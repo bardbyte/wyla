@@ -1,0 +1,35 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | grep -E '\\.py$' | xargs -I {} sh -c 'ruff check \"{}\" --fix --quiet 2>/dev/null || true'"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Bash(pytest*)",
+      "Bash(ruff*)",
+      "Bash(mypy*)",
+      "Bash(cat*)",
+      "Bash(ls*)",
+      "Bash(chmod*)",
+      "Bash(./scripts/*)",
+      "Bash(python -m*)",
+      "Bash(pip install*)",
+      "Bash(git*)",
+      "Bash(adk*)",
+      "Bash(jq*)",
+      "Bash(mkdir*)"
+    ]
+  }
+}
