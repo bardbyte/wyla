@@ -1,0 +1,42 @@
+{
+  "canonical_name": "Acquisition US Accounts",
+  "definition": "Accounts acquired in the United States across all products.",
+  "synonyms": ["new accounts", "acquisitions", "NAA source"],
+  "entity_type": "fact",
+  "relationships": [
+    {"related_entity": "customer_insights_cardmember", "type": "many_to_one", "on": "account_id"}
+  ],
+  "columns": [
+    {
+      "name": "account_id",
+      "canonical_name": "Account Identifier",
+      "definition": "Unique ID of the account.",
+      "synonyms": ["acct id", "account number"],
+      "data_type": "string"
+    },
+    {
+      "name": "data_source",
+      "canonical_name": "Data Source",
+      "definition": "Origin system. 'cornerstone' is the canonical source for most queries.",
+      "synonyms": ["source system"],
+      "allowed_values": ["cornerstone", "legacy", "third_party"]
+    },
+    {
+      "name": "fico_score",
+      "canonical_name": "FICO Score",
+      "definition": "Credit score from Fair Isaac, integer 300-850.",
+      "synonyms": ["credit score"]
+    },
+    {
+      "name": "billed_business",
+      "canonical_name": "Billed Business",
+      "definition": "Charge volume billed to cardmembers (USD).",
+      "synonyms": ["spend", "charge volume", "sales"]
+    },
+    {
+      "name": "acquisition_date",
+      "canonical_name": "Acquisition Date",
+      "definition": "Date the account was opened."
+    }
+  ]
+}

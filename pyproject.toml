@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lumi"
+version = "0.1.0"
+description = "LookML Understanding & Metric Intelligence — enriches LookML views from gold queries + MDM + LLM so NL2SQL can answer any question."
+requires-python = ">=3.11"
+readme = "BOOTSTRAP.md"
+dependencies = [
+    "google-adk>=1.31.1",
+    "langchain-core>=0.3",
+    "lkml>=1.3",
+    "sqlglot>=25",
+    "openpyxl>=3.1",
+    "pyyaml>=6",
+    "pydantic>=2.7",
+    "requests>=2.32",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lumi*", "src*"]
+
+[tool.ruff]
+line-length = 99
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RET", "PL"]
+ignore = ["PLR0913", "PLR2004", "E501", "PLC0415", "PLR0911", "PLR0912"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["lumi", "src"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["lkml.*", "sqlglot.*", "openpyxl.*", "google.adk.*", "google.genai.*"]
+ignore_missing_imports = true
+
+# The excel tool is a thick wrapper around sqlglot whose runtime types are
+# broader than its static types. Strict checking here produces noise without
+# catching real bugs.
+[[tool.mypy.overrides]]
+module = ["lumi.tools.excel_tools", "src.adapters.adk_safechain_llm"]
+disallow_untyped_defs = true
+warn_return_any = false
+disable_error_code = ["arg-type", "union-attr", "type-arg", "no-untyped-call", "unused-ignore"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --strict-markers"
+asyncio_mode = "auto"

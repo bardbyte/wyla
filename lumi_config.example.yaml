@@ -1,0 +1,44 @@
+# lumi_config.yaml — copy this file to lumi_config.yaml and fill in real values.
+
+git:
+  repo: "https://github.com/amex-internal/looker-project.git"   # REQUIRED
+  branch: "main"
+  model_file: "models/analytics.model.lkml"                      # REQUIRED
+  view_files:                                                    # REQUIRED (min 1)
+    - "views/custins_customer_insights_cardmember.view.lkml"
+    - "views/acqdw_acquisition_us.view.lkml"
+    # ... add all 30 views touched by the 137 gold queries
+  clone_dir: ".git_cache"
+
+mdm:
+  endpoint: "https://mdm.internal.amex.com/api/v2"               # REQUIRED
+  auth_env: "MDM_BEARER_TOKEN"    # or null if no auth
+  view_to_mdm_entity:                                            # REQUIRED per view
+    custins_customer_insights_cardmember: "customer_insights_cardmember"
+    acqdw_acquisition_us: "acquisition_us_accounts"
+    # ... one entry per view above
+  cache_dir: ".mdm_cache"
+  cache_ttl_hours: 24
+
+gold_queries:
+  file: "data/gold_queries.xlsx"                                 # REQUIRED
+  sheet: null
+  prompt_column: "user_prompt"
+  sql_column: "expected_query"
+  difficulty_column: "difficulty"
+
+llm:
+  strong_model_idx: "1"    # SafeChain "1" = gemini-2.5-pro
+  fast_model_idx: "3"      # SafeChain "3" = gemini-2.5-flash
+  temperature: 0.0
+
+output:
+  directory: "output"
+  views_subdir: "views"
+  model_subdir: "models"
+  reports_subdir: "reports"
+  git_branch: "lumi/enrichment-v1"
+
+batching:
+  field_threshold: 150
+  batch_size: 30
