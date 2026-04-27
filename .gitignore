@@ -5,6 +5,13 @@
 *.pem
 *.key
 credentials.json
+# GCP service-account keys (the script refuses to load them from inside the repo,
+# but belt-and-suspenders so they can never accidentally land in git either).
+*-service-account*.json
+*service-account-key*.json
+**/prj-*.json
+gcp-key*.json
+service_account*.json
 
 # OS
 .DS_Store
