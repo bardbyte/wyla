@@ -29,11 +29,8 @@ step failed.
 
 ## Prerequisites
 
-```bash
-pip install 'google-adk>=1.31.1' python-dotenv
-# Amex-internal — already installed on your work laptop:
-#   safechain   (langchain-core comes in with this)
-```
+You already have `google-adk` 1.31.1 and `safechain` (with `langchain-core` and
+`python-dotenv`) on your work laptop — nothing else to install.
 
 `.env` at the repo root with:
 
@@ -95,13 +92,11 @@ call → tool response → (model decides next step) → final text.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `ImportError: safechain` | Amex-internal package not installed | Install via your team's onboarding bundle |
-| `KeyError: CIBIS_CONSUMER_INTEGRATION_ID` | `.env` not loaded | Confirm `.env` is at the repo root and CIBIS vars are populated |
+| `KeyError: CIBIS_CONSUMER_INTEGRATION_ID` | `.env` not loaded | Confirm `.env` is at repo root with CIBIS vars set |
 | `FileNotFoundError: config.yml` | `CONFIG_PATH` unset / wrong | `export CONFIG_PATH=$(pwd)/config/config.yml` |
-| `KeyError: '1'` (or `'3'`) | The model index isn't defined in `config.yml` | Add the corresponding model entry per SafeChain's docs |
-| `error_code: SAFECHAIN_ERROR` in event trace | Underlying SafeChain call raised | The `error_message` field has the inner exception — usually 401 (creds expired), 403 (scope), or 429 (rate-limited) |
-| Agent finishes with no final text | Model returned only tool calls and ADK's max_llm_calls hit | Bump `max_llm_calls` in `run.py`, or simplify the prompt |
-| `LiteLlm…` errors | You're trying to use ADK's default Gemini loader | Don't — the whole point is `make_safechain_llm("1")` returns a `BaseLlm` directly |
+| `KeyError: '1'` (or `'3'`) | Model index not defined in `config.yml` | Add the model entry per SafeChain docs |
+| `error_code: SAFECHAIN_ERROR` in event trace | SafeChain call raised | Read `error_message` — usually 401 (creds), 403 (scope), or 429 (rate limit) |
+| Agent finishes with no final text | Model only emitted tool calls, hit `max_llm_calls` | Bump in `run.py` or simplify prompt |
 
 ## Where this goes next
 

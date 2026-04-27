@@ -2,25 +2,10 @@
 
 Wraps the LangChain-compatible chat client returned by `safechain.lcel.model(idx)`
 as a `google.adk.models.BaseLlm`, so an ADK `LlmAgent` can use a SafeChain-routed
-Gemini model exactly the same way it would use a native string `model="gemini-..."`.
-
-Why this exists
----------------
-At Amex, every LLM call has to go through SafeChain → CIBIS/IDaaS → Amex-hosted
-Gemini. The native ADK model loaders don't know how to do that handshake, and
-`LiteLlm` is the wrong tool because it expects an HTTP endpoint, not a Python
-LangChain object. So we write a thin `BaseLlm` subclass that:
-
-  1. Takes a SafeChain LangChain chat model (`safechain.lcel.model("1")`).
-  2. Translates ADK `LlmRequest` (Gemini-shaped) → LangChain message list.
-  3. Translates LangChain `AIMessage` (with optional tool_calls) → ADK
-     `LlmResponse` with `function_call` parts.
-  4. Yields at least one `LlmResponse` even on error (silent failure hangs the
-     ADK runner).
+Gemini model the same way it would use any native ADK model.
 
 Usage:
-
-    from agent_test.safechain_adk import make_safechain_llm
+    from safechain_adk import make_safechain_llm
     from google.adk.agents import LlmAgent
 
     llm = make_safechain_llm("1")     # Gemini 2.5 Pro via SafeChain
@@ -34,6 +19,7 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from dotenv import find_dotenv, load_dotenv
 from google.adk.models import BaseLlm
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
@@ -46,6 +32,11 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from pydantic import ConfigDict
+from safechain.lcel import model as safechain_model
+
+# Load .env so SafeChain can read CIBIS_CONSUMER_INTEGRATION_ID,
+# CIBIS_CONSUMER_SECRET, and CONFIG_PATH on first model() call.
+load_dotenv(find_dotenv())
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +44,8 @@ logger = logging.getLogger(__name__)
 class SafeChainLlm(BaseLlm):
     """Wrap a SafeChain LangChain chat model as an ADK BaseLlm.
 
-    One instance per agent. `lc_model` is shared, never mutated. Errors are
-    converted into a single error-shaped `LlmResponse` rather than raising,
-    because raising inside `generate_content_async` hangs the runner.
+    Errors are converted into a single error-shaped `LlmResponse` rather than
+    raising, because raising inside `generate_content_async` hangs the runner.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -63,7 +53,6 @@ class SafeChainLlm(BaseLlm):
 
     @classmethod
     def supported_models(cls) -> list[str]:
-        # The model string we set on instances starts with "safechain/".
         return [r"safechain/.*"]
 
     async def generate_content_async(
@@ -198,50 +187,11 @@ class SafeChainLlm(BaseLlm):
         return str(sys)
 
 
-# ---------------------------------------------------------------------- #
-# Public factory                                                         #
-# ---------------------------------------------------------------------- #
-
-_DOTENV_LOADED = False
-
-
-def _load_env_once() -> None:
-    """Idempotent .env load. SafeChain reads CIBIS_* vars from env on first
-    `model(...)` call, so they must be present in os.environ by then.
-    """
-    global _DOTENV_LOADED
-    if _DOTENV_LOADED:
-        return
-    try:
-        from dotenv import find_dotenv, load_dotenv
-
-        load_dotenv(find_dotenv())
-    except ImportError:
-        # python-dotenv missing isn't fatal if the user already exported the vars.
-        pass
-    _DOTENV_LOADED = True
-
-
 def make_safechain_llm(model_idx: str = "1", temperature: float = 0.0) -> SafeChainLlm:
     """Wrap `safechain.lcel.model(idx)` as an ADK BaseLlm.
 
-    Args:
-        model_idx: SafeChain model index — "1" = Gemini 2.5 Pro, "3" = Flash.
-        temperature: Bound on the LangChain side via `.bind(temperature=...)`.
-
-    Raises:
-        ImportError: if safechain isn't installed (expected on non-Amex machines —
-                     there's no public way to install it).
+    model_idx: SafeChain model index — "1" = Gemini 2.5 Pro, "3" = Flash.
+    temperature: Bound on the LangChain side via `.bind(temperature=...)`.
     """
-    _load_env_once()
-
-    try:
-        from safechain.lcel import model as _safechain_model
-    except ImportError as e:
-        raise ImportError(
-            "safechain not installed. This package is Amex-internal — install "
-            "via your team's onboarding instructions."
-        ) from e
-
-    lc_client = _safechain_model(model_idx).bind(temperature=temperature)
+    lc_client = safechain_model(model_idx).bind(temperature=temperature)
     return SafeChainLlm(model=f"safechain/{model_idx}", lc_model=lc_client)

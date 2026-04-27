@@ -9,7 +9,6 @@ Usage (from the repo root):
 Exit codes:
     0  the agent produced a final response
     1  the agent finished without a final response (something's off)
-    2  setup error (SafeChain not installed, .env missing, config bad)
 """
 
 from __future__ import annotations
@@ -29,6 +28,12 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
+from agent import build_agent  # noqa: E402
+from google.adk.agents.run_config import RunConfig, StreamingMode  # noqa: E402
+from google.adk.runners import Runner  # noqa: E402
+from google.adk.sessions import InMemorySessionService  # noqa: E402
+from google.genai import types  # noqa: E402
+
 DEFAULT_QUERY = (
     "Roll an 8-sided die for me, then tell me whether the result is a prime number."
 )
@@ -40,27 +45,7 @@ async def _run(model_idx: str, query: str, as_json: bool, verbose: bool) -> int:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
-    try:
-        from google.adk.agents.run_config import RunConfig, StreamingMode
-        from google.adk.runners import Runner
-        from google.adk.sessions import InMemorySessionService
-        from google.genai import types
-
-        from agent import build_agent
-    except ImportError as e:
-        print(f"ERROR: missing dependency — {e}", file=sys.stderr)
-        print(
-            "       run:  pip install 'google-adk>=1.31.1' python-dotenv",
-            file=sys.stderr,
-        )
-        return 2
-
-    try:
-        agent = build_agent(model_idx=model_idx)
-    except ImportError as e:
-        # SafeChain not installed — expected on non-Amex laptops.
-        print(f"ERROR: SafeChain not available — {e}", file=sys.stderr)
-        return 2
+    agent = build_agent(model_idx=model_idx)
 
     session_service: InMemorySessionService = (
         InMemorySessionService()  # type: ignore[no-untyped-call]
@@ -191,7 +176,7 @@ def _print_human(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="agent_test.run",
+        prog="agent-test/run",
         description="Run the SafeChain → ADK smoke-test agent.",
     )
     parser.add_argument(
