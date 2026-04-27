@@ -40,6 +40,53 @@ DEFAULT_TIMEOUT_SECS = 15
 DEFAULT_TOKEN_ENV = "GITHUB_AEXP_TOKEN"
 
 
+def normalize_repo(repo_arg: str) -> tuple[str, str | None]:
+    """Coerce any common repo-reference form into ('owner/name', api_base_url?).
+
+    Accepted inputs:
+      - owner/name
+      - https://github.aexp.com/owner/name
+      - https://github.aexp.com/owner/name.git
+      - https://github.aexp.com/owner/name/tree/branch/some/path
+      - git@github.aexp.com:owner/name.git
+      - github.aexp.com/owner/name
+
+    Returns:
+        (owner_name, derived_api_base_url_or_None)
+        derived_api_base_url is set when a host is detectable; the CLI uses it
+        only if --base-url wasn't explicitly overridden.
+    """
+    s = repo_arg.strip()
+    derived_base: str | None = None
+
+    # SSH form: git@host:owner/name(.git)
+    if s.startswith("git@"):
+        try:
+            host, rest = s[len("git@"):].split(":", 1)
+            derived_base = f"https://{host}/api/v3"
+            s = rest
+        except ValueError:
+            pass
+    # HTTPS or scheme-less host forms
+    elif "://" in s or s.startswith("github."):
+        if "://" not in s:
+            s = "https://" + s
+        parsed = urllib.parse.urlparse(s)
+        if parsed.netloc:
+            derived_base = f"{parsed.scheme}://{parsed.netloc}/api/v3"
+        s = parsed.path.lstrip("/")
+
+    # Trim .git suffix
+    if s.endswith(".git"):
+        s = s[: -len(".git")]
+    # Trim "/tree/<branch>/..." or "/blob/..." trailing paths
+    parts = s.split("/")
+    if len(parts) >= 2:
+        s = "/".join(parts[:2])
+
+    return s, derived_base
+
+
 # --------------------------------------------------------------------------- #
 # Tool-shaped core function — this is what we'll lift into lumi/tools/ later. #
 # --------------------------------------------------------------------------- #
@@ -82,8 +129,12 @@ def check_github_access(
           "error": str or None,
         }
     """
-    if "/" not in repo or repo.count("/") != 1:
-        return _err(repo, "repo must be in 'owner/name' form")
+    repo, _derived = normalize_repo(repo)
+    if "/" not in repo or repo.count("/") != 1 or not all(repo.split("/")):
+        return _err(
+            repo,
+            "could not parse repo into 'owner/name' (accepts URL, SSH, or short form)",
+        )
 
     headers = {
         "Accept": "application/vnd.github+json",
@@ -396,10 +447,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    # Accept URL / SSH / short forms. If the user pasted a URL, we derive the
+    # API base from it — but only override the default if --base-url wasn't
+    # explicitly set on the command line.
+    repo_normalized, derived_base = normalize_repo(args.repo)
+    base_url = args.base_url
+    user_passed_base = "--base-url" in (argv if argv is not None else sys.argv[1:])
+    if derived_base and not user_passed_base:
+        base_url = derived_base
+
     result = check_github_access(
-        repo=args.repo,
+        repo=repo_normalized,
         token=token,
-        base_url=args.base_url,
+        base_url=base_url,
         path=args.path,
         ref=args.ref,
         timeout_secs=args.timeout,
@@ -408,7 +468,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(result, indent=2, default=str))
     else:
-        print(_format_summary(result, repo=args.repo, base_url=args.base_url))
+        print(_format_summary(result, repo=repo_normalized, base_url=base_url))
 
     return 0 if result["status"] == "success" else 1
 
