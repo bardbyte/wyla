@@ -181,9 +181,18 @@ def _err(url: str, table_name: str | None, error: str) -> dict[str, Any]:
 # API, not just verifying connectivity.                                       #
 # --------------------------------------------------------------------------- #
 
-def digest_response(payload: Any, sample_size: int = 3) -> dict[str, Any]:
-    """Walk the response and surface its shape: top-level keys, list lengths,
-    representative element keys, distinct key sets across collections.
+def digest_response(
+    payload: Any,
+    sample_size: int = 2,
+    max_depth: int = 6,
+    _depth: int = 0,
+) -> dict[str, Any]:
+    """Walk the response recursively and surface its shape.
+
+    Recursion stops at `max_depth`; beyond that, objects are summarized as
+    just their key list, arrays as their length + element kind. This lets us
+    see column-level structure (depth ~4) without exploding output for
+    pathologically deep payloads.
     """
     if not isinstance(payload, dict | list):
         return {
@@ -193,33 +202,53 @@ def digest_response(payload: Any, sample_size: int = 3) -> dict[str, Any]:
         }
 
     if isinstance(payload, list):
+        if _depth >= max_depth:
+            return {
+                "kind": "array",
+                "length": len(payload),
+                "element_kind": _classify_list(payload),
+                "truncated_at_max_depth": True,
+            }
+        # For arrays: at top depth show a few samples; deeper, just one.
+        n = sample_size if _depth == 0 else max(1, sample_size - 1)
         return {
             "kind": "array",
             "length": len(payload),
             "first_n_samples": [
-                digest_response(e, sample_size) for e in payload[:sample_size]
+                digest_response(e, sample_size, max_depth, _depth + 1)
+                for e in payload[:n]
             ],
             "distinct_keys_across_elements": _distinct_keys(payload),
+        }
+
+    # object
+    if _depth >= max_depth:
+        return {
+            "kind": "object",
+            "subkey_count": len(payload),
+            "subkeys": list(payload.keys()),
+            "truncated_at_max_depth": True,
         }
 
     digest: dict[str, Any] = {"kind": "object", "keys": {}}
     for k, v in payload.items():
         if isinstance(v, list):
-            digest["keys"][k] = {
+            entry: dict[str, Any] = {
                 "type": "array",
                 "length": len(v),
                 "element_kind": _classify_list(v),
                 "distinct_keys": _distinct_keys(v) if v and isinstance(v[0], dict) else None,
-                "sample": (
-                    digest_response(v[0], sample_size) if v else None
-                ),
             }
+            if v:
+                entry["sample"] = digest_response(
+                    v[0], sample_size, max_depth, _depth + 1
+                )
+            digest["keys"][k] = entry
         elif isinstance(v, dict):
             digest["keys"][k] = {
                 "type": "object",
-                "subkeys": list(v.keys()),
                 "subkey_count": len(v),
-                "sample": _preview(v),
+                "nested": digest_response(v, sample_size, max_depth, _depth + 1),
             }
         else:
             digest["keys"][k] = {
@@ -307,16 +336,33 @@ def _render_digest(d: dict[str, Any] | None, indent: str = "  ") -> str:
         return "\n".join(out)
 
     if kind == "array":
+        if d.get("truncated_at_max_depth"):
+            out.append(
+                f"{indent}array, length={d['length']}, "
+                f"{d.get('element_kind', '?')} [max-depth]"
+            )
+            return "\n".join(out)
         out.append(f"{indent}array, length={d['length']}")
         if d.get("distinct_keys_across_elements"):
             keys = d["distinct_keys_across_elements"]
-            out.append(f"{indent}  element keys ({len(keys)}): {', '.join(keys)}")
+            out.append(
+                f"{indent}  element keys ({len(keys)}): "
+                f"{', '.join(keys[:25])}{' …' if len(keys) > 25 else ''}"
+            )
         for i, sample in enumerate(d.get("first_n_samples") or []):
             out.append(f"{indent}  [{i}]:")
             out.append(_render_digest(sample, indent + "    "))
         return "\n".join(out)
 
     # object
+    if d.get("truncated_at_max_depth"):
+        sub = d.get("subkeys") or []
+        out.append(
+            f"{indent}object({d.get('subkey_count', len(sub))} keys: "
+            f"{', '.join(sub[:12])}{' …' if len(sub) > 12 else ''}) [max-depth]"
+        )
+        return "\n".join(out)
+
     keys: dict[str, Any] = d.get("keys", {})
     out.append(f"{indent}object with {len(keys)} keys:")
     for k, info in keys.items():
@@ -337,12 +383,9 @@ def _render_digest(d: dict[str, Any] | None, indent: str = "  ") -> str:
                 out.append(f"{indent}    sample[0]:")
                 out.append(_render_digest(info["sample"], indent + "      "))
         elif t == "object":
-            sub = info.get("subkeys") or []
-            out.append(
-                f"{indent}  {k}: object("
-                f"{info.get('subkey_count', len(sub))} keys: {', '.join(sub[:10])}"
-                f"{' …' if len(sub) > 10 else ''})"
-            )
+            out.append(f"{indent}  {k}: object({info['subkey_count']} keys)")
+            if info.get("nested"):
+                out.append(_render_digest(info["nested"], indent + "    "))
         else:
             out.append(f"{indent}  {k}: {t} = {info.get('value_preview')}")
     return "\n".join(out)
@@ -390,6 +433,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--no-save", action="store_true", help="Don't save raw response.")
     parser.add_argument("--json", action="store_true", help="Print full result + digest as JSON.")
+    parser.add_argument(
+        "--depth",
+        type=int,
+        default=6,
+        help="Max recursion depth for the structure digest. Default: 6",
+    )
+    parser.add_argument(
+        "--samples",
+        type=int,
+        default=2,
+        help="How many array elements to render per level. Default: 2",
+    )
     args = parser.parse_args(argv)
 
     base_url = args.url or args.base
@@ -410,7 +465,9 @@ def main(argv: list[str] | None = None) -> int:
 
     digest: dict[str, Any] | None = None
     if result["status"] == "success" and result["json"] is not None:
-        digest = digest_response(result["json"])
+        digest = digest_response(
+            result["json"], sample_size=args.samples, max_depth=args.depth
+        )
 
     if args.json:
         print(json.dumps({"result": result, "digest": digest}, indent=2, default=str))
