@@ -38,7 +38,10 @@ from google.genai import types as genai_types
 from google.oauth2 import service_account
 
 DEFAULT_PROJECT = "prj-d-ea-poc"
-DEFAULT_LOCATION = "us-central1"
+# 'global' is Vertex AI's globally-distributed endpoint — auto-routes to the
+# nearest region and is the right default for newer Gemini previews. Override
+# with --location us-central1 / asia-south1 / etc. if your grant is regional.
+DEFAULT_LOCATION = "global"
 DEFAULT_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_PROMPT = (
     "Reply in one short sentence. What is the smallest prime number greater than 100?"
