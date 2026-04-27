@@ -150,7 +150,10 @@ def _print_human(
         marker = "(final)" if ev.get("is_final") else ""
         print(f"  [{i}] {ev['author']} {marker}")
         if "error_code" in ev:
-            print(f"      ERROR {ev['error_code']}: {ev['error_message']}")
+            # Print the full error_message verbatim — it carries the traceback.
+            print(f"      ERROR {ev['error_code']}:")
+            for line in (ev.get("error_message") or "").splitlines():
+                print(f"        {line}")
         for part in ev.get("parts", []):
             if "text" in part:
                 preview = part["text"][:140].replace("\n", " ")

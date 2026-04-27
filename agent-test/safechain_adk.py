@@ -4,6 +4,24 @@ Wraps the LangChain-compatible chat client returned by `safechain.lcel.model(idx
 as a `google.adk.models.BaseLlm`, so an ADK `LlmAgent` can use a SafeChain-routed
 Gemini model the same way it would use any native ADK model.
 
+Design notes (lessons from getting the ReAct loop to actually work):
+
+  - The reference test_safechain_access.py uses `client.invoke(messages)` (sync).
+    SafeChatOpenAI's async path is not battle-tested — calling `ainvoke` here
+    surfaced 'SafeChatOpenAI has no attribute get'. We sidestep by running the
+    sync call in `asyncio.to_thread`.
+
+  - We do NOT call `.bind(temperature=...)` on the chat model. That returns a
+    RunnableBinding whose `bind_tools` semantics are different from the raw
+    BaseChatModel's. The reference works without binding; we follow suit.
+
+  - genai's Schema.model_dump() emits JSON-Schema-like dicts but with uppercase
+    types ('STRING', 'NUMBER'). OpenAI tool-function specs expect lowercase
+    JSON Schema. We walk the schema and normalize before handing to bind_tools.
+
+  - On error inside generate_content_async we yield an LlmResponse(error_code,
+    error_message) carrying the full traceback. Raising would hang the runner.
+
 Usage:
     from safechain_adk import make_safechain_llm
     from google.adk.agents import LlmAgent
@@ -14,8 +32,10 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import traceback
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -34,8 +54,7 @@ from langchain_core.messages import (
 from pydantic import ConfigDict
 from safechain.lcel import model as safechain_model
 
-# Load .env so SafeChain can read CIBIS_CONSUMER_INTEGRATION_ID,
-# CIBIS_CONSUMER_SECRET, and CONFIG_PATH on first model() call.
+# Load .env so SafeChain reads CIBIS_* and CONFIG_PATH on first model() call.
 load_dotenv(find_dotenv())
 
 logger = logging.getLogger(__name__)
@@ -44,8 +63,8 @@ logger = logging.getLogger(__name__)
 class SafeChainLlm(BaseLlm):
     """Wrap a SafeChain LangChain chat model as an ADK BaseLlm.
 
-    Errors are converted into a single error-shaped `LlmResponse` rather than
-    raising, because raising inside `generate_content_async` hangs the runner.
+    `lc_model` is the raw `safechain_model("1")` return value — never bind on it
+    eagerly; bind only at use time inside `generate_content_async`.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -61,11 +80,19 @@ class SafeChainLlm(BaseLlm):
         try:
             messages = self._to_lc_messages(llm_request)
             lc_tools = self._to_lc_tools(llm_request)
-            bound = self.lc_model.bind_tools(lc_tools) if lc_tools else self.lc_model
+            bound = (
+                self.lc_model.bind_tools(lc_tools) if lc_tools else self.lc_model
+            )
 
             if stream:
+                # Sync stream wrapped in to_thread per chunk.
                 buf = ""
-                async for chunk in bound.astream(messages):
+
+                def _drain_stream() -> list[Any]:
+                    return list(bound.stream(messages))
+
+                chunks = await asyncio.to_thread(_drain_stream)
+                for chunk in chunks:
                     text = getattr(chunk, "content", "") or ""
                     if text:
                         buf += text
@@ -85,7 +112,9 @@ class SafeChainLlm(BaseLlm):
                 )
                 return
 
-            ai: AIMessage = await bound.ainvoke(messages)
+            # Non-streaming path: sync invoke off the event loop.
+            ai: AIMessage = await asyncio.to_thread(bound.invoke, messages)
+
             parts: list[genai_types.Part] = []
             if ai.content:
                 parts.append(genai_types.Part(text=str(ai.content)))
@@ -104,10 +133,11 @@ class SafeChainLlm(BaseLlm):
                 turn_complete=True,
             )
         except Exception as e:
+            tb = traceback.format_exc()
             logger.exception("SafeChainLlm.generate_content_async failed")
             yield LlmResponse(
                 error_code="SAFECHAIN_ERROR",
-                error_message=f"{type(e).__name__}: {e}",
+                error_message=f"{type(e).__name__}: {e}\n\n{tb}",
             )
 
     # ------------------------------------------------------------------ #
@@ -126,7 +156,9 @@ class SafeChainLlm(BaseLlm):
             role = content.role
             texts = [p.text for p in content.parts if p.text]
             fcalls = [p.function_call for p in content.parts if p.function_call]
-            fresps = [p.function_response for p in content.parts if p.function_response]
+            fresps = [
+                p.function_response for p in content.parts if p.function_response
+            ]
 
             if role == "user" and texts and not fresps:
                 out.append(HumanMessage(content="\n".join(texts)))
@@ -156,21 +188,23 @@ class SafeChainLlm(BaseLlm):
         return out
 
     def _to_lc_tools(self, req: LlmRequest) -> list[dict[str, Any]]:
+        """Convert ADK genai Tools into OpenAI-compatible function-tool dicts."""
         tools = (req.config.tools or []) if req.config else []
         out: list[dict[str, Any]] = []
         for t in tools:
             for fd in getattr(t, "function_declarations", None) or []:
+                params = (
+                    _normalize_schema(fd.parameters.model_dump())
+                    if fd.parameters
+                    else {"type": "object"}
+                )
                 out.append(
                     {
                         "type": "function",
                         "function": {
                             "name": fd.name,
                             "description": fd.description or "",
-                            "parameters": (
-                                fd.parameters.model_dump()
-                                if fd.parameters
-                                else {"type": "object"}
-                            ),
+                            "parameters": params,
                         },
                     }
                 )
@@ -187,11 +221,65 @@ class SafeChainLlm(BaseLlm):
         return str(sys)
 
 
-def make_safechain_llm(model_idx: str = "1", temperature: float = 0.0) -> SafeChainLlm:
+# ---------------------------------------------------------------------- #
+# Schema normalization — genai → JSON Schema (lowercase types)            #
+# ---------------------------------------------------------------------- #
+
+# genai's Type enum dumps as uppercase strings; OpenAI tool params expect
+# JSON Schema's lowercase. Map both forms safely.
+_TYPE_MAP = {
+    "TYPE_UNSPECIFIED": "string",
+    "STRING": "string",
+    "NUMBER": "number",
+    "INTEGER": "integer",
+    "BOOLEAN": "boolean",
+    "ARRAY": "array",
+    "OBJECT": "object",
+    "NULL": "null",
+}
+
+
+def _normalize_schema(schema: Any) -> Any:
+    """Recursively lowercase 'type' values and recurse into nested schemas.
+
+    Pass-through for non-dict / non-list nodes.
+    """
+    if isinstance(schema, dict):
+        out: dict[str, Any] = {}
+        for k, v in schema.items():
+            if k == "type" and isinstance(v, str):
+                out[k] = _TYPE_MAP.get(v, v.lower())
+            elif k in {"properties", "patternProperties"} and isinstance(v, dict):
+                out[k] = {pk: _normalize_schema(pv) for pk, pv in v.items()}
+            elif k == "items":
+                out[k] = _normalize_schema(v)
+            elif k in {"anyOf", "oneOf", "allOf", "enum"} and isinstance(v, list):
+                out[k] = [_normalize_schema(x) for x in v]
+            else:
+                out[k] = _normalize_schema(v) if isinstance(v, dict | list) else v
+        # Drop empty 'required' list that some schemas emit — confuses validators.
+        if out.get("required") == []:
+            out.pop("required")
+        return out
+    if isinstance(schema, list):
+        return [_normalize_schema(x) for x in schema]
+    return schema
+
+
+# ---------------------------------------------------------------------- #
+# Public factory                                                         #
+# ---------------------------------------------------------------------- #
+
+
+def make_safechain_llm(model_idx: str = "1") -> SafeChainLlm:
     """Wrap `safechain.lcel.model(idx)` as an ADK BaseLlm.
 
-    model_idx: SafeChain model index — "1" = Gemini 2.5 Pro, "3" = Flash.
-    temperature: Bound on the LangChain side via `.bind(temperature=...)`.
+    Mirrors the reference test_safechain_access.py exactly: just call
+    `safechain_model(idx)`, no `.bind(...)` wrapper. Temperature, if needed,
+    can be set via the LlmAgent's `generate_content_config` and translated by
+    a future enhancement of this adapter.
     """
-    lc_client = safechain_model(model_idx).bind(temperature=temperature)
-    return SafeChainLlm(model=f"safechain/{model_idx}", lc_model=lc_client)
+    return SafeChainLlm(
+        model=f"safechain/{model_idx}",
+        lc_model=safechain_model(model_idx),
+    )

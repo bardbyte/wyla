@@ -86,9 +86,9 @@ async def check_prime(nums: list[int]) -> str:
 # Build the agent. `make_safechain_llm("1")` returns a SafeChainLlm wrapping
 # Gemini 2.5 Pro via SafeChain. Swap to "3" for Flash if you want a faster /
 # cheaper run during iteration.
-def build_agent(model_idx: str = "1", temperature: float = 0.0) -> Agent:
+def build_agent(model_idx: str = "1") -> Agent:
     return Agent(
-        model=make_safechain_llm(model_idx, temperature=temperature),
+        model=make_safechain_llm(model_idx),
         name="safechain_smoke_agent",
         description=(
             "Smoke-test agent that rolls dice and checks prime numbers. "
