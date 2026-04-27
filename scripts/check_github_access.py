@@ -160,21 +160,44 @@ def check_github_access(
         return _err(repo, f"token check failed: {user_resp['detail']}", checks=checks)
 
     user_login = (user_resp["json"] or {}).get("login")
-    checks.append({"name": "token", "status": "ok", "user": user_login})
+    user_headers = user_resp.get("response_headers", {})
+    oauth_scopes_raw = _header_ci(user_headers, "X-OAuth-Scopes") or ""
+    oauth_scopes = [s.strip() for s in oauth_scopes_raw.split(",") if s.strip()]
+    accepted_scopes_raw = _header_ci(user_headers, "X-Accepted-OAuth-Scopes") or ""
+    checks.append(
+        {
+            "name": "token",
+            "status": "ok",
+            "user": user_login,
+            "scopes": oauth_scopes or None,
+            "scopes_raw_header": oauth_scopes_raw or None,
+        }
+    )
 
     # --- check 2: repo is reachable + introspect permissions ---------------
     repo_url = f"{base}/repos/{repo}"
     repo_resp = _http_get_json(repo_url, headers, timeout_secs)
     if not repo_resp["ok"]:
-        # On 404 from a valid token, help diagnose: list accessible orgs and
-        # report exactly what we queried so wrong-owner typos surface.
+        # On 404 from a valid token, help diagnose: list accessible orgs,
+        # surface SAML-SSO authorization URL if GHE asks for it, and report
+        # exactly what we queried so wrong-owner typos surface.
         accessible_orgs: list[str] | None = None
+        sso_url: str | None = None
+        repo_headers = repo_resp.get("response_headers", {})
+        sso_header = _header_ci(repo_headers, "X-GitHub-SSO")
+        if sso_header:
+            sso_url = _parse_sso_header(sso_header)
         if repo_resp.get("status_code") == 404:
             orgs_resp = _http_get_json(f"{base}/user/orgs", headers, timeout_secs)
             if orgs_resp["ok"] and isinstance(orgs_resp["json"], list):
                 accessible_orgs = [
                     str(o.get("login")) for o in orgs_resp["json"] if o.get("login")
                 ]
+            # /user/orgs may also carry an SSO header even when /repos/... didn't.
+            if not sso_url:
+                orgs_sso = _header_ci(orgs_resp.get("response_headers", {}), "X-GitHub-SSO")
+                if orgs_sso:
+                    sso_url = _parse_sso_header(orgs_sso)
         checks.append(
             {
                 "name": "repo",
@@ -182,10 +205,17 @@ def check_github_access(
                 "queried_url": repo_url,
                 "detail": repo_resp["detail"],
                 "accessible_orgs": accessible_orgs,
+                "sso_authorization_url": sso_url,
+                "sso_header_raw": sso_header,
             }
         )
         hint = _diagnose_repo_404(
-            repo, repo_resp.get("status_code"), accessible_orgs, user_login
+            repo,
+            repo_resp.get("status_code"),
+            accessible_orgs,
+            user_login,
+            oauth_scopes,
+            sso_url,
         )
         return _err(
             repo,
@@ -306,11 +336,12 @@ def check_github_access(
 def _http_get_json(
     url: str, headers: dict[str, str], timeout_secs: int
 ) -> dict[str, Any]:
-    """GET url with headers, return {ok, status_code, json, detail}."""
+    """GET url with headers, return {ok, status_code, json, detail, response_headers}."""
     req = urllib.request.Request(url, headers=headers, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=timeout_secs) as resp:
             raw = resp.read()
+            resp_headers = dict(resp.headers.items())
             try:
                 body = json.loads(raw)
             except json.JSONDecodeError as e:
@@ -319,20 +350,28 @@ def _http_get_json(
                     "status_code": resp.status,
                     "json": None,
                     "detail": f"non-JSON response: {e}",
+                    "response_headers": resp_headers,
                 }
             return {
                 "ok": True,
                 "status_code": resp.status,
                 "json": body,
                 "detail": None,
+                "response_headers": resp_headers,
             }
     except urllib.error.HTTPError as e:
         msg = _extract_error_message(e)
+        # HTTPError preserves response headers — these carry SSO + scope info.
+        try:
+            err_headers = dict(e.headers.items()) if e.headers else {}
+        except Exception:
+            err_headers = {}
         return {
             "ok": False,
             "status_code": e.code,
             "json": None,
             "detail": f"HTTP {e.code}: {msg}",
+            "response_headers": err_headers,
         }
     except urllib.error.URLError as e:
         return {
@@ -340,6 +379,7 @@ def _http_get_json(
             "status_code": None,
             "json": None,
             "detail": f"connection failed: {e.reason}",
+            "response_headers": {},
         }
     except (TimeoutError, OSError) as e:
         return {
@@ -347,7 +387,33 @@ def _http_get_json(
             "status_code": None,
             "json": None,
             "detail": f"{type(e).__name__}: {e}",
+            "response_headers": {},
         }
+
+
+def _parse_sso_header(value: str) -> str | None:
+    """Pull the authorization URL out of an X-GitHub-SSO header.
+
+    Format: 'required; url=https://...' or 'partial-results; url=https://...'
+    """
+    if not value:
+        return None
+    for part in value.split(";"):
+        part = part.strip()
+        if part.startswith("url="):
+            return part[len("url=") :]
+    return None
+
+
+def _header_ci(headers: dict[str, str], name: str) -> str | None:
+    """Case-insensitive header lookup."""
+    if not headers:
+        return None
+    target = name.lower()
+    for k, v in headers.items():
+        if k.lower() == target:
+            return v
+    return None
 
 
 def _extract_error_message(err: urllib.error.HTTPError) -> str:
@@ -365,20 +431,41 @@ def _diagnose_repo_404(
     status_code: int | None,
     accessible_orgs: list[str] | None,
     user_login: str | None,
+    oauth_scopes: list[str] | None = None,
+    sso_authorization_url: str | None = None,
 ) -> str:
     """Build an actionable hint for a repo-check 404."""
     if status_code != 404:
         return ""
     owner = repo.split("/")[0] if "/" in repo else repo
     parts: list[str] = ["\n\nDiagnosis:"]
+
+    # Highest-signal: the server explicitly told us SSO authorization is needed.
+    if sso_authorization_url:
+        parts.append(
+            f"  >> SAML SSO authorization REQUIRED for org '{owner}'."
+        )
+        parts.append(f"     Authorize this token here:\n     {sso_authorization_url}")
+        parts.append(
+            "     After authorizing, re-run this script. (This is the most "
+            "common cause at large enterprises like Amex.)"
+        )
+        parts.append("")
+
     parts.append(
         "  GitHub returns 404 (not 403) for private repos a token can't see, "
-        "to prevent existence-enumeration. Likely causes:"
+        "to prevent existence-enumeration. Likely causes (in order):"
     )
-    parts.append(f"  1. Wrong owner/name — we queried '{repo}'. Check spelling/case.")
-    parts.append(
-        "  2. Token lacks access to this repo:"
-    )
+    if not sso_authorization_url:
+        parts.append(
+            f"  1. SAML SSO not authorized for '{owner}' — open "
+            f"https://{_host_from_url(sso_authorization_url) or 'github.aexp.com'}"
+            f"/settings/tokens, find your token, click 'Configure SSO', "
+            "authorize the org. (No SSO header was returned, but Amex GHE "
+            "sometimes hides it on hard 404s.)"
+        )
+    parts.append(f"  2. Wrong owner/name — we queried '{repo}'. Check spelling/case.")
+    parts.append("  3. Token lacks access to this repo:")
     parts.append(
         "       - Fine-grained PAT: the repo must be in the token's "
         "'Repository access' list (Settings → Developer settings → Personal "
@@ -388,9 +475,30 @@ def _diagnose_repo_404(
         "       - Classic PAT: needs 'repo' scope (full control of private repos)."
     )
     parts.append(
-        "  3. Base URL is wrong (we queried the API at the host derived from your "
+        "  4. Base URL is wrong (we queried the API at the host derived from your "
         "input). Re-run with --base-url 'https://<your-ghe-host>/api/v3' if needed."
     )
+
+    if oauth_scopes is not None:
+        if oauth_scopes:
+            parts.append(
+                f"\n  Token scopes (from X-OAuth-Scopes): {', '.join(oauth_scopes)}"
+            )
+            if "repo" not in oauth_scopes and not any(
+                s.startswith("repo") for s in oauth_scopes
+            ):
+                parts.append(
+                    "  >> 'repo' scope is missing. Classic PATs need 'repo' "
+                    "for private repo access."
+                )
+        else:
+            parts.append(
+                "\n  Token scopes header was empty — likely a fine-grained PAT "
+                "(those don't expose scopes via X-OAuth-Scopes). For fine-grained "
+                "PATs, ensure this specific repo is in the token's Repository "
+                "access list."
+            )
+
     if accessible_orgs is not None:
         if accessible_orgs:
             sample = ", ".join(accessible_orgs[:8])
@@ -401,15 +509,25 @@ def _diagnose_repo_404(
             if owner not in accessible_orgs:
                 parts.append(
                     f"  >> Owner '{owner}' is NOT in the visible-orgs list — "
-                    "this is almost certainly the cause."
+                    "either SSO is unauthorized or you're not a member."
                 )
         else:
             parts.append(
-                f"  Token-visible orgs: (none for user '{user_login}'). "
-                "If '{owner}' is your own user account, that's fine; otherwise "
-                "the token has no org membership."
+                f"\n  Token-visible orgs: (none for user '{user_login}'). "
+                "Two common reasons: (a) classic PAT missing 'read:org' scope "
+                "(orgs hidden from /user/orgs but repo access can still work "
+                "with 'repo' scope), or (b) SSO not authorized for any org."
             )
     return "\n".join(parts)
+
+
+def _host_from_url(u: str | None) -> str | None:
+    if not u:
+        return None
+    try:
+        return urllib.parse.urlparse(u).netloc or None
+    except Exception:
+        return None
 
 
 def _err(
