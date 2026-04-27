@@ -146,21 +146,50 @@ def check_github_access(
     checks: list[dict[str, Any]] = []
 
     # --- check 1: token authenticates --------------------------------------
-    user_resp = _http_get_json(f"{base}/user", headers, timeout_secs)
+    user_url = f"{base}/user"
+    user_resp = _http_get_json(user_url, headers, timeout_secs)
     if not user_resp["ok"]:
-        checks.append({"name": "token", "status": "fail", "detail": user_resp["detail"]})
+        checks.append(
+            {
+                "name": "token",
+                "status": "fail",
+                "queried_url": user_url,
+                "detail": user_resp["detail"],
+            }
+        )
         return _err(repo, f"token check failed: {user_resp['detail']}", checks=checks)
 
     user_login = (user_resp["json"] or {}).get("login")
     checks.append({"name": "token", "status": "ok", "user": user_login})
 
     # --- check 2: repo is reachable + introspect permissions ---------------
-    repo_resp = _http_get_json(f"{base}/repos/{repo}", headers, timeout_secs)
+    repo_url = f"{base}/repos/{repo}"
+    repo_resp = _http_get_json(repo_url, headers, timeout_secs)
     if not repo_resp["ok"]:
-        checks.append({"name": "repo", "status": "fail", "detail": repo_resp["detail"]})
+        # On 404 from a valid token, help diagnose: list accessible orgs and
+        # report exactly what we queried so wrong-owner typos surface.
+        accessible_orgs: list[str] | None = None
+        if repo_resp.get("status_code") == 404:
+            orgs_resp = _http_get_json(f"{base}/user/orgs", headers, timeout_secs)
+            if orgs_resp["ok"] and isinstance(orgs_resp["json"], list):
+                accessible_orgs = [
+                    str(o.get("login")) for o in orgs_resp["json"] if o.get("login")
+                ]
+        checks.append(
+            {
+                "name": "repo",
+                "status": "fail",
+                "queried_url": repo_url,
+                "detail": repo_resp["detail"],
+                "accessible_orgs": accessible_orgs,
+            }
+        )
+        hint = _diagnose_repo_404(
+            repo, repo_resp.get("status_code"), accessible_orgs, user_login
+        )
         return _err(
             repo,
-            f"repo '{repo}' not reachable: {repo_resp['detail']}",
+            f"repo '{repo}' not reachable: {repo_resp['detail']}{hint}",
             checks=checks,
             user=user_login,
         )
@@ -329,6 +358,58 @@ def _extract_error_message(err: urllib.error.HTTPError) -> str:
     except (json.JSONDecodeError, ValueError, OSError):
         pass
     return err.reason or "(no body)"
+
+
+def _diagnose_repo_404(
+    repo: str,
+    status_code: int | None,
+    accessible_orgs: list[str] | None,
+    user_login: str | None,
+) -> str:
+    """Build an actionable hint for a repo-check 404."""
+    if status_code != 404:
+        return ""
+    owner = repo.split("/")[0] if "/" in repo else repo
+    parts: list[str] = ["\n\nDiagnosis:"]
+    parts.append(
+        "  GitHub returns 404 (not 403) for private repos a token can't see, "
+        "to prevent existence-enumeration. Likely causes:"
+    )
+    parts.append(f"  1. Wrong owner/name — we queried '{repo}'. Check spelling/case.")
+    parts.append(
+        "  2. Token lacks access to this repo:"
+    )
+    parts.append(
+        "       - Fine-grained PAT: the repo must be in the token's "
+        "'Repository access' list (Settings → Developer settings → Personal "
+        "access tokens → Fine-grained → edit → Repository access)."
+    )
+    parts.append(
+        "       - Classic PAT: needs 'repo' scope (full control of private repos)."
+    )
+    parts.append(
+        "  3. Base URL is wrong (we queried the API at the host derived from your "
+        "input). Re-run with --base-url 'https://<your-ghe-host>/api/v3' if needed."
+    )
+    if accessible_orgs is not None:
+        if accessible_orgs:
+            sample = ", ".join(accessible_orgs[:8])
+            more = "" if len(accessible_orgs) <= 8 else f" (+{len(accessible_orgs) - 8} more)"
+            parts.append(
+                f"\n  Token-visible orgs ({len(accessible_orgs)}): {sample}{more}"
+            )
+            if owner not in accessible_orgs:
+                parts.append(
+                    f"  >> Owner '{owner}' is NOT in the visible-orgs list — "
+                    "this is almost certainly the cause."
+                )
+        else:
+            parts.append(
+                f"  Token-visible orgs: (none for user '{user_login}'). "
+                "If '{owner}' is your own user account, that's fine; otherwise "
+                "the token has no org membership."
+            )
+    return "\n".join(parts)
 
 
 def _err(
