@@ -30,10 +30,9 @@ step failed.
 ## Prerequisites
 
 ```bash
-pip install 'google-adk>=1.31.1' langchain-core python-dotenv
-# Plus the Amex-internal packages (already on your work laptop):
-#   safechain
-#   ee_config
+pip install 'google-adk>=1.31.1' python-dotenv
+# Amex-internal — already installed on your work laptop:
+#   safechain   (langchain-core comes in with this)
 ```
 
 `.env` at the repo root with:
@@ -97,7 +96,6 @@ call → tool response → (model decides next step) → final text.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `ImportError: safechain` | Amex-internal package not installed | Install via your team's onboarding bundle |
-| `ImportError: ee_config` | Same as above | Same |
 | `KeyError: CIBIS_CONSUMER_INTEGRATION_ID` | `.env` not loaded | Confirm `.env` is at the repo root and CIBIS vars are populated |
 | `FileNotFoundError: config.yml` | `CONFIG_PATH` unset / wrong | `export CONFIG_PATH=$(pwd)/config/config.yml` |
 | `KeyError: '1'` (or `'3'`) | The model index isn't defined in `config.yml` | Add the corresponding model entry per SafeChain's docs |

@@ -50,7 +50,7 @@ async def _run(model_idx: str, query: str, as_json: bool, verbose: bool) -> int:
     except ImportError as e:
         print(f"ERROR: missing dependency — {e}", file=sys.stderr)
         print(
-            "       run:  pip install 'google-adk>=1.31.1' langchain-core python-dotenv",
+            "       run:  pip install 'google-adk>=1.31.1' python-dotenv",
             file=sys.stderr,
         )
         return 2
@@ -58,8 +58,8 @@ async def _run(model_idx: str, query: str, as_json: bool, verbose: bool) -> int:
     try:
         agent = build_agent(model_idx=model_idx)
     except ImportError as e:
-        # SafeChain / ee_config not installed — typical on non-Amex laptops.
-        print(f"ERROR: SafeChain bootstrap failed — {e}", file=sys.stderr)
+        # SafeChain not installed — expected on non-Amex laptops.
+        print(f"ERROR: SafeChain not available — {e}", file=sys.stderr)
         return 2
 
     session_service: InMemorySessionService = (

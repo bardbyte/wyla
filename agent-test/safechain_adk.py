@@ -202,39 +202,24 @@ class SafeChainLlm(BaseLlm):
 # Public factory                                                         #
 # ---------------------------------------------------------------------- #
 
-_CONFIG_BOOTSTRAPPED = False
+_DOTENV_LOADED = False
 
 
-def _bootstrap_safechain_config() -> None:
-    """Load .env and call ee_config.Config.from_env() exactly once.
-
-    Mirrors the bootstrap pattern in user's test_safechain_access.py — required
-    so the SafeChain client can read CIBIS_CONSUMER_INTEGRATION_ID,
-    CIBIS_CONSUMER_SECRET, and CONFIG_PATH on first use.
+def _load_env_once() -> None:
+    """Idempotent .env load. SafeChain reads CIBIS_* vars from env on first
+    `model(...)` call, so they must be present in os.environ by then.
     """
-    global _CONFIG_BOOTSTRAPPED
-    if _CONFIG_BOOTSTRAPPED:
+    global _DOTENV_LOADED
+    if _DOTENV_LOADED:
         return
-
     try:
         from dotenv import find_dotenv, load_dotenv
 
         load_dotenv(find_dotenv())
     except ImportError:
-        # python-dotenv missing isn't fatal if env vars are already set.
+        # python-dotenv missing isn't fatal if the user already exported the vars.
         pass
-
-    try:
-        from ee_config.config import Config
-
-        Config.from_env()
-    except ImportError as e:
-        raise ImportError(
-            "ee_config not installed. On Amex laptops, ee_config is part of the "
-            "internal SafeChain bundle. Install per your team's onboarding."
-        ) from e
-
-    _CONFIG_BOOTSTRAPPED = True
+    _DOTENV_LOADED = True
 
 
 def make_safechain_llm(model_idx: str = "1", temperature: float = 0.0) -> SafeChainLlm:
@@ -245,17 +230,17 @@ def make_safechain_llm(model_idx: str = "1", temperature: float = 0.0) -> SafeCh
         temperature: Bound on the LangChain side via `.bind(temperature=...)`.
 
     Raises:
-        ImportError: if safechain or ee_config is not installed (expected on
-                     non-Amex machines — there's no public way to install them).
+        ImportError: if safechain isn't installed (expected on non-Amex machines —
+                     there's no public way to install it).
     """
-    _bootstrap_safechain_config()
+    _load_env_once()
 
     try:
         from safechain.lcel import model as _safechain_model
     except ImportError as e:
         raise ImportError(
-            "safechain not installed. This package is Amex-internal and must "
-            "be installed via your team's onboarding instructions."
+            "safechain not installed. This package is Amex-internal — install "
+            "via your team's onboarding instructions."
         ) from e
 
     lc_client = _safechain_model(model_idx).bind(temperature=temperature)
