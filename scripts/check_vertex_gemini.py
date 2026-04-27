@@ -28,14 +28,34 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import ssl
 import sys
 import time
+import warnings
 from pathlib import Path
 from typing import Any
 
-from google import genai
-from google.genai import types as genai_types
-from google.oauth2 import service_account
+# --- Corporate-network TLS handling -------------------------------------- #
+# On corporate networks (Amex), all HTTPS is MITM'd by a proxy that re-signs
+# certificates with the company's root CA. Python's bundled CA list (certifi)
+# doesn't include that root, so we get 'certificate verify failed:
+# self-signed certificate in certificate chain (_ssl.c:1016)'.
+#
+# Best fix: install `truststore` which uses macOS Keychain (where the company
+# root CA is already trusted by the OS).
+try:
+    import truststore  # type: ignore[import-not-found]
+
+    truststore.inject_into_ssl()
+    _TRUSTSTORE_LOADED = True
+except ImportError:
+    _TRUSTSTORE_LOADED = False
+# ------------------------------------------------------------------------- #
+
+from google import genai  # noqa: E402
+from google.genai import types as genai_types  # noqa: E402
+from google.oauth2 import service_account  # noqa: E402
 
 DEFAULT_PROJECT = "prj-d-ea-poc"
 # 'global' is Vertex AI's globally-distributed endpoint — auto-routes to the
@@ -43,6 +63,81 @@ DEFAULT_PROJECT = "prj-d-ea-poc"
 # with --location us-central1 / asia-south1 / etc. if your grant is regional.
 DEFAULT_LOCATION = "global"
 DEFAULT_MODEL = "gemini-3.1-pro-preview"
+
+
+def _disable_ssl_verification() -> None:
+    """Disable SSL verification across stdlib ssl, httpx, and google-auth.
+
+    For corporate networks where the proxy re-signs certificates and you'd
+    rather skip the chain check than wire up the corporate CA. INSECURE on the
+    open internet — only use it where you already trust the network path.
+    """
+    # urllib / stdlib ssl
+    ssl._create_default_https_context = ssl._create_unverified_context  # type: ignore[assignment]
+    os.environ["PYTHONHTTPSVERIFY"] = "0"
+
+    # urllib3 — silences the noise from the patched httpx/requests
+    try:
+        import urllib3
+
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except ImportError:
+        pass
+
+    # httpx — what google-genai uses under the hood
+    try:
+        import httpx
+
+        _orig_client = httpx.Client
+        _orig_async = httpx.AsyncClient
+
+        def _client_no_verify(*args: Any, **kwargs: Any) -> Any:
+            kwargs.setdefault("verify", False)
+            return _orig_client(*args, **kwargs)
+
+        def _async_no_verify(*args: Any, **kwargs: Any) -> Any:
+            kwargs.setdefault("verify", False)
+            return _orig_async(*args, **kwargs)
+
+        httpx.Client = _client_no_verify  # type: ignore[misc]
+        httpx.AsyncClient = _async_no_verify  # type: ignore[misc]
+    except ImportError:
+        pass
+
+    # google-auth's AuthorizedSession (used during OAuth token exchange)
+    try:
+        import google.auth.transport.requests as gat
+
+        _orig_session = gat.AuthorizedSession
+
+        class _NoVerifyAuthorizedSession(_orig_session):  # type: ignore[misc, valid-type]
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+                self.verify = False
+
+        gat.AuthorizedSession = _NoVerifyAuthorizedSession  # type: ignore[misc]
+    except ImportError:
+        pass
+
+    warnings.warn(
+        "SSL verification disabled — only safe on networks you already trust.",
+        stacklevel=2,
+    )
+
+
+def _set_ca_bundle(path: str) -> None:
+    """Point every standard CA-bundle env var at `path`. Works for requests,
+    httpx, urllib, and the google libraries downstream.
+    """
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        raise FileNotFoundError(f"CA bundle not found: {p}")
+    bundle_str = str(p)
+    os.environ["REQUESTS_CA_BUNDLE"] = bundle_str
+    os.environ["SSL_CERT_FILE"] = bundle_str
+    os.environ["CURL_CA_BUNDLE"] = bundle_str
+    # gRPC clients (Vertex AI uses gRPC for some calls)
+    os.environ["GRPC_DEFAULT_SSL_ROOTS_FILE_PATH"] = bundle_str
 DEFAULT_PROMPT = (
     "Reply in one short sentence. What is the smallest prime number greater than 100?"
 )
@@ -208,6 +303,14 @@ def _err(code: str, msg: str) -> dict[str, Any]:
 
 def _format_summary(result: dict[str, Any]) -> str:
     lines: list[str] = []
+    tls_mode = (
+        "truststore (OS Keychain)"
+        if _TRUSTSTORE_LOADED
+        else os.environ.get("REQUESTS_CA_BUNDLE")
+        or ("DISABLED (--insecure)" if os.environ.get("PYTHONHTTPSVERIFY") == "0" else "default certifi")
+    )
+    lines.append(f"TLS:                 {tls_mode}")
+    lines.append("")
     lines.append("Auth:")
     lines.append(f"  Service account:    {result.get('key_email') or '(none)'}")
     lines.append(f"  Key project_id:     {result.get('key_project_id') or '(none)'}")
@@ -259,9 +362,33 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--prompt", default=DEFAULT_PROMPT)
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of human text.")
+    parser.add_argument(
+        "--ca-bundle",
+        help=(
+            "Path to a corporate root CA bundle (.pem). Sets REQUESTS_CA_BUNDLE / "
+            "SSL_CERT_FILE / CURL_CA_BUNDLE / GRPC_DEFAULT_SSL_ROOTS_FILE_PATH. "
+            "Use this when behind a TLS-intercepting corporate proxy."
+        ),
+    )
+    parser.add_argument(
+        "--insecure",
+        action="store_true",
+        help=(
+            "Disable SSL verification entirely. Use only on networks you trust "
+            "(e.g. corporate intranet behind a known MITM proxy)."
+        ),
+    )
     args = parser.parse_args(argv)
 
-    import os
+    if args.ca_bundle:
+        try:
+            _set_ca_bundle(args.ca_bundle)
+        except FileNotFoundError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
+
+    if args.insecure:
+        _disable_ssl_verification()
 
     key_file = args.key_file or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if not key_file:
