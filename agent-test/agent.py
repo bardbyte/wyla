@@ -1,38 +1,27 @@
-"""Minimal ADK agent backed by SafeChain Gemini 2.5 Pro.
+"""Minimal Vertex AI ADK agent — Gemini 3.1 Pro via prj-d-ea-poc.
 
-This is the canonical "hello world" ADK pattern (modeled on Google's
-hello_world sample with dice + prime tools), wired to SafeChain instead of the
-default Gemini model loader.
+This module is imported by run.py *after* the necessary env vars are set
+(GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION,
+GOOGLE_APPLICATION_CREDENTIALS). ADK's google-genai client reads them on first
+use, so as long as run.py sets them before `from agent import build_agent`,
+the agent talks to Vertex correctly.
 
-If `python -m agent_test.run` succeeds, it proves end-to-end:
-  1. SafeChain auth works (CIBIS creds + config.yml)
-  2. SafeChainLlm adapter correctly translates ADK ↔ LangChain
-  3. Gemini 2.5 Pro reasons over the prompt
-  4. The model emits tool calls
-  5. ADK invokes the tools and feeds responses back
-  6. Multi-step reason→act→reason loop completes cleanly
+Two trivial tools (roll_die + check_prime) so we can verify the full
+reason → tool → reason → answer loop, not just LLM connectivity.
 """
 
 from __future__ import annotations
 
 import logging
 import random
-import sys
-from pathlib import Path
 
-# This directory ('agent-test/') has a hyphen, so it can't be a Python package.
-# Add it to sys.path so we can import sibling modules directly.
-_HERE = Path(__file__).resolve().parent
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
-
-from google.adk import Agent  # noqa: E402
-from google.adk.tools.tool_context import ToolContext  # noqa: E402
-from google.genai import types  # noqa: E402
-
-from safechain_adk import make_safechain_llm  # noqa: E402
+from google.adk import Agent
+from google.adk.tools.tool_context import ToolContext
+from google.genai import types
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_MODEL = "gemini-3.1-pro-preview"
 
 
 def roll_die(sides: int, tool_context: ToolContext) -> int:
@@ -47,7 +36,6 @@ def roll_die(sides: int, tool_context: ToolContext) -> int:
     if sides < 1:
         raise ValueError(f"sides must be ≥ 1, got {sides}")
     result = random.randint(1, sides)
-    # Persist roll history in session state — proves tool_context wiring works.
     rolls = list(tool_context.state.get("rolls", []))
     rolls.append(result)
     tool_context.state["rolls"] = rolls
@@ -83,16 +71,14 @@ async def check_prime(nums: list[int]) -> str:
     )
 
 
-# Build the agent. `make_safechain_llm("1")` returns a SafeChainLlm wrapping
-# Gemini 2.5 Pro via SafeChain. Swap to "3" for Flash if you want a faster /
-# cheaper run during iteration.
-def build_agent(model_idx: str = "1") -> Agent:
+def build_agent(model: str = DEFAULT_MODEL) -> Agent:
     return Agent(
-        model=make_safechain_llm(model_idx),
-        name="safechain_smoke_agent",
+        model=model,
+        name="vertex_smoke_agent",
         description=(
-            "Smoke-test agent that rolls dice and checks prime numbers. "
-            "If this responds, SafeChain → ADK → Gemini is wired correctly."
+            "Smoke-test agent that rolls dice and checks prime numbers via "
+            "Gemini on Vertex AI. If this responds, the full ADK + Vertex "
+            "stack is wired correctly."
         ),
         instruction=(
             "You answer questions about dice rolls and prime numbers.\n"
@@ -114,7 +100,7 @@ def build_agent(model_idx: str = "1") -> Agent:
         ),
         tools=[roll_die, check_prime],
         generate_content_config=types.GenerateContentConfig(
-            # Safety settings off so trivial test prompts don't get blocked.
+            temperature=0.0,
             safety_settings=[
                 types.SafetySetting(
                     category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
@@ -123,7 +109,3 @@ def build_agent(model_idx: str = "1") -> Agent:
             ],
         ),
     )
-
-
-# Module-level instance — `adk run agent_test/` discovers `root_agent`.
-root_agent = build_agent()

@@ -1,106 +1,108 @@
-# agent-test/ — SafeChain → Google ADK → Gemini smoke test
+# agent-test/ — Vertex AI → ADK → Gemini smoke test
 
-Minimal end-to-end check that you can run a Google ADK `LlmAgent` powered by
-Gemini 2.5 Pro through Amex SafeChain. If `python agent-test/run.py` produces
-a final answer, the entire chain is wired correctly and we can move forward.
+Minimal end-to-end check that ADK can run an `Agent` against Gemini 3.1 Pro on
+Vertex AI in your certified-access GCP project (`prj-d-ea-poc`). If
+`python agent-test/run.py` produces a final answer, ADK + Vertex + service-
+account auth + tool calling all work and we can move on.
 
 ## What's in here
 
 | File | Purpose |
 |---|---|
-| `safechain_adk.py` | `SafeChainLlm(BaseLlm)` adapter + `make_safechain_llm(idx)` factory. Translates between ADK's Gemini-shaped requests and SafeChain's LangChain chat client. |
-| `agent.py` | One `Agent` (LlmAgent) with two trivial tools — `roll_die` and `check_prime`. Mirrors Google's canonical `hello_world` sample so it's easy to compare against the docs. |
-| `run.py` | `Runner` setup + asyncio main. Sends one query, prints the full event trace (tool calls, tool responses, final answer), exits 0 on success. |
+| `agent.py` | One `Agent` (LlmAgent) with two trivial tools — `roll_die` and `check_prime`. Default model `gemini-3.1-pro-preview`. |
+| `run.py` | Sets the four env vars ADK needs (`GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS`), handles corporate-network TLS, then runs the agent and prints the full event trace. |
 
-## What this proves
+## What this proves on PASS
 
-When `python agent-test/run.py` succeeds:
-
-1. ✓ SafeChain auth works (CIBIS creds + `config.yml` resolved)
-2. ✓ The adapter correctly bridges ADK ↔ LangChain message shapes
-3. ✓ Gemini 2.5 Pro receives the prompt and reasons about it
-4. ✓ The model emits tool calls in Gemini-native format
-5. ✓ ADK invokes the Python tool functions and feeds responses back
-6. ✓ The reason→act→reason loop terminates with a final response
-7. ✓ Session state survives across tool invocations (roll history persists)
-
-If any of these break, the run prints the event trace showing exactly which
-step failed.
-
-## Prerequisites
-
-You already have `google-adk` 1.31.1 and `safechain` (with `langchain-core` and
-`python-dotenv`) on your work laptop — nothing else to install.
-
-`.env` at the repo root with:
-
-```
-CIBIS_CONSUMER_INTEGRATION_ID=...
-CIBIS_CONSUMER_SECRET=...
-CONFIG_PATH=./config/config.yml
-```
-
-`config/config.yml` per the SafeChain bundle's standard layout — must define
-model entries for `"1"` (Gemini 2.5 Pro) and `"3"` (Gemini 2.5 Flash) at minimum.
+1. ✓ Service-account auth to `prj-d-ea-poc` works
+2. ✓ Vertex AI Gemini 3.1 Pro is reachable
+3. ✓ Corporate-MITM TLS is handled
+4. ✓ ADK builds an agent against the Vertex backend
+5. ✓ The agent emits tool calls in the right format
+6. ✓ ADK invokes tools and feeds responses back
+7. ✓ The reason → act → reason loop terminates with a final answer
+8. ✓ Session state persists across tool invocations
 
 ## Run it
 
-From the repo root:
+Same flags that worked for `scripts/check_vertex_gemini.py` (since the
+underlying transport is identical).
 
 ```bash
-# Default: Gemini 2.5 Pro, asks for a die roll + prime check
-python agent-test/run.py
+# Simplest — assumes truststore is installed (recommended for corporate Mac)
+python agent-test/run.py --key-file ~/Downloads/key.json
 
-# Faster / cheaper iteration — Flash
-python agent-test/run.py --model 3
+# Quick bypass for corporate-MITM SSL (intranet only)
+python agent-test/run.py --key-file ~/Downloads/key.json --insecure
+
+# Different model
+python agent-test/run.py --key-file ~/Downloads/key.json --model gemini-2.5-pro
 
 # Custom prompt
-python agent-test/run.py --query "Roll a 20-sided die three times and tell me which results are prime."
+python agent-test/run.py --key-file ~/Downloads/key.json \
+    --query "Roll a 20-sided die and tell me if it's prime."
 
-# Machine-readable JSON output
-python agent-test/run.py --json
+# Machine-readable
+python agent-test/run.py --key-file ~/Downloads/key.json --json
 ```
 
-## Expected output (Pro, default query)
+You can also set `GOOGLE_APPLICATION_CREDENTIALS` once and skip `--key-file`:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=~/Downloads/key.json
+python agent-test/run.py
+```
+
+## Defaults
+
+| | Default | Override |
+|---|---|---|
+| Project | `prj-d-ea-poc` | `--project` |
+| Location | `global` | `--location us-central1` (or any region) |
+| Model | `gemini-3.1-pro-preview` | `--model gemini-2.5-pro` |
+| TLS | truststore if installed, else `default certifi` | `--ca-bundle PATH` or `--insecure` |
+
+## Expected output (truncated)
 
 ```
-Model:    safechain/1
-Query:    Roll an 8-sided die for me, then tell me whether the result is a prime number.
-Elapsed:  3.4s, 5 events
+TLS:                truststore (OS Keychain)
+Service account:    svc-d-lumigct-hyd@prj-d-ea-poc.iam.gserviceaccount.com
+Key project_id:     prj-d-ea-poc
+Vertex project:     prj-d-ea-poc
+Vertex location:    global
+Model:              gemini-3.1-pro-preview
+Elapsed:            2.8s, 5 events
 
 Event trace:
-  [0] safechain_smoke_agent
+  [0] vertex_smoke_agent
       tool_call: roll_die({'sides': 8})
-  [1] safechain_smoke_agent
+  [1] vertex_smoke_agent
       tool_resp: roll_die → 5
-  [2] safechain_smoke_agent
+  [2] vertex_smoke_agent
       tool_call: check_prime({'nums': [5]})
-  [3] safechain_smoke_agent
+  [3] vertex_smoke_agent
       tool_resp: check_prime → "5 are prime numbers."
-  [4] safechain_smoke_agent (final)
-      text: I rolled a 5 on the 8-sided die — 5 is a prime number.
+  [4] vertex_smoke_agent (final)
+      text: I rolled a 5 — it is prime.
 
-Final answer:  I rolled a 5 on the 8-sided die — 5 is a prime number.
-
-PASS — SafeChain → ADK → Gemini smoke test succeeded.
+PASS — Vertex AI → ADK → Gemini smoke test succeeded.
 ```
 
-The exact die roll varies, but the event ordering should match: model → tool
-call → tool response → (model decides next step) → final text.
+## Failure modes
 
-## Failure modes and what to do
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| `KeyError: CIBIS_CONSUMER_INTEGRATION_ID` | `.env` not loaded | Confirm `.env` is at repo root with CIBIS vars set |
-| `FileNotFoundError: config.yml` | `CONFIG_PATH` unset / wrong | `export CONFIG_PATH=$(pwd)/config/config.yml` |
-| `KeyError: '1'` (or `'3'`) | Model index not defined in `config.yml` | Add the model entry per SafeChain docs |
-| `error_code: SAFECHAIN_ERROR` in event trace | SafeChain call raised | Read `error_message` — usually 401 (creds), 403 (scope), or 429 (rate limit) |
-| Agent finishes with no final text | Model only emitted tool calls, hit `max_llm_calls` | Bump in `run.py` or simplify prompt |
+| Symptom | Likely cause |
+|---|---|
+| `SSLCertVerificationError` | Corporate MITM proxy — install `truststore` or pass `--insecure` |
+| `403 ... Vertex AI API has not been used` | Enable `aiplatform.googleapis.com` on the project |
+| `403 ... caller does not have permission` | Service account missing `roles/aiplatform.user` |
+| `404 ... model is not found` | Try `--location us-central1` or fall back to `--model gemini-2.5-pro` |
+| `refusing to load credentials from inside the repo` | The key path resolves under the repo — move it (e.g. to `~/Downloads/`) |
+| `error_code: ...` in event trace | Read the trace — it carries the full Python traceback |
+| Agent finishes with no final text | Model only emitted tool calls; bump `max_llm_calls` in `run.py` |
 
 ## Where this goes next
 
-`agent-test/` is the proof-of-life. Once it passes, the same pattern
-(`make_safechain_llm` factory + `SafeChainLlm` adapter) is what we'll use in
-the real LUMI pipeline — `lumi/agents/view_enricher.py` will get its model via
-`make_safechain_llm("1")` and behave identically.
+Once it passes, the real LUMI pipeline (`lumi/agents/...`) uses this same
+direct-Vertex pattern — no SafeChain layer in the agent runtime. The
+`make_safechain_llm` adapter is gone; agents just construct `Agent(model="...")`
+with the env vars set.
