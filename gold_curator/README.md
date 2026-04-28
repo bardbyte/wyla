@@ -30,12 +30,12 @@ source agent_test/setup_vertex_env.sh ~/Downloads/key.json
 adk web apps/
 ```
 
-Open `http://localhost:8000`. The sidebar will show **two** agents now:
+Open `http://localhost:8000`. The sidebar will show **two** apps now:
 
 - `vertex_smoke` — the dice/prime canonical smoke test (kept for reference)
-- `gold_curator` — this one
+- `curator` — the gold-curator agent (lives in `gold_curator/` at the repo root, exposed via `apps/curator/` to avoid a name collision with its own package)
 
-Pick `gold_curator`, then start with a message like:
+Pick `curator`, then start with a message like:
 
 > Audit the Excel at `/Users/me/Downloads/gold_queries.xlsx`. Is it ready?
 

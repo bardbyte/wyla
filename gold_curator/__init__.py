@@ -1,6 +1,6 @@
 """gold_curator — agent that inspects gold-query Excels with LLM reasoning.
 
-Imported by `apps/gold_curator/agent.py` (the adk web entry) and importable
+Imported by `apps/curator/agent.py` (the adk web entry) and importable
 directly. Inject truststore here so corporate-MITM TLS is handled before
 any google.* HTTP code initializes.
 """
