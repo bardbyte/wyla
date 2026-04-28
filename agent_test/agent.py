@@ -109,3 +109,10 @@ def build_agent(model: str = DEFAULT_MODEL) -> Agent:
             ],
         ),
     )
+
+
+# Module-level instance — required for `adk web` discovery.
+# Construction is cheap (no API calls); the actual model client is lazily
+# initialized on first use, by which time run.py / `adk web` has set the
+# GOOGLE_* env vars.
+root_agent = build_agent()

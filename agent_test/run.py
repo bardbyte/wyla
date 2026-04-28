@@ -5,10 +5,10 @@ LlmAgent with two tools so the reason → tool → reason → answer loop is
 exercised.
 
 Usage (from the repo root):
-    python agent-test/run.py --key-file ~/Downloads/key.json
-    python agent-test/run.py --key-file ~/Downloads/key.json --insecure
-    python agent-test/run.py --key-file ~/Downloads/key.json --model gemini-2.5-pro
-    python agent-test/run.py --query 'roll a 20-sided die' --json
+    python agent_test/run.py --key-file ~/Downloads/key.json
+    python agent_test/run.py --key-file ~/Downloads/key.json --insecure
+    python agent_test/run.py --key-file ~/Downloads/key.json --model gemini-2.5-pro
+    python agent_test/run.py --query 'roll a 20-sided die' --json
 
 Defaults match the certified-access GCP project:
     project   prj-d-ea-poc
@@ -356,7 +356,7 @@ def _print_human(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="agent-test/run",
+        prog="python agent_test/run.py",
         description="Run the Vertex AI → ADK smoke-test agent.",
     )
     parser.add_argument(
