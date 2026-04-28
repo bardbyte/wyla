@@ -1,9 +1,13 @@
-# gold_curator/
+# apps/curator/
 
 A Gemini 3.1 Pro agent that audits gold-query Excel files for the LUMI
 NL-to-SQL → LookML pipeline. Replaces the old heuristic-based
 `scripts/inspect_excel.py` — instead of regex-scoring columns, this agent
 inspects the file using tools and reasons about it like a senior engineer.
+
+The whole agent (system prompt, tools, TLS bootstrap) lives in this
+directory — no cross-package imports, no `sys.path` tricks. ADK loads
+`agent.py` directly and grabs `root_agent`.
 
 ## What it answers
 
@@ -33,7 +37,7 @@ adk web apps/
 Open `http://localhost:8000`. The sidebar will show **two** apps now:
 
 - `vertex_smoke` — the dice/prime canonical smoke test (kept for reference)
-- `curator` — the gold-curator agent (lives in `gold_curator/` at the repo root, exposed via `apps/curator/` to avoid a name collision with its own package)
+- `curator` — the gold-curator agent (this directory)
 
 Pick `curator`, then start with a message like:
 
