@@ -45,6 +45,22 @@ Pick `curator`, then start with a message like:
 
 The agent will list_excel_sheets, preview a few of them, validate sample SQL, and give you a verdict.
 
+### ⚠ Don't use the attach-file button
+
+Type the **file path** in the chat — don't drag/upload the .xlsx through the
+paperclip icon. Reasons:
+
+1. Gemini doesn't natively accept `.xlsx` as multimodal input. Attaching
+   gets you a `400 Invalid argument: mime type ... not supported` error
+   from the model.
+2. Our whole tool kit is path-based. The Excel binary stays on your disk;
+   only the structured tool outputs (sheet names, markdown previews, SQL
+   parse results) ever travel to Gemini. That's faster, smaller, and
+   keeps the source data local.
+
+If you do attach by mistake, the agent will respond with a one-line nudge
+asking for the path. Just paste the path and continue.
+
 ## Tools (what the LLM has access to)
 
 | Tool | Use when |
