@@ -88,12 +88,45 @@ def parse_sqls(sqls: list[str]) -> list[SQLFingerprint]:
     return [_parse_one(sql) for sql in sqls]
 
 
+def _trim_for_parse(sql: str) -> str:
+    """Strip trailing junk that confuses sqlglot.
+
+    Handles: trailing semicolons, BOM, surrounding whitespace, and SQL-line
+    comments at the very end ('-- some note'). Doesn't try to be clever
+    about MIDDLE-of-query problems; that's the user's data.
+    """
+    s = (sql or "").lstrip("﻿").strip()
+    # Drop any pure-whitespace + semicolons at the end (one or many).
+    while s.endswith(";"):
+        s = s[:-1].rstrip()
+    return s
+
+
 def _parse_one(raw_sql: str) -> SQLFingerprint:
     fp = SQLFingerprint(raw_sql=raw_sql)
+    cleaned = _trim_for_parse(raw_sql)
+    tree: exp.Expression | None = None
+    first_error: Exception | None = None
+
     try:
-        tree = sqlglot.parse_one(raw_sql, dialect=BQ_DIALECT)
+        tree = sqlglot.parse_one(cleaned, dialect=BQ_DIALECT)
     except Exception as e:
-        fp.parse_error = f"{type(e).__name__}: {e}"
+        first_error = e
+        # Cell may have multiple statements (semicolon-separated). Pull the
+        # first SELECT/WITH and re-parse that one.
+        try:
+            statements = sqlglot.parse(cleaned, dialect=BQ_DIALECT)
+        except Exception:
+            statements = []
+        for stmt in statements:
+            if stmt is None:
+                continue
+            if isinstance(stmt, exp.Select | exp.With | exp.Subquery):
+                tree = stmt
+                break
+
+    if tree is None:
+        fp.parse_error = f"{type(first_error).__name__}: {first_error}"
         return fp
 
     fp.ctes = _extract_ctes(tree)
@@ -196,31 +229,50 @@ def _extract_case_whens(tree: exp.Expression) -> list[dict[str, Any]]:
 
 def _extract_ctes(tree: exp.Expression) -> list[dict[str, Any]]:
     """Each WITH ... AS (...) clause. Captures alias, structural filters
-    (everything in its WHERE), and the source tables it reads from.
+    (everything in its WHERE), the real tables it reads from, and any
+    upstream CTE aliases it depends on (chained CTEs).
+
+    Chained CTEs are valid SQL — `WITH a AS (...), b AS (SELECT * FROM a)`.
+    `b`'s "source" is `a`, not a real BQ table. We track these as
+    `cte_dependencies` so downstream guards can distinguish real-table
+    references from CTE-internal references.
     """
     out: list[dict[str, Any]] = []
     with_node = tree.find(exp.With)
     if with_node is None:
         return out
+    cte_alias_set = {c.alias for c in (with_node.expressions or [])}
+
     for cte in with_node.expressions or []:
         alias = cte.alias
         body = cte.this  # the SELECT inside
-        cte_filters = _flatten_predicates(body.find(exp.Where).this) if body.find(exp.Where) else []
-        # CTE-internal filters are STRUCTURAL by definition — they define the
-        # scope of the CTE and aren't user-toggleable.
+        cte_filters = (
+            _flatten_predicates(body.find(exp.Where).this)
+            if body.find(exp.Where)
+            else []
+        )
         for f in cte_filters:
             f["is_structural"] = True
-        # Source tables this CTE reads from.
-        cte_alias_set = {c.alias for c in (with_node.expressions or [])}
-        source_tables = [
-            t.name for t in body.find_all(exp.Table)
-            if t.name and t.name not in cte_alias_set
-        ]
+
+        # Split FROM-table references into real tables vs upstream CTEs.
+        source_tables: list[str] = []
+        cte_dependencies: list[str] = []
+        for t in body.find_all(exp.Table):
+            if not t.name:
+                continue
+            if t.name in cte_alias_set:
+                if t.name not in cte_dependencies:
+                    cte_dependencies.append(t.name)
+            else:
+                if t.name not in source_tables:
+                    source_tables.append(t.name)
+
         out.append({
             "alias": alias,
             "structural_filters": cte_filters,
             "sql": body.sql(dialect=BQ_DIALECT),
             "source_tables": source_tables,
+            "cte_dependencies": cte_dependencies,
         })
     return out
 
