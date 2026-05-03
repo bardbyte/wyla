@@ -49,7 +49,7 @@ from typing import Any
 
 DEFAULT_API_BASE = "https://github.aexp.com/api/v3"
 DEFAULT_REPO = "amex-eng/prj-d-lumi-gpt-semantic"
-DEFAULT_BRANCH = "main"
+DEFAULT_BRANCH = "auto"  # special — auto-detect from /repos/{repo}.default_branch
 DEFAULT_OUT_DIR = "data/looker_master"
 DEFAULT_TIMEOUT_SECS = 30
 
@@ -95,14 +95,72 @@ def _gh_request(url: str, token: str) -> dict[str, Any]:
         return json.loads(resp.read())
 
 
+def get_repo_metadata(
+    repo: str, token: str, api_base: str
+) -> dict[str, Any]:
+    """GET /repos/{repo}. Returns full repo metadata (default_branch, etc.).
+    Raises HTTPError if the repo doesn't exist or PAT can't see it.
+    """
+    return _gh_request(f"{api_base}/repos/{repo}", token)
+
+
 def list_all_files(
     repo: str, branch: str, token: str, api_base: str
-) -> list[dict[str, Any]]:
-    """Trees API ?recursive=1 — every file at branch HEAD in one call."""
+) -> tuple[list[dict[str, Any]], str]:
+    """Trees API ?recursive=1 — every file at branch HEAD in one call.
+
+    Returns (tree_entries, resolved_branch_name). If `branch == "auto"` we
+    fetch /repos/{repo} first to discover the default branch. If an explicit
+    branch 404s, we ALSO try the default branch and report which one worked.
+    """
+    # Step 1: figure out the branch.
+    if branch == "auto":
+        try:
+            meta = get_repo_metadata(repo, token, api_base)
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(
+                f"could not read /repos/{repo} (HTTP {e.code} {e.reason}). "
+                "Verify: (a) repo name is exact, (b) PAT is SSO-authorized "
+                "for the org. Run scripts/check_github_access.py from the "
+                "main repo if you have it."
+            ) from e
+        branch = meta.get("default_branch") or "main"
+        print(f"# auto-detected default branch: {branch}", file=sys.stderr)
+
+    # Step 2: fetch the branch's HEAD SHA.
     branch_url = f"{api_base}/repos/{repo}/branches/{urllib.parse.quote(branch)}"
-    branch_data = _gh_request(branch_url, token)
+    try:
+        branch_data = _gh_request(branch_url, token)
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise
+        # Try default branch as a fallback before giving up.
+        try:
+            meta = get_repo_metadata(repo, token, api_base)
+            default_branch = meta.get("default_branch")
+        except Exception:
+            default_branch = None
+        if default_branch and default_branch != branch:
+            print(
+                f"WARN: branch {branch!r} not found; falling back to "
+                f"default branch {default_branch!r}.",
+                file=sys.stderr,
+            )
+            branch = default_branch
+            branch_data = _gh_request(
+                f"{api_base}/repos/{repo}/branches/{urllib.parse.quote(branch)}",
+                token,
+            )
+        else:
+            raise RuntimeError(
+                f"branch {branch!r} not found on {repo} (HTTP 404). "
+                f"Default branch is {default_branch or 'unknown'}. "
+                f"Pass --branch <name> with the correct branch."
+            ) from e
+
     head_sha = branch_data["commit"]["sha"]
 
+    # Step 3: list the tree at that SHA.
     tree_url = f"{api_base}/repos/{repo}/git/trees/{head_sha}?recursive=1"
     tree_data = _gh_request(tree_url, token)
 
@@ -112,7 +170,7 @@ def list_all_files(
             file=sys.stderr,
         )
 
-    return tree_data.get("tree") or []
+    return tree_data.get("tree") or [], branch
 
 
 def fetch_blob(repo: str, sha: str, token: str, api_base: str) -> str:
@@ -190,7 +248,15 @@ def _parse_types(types_arg: str | None) -> set[str] | None:
 def main() -> int:
     parser = argparse.ArgumentParser(prog="fetch_lookml_master")
     parser.add_argument("--repo", default=DEFAULT_REPO, help="owner/name on GHE")
-    parser.add_argument("--branch", default=DEFAULT_BRANCH)
+    parser.add_argument(
+        "--branch",
+        default=DEFAULT_BRANCH,
+        help=(
+            "Branch to fetch from. Default: 'auto' (reads default_branch from "
+            "/repos/{repo}). Pass an explicit name like 'main', 'master', "
+            "'develop' to override."
+        ),
+    )
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument(
         "--out", default=DEFAULT_OUT_DIR, help=f"Default: {DEFAULT_OUT_DIR}/"
@@ -238,9 +304,18 @@ def main() -> int:
 
     print(f"# Listing tree for {args.repo}@{args.branch} …", file=sys.stderr)
     try:
-        tree = list_all_files(args.repo, args.branch, token, args.api_base)
+        tree, resolved_branch = list_all_files(
+            args.repo, args.branch, token, args.api_base
+        )
+    except RuntimeError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
     except urllib.error.HTTPError as e:
-        print(f"ERROR: HTTP {e.code} {e.reason} on tree listing", file=sys.stderr)
+        print(
+            f"ERROR: HTTP {e.code} {e.reason} listing tree for "
+            f"{args.repo}@{args.branch}",
+            file=sys.stderr,
+        )
         return 1
 
     matches = filter_lookml_files(tree, wanted_types, args.include)
@@ -259,7 +334,7 @@ def main() -> int:
             f"types={sorted(wanted_types)}" if wanted_types else "all LookML types"
         )
         print(
-            f"# {len(matches)} matching files in {args.repo}@{args.branch} "
+            f"# {len(matches)} matching files in {args.repo}@{resolved_branch} "
             f"({types_label})"
         )
         print(f"# Breakdown: {dict(by_type)}")
