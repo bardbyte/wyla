@@ -1,0 +1,18 @@
+# Pin google-adk to a real version (>=0.1 was a fiction).
+google-adk>=1.31.1
+
+# Corporate-MITM TLS via macOS Keychain. Required on Amex laptops for
+# adk web + Vertex calls. See parent CLAUDE.md "Don'ts".
+truststore>=0.10
+
+# Core dependencies
+sqlglot>=25.0.0
+lkml>=1.3.0
+pydantic>=2.0.0
+requests>=2.32.0          # MDM API + GitHub probes
+python-dotenv>=1.0.0      # optional .env loading
+
+# Dev
+pytest>=8.0.0
+ruff>=0.4.0
+mypy>=1.10.0

@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Edit(**)",
+      "Bash(pytest*)",
+      "Bash(python -m lumi*)",
+      "Bash(python -m pytest*)",
+      "Bash(python scripts/*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git push*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(pip install*)",
+      "Bash(ruff*)",
+      "Bash(mypy*)",
+      "Bash(mkdir*)",
+      "Bash(ls*)",
+      "Bash(find*)",
+      "Bash(cat*)",
+      "Bash(head*)",
+      "Bash(tail*)",
+      "Bash(wc*)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(curl*)",
+      "Bash(wget*)"
+    ]
+  }
+}
