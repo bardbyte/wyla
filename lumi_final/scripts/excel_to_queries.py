@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Read SQL queries out of an Excel column and write them as the LUMI inputs.
 
-Two outputs from one input:
+Three outputs from one input:
   1. data/gold_queries/Q001.sql ... Q129.sql  (one .sql per row — pipeline input)
   2. data/gold_queries/queries.json           (consolidated, JSON-shaped, with
                                               prompt/SQL/difficulty/derived metadata)
+  3. data/gold_queries/tables.json            (sorted manifest of every unique
+                                              table referenced + query_count +
+                                              which queries hit it — feeds
+                                              fetch_all_views / fetch_baselines /
+                                              probe_mdm)
 
 Optional Gemini cleanup pass on each row:
   - normalizes smart-quotes / line-endings
@@ -383,6 +388,27 @@ def extract(
     json_out.parent.mkdir(parents=True, exist_ok=True)
     json_out.write_text(json.dumps(queries, indent=2), encoding="utf-8")
 
+    # Write the tables.json manifest — sorted by query_count desc, then name.
+    # This is the single source of truth for "which tables does this corpus
+    # touch?" — consumed by fetch_all_views, fetch_baselines, probe_mdm.
+    tables_path = json_out.parent / "tables.json"
+    tables_index: dict[str, list[str]] = {}
+    for q in queries:
+        for t in q["tables"]:
+            tables_index.setdefault(t, []).append(q["id"])
+    tables_manifest = sorted(
+        (
+            {
+                "table": t,
+                "query_count": len(qids),
+                "query_ids": sorted(qids),
+            }
+            for t, qids in tables_index.items()
+        ),
+        key=lambda x: (-x["query_count"], x["table"]),
+    )
+    tables_path.write_text(json.dumps(tables_manifest, indent=2), encoding="utf-8")
+
     return {
         "status": "ok",
         "extracted": len(queries),
@@ -390,6 +416,8 @@ def extract(
         "skipped_not_sql": skipped_not_sql,
         "sql_dir": str(out_dir),
         "json": str(json_out),
+        "tables_json": str(tables_path),
+        "unique_tables": len(tables_manifest),
         "first_3": queries[:3],
     }
 
@@ -457,11 +485,13 @@ def main() -> int:
         return 1
 
     print()
-    print(f"Extracted: {result['extracted']} queries")
+    print(f"Extracted: {result['extracted']} queries hitting "
+          f"{result['unique_tables']} unique tables")
     print(f"  skipped (blank rows):  {result['skipped_blank']}")
     print(f"  skipped (not SQL, Gemini-flagged): {result['skipped_not_sql']}")
-    print(f"  .sql files:  {result['sql_dir']}/Q*.sql")
+    print(f"  .sql files:        {result['sql_dir']}/Q*.sql")
     print(f"  consolidated json: {result['json']}")
+    print(f"  tables manifest:   {result['tables_json']}")
     print()
     print("First 3 records (preview):")
     for r in result["first_3"]:
