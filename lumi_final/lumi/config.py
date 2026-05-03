@@ -41,7 +41,11 @@ class LumiConfig:
     mdm_api_base: str = "https://lumimdmapi-guse4.aexp.com/api/v1/ngbd/mdm-api/datasets/schemas"
 
     # Paths
-    baseline_views_dir: str = "data/baseline_views"
+    # baseline_views_dir is now the full Looker mirror by default — same
+    # files, just in their original directory layout. discover_tables()
+    # finds <table>.view.lkml under any subdir.
+    baseline_views_dir: str = "data/looker_master"
+    mdm_cache_dir: str = "data/mdm_cache"
     gold_queries_dir: str = "data/gold_queries"
     output_dir: str = "output"
     learnings_path: str = "data/learnings.md"

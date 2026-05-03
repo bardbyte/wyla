@@ -439,11 +439,33 @@ def discover_tables(
         raw_ctx["mdm_table_description"] = mdm.get("table_description")
         raw_ctx["mdm_coverage_pct"] = float(mdm.get("mdm_coverage_pct") or 0.0)
 
-        baseline_file = baseline_dir / f"{table_name}.view.lkml"
-        if baseline_file.exists():
-            raw_ctx["existing_view_lkml"] = baseline_file.read_text(encoding="utf-8")
+        baseline_text = _find_baseline_view(baseline_dir, table_name)
+        if baseline_text is not None:
+            raw_ctx["existing_view_lkml"] = baseline_text
 
     return {name: TableContext(**raw) for name, raw in contexts.items()}
+
+
+def _find_baseline_view(baseline_dir: Path, table_name: str) -> str | None:
+    """Find <table>.view.lkml under baseline_dir, searching at the root and
+    recursively in subdirs. Returns the file's text content or None if
+    not found.
+
+    This lets the same `discover_tables()` work against either layout:
+      data/baseline_views/<table>.view.lkml      (flat — fetch_baselines)
+      data/looker_master/views/<table>.view.lkml (mirror — fetch_lookml_master)
+    """
+    if not baseline_dir.exists():
+        return None
+    target = f"{table_name}.view.lkml"
+    # Quick path: file at root
+    direct = baseline_dir / target
+    if direct.is_file():
+        return direct.read_text(encoding="utf-8")
+    # Recursive search; first hit wins. Fast for hundreds of files.
+    for path in baseline_dir.rglob(target):
+        return path.read_text(encoding="utf-8")
+    return None
 
 
 def _empty_context(table_name: str) -> dict[str, Any]:
