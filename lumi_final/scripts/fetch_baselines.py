@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 """Pull baseline .view.lkml files from the Looker Enterprise GitHub repo.
 
+The set of tables to fetch is DERIVED from the SQL files in
+data/gold_queries/ (or whatever you point --from-sqls at). Same script
+works for the 10 fixtures or 129 production queries.
+
 Usage (on Saheb's work laptop, on VPN):
 
     export GHE_TOKEN='ghp_xxxxx...'        # SSO-authorized for amex-eng org
-    python scripts/fetch_baselines.py                       # all 6 baseline tables
-    python scripts/fetch_baselines.py --table cornerstone_metrics
-    python scripts/fetch_baselines.py --views-path views/   # subdirectory in the repo
+
+    python scripts/fetch_baselines.py                              # all tables in data/gold_queries/
+    python scripts/fetch_baselines.py --from-sqls data/extra_sqls/ # different dir
+    python scripts/fetch_baselines.py --table cornerstone_metrics  # single table
+    python scripts/fetch_baselines.py --views-path lookml/{name}.view.lkml
 
 Saves files into data/baseline_views/<table_name>.view.lkml.
 
-Pure-stdlib urllib — runs from a fresh laptop with no pip installs.
+Pure-stdlib urllib for HTTP. Uses lumi.sql_to_context.parse_sqls for table
+discovery (one source of truth — same parser the pipeline uses).
 Per parent CLAUDE.md: PAT must be SSO-authorized against amex-eng org.
 """
 
@@ -27,17 +34,8 @@ from pathlib import Path
 
 DEFAULT_API_BASE = "https://github.aexp.com/api/v3"
 DEFAULT_REPO = "amex-eng/prj-d-lumi-gpt-semantic"
+DEFAULT_GOLD_QUERIES_DIR = "data/gold_queries"
 DEFAULT_TIMEOUT_SECS = 30
-
-# Tables Q1-Q10 reference. Update as the gold queries grow.
-DEFAULT_TABLES = [
-    "cornerstone_metrics",
-    "risk_pers_acct_history",
-    "risk_indv_cust_hist",
-    "drm_product_member",
-    "drm_product_hier",
-    "acquisitions",
-]
 
 # Common locations for view files inside Looker projects.
 DEFAULT_PATH_CANDIDATES = (
@@ -46,6 +44,47 @@ DEFAULT_PATH_CANDIDATES = (
     "looker/views/{name}.view.lkml",
     "lookml/views/{name}.view.lkml",
 )
+
+
+# ─── Discover tables from the SQL corpus ─────────────────────
+
+
+def discover_tables_from_sqls(sql_dir: Path) -> list[str]:
+    """Same logic as probe_mdm — single source of truth via lumi.sql_to_context.
+
+    Includes both top-level FROM tables and CTE source tables.
+    """
+    sql_files = sorted(sql_dir.glob("*.sql"))
+    if not sql_files:
+        return []
+
+    repo_root = Path(__file__).resolve().parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from lumi.sql_to_context import parse_sqls  # noqa: E402
+
+    sqls = [f.read_text(encoding="utf-8") for f in sql_files]
+    fps = parse_sqls(sqls)
+
+    tables: set[str] = set()
+    parse_failures = 0
+    for fp in fps:
+        if fp.parse_error:
+            parse_failures += 1
+            continue
+        tables.update(fp.tables)
+        for cte in fp.ctes:
+            tables.update(cte.get("source_tables") or [])
+
+    if parse_failures:
+        print(
+            f"WARN: {parse_failures}/{len(sql_files)} SQL files failed to parse",
+            file=sys.stderr,
+        )
+    return sorted(tables)
+
+
+# ─── HTTP fetch ──────────────────────────────────────────────
 
 
 def fetch_file(
@@ -72,12 +111,10 @@ def fetch_file(
             return None
         raise
 
-    # GitHub returns {content: base64, encoding: 'base64'}
-    import base64
-
     encoding = data.get("encoding", "")
     if encoding != "base64":
         return data.get("content", "")
+    import base64
     return base64.b64decode(data["content"]).decode("utf-8", errors="replace")
 
 
@@ -97,9 +134,22 @@ def find_view(
     return None, None
 
 
+# ─── CLI ─────────────────────────────────────────────────────
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="fetch_baselines")
-    parser.add_argument("--table", help="Single table; default: all 6 Q1-Q10 tables")
+    parser.add_argument(
+        "--from-sqls",
+        default=DEFAULT_GOLD_QUERIES_DIR,
+        help=f"Directory of .sql files. Default: {DEFAULT_GOLD_QUERIES_DIR}/",
+    )
+    parser.add_argument("--table", help="Single table — overrides --from-sqls discovery")
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Just list the tables that would be fetched and exit",
+    )
     parser.add_argument("--repo", default=DEFAULT_REPO, help="owner/name on GHE")
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument(
@@ -116,27 +166,49 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    token = os.environ.get(args.token_env, "").strip() or os.environ.get("GITHUB_TOKEN", "").strip()
+    # Resolve table set
+    if args.table:
+        tables = [args.table]
+    else:
+        sql_dir = Path(args.from_sqls)
+        if not sql_dir.exists():
+            print(f"ERROR: {sql_dir} does not exist", file=sys.stderr)
+            return 2
+        tables = discover_tables_from_sqls(sql_dir)
+        if not tables:
+            print(
+                f"ERROR: no .sql files under {sql_dir} (or all failed to parse)",
+                file=sys.stderr,
+            )
+            return 2
+
+    if args.list:
+        print(f"# Discovered {len(tables)} unique tables across {args.from_sqls}/")
+        for t in tables:
+            print(t)
+        return 0
+
+    token = os.environ.get(args.token_env, "").strip() or os.environ.get(
+        "GITHUB_TOKEN", ""
+    ).strip()
     if not token:
         print(
             f"ERROR: no token in ${args.token_env} or $GITHUB_TOKEN. "
-            "PAT must be SSO-authorized against the amex-eng org "
-            "(see parent CLAUDE.md sharp-edge #7).",
+            "PAT must be SSO-authorized against the amex-eng org.",
             file=sys.stderr,
         )
         return 2
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    tables = [args.table] if args.table else DEFAULT_TABLES
     candidates = (args.views_path,) if args.views_path else DEFAULT_PATH_CANDIDATES
+
+    print(f"# Fetching {len(tables)} baseline views (from {args.from_sqls}/)\n")
 
     failures: list[str] = []
     for t in tables:
         try:
-            path, contents = find_view(t, t, token, args.api_base, candidates) \
-                if False else find_view(args.repo, t, token, args.api_base, candidates)
+            path, contents = find_view(args.repo, t, token, args.api_base, candidates)
         except urllib.error.HTTPError as e:
             failures.append(f"{t}: HTTP {e.code} {e.reason}")
             print(f"[{t}] FAIL — HTTP {e.code} {e.reason}", file=sys.stderr)
