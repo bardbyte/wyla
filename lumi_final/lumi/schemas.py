@@ -136,7 +136,7 @@ class EnrichmentPlan(BaseModel):
     )
 
 
-ApprovalSource = Literal["human", "auto_low_risk", "auto_skip"]
+ApprovalSource = Literal["human", "auto_low_risk", "auto_skip", "pending"]
 
 
 class PlanApproval(BaseModel):

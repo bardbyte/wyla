@@ -68,7 +68,7 @@ def print_one(info: dict[str, str | bool | None]) -> None:
 
     print(f"  type:                {info['type']}")
     if info["type"] not in KNOWN_TYPES:
-        print(f"    ⚠ unexpected type — should be 'service_account'")
+        print("    ⚠ unexpected type — should be 'service_account'")
 
     print(f"  project_id:          {info['project_id']}")
     print(f"  client_email:        {info['client_email']}")
