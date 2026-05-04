@@ -460,7 +460,92 @@ def publish_to_disk(
     )
     written.append(str(overwrites_path))
 
+    # uncertain_fields.md — every field the LLM admitted it couldn't ground.
+    # This is the trust signal: you know which descriptions are best-guesses
+    # vs evidence-backed before the LookML lands in production.
+    uncertain_ledger: list[dict[str, Any]] = []
+    confidence_summary: dict[str, dict[str, int]] = {}
+    for table_name, eo in enriched_outputs.items():
+        for entry in eo.uncertain_fields or []:
+            row = {**entry, "table": table_name}
+            uncertain_ledger.append(row)
+        if eo.field_confidences:
+            counts = {"grounded": 0, "inferred": 0, "guessed": 0}
+            for c in eo.field_confidences.values():
+                if c in counts:
+                    counts[c] += 1
+            confidence_summary[table_name] = counts
+    uncertain_path = out / "uncertain_fields.md"
+    uncertain_path.write_text(
+        _render_uncertain_md(uncertain_ledger, confidence_summary),
+        encoding="utf-8",
+    )
+    written.append(str(uncertain_path))
+
     return {"status": "ok", "error": None, "files_written": written}
+
+
+def _render_uncertain_md(
+    ledger: list[dict[str, Any]],
+    confidence_summary: dict[str, dict[str, int]],
+) -> str:
+    """Per-table summary of confidence labels + the full list of fields
+    the LLM flagged as guessed/inferred without anchoring evidence.
+    """
+    lines: list[str] = ["# Uncertain fields", ""]
+    if confidence_summary:
+        lines.append("## Confidence summary per table")
+        lines.append("")
+        lines.append("| Table | Grounded | Inferred | Guessed |")
+        lines.append("|---|---:|---:|---:|")
+        for table_name in sorted(confidence_summary.keys()):
+            c = confidence_summary[table_name]
+            lines.append(
+                f"| `{table_name}` | {c.get('grounded', 0)} "
+                f"| {c.get('inferred', 0)} | {c.get('guessed', 0)} |"
+            )
+        lines.append("")
+
+    if not ledger:
+        lines.append(
+            "_No fields flagged as uncertain — every description / type / "
+            "role the LLM produced is anchored to MDM, baseline, or "
+            "query-usage evidence._"
+        )
+        return "\n".join(lines) + "\n"
+
+    lines.append("## Fields needing human review")
+    lines.append("")
+    lines.append(
+        "Each entry below is a field the LLM admitted it couldn't ground. "
+        "Verify the description / type / role is correct before the next "
+        "iteration; if a field is consistently guessed, the underlying "
+        "data source (MDM, BQ DISTINCT, glossary) probably needs a fix."
+    )
+    lines.append("")
+
+    by_table: dict[str, list[dict[str, Any]]] = {}
+    for e in ledger:
+        by_table.setdefault(e.get("table") or "<unknown>", []).append(e)
+
+    for table_name in sorted(by_table.keys()):
+        lines.append(f"### `{table_name}`")
+        lines.append("")
+        for e in by_table[table_name]:
+            kind = e.get("field_kind") or "field"
+            name = e.get("field_name") or "?"
+            attr = e.get("attribute") or "value"
+            conf = e.get("confidence") or "guessed"
+            value = e.get("value") or ""
+            reason = e.get("reason") or "no anchor in any source"
+            lines.append(
+                f"- **{kind} `{name}` — {attr}** [{conf}]"
+            )
+            if value:
+                lines.append(f"    - proposed: `{value}`")
+            lines.append(f"    - reason: _{reason}_")
+        lines.append("")
+    return "\n".join(lines)
 
 
 def _render_overwrites_md(ledger: list[dict[str, Any]]) -> str:

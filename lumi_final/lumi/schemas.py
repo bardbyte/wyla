@@ -216,6 +216,21 @@ class EnrichedOutput(BaseModel):
     # Each item: {field_kind, field_name, attribute, baseline_value,
     #             proposed_value, reason}
     proposed_overwrites: list[dict] = Field(default_factory=list)
+    # Per-field confidence label so the human reviewing knows what was
+    # grounded vs inferred vs guessed. Keys are field names ("bus_seg",
+    # "total_billed_business"); values are one of:
+    #   "grounded"  — backed by MDM description, baseline content, or
+    #                 query-usage evidence
+    #   "inferred"  — supported by a deterministic signal (naming
+    #                 convention, prefix pattern, structural inference)
+    #                 but not directly described
+    #   "guessed"   — best-effort with no anchor; needs human review
+    field_confidences: dict[str, str] = Field(default_factory=dict)
+    # Fields where the LLM admitted it couldn't ground its claim. Each
+    # item: {field_kind, field_name, attribute, value, confidence, reason}.
+    # Surfaced via output/uncertain_fields.md so a reviewer can verify
+    # before the LookML lands in production.
+    uncertain_fields: list[dict] = Field(default_factory=list)
 
 
 # ─── Session 4: Validate ─────────────────────────────────────

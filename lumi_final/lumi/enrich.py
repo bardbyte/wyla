@@ -62,6 +62,9 @@ def enrich_table(
     model: str | None = None,
     config: LumiConfig | None = None,
     max_attempts: int = 2,
+    *,
+    all_fingerprints: list | None = None,
+    contexts_by_table: dict | None = None,
 ) -> EnrichedOutput:
     """Run one enrichment LLM call for ``table_context.table_name``.
 
@@ -76,6 +79,14 @@ def enrich_table(
         config: Optional :class:`LumiConfig` for project/dataset/temperature.
         max_attempts: Total invocations allowed (default 2 = first try +
             one self-repair attempt). Set to 1 to disable repair.
+        all_fingerprints: All gold-query SQLFingerprints. When provided,
+            grounding signals are computed and injected into the prompt.
+            This is what gives Gemini per-column usage intelligence
+            (PK candidates, join hints, observed values) so it can
+            reason about column semantics instead of guessing.
+        contexts_by_table: Other tables' contexts, for transitive
+            join inference (cm11 → customer_master.cust_id even if the
+            current query doesn't show that join directly).
 
     Returns:
         :class:`EnrichedOutput` with view_lkml, derived tables, explore,
@@ -87,7 +98,19 @@ def enrich_table(
 
     cfg = config or LumiConfig()
     model_id = model or cfg.model_name
-    base_prompt = build_enrichment_prompt(table_context, approved_plan, config=cfg)
+
+    # Compute grounding signals when we have the corpus to do it. Always
+    # safe to skip; the prompt degrades gracefully without them.
+    grounding = None
+    if all_fingerprints is not None:
+        from lumi.grounding import build_grounding_signals
+        grounding = build_grounding_signals(
+            table_context, all_fingerprints, contexts_by_table or {}
+        )
+
+    base_prompt = build_enrichment_prompt(
+        table_context, approved_plan, config=cfg, grounding=grounding,
+    )
     logger.info(
         "Enriching %s — prompt %d chars, plan dims=%d measures=%d",
         table_context.table_name,
@@ -206,14 +229,30 @@ def build_enrichment_prompt(
     table_context: TableContext,
     plan: EnrichmentPlan,
     config: LumiConfig | None = None,
+    *,
+    grounding: object | None = None,
 ) -> str:
     """Render the enrichment prompt with all placeholders interpolated.
 
     The base template lives at ``lumi/prompts/enrich_view.md``. After
-    interpolation we APPEND the LookML SKILL excerpt + the approved plan
-    contract. The plan goes near the top of the appended block because the
-    LLM tends to weight late-prompt content highly when generating long
-    structured output.
+    interpolation we APPEND, in this order:
+      1. The approved plan (scope contract)
+      2. Baseline gap analysis
+      3. **Grounding signals** — densely-structured deterministic
+         intelligence that lets Gemini reason about column semantics
+         instead of guessing them. This is where ``cm11`` becomes
+         "the customer-grain identifier (used as JOIN key in 4 queries
+         to customer_master.cust_id, COUNT-DISTINCT'd in 2 queries,
+         MDM-partitioned)" instead of opaque.
+      4. LookML SKILL.md sections 1-7
+
+    Args:
+        grounding: optional GroundingSignals payload from
+            ``lumi.grounding.build_grounding_signals``. When provided,
+            its rendered Markdown form is appended as the highest-
+            priority context section. When None, the prompt falls back
+            to the same content it had before grounding was wired —
+            still works, just less grounded.
     """
     cfg = config or LumiConfig()
     template = _PROMPT_PATH.read_text(encoding="utf-8")
@@ -233,16 +272,60 @@ def build_enrichment_prompt(
     }
     rendered = _interpolate(template, placeholders)
 
-    return "\n\n".join(
-        [
-            rendered,
-            "## Approved enrichment plan (scope contract — do not exceed)",
-            _render_plan_contract(plan),
-            "## Baseline gap analysis (drives surgical enrichment scope)",
-            _render_baseline_gaps(table_context),
-            "## LookML patterns reference (from .claude/skills/lookml/SKILL.md)",
-            _load_skill_excerpt(),
-        ]
+    sections: list[str] = [
+        rendered,
+        "## Approved enrichment plan (scope contract — do not exceed)",
+        _render_plan_contract(plan),
+        "## Baseline gap analysis (drives surgical enrichment scope)",
+        _render_baseline_gaps(table_context),
+    ]
+
+    if grounding is not None:
+        # Lazy import keeps grounding optional for callers that just
+        # want the legacy prompt shape (e.g. some unit tests).
+        from lumi.grounding import render_grounding_signals
+        sections.extend([
+            "",  # visual separator
+            render_grounding_signals(grounding),  # type: ignore[arg-type]
+            "",
+            "## Confidence-labeling rules (enforce on every field)",
+            _render_confidence_rules(),
+        ])
+
+    sections.extend([
+        "## LookML patterns reference (from .claude/skills/lookml/SKILL.md)",
+        _load_skill_excerpt(),
+    ])
+
+    return "\n\n".join(sections)
+
+
+def _render_confidence_rules() -> str:
+    """Tell Gemini the EXPLICIT rule for marking confidence on every field.
+
+    This is the Layer-4 contract: nothing in the output is allowed to
+    be ungrounded silently — if the LLM can't anchor a claim to a
+    grounding signal, it must declare so via uncertain_fields.
+    """
+    return (
+        "For EVERY dimension, dimension_group, and measure you emit, you "
+        "MUST add an entry to `field_confidences` mapping its name to one "
+        "of:\n"
+        "  - `grounded`  — the field's role/type/description is anchored "
+        "to MDM description, baseline content, or query usage signal "
+        "above.\n"
+        "  - `inferred`  — the role is supported by a deterministic "
+        "signal (naming pattern, JOIN-key evidence, structural shape) "
+        "but not directly described.\n"
+        "  - `guessed`   — best-effort with no anchor. Add it to "
+        "`uncertain_fields` with `{field_kind, field_name, attribute, "
+        "value, reason}` so a human reviews it.\n"
+        "\n"
+        "Honesty rule: if you would normally write a description by "
+        "pattern-matching on the column name alone (e.g. `cm11` → "
+        "'Customer Member 11'), that's a `guessed` and goes into "
+        "`uncertain_fields`. Do NOT silently write speculative "
+        "descriptions as if they were grounded."
     )
 
 
