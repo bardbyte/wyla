@@ -1,0 +1,76 @@
+{
+  "view_lkml": "view: risk_pers_acct_history {\n  sql_table_name: `axp-lumi.dw.risk_pers_acct_history` ;;\n\n  dimension: acct_cust_xref_id {\n    primary_key: yes\n    type: string\n    sql: ${TABLE}.acct_cust_xref_id ;;\n    label: \"Account Customer Cross-Reference ID\"\n    description: \"Unique account-to-customer cross-reference identifier used as the join key for credit and product enrichment.\"\n  }\n\n  dimension: acct_bus_unit_cd {\n    type: number\n    sql: ${TABLE}.acct_bus_unit_cd ;;\n    label: \"Business Unit Code\"\n    description: \"Numeric business unit code partitioning the account portfolio. Codes 1 and 2 designate consumer business units.\"\n  }\n\n  dimension: acct_srce_sys_cd {\n    type: string\n    sql: ${TABLE}.acct_srce_sys_cd ;;\n    label: \"Source System Code\"\n    description: \"Source system identifier for the account record. TRIUMPH is the canonical source for consumer risk reporting.\"\n  }\n\n  dimension_group: acct_as_of {\n    type: time\n    timeframes: [raw, date, week, month, quarter, year]\n    datatype: date\n    convert_tz: no\n    sql: ${TABLE}.acct_as_of_dt ;;\n    description: \"Snapshot date for the account history record, aligned to monthly credit and product reporting cycles.\"\n  }\n\n  measure: total_ar {\n    type: sum\n    sql: ${TABLE}.acct_bill_bal_mth01_amt ;;\n    label: \"Total Accounts Receivable\"\n    description: \"Sum of month-one billed balance across selected accounts in USD; the canonical AR measure for the portfolio.\"\n    value_format_name: usd\n  }\n\n  measure: total_writeoffs {\n    type: sum\n    sql: ${TABLE}.acct_wrt_off_am ;;\n    label: \"Total Write-offs\"\n    description: \"Sum of write-off amounts in USD across selected accounts during the reporting period.\"\n    value_format_name: usd\n  }\n\n  measure: total_recoveries {\n    type: sum\n    sql: ${TABLE}.acct_rcvr_mo_01_am ;;\n    label: \"Total Recoveries\"\n    description: \"Sum of month-one recovery amounts in USD; tracks dollars recovered after write-off in the reporting window.\"\n    value_format_name: usd\n  }\n}\n",
+  "derived_table_views": [
+    "view: risk_acct_triumph_consumer {\n  derived_table: {\n    sql:\n      SELECT acct_cust_xref_id,\n             acct_bal_age_mth01_cd,\n             acct_bill_bal_mth01_amt,\n             acct_wrt_off_am,\n             acct_rcvr_mo_01_am,\n             acct_bus_unit_cd,\n             acct_as_of_dt\n      FROM `axp-lumi.dw.risk_pers_acct_history`\n      WHERE acct_srce_sys_cd = 'TRIUMPH'\n        AND acct_bus_unit_cd IN (1, 2)\n    ;;\n    persist_for: \"24 hours\"\n  }\n\n  dimension: acct_cust_xref_id {\n    primary_key: yes\n    type: string\n    sql: ${TABLE}.acct_cust_xref_id ;;\n    description: \"Account-to-customer cross-reference id; primary key after structural filters bake in TRIUMPH consumer scope.\"\n  }\n\n  dimension: delinquency_age_bucket {\n    type: string\n    sql: CASE\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) IN ('00','01') THEN 'Current'\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) = '02' THEN '30 DPB'\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) = '03' THEN '60 DPB'\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) = '04' THEN '90 DPB'\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) = '05' THEN '120 DPB'\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) = '06' THEN '150 DPB'\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) IN ('07','08','09') THEN '180+ DPB'\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) = '99' THEN 'Written Off'\n      ELSE 'NA/Other'\n    END ;;\n    label: \"Delinquency Age Bucket\"\n    description: \"Account aging in delinquency buckets derived from the balance age code; DPB = days past billing.\"\n    order_by_field: delinquency_age_bucket_sort\n    tags: [\"delinquency\", \"aging\", \"past_due\", \"dpb\"]\n  }\n\n  dimension: delinquency_age_bucket_sort {\n    type: number\n    hidden: yes\n    sql: CASE\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) IN ('00','01') THEN 1\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) = '02' THEN 2\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) = '03' THEN 3\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) = '04' THEN 4\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) = '05' THEN 5\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) = '06' THEN 6\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) IN ('07','08','09') THEN 7\n      WHEN TRIM(${TABLE}.acct_bal_age_mth01_cd) = '99' THEN 8\n      ELSE 9\n    END ;;\n    description: \"Sort key enforcing business-correct ordering of delinquency buckets; hidden helper for delinquency_age_bucket.\"\n  }\n\n  dimension_group: acct_as_of {\n    type: time\n    timeframes: [raw, date, week, month, quarter, year]\n    datatype: date\n    convert_tz: no\n    sql: ${TABLE}.acct_as_of_dt ;;\n    description: \"Snapshot date for the TRIUMPH consumer account scope, retained from the source for monthly reporting alignment.\"\n  }\n\n  measure: total_ar {\n    type: sum\n    sql: ${TABLE}.acct_bill_bal_mth01_amt ;;\n    label: \"Total AR (TRIUMPH Consumer)\"\n    description: \"Sum of month-one billed balance scoped to TRIUMPH consumer business units; the AR measure for this derived view.\"\n    value_format_name: usd\n  }\n\n  measure: total_writeoffs {\n    type: sum\n    sql: ${TABLE}.acct_wrt_off_am ;;\n    label: \"Total Write-offs (TRIUMPH Consumer)\"\n    description: \"Sum of write-off dollars scoped to TRIUMPH consumer accounts during the snapshot period.\"\n    value_format_name: usd\n  }\n\n  measure: total_recoveries {\n    type: sum\n    sql: ${TABLE}.acct_rcvr_mo_01_am ;;\n    label: \"Total Recoveries (TRIUMPH Consumer)\"\n    description: \"Sum of month-one recovery dollars scoped to TRIUMPH consumer accounts; pairs with total_writeoffs for net loss.\"\n    value_format_name: usd\n  }\n}\n"
+  ],
+  "explore_lkml": "explore: risk_acct_triumph_consumer {\n  label: \"TRIUMPH Consumer Risk Analysis\"\n  description: \"Account-level delinquency, AR, write-offs, and recoveries for TRIUMPH source on consumer business units 1-2. Answers questions about portfolio aging, recovery efficiency, and write-off trends by delinquency bucket.\"\n\n  always_filter: {\n    filters: [risk_acct_triumph_consumer.acct_as_of_date: \"last 12 months\"]\n  }\n}\n",
+  "filter_catalog": [
+    {
+      "field_key": "risk_acct_triumph_consumer.delinquency_age_bucket",
+      "canonical_name": "Delinquency Age Bucket",
+      "synonyms": ["delinquency", "aging", "past due", "dpb"],
+      "known_values": ["Current", "30 DPB", "60 DPB", "90 DPB", "120 DPB", "150 DPB", "180+ DPB", "Written Off", "NA/Other"],
+      "operators": ["=", "IN"],
+      "is_structural": false,
+      "default_value": null
+    }
+  ],
+  "metric_catalog": [
+    {
+      "canonical_name": "Total AR (TRIUMPH Consumer)",
+      "description": "Sum of month-one billed balance for TRIUMPH consumer accounts.",
+      "aggregation": "sum",
+      "source_column": "acct_bill_bal_mth01_amt",
+      "source_table": "risk_acct_triumph_consumer",
+      "synonyms": ["AR", "accounts receivable", "billed balance"],
+      "value_format": "usd"
+    },
+    {
+      "canonical_name": "Total Write-offs (TRIUMPH Consumer)",
+      "description": "Sum of write-off dollars for TRIUMPH consumer accounts.",
+      "aggregation": "sum",
+      "source_column": "acct_wrt_off_am",
+      "source_table": "risk_acct_triumph_consumer",
+      "synonyms": ["write-off", "writeoff", "charge-off"],
+      "value_format": "usd"
+    },
+    {
+      "canonical_name": "Total Recoveries (TRIUMPH Consumer)",
+      "description": "Sum of recovery dollars for TRIUMPH consumer accounts.",
+      "aggregation": "sum",
+      "source_column": "acct_rcvr_mo_01_am",
+      "source_table": "risk_acct_triumph_consumer",
+      "synonyms": ["recoveries", "recovery"],
+      "value_format": "usd"
+    }
+  ],
+  "nl_questions": [
+    {
+      "question": "What is total AR by delinquency bucket for TRIUMPH consumer accounts?",
+      "explore": "risk_acct_triumph_consumer",
+      "measures": ["total_ar"],
+      "dimensions": ["delinquency_age_bucket"],
+      "filters": {"acct_as_of_date": "2025-05-01"},
+      "difficulty": "medium",
+      "source_sql_id": "Q9"
+    },
+    {
+      "question": "Show write-offs vs recoveries by FICO band for May 2025.",
+      "explore": "risk_acct_triumph_consumer",
+      "measures": ["total_writeoffs", "total_recoveries"],
+      "dimensions": ["delinquency_age_bucket"],
+      "filters": {"acct_as_of_date": "2025-05-01"},
+      "difficulty": "hard",
+      "source_sql_id": "Q9"
+    },
+    {
+      "question": "Which delinquency buckets have the highest AR?",
+      "explore": "risk_acct_triumph_consumer",
+      "measures": ["total_ar"],
+      "dimensions": ["delinquency_age_bucket"],
+      "filters": {},
+      "difficulty": "easy",
+      "source_sql_id": "Q9"
+    }
+  ]
+}

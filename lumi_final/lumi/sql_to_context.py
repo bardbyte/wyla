@@ -610,29 +610,226 @@ def discover_tables(
         baseline_text = _find_baseline_view(baseline_dir, table_name)
         if baseline_text is not None:
             raw_ctx["existing_view_lkml"] = baseline_text
+            # Parse once at discover time so the planner + enricher see
+            # structured baseline content instead of having to re-parse it
+            # themselves. Auto-generated Looker baselines have terse or
+            # missing descriptions; the quality_signals tell the planner
+            # exactly which fields need attention.
+            parsed = _parse_baseline_view(baseline_text, raw_ctx["date_functions"])
+            raw_ctx["baseline_dimensions"] = parsed["dimensions"]
+            raw_ctx["baseline_dimension_groups"] = parsed["dimension_groups"]
+            raw_ctx["baseline_measures"] = parsed["measures"]
+            raw_ctx["baseline_quality_signals"] = parsed["quality_signals"]
 
     return {name: TableContext(**raw) for name, raw in contexts.items()}
 
 
-def _find_baseline_view(baseline_dir: Path, table_name: str) -> str | None:
-    """Find <table>.view.lkml under baseline_dir, searching at the root and
-    recursively in subdirs. Returns the file's text content or None if
-    not found.
+# ─── Baseline LookML parser ─────────────────────────────────
 
-    This lets the same `discover_tables()` work against either layout:
-      data/baseline_views/<table>.view.lkml      (flat — fetch_baselines)
-      data/looker_master/views/<table>.view.lkml (mirror — fetch_lookml_master)
+
+# Below this length we treat a description as auto-generated boilerplate.
+# 30 chars roughly = "Customer ID" plus a couple words. Anything longer is
+# almost always human-edited and worth preserving.
+_DESCRIPTION_QUALITY_THRESHOLD = 30
+
+
+def _parse_baseline_view(
+    lkml_text: str,
+    date_functions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Parse a baseline .view.lkml string with the lkml lib and surface
+    structured signals for downstream stages.
+
+    Returns:
+        {
+            "dimensions": [<lkml dim dict>...],
+            "dimension_groups": [...],
+            "measures": [...],
+            "quality_signals": {
+                "dims_total": int,
+                "dims_missing_description": int,
+                "dims_short_description": int,        # < threshold chars
+                "dims_missing_label": int,
+                "dims_missing_tags": int,
+                "measures_total": int,
+                "measures_missing_value_format": int,
+                "dates_as_plain_dim": int,            # date col with no dim_group
+                "has_primary_key": bool,
+            }
+        }
+
+    Failures (unparseable LookML, missing views) return empty structures —
+    callers must tolerate that since baseline files can drift.
+    """
+    try:
+        import lkml  # local import to keep module-import cost down
+        tree = lkml.load(lkml_text)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("baseline parse failed; skipping structured fields: %s", e)
+        return {
+            "dimensions": [],
+            "dimension_groups": [],
+            "measures": [],
+            "quality_signals": {},
+        }
+
+    views = tree.get("views") or []
+    if not views:
+        return {
+            "dimensions": [],
+            "dimension_groups": [],
+            "measures": [],
+            "quality_signals": {},
+        }
+
+    # First view in the file is canonical (Looker-generated baselines have one).
+    view = views[0]
+    dims = list(view.get("dimensions") or [])
+    dgs = list(view.get("dimension_groups") or [])
+    msrs = list(view.get("measures") or [])
+
+    dims_missing_desc = sum(1 for d in dims if not (d.get("description") or "").strip())
+    dims_short_desc = sum(
+        1 for d in dims
+        if 0 < len((d.get("description") or "").strip()) < _DESCRIPTION_QUALITY_THRESHOLD
+    )
+    dims_missing_label = sum(1 for d in dims if not (d.get("label") or "").strip())
+    dims_missing_tags = sum(1 for d in dims if not d.get("tags"))
+    msrs_missing_vf = sum(
+        1 for m in msrs
+        if not (m.get("value_format_name") or m.get("value_format"))
+    )
+    has_pk = any(
+        (d.get("primary_key") or "").lower() in {"yes", "true"} for d in dims
+    )
+
+    # Date columns from sqlglot fingerprint that don't appear as dim_groups
+    # are "still plain dims" — a SKILL.md violation we want enrichment to fix.
+    dg_source_cols: set[str] = set()
+    for dg in dgs:
+        sql = (dg.get("sql") or "").lower()
+        if sql:
+            # ${TABLE}.col_name → col_name
+            for tok in sql.replace("${TABLE}.", "").replace("${table}.", "").split():
+                tok = tok.strip(";`,()").lower()
+                if tok and tok.isidentifier():
+                    dg_source_cols.add(tok)
+        if dg.get("name"):
+            dg_source_cols.add(dg["name"].lower())
+    date_cols_from_fp = {
+        (df.get("column") or "").lower() for df in (date_functions or []) if df.get("column")
+    }
+    dates_as_plain = len(date_cols_from_fp - dg_source_cols)
+
+    return {
+        "dimensions": dims,
+        "dimension_groups": dgs,
+        "measures": msrs,
+        "quality_signals": {
+            "dims_total": len(dims),
+            "dims_missing_description": dims_missing_desc,
+            "dims_short_description": dims_short_desc,
+            "dims_missing_label": dims_missing_label,
+            "dims_missing_tags": dims_missing_tags,
+            "measures_total": len(msrs),
+            "measures_missing_value_format": msrs_missing_vf,
+            "dates_as_plain_dim": dates_as_plain,
+            "has_primary_key": has_pk,
+        },
+    }
+
+
+def _find_baseline_view(baseline_dir: Path, table_name: str) -> str | None:
+    """Find a baseline LookML view file for ``table_name``.
+
+    Looker repos use a few different naming conventions in the wild:
+      - ``<table>.view.lkml``                (canonical Looker default)
+      - ``bq_<table>.view.lkml``             (some teams prefix by source)
+      - ``<dataset>_<table>.view.lkml``      (e.g. ``dw_cornerstone_metrics``)
+      - ``<table>.view``                     (rare: omitted .lkml)
+      - inside subdirs grouped by dataset (``views/dw/<table>.view.lkml``)
+
+    We try them all in order of specificity. First hit wins.
+
+    Returns the file's text content or None if not found.
     """
     if not baseline_dir.exists():
         return None
-    target = f"{table_name}.view.lkml"
-    # Quick path: file at root
-    direct = baseline_dir / target
-    if direct.is_file():
-        return direct.read_text(encoding="utf-8")
-    # Recursive search; first hit wins. Fast for hundreds of files.
-    for path in baseline_dir.rglob(target):
-        return path.read_text(encoding="utf-8")
+
+    # Build candidate filename patterns. Most-specific first so we don't
+    # accidentally match a generic prefix when the canonical file exists.
+    candidates: list[str] = [
+        f"{table_name}.view.lkml",
+        f"{table_name}.view",                  # extension variant
+    ]
+    # Prefix variants: only check these if the bare name didn't match.
+    # Common prefixes seen in real Looker repos at AmEx-style data warehouses.
+    prefix_variants = ("bq_", "dw_", "edw_", "fact_", "dim_")
+
+    # 1. Quick path: file at root.
+    for cand in candidates:
+        direct = baseline_dir / cand
+        if direct.is_file():
+            return direct.read_text(encoding="utf-8")
+
+    # 2. Recursive search for the canonical name; first hit wins.
+    for cand in candidates:
+        for path in baseline_dir.rglob(cand):
+            return path.read_text(encoding="utf-8")
+
+    # 3. Fallback: try common prefixes (only after canonical search misses,
+    # so we don't shadow a real <table>.view.lkml elsewhere in the tree).
+    for prefix in prefix_variants:
+        prefixed_name = f"{prefix}{table_name}.view.lkml"
+        direct = baseline_dir / prefixed_name
+        if direct.is_file():
+            logger.info(
+                "matched baseline for %s via prefix variant %s",
+                table_name, prefixed_name,
+            )
+            return direct.read_text(encoding="utf-8")
+        for path in baseline_dir.rglob(prefixed_name):
+            logger.info(
+                "matched baseline for %s via prefix variant %s",
+                table_name, prefixed_name,
+            )
+            return path.read_text(encoding="utf-8")
+
+    # 4. Last-resort fuzzy: scan every .view.lkml under the dir and check
+    # whether its declared `view: <name>` matches our table_name. Catches the
+    # case where the FILENAME doesn't match but the VIEW NAME inside does
+    # (which is what Looker actually resolves explores against). Capped at
+    # 500 files to bound cost on huge repos.
+    return _fuzzy_match_by_view_name(baseline_dir, table_name)
+
+
+def _fuzzy_match_by_view_name(
+    baseline_dir: Path, table_name: str, *, file_cap: int = 500
+) -> str | None:
+    """Scan .view.lkml files for a `view: <table_name>` declaration.
+
+    Useful when the filename convention doesn't match our table key but the
+    view name inside does. We don't fully parse the LKML here — just scan
+    the first ~80 chars of each file for `view: <name> {`.
+    """
+    needle = f"view: {table_name} ".encode()
+    needle_brace = f"view: {table_name}{{".encode()
+    count = 0
+    for path in baseline_dir.rglob("*.view.lkml"):
+        count += 1
+        if count > file_cap:
+            return None
+        try:
+            with path.open("rb") as f:
+                head = f.read(256)
+        except OSError:
+            continue
+        if needle in head or needle_brace in head:
+            logger.info(
+                "matched baseline for %s via view-name scan in %s",
+                table_name, path.name,
+            )
+            return path.read_text(encoding="utf-8")
     return None
 
 

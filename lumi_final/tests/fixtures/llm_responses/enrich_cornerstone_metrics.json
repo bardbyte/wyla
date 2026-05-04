@@ -1,0 +1,101 @@
+{
+  "view_lkml": "view: cornerstone_metrics {\n  sql_table_name: `axp-lumi.dw.cornerstone_metrics` ;;\n\n  dimension: cornerstone_pk {\n    primary_key: yes\n    hidden: yes\n    type: string\n    sql: CONCAT(${TABLE}.bus_seg, '|', ${TABLE}.data_source, '|', CAST(${TABLE}.rpt_dt AS STRING)) ;;\n    description: \"Synthetic primary key combining business segment, data source, and report date for unique row identification.\"\n  }\n\n  dimension: business_segment {\n    type: string\n    sql: ${TABLE}.bus_seg ;;\n    label: \"Business Segment\"\n    description: \"Card portfolio segment classification used to slice metrics across consumer, commercial, and global network business lines.\"\n    group_label: \"Segmentation\"\n    tags: [\"segment\", \"business segment\", \"bus_seg\"]\n  }\n\n  dimension: data_source {\n    type: string\n    sql: ${TABLE}.data_source ;;\n    label: \"Data Source\"\n    description: \"Originating system that produced this metrics row. Cornerstone is the canonical default in nine of ten gold queries.\"\n    tags: [\"source\", \"system\", \"data_source\"]\n  }\n\n  dimension: generation {\n    type: string\n    sql: ${TABLE}.generation ;;\n    label: \"Generation\"\n    description: \"Cardmember generational cohort assignment used in lifecycle analytics and demographic segmentation.\"\n  }\n\n  dimension: sub_product_group {\n    type: string\n    sql: ${TABLE}.sub_product_group ;;\n    label: \"Sub Product Group\"\n    description: \"Card sub-product grouping used to roll up product-level revenue and account metrics.\"\n  }\n\n  dimension: fico_band {\n    type: string\n    sql: ${TABLE}.fico_band ;;\n    label: \"FICO Band\"\n    description: \"Credit risk band derived from FICO score, used to segment portfolio performance by creditworthiness tier.\"\n  }\n\n  dimension: accounts_in_force_raw {\n    type: number\n    sql: ${TABLE}.accounts_in_force ;;\n    hidden: yes\n    description: \"Raw active account count column. Hidden \\u2014 exposed via the total_accounts_in_force measure with the >0 filter baked in.\"\n  }\n\n  dimension_group: report {\n    type: time\n    timeframes: [raw, date, day_of_week, week, month, month_name, quarter, year]\n    datatype: date\n    convert_tz: no\n    sql: ${TABLE}.rpt_dt ;;\n    description: \"Reporting date dimension exposing daily through yearly grains for time-series analysis of cornerstone metrics.\"\n  }\n\n  measure: total_billed_business {\n    type: sum\n    sql: ${TABLE}.billed_business ;;\n    label: \"Total Billed Business\"\n    description: \"Sum of billed business volume in USD across the active filter set; the headline revenue measure for cornerstone metrics.\"\n    value_format_name: usd\n  }\n\n  measure: total_new_accounts_acquired {\n    type: sum\n    sql: ${TABLE}.new_accounts_acquired ;;\n    label: \"Total New Accounts Acquired\"\n    description: \"Sum of new accounts opened in the reporting period across the selected segment, source, and time slice.\"\n    value_format_name: decimal_0\n  }\n\n  measure: avg_billed_business {\n    type: average\n    sql: ${TABLE}.billed_business ;;\n    label: \"Average Billed Business\"\n    description: \"Average billed business per row in USD, useful for per-segment or per-cohort comparison rather than absolute totals.\"\n    value_format_name: usd\n  }\n\n  measure: total_accounts_in_force {\n    type: sum\n    sql: ${TABLE}.accounts_in_force ;;\n    label: \"Accounts in Force\"\n    description: \"Sum of accounts in force where the underlying count is positive, baking in the standard active-account filter.\"\n    value_format_name: decimal_0\n    filters: [accounts_in_force_raw: \">0\"]\n  }\n}\n",
+  "derived_table_views": [],
+  "explore_lkml": "explore: cornerstone_metrics {\n  label: \"Cornerstone Metrics\"\n  description: \"Daily cornerstone metrics by segment, product, generation, FICO band, and reporting date. Answers questions about billed business totals, new account acquisition, and accounts in force across consumer and commercial portfolios.\"\n\n  always_filter: {\n    filters: [cornerstone_metrics.report_date: \"last 12 months\", cornerstone_metrics.data_source: \"cornerstone\"]\n  }\n}\n",
+  "filter_catalog": [
+    {
+      "field_key": "cornerstone_metrics.business_segment",
+      "canonical_name": "Business Segment",
+      "synonyms": ["segment", "business segment", "bus_seg"],
+      "known_values": ["Consumer", "Commercial", "GNS"],
+      "operators": ["=", "IN"],
+      "is_structural": false,
+      "default_value": null
+    },
+    {
+      "field_key": "cornerstone_metrics.data_source",
+      "canonical_name": "Data Source",
+      "synonyms": ["source", "system", "data_source"],
+      "known_values": ["cornerstone", "oracle"],
+      "operators": ["=", "IN"],
+      "is_structural": false,
+      "default_value": "cornerstone"
+    },
+    {
+      "field_key": "cornerstone_metrics.report_date",
+      "canonical_name": "Report Date",
+      "synonyms": ["report date", "rpt_dt", "date"],
+      "known_values": [],
+      "operators": ["=", "BETWEEN"],
+      "is_structural": false,
+      "default_value": "last 12 months"
+    }
+  ],
+  "metric_catalog": [
+    {
+      "canonical_name": "Total Billed Business",
+      "description": "Sum of billed business volume in USD.",
+      "aggregation": "sum",
+      "source_column": "billed_business",
+      "source_table": "cornerstone_metrics",
+      "synonyms": ["billed business", "BB", "billing volume"],
+      "value_format": "usd"
+    },
+    {
+      "canonical_name": "Total New Accounts Acquired",
+      "description": "Count of new accounts opened in the reporting period.",
+      "aggregation": "sum",
+      "source_column": "new_accounts_acquired",
+      "source_table": "cornerstone_metrics",
+      "synonyms": ["new accounts", "acquisitions", "new acquisitions"],
+      "value_format": "decimal_0"
+    },
+    {
+      "canonical_name": "Average Billed Business",
+      "description": "Average billed business per row in USD.",
+      "aggregation": "average",
+      "source_column": "billed_business",
+      "source_table": "cornerstone_metrics",
+      "synonyms": ["avg billed business", "avg BB"],
+      "value_format": "usd"
+    }
+  ],
+  "nl_questions": [
+    {
+      "question": "What was the total billed business for the consumer segment last quarter?",
+      "explore": "cornerstone_metrics",
+      "measures": ["total_billed_business"],
+      "dimensions": [],
+      "filters": {"business_segment": "Consumer", "report_date": "last quarter"},
+      "difficulty": "easy",
+      "source_sql_id": "Q1"
+    },
+    {
+      "question": "How many new accounts did we acquire in 2024 from cornerstone?",
+      "explore": "cornerstone_metrics",
+      "measures": ["total_new_accounts_acquired"],
+      "dimensions": [],
+      "filters": {"data_source": "cornerstone", "report_year": "2024"},
+      "difficulty": "easy",
+      "source_sql_id": "Q2"
+    },
+    {
+      "question": "Show average billed business by generation for January 2025.",
+      "explore": "cornerstone_metrics",
+      "measures": ["avg_billed_business"],
+      "dimensions": ["generation"],
+      "filters": {"data_source": "cornerstone", "report_date": "2025-01-01"},
+      "difficulty": "medium",
+      "source_sql_id": "Q3"
+    },
+    {
+      "question": "Billed business in billions by sub product group for consumer in 2024.",
+      "explore": "cornerstone_metrics",
+      "measures": ["total_billed_business"],
+      "dimensions": ["sub_product_group"],
+      "filters": {"business_segment": "Consumer", "data_source": "cornerstone", "report_year": "2024"},
+      "difficulty": "medium",
+      "source_sql_id": "Q4"
+    }
+  ]
+}

@@ -952,7 +952,14 @@ def check_approvals(
         )
 
     for a in approvals:
-        if not a.approved and not a.feedback:
+        if a.approver == "pending":
+            # Pending approvals are NOT decisions — block the gate so the
+            # human knows there's work left in review_queue/.
+            blocking.append(
+                f"Plan for '{a.table_name}' is still pending — no ✅/❌ "
+                "checkbox marked in review_queue/<table>.plan.md"
+            )
+        elif not a.approved and not a.feedback:
             blocking.append(
                 f"Plan for '{a.table_name}' was rejected but has no feedback "
                 "— next planning round can't improve"
