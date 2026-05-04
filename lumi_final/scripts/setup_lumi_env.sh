@@ -74,18 +74,25 @@ if [[ "$VERTEX_ABS" == "$BQ_ABS" ]]; then
     echo "WARN: --vertex and --bq point at the same file; that defeats the purpose of split SAs." >&2
 fi
 
+# Vertex side — google-genai / ADK auto-discover all four of these.
 export GOOGLE_APPLICATION_CREDENTIALS="$VERTEX_ABS"
 export GOOGLE_GENAI_USE_VERTEXAI=true
 export GOOGLE_CLOUD_PROJECT=prj-d-ea-poc
 export GOOGLE_CLOUD_LOCATION=global
+
+# BQ side — separate SA + separate billing project. Tables physically live
+# under axp-lumi but the SA's jobUser grant is on prj-d-lumi-gpt, so that's
+# the project we bill against.
 export LUMI_BQ_KEY_FILE="$BQ_ABS"
+export LUMI_BQ_BILLING_PROJECT=prj-d-lumi-gpt
 
 echo "LUMI env configured:"
 echo "  GOOGLE_APPLICATION_CREDENTIALS = $GOOGLE_APPLICATION_CREDENTIALS"
 echo "  GOOGLE_GENAI_USE_VERTEXAI      = $GOOGLE_GENAI_USE_VERTEXAI"
-echo "  GOOGLE_CLOUD_PROJECT           = $GOOGLE_CLOUD_PROJECT"
+echo "  GOOGLE_CLOUD_PROJECT           = $GOOGLE_CLOUD_PROJECT  (Vertex)"
 echo "  GOOGLE_CLOUD_LOCATION          = $GOOGLE_CLOUD_LOCATION"
 echo "  LUMI_BQ_KEY_FILE               = $LUMI_BQ_KEY_FILE"
+echo "  LUMI_BQ_BILLING_PROJECT        = $LUMI_BQ_BILLING_PROJECT  (BQ jobs billed here)"
 echo
 echo "Now run any of:"
 echo "  python lumi_final/scripts/check_vertex_gemini.py     # Vertex SA"

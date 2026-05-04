@@ -17,13 +17,12 @@ Usage (on Saheb's work laptop, on VPN):
     export GOOGLE_APPLICATION_CREDENTIALS=~/Downloads/key.json
 
     # Default probe — pulls schema + samples DISTINCT on a known-good table
+    # (--billing-project defaults to prj-d-lumi-gpt, --data-project to axp-lumi)
     python scripts/check_bq_access.py \\
-        --project axp-lumi --dataset dw \\
         --table custins_customer_insights_cardmember
 
     # Multi-table probe (run after run_session1.py, picks discovered tables)
-    python scripts/check_bq_access.py --from-session1 data/session1_output.json \\
-        --project axp-lumi --dataset dw
+    python scripts/check_bq_access.py --from-session1 data/session1_output.json
 
     # Just the auth check, don't run any queries
     python scripts/check_bq_access.py --auth-only
@@ -78,7 +77,14 @@ except ImportError as e:
 
 logger = logging.getLogger("check_bq_access")
 
-DEFAULT_PROJECT = "axp-lumi"
+# BQ has TWO distinct project concepts:
+#   - billing project  : pays for the query; SA needs roles/bigquery.jobUser
+#   - data project     : where the tables physically live; SA needs
+#                        roles/bigquery.dataViewer on the target dataset
+# These are usually different. Our SA is grant'd jobUser on prj-d-lumi-gpt
+# but the data lives under axp-lumi.dw.<table>. Don't conflate them.
+DEFAULT_BILLING_PROJECT = "prj-d-lumi-gpt"
+DEFAULT_DATA_PROJECT = "axp-lumi"
 DEFAULT_DATASET = "dw"
 # Tables small enough to enumerate distinct values without scanning TBs.
 # Strings + bool + small int. We skip wide types (numeric/float/timestamp).
@@ -139,9 +145,15 @@ def _resolve_key_path(explicit: str | None) -> Path:
     return Path(env).expanduser()
 
 
-def _build_client(project: str, key_path: Path) -> bigquery.Client:
-    """Build a BQ client from the SA JSON. Uses the BQ scope explicitly so
-    we get a clear permission error if the SA doesn't carry the BQ role.
+def _build_client(billing_project: str, key_path: Path) -> bigquery.Client:
+    """Build a BQ client from the SA JSON.
+
+    Args:
+        billing_project: project that pays for queries — SA needs jobUser here.
+        key_path: SA JSON.
+
+    The data project (where tables live) is passed per-query via the
+    fully-qualified `project.dataset.table` reference in the SQL.
     """
     if not key_path.exists():
         raise SystemExit(f"ERROR: key file not found: {key_path}")
@@ -149,31 +161,58 @@ def _build_client(project: str, key_path: Path) -> bigquery.Client:
         str(key_path),
         scopes=["https://www.googleapis.com/auth/bigquery.readonly"],
     )
-    return bigquery.Client(project=project, credentials=creds)
+    return bigquery.Client(project=billing_project, credentials=creds)
 
 
 # ─── Probes ──────────────────────────────────────────────────
 
 
-def probe_auth(client: bigquery.Client) -> dict[str, Any]:
-    """List datasets in the project. Cheapest call that proves the SA can
-    talk to the BQ API and has at least dataViewer on something.
+def probe_auth(
+    client: bigquery.Client, data_project: str
+) -> dict[str, Any]:
+    """Two-part auth probe:
+      1. list_datasets on the BILLING project — proves SA can talk to BQ.
+      2. list_datasets on the DATA project — proves SA has dataViewer where
+         the tables actually live (different project, separate IAM grant).
     """
+    out: dict[str, Any] = {
+        "status": "ok",
+        "billing_project": client.project,
+        "data_project": data_project,
+        "billing_datasets_visible": [],
+        "data_datasets_visible": [],
+        "error": None,
+    }
     try:
-        # max_results=1 — we only need the call to succeed, not the data.
-        datasets = list(client.list_datasets(max_results=5))
-        return {
-            "status": "ok",
-            "project": client.project,
-            "datasets_visible": [d.dataset_id for d in datasets],
-            "error": None,
-        }
+        billing_ds = list(client.list_datasets(max_results=5))
+        out["billing_datasets_visible"] = [d.dataset_id for d in billing_ds]
     except gcp_exceptions.Forbidden as e:
-        return {"status": "error", "error": f"Forbidden — SA lacks BQ access: {e}"}
+        out["status"] = "error"
+        out["error"] = f"Forbidden listing billing project '{client.project}': {e}"
+        return out
     except gcp_exceptions.GoogleAPICallError as e:
-        return {"status": "error", "error": f"BQ API error: {e}"}
-    except Exception as e:
-        return {"status": "error", "error": f"{type(e).__name__}: {e}"}
+        out["status"] = "error"
+        out["error"] = f"BQ API error on billing project: {e}"
+        return out
+
+    if data_project == client.project:
+        # Same project for both — nothing more to probe.
+        return out
+
+    try:
+        data_ds = list(client.list_datasets(project=data_project, max_results=5))
+        out["data_datasets_visible"] = [d.dataset_id for d in data_ds]
+    except gcp_exceptions.Forbidden as e:
+        out["status"] = "warn"
+        out["error"] = (
+            f"Cannot list datasets in data project '{data_project}': {e}. "
+            "SA may still have direct dataset-level grants — INFORMATION_SCHEMA "
+            "probe will reveal the truth."
+        )
+    except gcp_exceptions.GoogleAPICallError as e:
+        out["status"] = "warn"
+        out["error"] = f"BQ API error on data project: {e}"
+    return out
 
 
 def probe_information_schema(
@@ -369,8 +408,20 @@ def _save_digest(d: TableDigest, out_dir: Path) -> Path:
 
 def main() -> int:
     p = argparse.ArgumentParser(prog="check_bq_access")
-    p.add_argument("--key-file", help="SA JSON; defaults to $GOOGLE_APPLICATION_CREDENTIALS")
-    p.add_argument("--project", default=DEFAULT_PROJECT, help=f"BQ project (default: {DEFAULT_PROJECT})")
+    p.add_argument("--key-file", help="SA JSON; defaults to $LUMI_BQ_KEY_FILE / $GOOGLE_APPLICATION_CREDENTIALS")
+    p.add_argument(
+        "--billing-project",
+        default=os.environ.get("LUMI_BQ_BILLING_PROJECT", DEFAULT_BILLING_PROJECT),
+        help=(
+            f"Project that pays for queries (SA needs jobUser here). "
+            f"Default: $LUMI_BQ_BILLING_PROJECT or '{DEFAULT_BILLING_PROJECT}'"
+        ),
+    )
+    p.add_argument(
+        "--data-project",
+        default=DEFAULT_DATA_PROJECT,
+        help=f"Project where tables live (SA needs dataViewer). Default: {DEFAULT_DATA_PROJECT}",
+    )
     p.add_argument("--dataset", default=DEFAULT_DATASET, help=f"BQ dataset (default: {DEFAULT_DATASET})")
     p.add_argument("--table", action="append", help="Specific table(s) to probe; repeat for many")
     p.add_argument(
@@ -420,23 +471,35 @@ def main() -> int:
     else:
         key_source = "$GOOGLE_APPLICATION_CREDENTIALS (fallback)"
     print(f"Using credentials: {key_path}  ({key_source})")
-    print(f"Project:           {args.project}")
+    print(f"Billing project:   {args.billing_project}  (pays for queries; needs jobUser)")
+    print(f"Data project:      {args.data_project}  (where tables live; needs dataViewer)")
     print(f"Dataset:           {args.dataset}")
     print()
 
-    client = _build_client(args.project, key_path)
+    client = _build_client(args.billing_project, key_path)
 
-    # Step 1: auth probe
-    auth_result = probe_auth(client)
-    if auth_result["status"] != "ok":
+    # Step 1: auth probe — covers BOTH billing and data project access.
+    auth_result = probe_auth(client, args.data_project)
+    if auth_result["status"] == "error":
         print(f"AUTH FAIL: {auth_result['error']}", file=sys.stderr)
         return 1
+
+    bp_n = len(auth_result["billing_datasets_visible"])
     print(
-        f"AUTH OK — SA can list datasets in {auth_result['project']} "
-        f"({len(auth_result['datasets_visible'])} visible: "
-        f"{auth_result['datasets_visible'][:3]}"
-        f"{' …' if len(auth_result['datasets_visible']) >= 5 else ''})"
+        f"AUTH OK (billing) — SA can list datasets in {auth_result['billing_project']} "
+        f"({bp_n} visible: {auth_result['billing_datasets_visible'][:3]}"
+        f"{' …' if bp_n >= 5 else ''})"
     )
+    if args.data_project != args.billing_project:
+        if auth_result["status"] == "warn":
+            print(f"AUTH WARN (data)  — {auth_result['error']}")
+        else:
+            dp_n = len(auth_result["data_datasets_visible"])
+            print(
+                f"AUTH OK (data)    — SA can list datasets in {auth_result['data_project']} "
+                f"({dp_n} visible: {auth_result['data_datasets_visible'][:3]}"
+                f"{' …' if dp_n >= 5 else ''})"
+            )
 
     if args.auth_only:
         return 0
@@ -463,7 +526,7 @@ def main() -> int:
     failures = 0
     for t in targets:
         digest = digest_one_table(
-            client, args.project, args.dataset, t,
+            client, args.data_project, args.dataset, t,
             skip_distinct=args.skip_distinct,
         )
         _print_digest(digest)
