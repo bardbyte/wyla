@@ -45,7 +45,9 @@ import argparse
 import json
 import logging
 import os
+import ssl
 import sys
+import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -76,6 +78,90 @@ except ImportError as e:
     sys.exit(2)
 
 logger = logging.getLogger("check_bq_access")
+
+
+# ─── TLS / corporate-MITM helpers ────────────────────────────
+
+
+def _set_ca_bundle(path: str) -> None:
+    """Point every standard CA-bundle env var at `path`. Works for requests,
+    httpx, urllib, and the gRPC layer that BQ uses for the storage API.
+
+    Use this when behind a TLS-intercepting corporate proxy and you have the
+    corporate root CA exported as a .pem file. Cleaner than --insecure.
+    """
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        raise FileNotFoundError(f"CA bundle not found: {p}")
+    bundle_str = str(p)
+    os.environ["REQUESTS_CA_BUNDLE"] = bundle_str
+    os.environ["SSL_CERT_FILE"] = bundle_str
+    os.environ["CURL_CA_BUNDLE"] = bundle_str
+    # gRPC — google-cloud-bigquery uses gRPC for storage / streaming
+    os.environ["GRPC_DEFAULT_SSL_ROOTS_FILE_PATH"] = bundle_str
+
+
+def _disable_ssl_verification() -> None:
+    """Disable SSL verification across stdlib, requests, httpx, and
+    google-auth's AuthorizedSession (which is what google-cloud-bigquery
+    uses for HTTP calls).
+
+    Call this BEFORE building the BQ client — patches must be in place
+    when AuthorizedSession is instantiated.
+    """
+    # stdlib ssl + env-var hint for child processes
+    ssl._create_default_https_context = ssl._create_unverified_context  # type: ignore[assignment]
+    os.environ["PYTHONHTTPSVERIFY"] = "0"
+
+    # Silence the InsecureRequestWarning spam from urllib3
+    try:
+        import urllib3
+
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except ImportError:
+        pass
+
+    # google-auth's AuthorizedSession (a requests.Session subclass) — this is
+    # what google-cloud-bigquery's HTTP transport uses. Setting verify=False
+    # on the class makes every new instance skip cert validation.
+    try:
+        import google.auth.transport.requests as gat
+
+        _orig_session = gat.AuthorizedSession
+
+        class _NoVerifyAuthorizedSession(_orig_session):  # type: ignore[misc, valid-type]
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+                self.verify = False
+
+        gat.AuthorizedSession = _NoVerifyAuthorizedSession  # type: ignore[misc]
+    except ImportError:
+        pass
+
+    # httpx — newer google-cloud clients sometimes route through httpx as well
+    try:
+        import httpx
+
+        _orig_client = httpx.Client
+        _orig_async = httpx.AsyncClient
+
+        def _client_no_verify(*args: Any, **kwargs: Any) -> Any:
+            kwargs.setdefault("verify", False)
+            return _orig_client(*args, **kwargs)
+
+        def _async_no_verify(*args: Any, **kwargs: Any) -> Any:
+            kwargs.setdefault("verify", False)
+            return _orig_async(*args, **kwargs)
+
+        httpx.Client = _client_no_verify  # type: ignore[misc]
+        httpx.AsyncClient = _async_no_verify  # type: ignore[misc]
+    except ImportError:
+        pass
+
+    warnings.warn(
+        "SSL verification disabled — only safe on networks you already trust.",
+        stacklevel=2,
+    )
 
 # BQ has TWO distinct project concepts:
 #   - billing project  : pays for the query; SA needs roles/bigquery.jobUser
@@ -443,21 +529,39 @@ def main() -> int:
         help="Directory to write per-table JSON digests (e.g. data/bq_cache/)",
     )
     p.add_argument(
+        "--ca-bundle",
+        help=(
+            "Path to corporate root CA bundle (.pem). Sets REQUESTS_CA_BUNDLE / "
+            "SSL_CERT_FILE / CURL_CA_BUNDLE / GRPC_DEFAULT_SSL_ROOTS_FILE_PATH. "
+            "Use this when truststore can't see the corp root CA in Keychain."
+        ),
+    )
+    p.add_argument(
         "--insecure",
         action="store_true",
-        help="Skip TLS verification (only when truststore unavailable)",
+        help=(
+            "Disable SSL verification across stdlib, requests, httpx, and "
+            "google-auth. Last resort — only on networks you already trust."
+        ),
     )
     args = p.parse_args()
 
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
+    # TLS setup — order matters: bundle env vars first (so any subsequent
+    # client picks them up), then insecure patches (must run BEFORE the BQ
+    # client builds its AuthorizedSession).
+    if args.ca_bundle:
+        try:
+            _set_ca_bundle(args.ca_bundle)
+            print(f"CA bundle: {args.ca_bundle}", file=sys.stderr)
+        except FileNotFoundError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 2
     if args.insecure:
-        # Last-resort bypass — same approach as check_vertex_gemini.py.
-        import ssl
-        ssl._create_default_https_context = ssl._create_unverified_context  # type: ignore[assignment]
-        os.environ["PYTHONHTTPSVERIFY"] = "0"
+        _disable_ssl_verification()
         print("WARN: TLS verification disabled (--insecure)", file=sys.stderr)
-    else:
+    if not args.insecure and not args.ca_bundle:
         print(
             f"truststore: {'loaded' if _TRUSTSTORE_LOADED else 'NOT loaded — pip install truststore'}",
             file=sys.stderr,
