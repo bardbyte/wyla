@@ -122,19 +122,36 @@ def _disable_ssl_verification() -> None:
         pass
 
     # google-auth's AuthorizedSession (a requests.Session subclass) — this is
-    # what google-cloud-bigquery's HTTP transport uses. Setting verify=False
-    # on the class makes every new instance skip cert validation.
+    # what google-cloud-bigquery's HTTP transport uses. Patch __init__ in
+    # place rather than subclassing — google-cloud-bigquery introspects the
+    # class identity and a swapped subclass loses the original signature
+    # ("AuthorizedSession is missing 1 required positional argument:
+    # 'credentials'" on Client construction).
     try:
         import google.auth.transport.requests as gat
 
-        _orig_session = gat.AuthorizedSession
+        _orig_init = gat.AuthorizedSession.__init__
 
-        class _NoVerifyAuthorizedSession(_orig_session):  # type: ignore[misc, valid-type]
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                super().__init__(*args, **kwargs)
-                self.verify = False
+        def _patched_init(self: Any, *args: Any, **kwargs: Any) -> None:
+            _orig_init(self, *args, **kwargs)
+            self.verify = False
 
-        gat.AuthorizedSession = _NoVerifyAuthorizedSession  # type: ignore[misc]
+        gat.AuthorizedSession.__init__ = _patched_init  # type: ignore[method-assign]
+    except ImportError:
+        pass
+
+    # requests.Session itself — covers any path that doesn't go through
+    # AuthorizedSession (e.g. google-resumable-media's plain Session).
+    try:
+        import requests
+
+        _orig_req_init = requests.Session.__init__
+
+        def _patched_req_init(self: Any, *args: Any, **kwargs: Any) -> None:
+            _orig_req_init(self, *args, **kwargs)
+            self.verify = False
+
+        requests.Session.__init__ = _patched_req_init  # type: ignore[method-assign]
     except ImportError:
         pass
 
