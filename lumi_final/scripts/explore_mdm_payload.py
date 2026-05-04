@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
-"""Explore the raw MDM API payload structure exhaustively.
+"""Explore the raw MDM API payload by inferring its schema automatically.
 
 We currently extract ~5 fields per column out of ~22 + ~3 fields per
 table out of ~15. Before expanding the digest we need to see the
-ACTUAL keys MDM returns for AmEx tables — different deployments expose
-different keys, and CLAUDE.md only documents what we've encountered so
-far. Run this on the work laptop, paste the structured output back so
-the digest expansion is field-accurate, not guessed.
+ACTUAL keys MDM returns for AmEx tables.
+
+This probe walks the payload tree and infers a deduplicated schema:
+  - lists of dicts (e.g. 193 columns) collapse into ONE schema entry
+    with populate-rate stats across all items
+  - every nested key is shown once with type, populated/total count,
+    and up to 5 sample values
+  - depth is auto-determined; the program walks until it hits primitives
+
+This means the output for a 193-column table is ~50 lines instead of
+~5000, while still telling you EVERY key MDM uses + how often it's
+populated + what kinds of values it carries.
 
 Usage:
     # Default: probe one table, dump full structure to stdout
@@ -27,21 +35,19 @@ Usage:
 
 Two output modes:
 
-  Default (structured view):
-    Recursively walks every nested dict + lists-of-dicts up to --max-depth
-    (default 4) so nothing is masked behind "dict(N keys)" placeholders.
-    Sample values truncated to ~100 chars to keep output scannable.
+  Default (schema-inferred view):
+    Auto-walks the payload, collapses lists of dicts into a single
+    schema entry, and reports populate-rate per key. Output for a
+    193-column table is ~50 lines, not ~5000. Lossless on the SHAPE
+    of the data — only repetition is collapsed.
 
   --raw-dump:
     Prints `json.dumps(payload, indent=2)` verbatim — bytes-level truth,
     no transformation, no truncation, no key filtering. Use this when
     you want zero risk of the structured view masking anything.
 
-Both modes can be paired with --save to also persist raw JSON to disk
-under data/mdm_raw/<table>.raw.json.
-
-Designed to be pasted back into the conversation — output is verbose
-but well-structured.
+Both modes can be paired with --save to persist raw JSON under
+data/mdm_raw/<table>.raw.json.
 """
 
 from __future__ import annotations
@@ -55,6 +61,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import warnings
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -162,6 +169,209 @@ def _sample_value(v: Any) -> str:
     return str(v)
 
 
+# ─── Schema inference engine ─────────────────────────────────
+
+
+@dataclass
+class FieldStats:
+    """Inferred schema for one path through the payload tree.
+
+    Lists of dicts get collapsed into a single FieldStats whose
+    ``populated`` / ``total`` count across every list item. So 193
+    columns become ONE entry per nested key, with populate-rate
+    showing how reliably MDM fills that key on this table.
+    """
+    path: str                                       # "schema.schema_attributes[].attribute_details.business_name"
+    types_seen: set[str] = field(default_factory=set)
+    populated: int = 0                              # count of non-empty observations
+    total: int = 0                                  # count of times the key appeared (incl. null)
+    sample_values: list[Any] = field(default_factory=list)
+    container_kind: str | None = None               # "dict" | "list[dict]" | "list[primitive]" | None
+    list_lengths: list[int] = field(default_factory=list)
+
+    def add_sample(self, v: Any, max_samples: int = 5) -> None:
+        if v is None or isinstance(v, (dict, list)):
+            return
+        if v in self.sample_values:
+            return
+        if len(self.sample_values) >= max_samples:
+            return
+        self.sample_values.append(v)
+
+
+def _short_type(v: Any) -> str:
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "bool"
+    if isinstance(v, int):
+        return "int"
+    if isinstance(v, float):
+        return "float"
+    if isinstance(v, str):
+        return "str"
+    if isinstance(v, list):
+        return "list"
+    if isinstance(v, dict):
+        return "dict"
+    return type(v).__name__
+
+
+def infer_schema(
+    value: Any,
+    path: str = "$",
+    stats: dict[str, FieldStats] | None = None,
+) -> dict[str, FieldStats]:
+    """Walk the payload and accumulate per-path FieldStats.
+
+    Behavior:
+      - dict: recurse into each key with path "<path>.<key>"
+      - list of dicts: collapse — recurse each item with path "<path>[]"
+        so all items contribute to the same FieldStats node
+      - list of primitives: record samples + types at the list path
+      - primitive: caller's responsibility to record (we just touch)
+
+    No max depth — JSON is acyclic, so we recurse fully. Repetition is
+    handled by path-deduping, which is what makes this efficient on
+    wide tables.
+    """
+    if stats is None:
+        stats = {}
+
+    s = stats.setdefault(path, FieldStats(path=path))
+    s.types_seen.add(_short_type(value))
+    s.total += 1
+    if _is_populated(value):
+        s.populated += 1
+
+    if isinstance(value, dict):
+        s.container_kind = "dict"
+        for k, v in value.items():
+            child = f"{path}.{k}"
+            infer_schema(v, child, stats)
+    elif isinstance(value, list):
+        s.list_lengths.append(len(value))
+        if value and isinstance(value[0], dict):
+            s.container_kind = "list[dict]"
+            list_path = f"{path}[]"
+            for item in value:
+                infer_schema(item, list_path, stats)
+        elif value:
+            s.container_kind = "list[primitive]"
+            for item in value[:10]:  # sample first 10 primitives
+                if item not in s.sample_values and len(s.sample_values) < 10:
+                    s.sample_values.append(item)
+        else:
+            s.container_kind = "list[empty]"
+    else:
+        # Primitive — record sample.
+        s.add_sample(value)
+
+    return stats
+
+
+def render_schema(stats: dict[str, FieldStats], out: list[str] | None = None) -> str:
+    """Render the inferred schema as a tree, sorted by path so siblings
+    stay together. Each line shows: path, types, populated/total, samples.
+    """
+    if out is None:
+        out = []
+
+    paths_sorted = sorted(stats.keys())
+    for p in paths_sorted:
+        s = stats[p]
+        # Indent based on path depth (count of '.' + '[' tokens beyond root).
+        depth = _depth_of(p)
+        pad = "  " * depth
+
+        # Type label
+        types = sorted(s.types_seen - {"dict", "list"})
+        if s.container_kind == "list[dict]":
+            type_label = "list[dict]"
+            len_info = f", lengths={s.list_lengths[:5]}" if s.list_lengths else ""
+        elif s.container_kind == "list[primitive]":
+            type_label = f"list[{','.join(types) or '?'}]"
+            len_info = f", lengths={s.list_lengths[:5]}" if s.list_lengths else ""
+        elif s.container_kind == "list[empty]":
+            type_label = "list[empty]"
+            len_info = ""
+        elif s.container_kind == "dict":
+            type_label = "dict"
+            len_info = ""
+        else:
+            type_label = "/".join(types) if types else "null"
+            len_info = ""
+
+        pop_info = ""
+        if s.total > 1:
+            pop_pct = (s.populated / s.total) * 100 if s.total else 0
+            pop_info = f"  populated={s.populated}/{s.total} ({pop_pct:.0f}%)"
+        elif not _populated_marker(s):
+            pop_info = "  populated=NO"
+
+        # Sample values (truncated)
+        sample = ""
+        if s.sample_values:
+            shown = [
+                _truncate_sample(v) for v in s.sample_values[:3]
+            ]
+            sample = f"  e.g. {shown}"
+            if len(s.sample_values) > 3:
+                sample += f" (+{len(s.sample_values) - 3} more samples)"
+
+        marker = "✓" if _populated_marker(s) else "✗"
+        # Last segment of the path is the "name" we display indented.
+        leaf = _leaf_name(p)
+        out.append(
+            f"{pad}{marker} {leaf}  ({type_label}{len_info}){pop_info}{sample}"
+        )
+
+    return "\n".join(out)
+
+
+def _depth_of(path: str) -> int:
+    """How nested this path is from root. $ → 0, $.a → 1, $.a.b → 2,
+    $.a[].b → 3 (list-of-dicts adds one level for the list, one for the item).
+    """
+    if path == "$":
+        return 0
+    # Count separators after stripping the root.
+    body = path[2:] if path.startswith("$.") else path
+    depth = 0
+    for ch in body:
+        if ch == ".":
+            depth += 1
+        elif ch == "[":
+            depth += 1
+    return depth + 1  # +1 because the leaf itself counts as a level
+
+
+def _leaf_name(path: str) -> str:
+    """Just the last segment of a path, with [] preserved on lists."""
+    if path == "$":
+        return "$ (root)"
+    # Split on the LAST separator, preserving "[]" markers
+    last_dot = path.rfind(".")
+    last_bracket = path.rfind("[]")
+    cut = max(last_dot, last_bracket if last_bracket > 0 else -1)
+    if cut < 0:
+        return path
+    return path[cut + 1:] if path[cut] == "." else path[cut:]
+
+
+def _populated_marker(s: FieldStats) -> bool:
+    """A FieldStats is 'populated' if at least one observation was non-null."""
+    return s.populated > 0
+
+
+def _truncate_sample(v: Any, n: int = SAMPLE_VALUE_MAXLEN) -> str:
+    if isinstance(v, str):
+        return f'"{v[:n]}{"..." if len(v) > n else ""}"'
+    if isinstance(v, bool):
+        return str(v).lower()
+    return repr(v)
+
+
 # ─── Output rendering ────────────────────────────────────────
 
 
@@ -172,72 +382,19 @@ def _print_section(title: str) -> None:
     print("═" * 78)
 
 
-def _print_dict_keys(
-    d: dict[str, Any],
-    indent: int = 2,
-    *,
-    recurse: bool = False,
-    max_depth: int = 4,
-    _depth: int = 0,
-) -> None:
-    """Print every key of `d` with type + populated marker + sample value.
+# (Legacy hand-coded walkers were removed — the schema-inference engine
+# above produces the same output more compactly and without hardcoded
+# section names or max_depth bounds.)
 
-    When ``recurse=True``, also drills into nested dicts up to ``max_depth``
-    so unexpected sections (e.g. a `lineage_details` block we didn't
-    anticipate) get their keys shown, not just `dict(N keys)`.
+
+def explore_payload(table_name: str, payload: Any, **_: Any) -> None:
+    """Infer + render the schema of one MDM payload.
+
+    Output is the deduplicated schema tree: every key seen at every
+    nested level, with populate-rate (e.g. business_name populated on
+    192/193 cols), types, and up to 3 sample values per key.
+    No max_depth — auto-determined by walking until primitives.
     """
-    pad = " " * indent
-    if not d:
-        print(f"{pad}(empty dict)")
-        return
-    # Sort populated first, then null/empty.
-    items = sorted(
-        d.items(),
-        key=lambda kv: (not _is_populated(kv[1]), kv[0]),
-    )
-    for k, v in items:
-        marker = "✓" if _is_populated(v) else "✗"
-        print(f"{pad}{marker} {k} ({_typeof(v)}): {_sample_value(v)}")
-        # Recursive drill — keys that are themselves dicts get expanded.
-        if recurse and _depth < max_depth and isinstance(v, dict) and v:
-            _print_dict_keys(
-                v,
-                indent=indent + 4,
-                recurse=True,
-                max_depth=max_depth,
-                _depth=_depth + 1,
-            )
-        # If a list-of-dicts, drill into the FIRST item's keys.
-        elif (
-            recurse and _depth < max_depth
-            and isinstance(v, list) and v
-            and isinstance(v[0], dict)
-        ):
-            print(f"{pad}    [first item shape:]")
-            _print_dict_keys(
-                v[0],
-                indent=indent + 8,
-                recurse=True,
-                max_depth=max_depth,
-                _depth=_depth + 1,
-            )
-
-
-def _print_list_item_shape(label: str, lst: list, indent: int = 2) -> None:
-    pad = " " * indent
-    if not lst:
-        print(f"{pad}(empty list — no shape to inspect)")
-        return
-    first = lst[0]
-    print(f"{pad}list of {len(lst)} items, first item shape:")
-    if isinstance(first, dict):
-        _print_dict_keys(first, indent=indent + 4)
-    else:
-        print(f"{pad}    {_typeof(first)}: {_sample_value(first)}")
-
-
-def explore_payload(table_name: str, payload: Any, *, max_depth: int = 4) -> None:
-    """Pretty-print the structure of one MDM payload."""
     _print_section(f"Table: {table_name}")
 
     print(f"\nTop-level shape: {_typeof(payload)}")
@@ -246,149 +403,31 @@ def explore_payload(table_name: str, payload: Any, *, max_depth: int = 4) -> Non
         print(f"   {_sample_value(payload)}")
         return
 
-    print(f"  → length {len(payload)}, peeling [0]")
-    data = payload[0]
+    print(f"  → length {len(payload)}, peeling [0]\n")
 
+    data = payload[0]
     if not isinstance(data, dict):
         print(f"\n⚠  Expected dict at [0]. Got {_typeof(data)}: {_sample_value(data)}")
         return
 
-    # -- Top-level keys (recursive — every nested dict gets fully expanded) --
-    print(f"\n📦 Top-level keys ({len(data)} total) — RECURSIVE walk:")
-    _print_dict_keys(data, indent=4, recurse=True, max_depth=max_depth)
+    # Infer schema for the WHOLE payload (starting from [0] data).
+    stats = infer_schema(data, path="$")
 
-    # -- dataset_details --
-    if "dataset_details" in data and isinstance(data["dataset_details"], dict):
-        _print_section("dataset_details (table-level metadata)")
-        _print_dict_keys(data["dataset_details"], indent=4,
-                         recurse=True, max_depth=max_depth)
+    # Render the schema tree.
+    rendered = render_schema(stats)
+    print(rendered)
 
-    # -- dataset_source_details --
-    if "dataset_source_details" in data and isinstance(data["dataset_source_details"], dict):
-        _print_section("dataset_source_details (BQ location)")
-        _print_dict_keys(data["dataset_source_details"], indent=4,
-                         recurse=True, max_depth=max_depth)
-
-    # -- ownership_details --
-    if "ownership_details" in data and isinstance(data["ownership_details"], dict):
-        _print_section("ownership_details")
-        _print_dict_keys(data["ownership_details"], indent=4,
-                         recurse=True, max_depth=max_depth)
-        # Drill into business_contacts / tech_contacts shape if list-of-dicts.
-        for k in ("business_contacts", "tech_contacts"):
-            v = data["ownership_details"].get(k)
-            if isinstance(v, list) and v:
-                print(f"\n  {k} item shape:")
-                _print_list_item_shape(k, v, indent=4)
-
-    # -- schema.schema_attributes (per-column) --
-    schema = data.get("schema") or {}
-    cols = schema.get("schema_attributes") or []
-    _print_section(f"schema.schema_attributes — {len(cols)} columns")
-    if cols:
-        first_col = cols[0]
-        col_name = (
-            (first_col.get("attribute_details") or {}).get("attribute_name")
-            or first_col.get("attribute_name")
-            or "(?)"
-        )
-        print(f"\nFirst column: {col_name}")
-        print(f"  Top-level keys ({len(first_col)} total):")
-        _print_dict_keys(first_col, indent=6)
-
-        # attribute_details (the meaty per-column section)
-        ad = first_col.get("attribute_details") or {}
-        if ad:
-            print(f"\n  attribute_details ({len(ad)} keys):")
-            _print_dict_keys(ad, indent=6)
-
-        # sensitivity_details
-        sd = first_col.get("sensitivity_details") or {}
-        if sd:
-            print(f"\n  sensitivity_details ({len(sd)} keys):")
-            _print_dict_keys(sd, indent=6)
-
-        # external_reference_details — THE JOIN GOLDMINE
-        erd = first_col.get("external_reference_details") or []
-        print(f"\n  external_reference_details — {_typeof(erd)}")
-        if isinstance(erd, list) and erd:
-            _print_list_item_shape("external_reference_details", erd, indent=6)
-        elif isinstance(erd, list):
-            print("    (empty — first column has no MDM-declared joins)")
-
-        # -- Hunt for the FIRST column with non-empty external_reference_details --
-        # because the first column might be metadata; the join-key columns later
-        # are where the gold lives.
-        _print_section("Cross-reference scan (first 3 cols with populated external_references)")
-        found = 0
-        for col in cols:
-            erd = col.get("external_reference_details") or []
-            if isinstance(erd, list) and erd:
-                col_name = (
-                    (col.get("attribute_details") or {}).get("attribute_name")
-                    or col.get("attribute_name") or "(?)"
-                )
-                print(f"\n  Column: {col_name}")
-                _print_list_item_shape("external_reference_details", erd, indent=8)
-                found += 1
-                if found >= 3:
-                    break
-        if found == 0:
-            print("\n  (no columns in this table have populated external_reference_details)")
-
-        # -- Survey field presence across ALL columns --
-        _print_section("Field-presence histogram across ALL columns")
-        _print_field_presence_histogram(cols)
-
-    # -- Any remaining top-level keys we haven't shown explicitly --
-    # FULL recursive walk so anything unexpected gets its keys exposed,
-    # not just a "dict(N keys)" placeholder.
-    handled = {
-        "dataset_details", "dataset_source_details",
-        "ownership_details", "schema",
-    }
-    remaining = {k: v for k, v in data.items() if k not in handled}
-    if remaining:
-        _print_section("Other top-level keys (not in our digest yet) — recursive")
-        _print_dict_keys(remaining, indent=4, recurse=True, max_depth=4)
-
-
-def _print_field_presence_histogram(cols: list[dict[str, Any]]) -> None:
-    """For every key seen in attribute_details / sensitivity_details across
-    all columns, count how many columns actually have a populated value.
-    Tells us which keys are real signal vs MDM-defined-but-always-null.
-    """
-    sections = {
-        "attribute_details": {},
-        "sensitivity_details": {},
-    }
-    section_external_ref_pop = 0
-
-    for col in cols:
-        for sect_name, agg in sections.items():
-            sect = col.get(sect_name) or {}
-            for k, v in sect.items():
-                if k not in agg:
-                    agg[k] = {"populated": 0, "total": 0}
-                agg[k]["total"] += 1
-                if _is_populated(v):
-                    agg[k]["populated"] += 1
-        erd = col.get("external_reference_details")
-        if isinstance(erd, list) and erd:
-            section_external_ref_pop += 1
-
-    for sect_name, agg in sections.items():
-        if not agg:
-            continue
-        print(f"\n  {sect_name} keys (column-populated / total):")
-        for k in sorted(agg.keys()):
-            a = agg[k]
-            pct = (a["populated"] / a["total"]) * 100 if a["total"] else 0
-            print(f"    {k:40s}  {a['populated']:>4} / {a['total']}  ({pct:>5.1f}%)")
-
+    # Auto-collapse summary.
+    list_dict_paths = [
+        s for s in stats.values() if s.container_kind == "list[dict]"
+    ]
+    collapsed_items = sum(
+        (s.list_lengths[0] if s.list_lengths else 0) for s in list_dict_paths
+    )
     print(
-        f"\n  external_reference_details populated on "
-        f"{section_external_ref_pop} / {len(cols)} columns"
+        f"\n  → {len(stats)} unique schema paths "
+        f"(collapsed {collapsed_items} repeated list-items into "
+        f"{len(list_dict_paths)} list[dict] schemas)"
     )
 
 
@@ -445,13 +484,6 @@ def main() -> int:
             "truth, no transformation, no truncation, no key filtering. "
             "Use this when you want zero risk of the structured view masking "
             "anything."
-        ),
-    )
-    p.add_argument(
-        "--max-depth", type=int, default=4,
-        help=(
-            "Max recursion depth when walking nested dicts in the structured "
-            "view. Default 4 keeps output bounded; bump to 10 for deepest dive."
         ),
     )
     args = p.parse_args()
@@ -515,7 +547,7 @@ def main() -> int:
             print(f"\n# === RAW JSON for {table} ({len(json.dumps(payload))} bytes) ===")
             print(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
         else:
-            explore_payload(table, payload, max_depth=args.max_depth)
+            explore_payload(table, payload)
 
         if save_dir is not None:
             target = _save_raw(payload, table, save_dir)
