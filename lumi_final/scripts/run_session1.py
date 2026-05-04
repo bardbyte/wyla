@@ -177,6 +177,24 @@ def main() -> int:
     # Stage 1: parse — kept separate so we can run the parse-success guardrail
     fps = parse_sqls(sqls)
 
+    # Parse-stage breakdown (empty cells vs real errors vs success).
+    empty_idx = [i + 1 for i, fp in enumerate(fps) if fp.parse_error == "empty_input"]
+    real_err_idx = [
+        i + 1 for i, fp in enumerate(fps)
+        if fp.parse_error and fp.parse_error != "empty_input"
+    ]
+    parsed_n = len(fps) - len(empty_idx) - len(real_err_idx)
+    print(
+        f"Parse: {parsed_n}/{len(fps)} parsed  "
+        f"({len(empty_idx)} empty cells, {len(real_err_idx)} real errors)"
+    )
+    if empty_idx:
+        print(f"  empty cells:  Q{', Q'.join(f'{i:02d}' for i in empty_idx[:10])}"
+              f"{' …' if len(empty_idx) > 10 else ''}")
+    if real_err_idx:
+        print(f"  real errors:  Q{', Q'.join(f'{i:02d}' for i in real_err_idx[:10])}"
+              f"{' …' if len(real_err_idx) > 10 else ''}")
+
     # Stage 2: discover — full hydration with MDM + baselines
     contexts = prepare_enrichment_context(sqls, mdm, str(baseline_dir))
 
