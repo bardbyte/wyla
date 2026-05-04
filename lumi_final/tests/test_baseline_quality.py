@@ -277,6 +277,70 @@ def test_proposed_overwrites_empty_when_baseline_curated(tmp_path: Path) -> None
 # ─── 4. Integration: end-to-end discover → merge ─────────────
 
 
+def test_baseline_lookup_finds_prefixed_filename(tmp_path: Path) -> None:
+    """Looker repos sometimes prefix view files (bq_, dw_, edw_, etc.).
+    The lookup must still find them when the canonical name doesn't exist.
+    """
+    baseline_dir = tmp_path / "looker_master"
+    baseline_dir.mkdir()
+    # Only the prefixed variant exists — no cornerstone_metrics.view.lkml.
+    (baseline_dir / "dw_cornerstone_metrics.view.lkml").write_text(
+        _AUTOGEN_BASELINE, encoding="utf-8"
+    )
+
+    sqls = ["SELECT a FROM cornerstone_metrics WHERE bus_seg = 'X'"]
+    contexts = prepare_enrichment_context(sqls, _NoopMDM(), str(baseline_dir))
+    ctx = contexts["cornerstone_metrics"]
+    # Baseline was found despite filename mismatch.
+    assert ctx.existing_view_lkml is not None
+    assert "view: cornerstone_metrics" in ctx.existing_view_lkml
+    assert ctx.baseline_quality_signals  # populated => parse worked
+
+
+def test_baseline_lookup_canonical_wins_over_prefix(tmp_path: Path) -> None:
+    """If both <table>.view.lkml and bq_<table>.view.lkml exist, the
+    canonical filename wins — we don't shadow it with a prefix variant
+    that might be from a different team's mirror.
+    """
+    baseline_dir = tmp_path / "looker_master"
+    baseline_dir.mkdir()
+    (baseline_dir / "cornerstone_metrics.view.lkml").write_text(
+        '# canonical\nview: cornerstone_metrics { sql_table_name: `t` ;; }',
+        encoding="utf-8",
+    )
+    (baseline_dir / "bq_cornerstone_metrics.view.lkml").write_text(
+        '# prefixed\nview: cornerstone_metrics { sql_table_name: `other` ;; }',
+        encoding="utf-8",
+    )
+
+    sqls = ["SELECT a FROM cornerstone_metrics"]
+    contexts = prepare_enrichment_context(sqls, _NoopMDM(), str(baseline_dir))
+    ctx = contexts["cornerstone_metrics"]
+    assert "# canonical" in (ctx.existing_view_lkml or "")
+
+
+def test_baseline_lookup_view_name_fallback(tmp_path: Path) -> None:
+    """When the FILENAME has no obvious link to the table but the VIEW
+    NAME inside the file matches, the fuzzy fallback finds it.
+    Mirrors how Looker actually resolves explores against view names.
+    """
+    baseline_dir = tmp_path / "looker_master"
+    baseline_dir.mkdir()
+    # Filename is unrelated; view declaration inside matches.
+    (baseline_dir / "weird_legacy_filename.view.lkml").write_text(
+        'view: cornerstone_metrics {\n'
+        '  sql_table_name: `axp-lumi.dw.cornerstone_metrics` ;;\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    sqls = ["SELECT a FROM cornerstone_metrics"]
+    contexts = prepare_enrichment_context(sqls, _NoopMDM(), str(baseline_dir))
+    ctx = contexts["cornerstone_metrics"]
+    assert ctx.existing_view_lkml is not None
+    assert "axp-lumi.dw.cornerstone_metrics" in ctx.existing_view_lkml
+
+
 def test_end_to_end_baseline_aware_pipeline(tmp_path: Path) -> None:
     """Discover sees the gaps; merge fixes them; ledger documents what changed."""
     baseline_dir = tmp_path / "looker_master"

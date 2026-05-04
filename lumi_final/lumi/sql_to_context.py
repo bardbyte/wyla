@@ -740,24 +740,96 @@ def _parse_baseline_view(
 
 
 def _find_baseline_view(baseline_dir: Path, table_name: str) -> str | None:
-    """Find <table>.view.lkml under baseline_dir, searching at the root and
-    recursively in subdirs. Returns the file's text content or None if
-    not found.
+    """Find a baseline LookML view file for ``table_name``.
 
-    This lets the same `discover_tables()` work against either layout:
-      data/baseline_views/<table>.view.lkml      (flat — fetch_baselines)
-      data/looker_master/views/<table>.view.lkml (mirror — fetch_lookml_master)
+    Looker repos use a few different naming conventions in the wild:
+      - ``<table>.view.lkml``                (canonical Looker default)
+      - ``bq_<table>.view.lkml``             (some teams prefix by source)
+      - ``<dataset>_<table>.view.lkml``      (e.g. ``dw_cornerstone_metrics``)
+      - ``<table>.view``                     (rare: omitted .lkml)
+      - inside subdirs grouped by dataset (``views/dw/<table>.view.lkml``)
+
+    We try them all in order of specificity. First hit wins.
+
+    Returns the file's text content or None if not found.
     """
     if not baseline_dir.exists():
         return None
-    target = f"{table_name}.view.lkml"
-    # Quick path: file at root
-    direct = baseline_dir / target
-    if direct.is_file():
-        return direct.read_text(encoding="utf-8")
-    # Recursive search; first hit wins. Fast for hundreds of files.
-    for path in baseline_dir.rglob(target):
-        return path.read_text(encoding="utf-8")
+
+    # Build candidate filename patterns. Most-specific first so we don't
+    # accidentally match a generic prefix when the canonical file exists.
+    candidates: list[str] = [
+        f"{table_name}.view.lkml",
+        f"{table_name}.view",                  # extension variant
+    ]
+    # Prefix variants: only check these if the bare name didn't match.
+    # Common prefixes seen in real Looker repos at AmEx-style data warehouses.
+    prefix_variants = ("bq_", "dw_", "edw_", "fact_", "dim_")
+
+    # 1. Quick path: file at root.
+    for cand in candidates:
+        direct = baseline_dir / cand
+        if direct.is_file():
+            return direct.read_text(encoding="utf-8")
+
+    # 2. Recursive search for the canonical name; first hit wins.
+    for cand in candidates:
+        for path in baseline_dir.rglob(cand):
+            return path.read_text(encoding="utf-8")
+
+    # 3. Fallback: try common prefixes (only after canonical search misses,
+    # so we don't shadow a real <table>.view.lkml elsewhere in the tree).
+    for prefix in prefix_variants:
+        prefixed_name = f"{prefix}{table_name}.view.lkml"
+        direct = baseline_dir / prefixed_name
+        if direct.is_file():
+            logger.info(
+                "matched baseline for %s via prefix variant %s",
+                table_name, prefixed_name,
+            )
+            return direct.read_text(encoding="utf-8")
+        for path in baseline_dir.rglob(prefixed_name):
+            logger.info(
+                "matched baseline for %s via prefix variant %s",
+                table_name, prefixed_name,
+            )
+            return path.read_text(encoding="utf-8")
+
+    # 4. Last-resort fuzzy: scan every .view.lkml under the dir and check
+    # whether its declared `view: <name>` matches our table_name. Catches the
+    # case where the FILENAME doesn't match but the VIEW NAME inside does
+    # (which is what Looker actually resolves explores against). Capped at
+    # 500 files to bound cost on huge repos.
+    return _fuzzy_match_by_view_name(baseline_dir, table_name)
+
+
+def _fuzzy_match_by_view_name(
+    baseline_dir: Path, table_name: str, *, file_cap: int = 500
+) -> str | None:
+    """Scan .view.lkml files for a `view: <table_name>` declaration.
+
+    Useful when the filename convention doesn't match our table key but the
+    view name inside does. We don't fully parse the LKML here — just scan
+    the first ~80 chars of each file for `view: <name> {`.
+    """
+    needle = f"view: {table_name} ".encode()
+    needle_brace = f"view: {table_name}{{".encode()
+    count = 0
+    for path in baseline_dir.rglob("*.view.lkml"):
+        count += 1
+        if count > file_cap:
+            return None
+        try:
+            with path.open("rb") as f:
+                head = f.read(256)
+        except OSError:
+            continue
+        if needle in head or needle_brace in head:
+            logger.info(
+                "matched baseline for %s via view-name scan in %s",
+                table_name, path.name,
+            )
+            return path.read_text(encoding="utf-8")
     return None
 
 
