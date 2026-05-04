@@ -610,8 +610,133 @@ def discover_tables(
         baseline_text = _find_baseline_view(baseline_dir, table_name)
         if baseline_text is not None:
             raw_ctx["existing_view_lkml"] = baseline_text
+            # Parse once at discover time so the planner + enricher see
+            # structured baseline content instead of having to re-parse it
+            # themselves. Auto-generated Looker baselines have terse or
+            # missing descriptions; the quality_signals tell the planner
+            # exactly which fields need attention.
+            parsed = _parse_baseline_view(baseline_text, raw_ctx["date_functions"])
+            raw_ctx["baseline_dimensions"] = parsed["dimensions"]
+            raw_ctx["baseline_dimension_groups"] = parsed["dimension_groups"]
+            raw_ctx["baseline_measures"] = parsed["measures"]
+            raw_ctx["baseline_quality_signals"] = parsed["quality_signals"]
 
     return {name: TableContext(**raw) for name, raw in contexts.items()}
+
+
+# ─── Baseline LookML parser ─────────────────────────────────
+
+
+# Below this length we treat a description as auto-generated boilerplate.
+# 30 chars roughly = "Customer ID" plus a couple words. Anything longer is
+# almost always human-edited and worth preserving.
+_DESCRIPTION_QUALITY_THRESHOLD = 30
+
+
+def _parse_baseline_view(
+    lkml_text: str,
+    date_functions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Parse a baseline .view.lkml string with the lkml lib and surface
+    structured signals for downstream stages.
+
+    Returns:
+        {
+            "dimensions": [<lkml dim dict>...],
+            "dimension_groups": [...],
+            "measures": [...],
+            "quality_signals": {
+                "dims_total": int,
+                "dims_missing_description": int,
+                "dims_short_description": int,        # < threshold chars
+                "dims_missing_label": int,
+                "dims_missing_tags": int,
+                "measures_total": int,
+                "measures_missing_value_format": int,
+                "dates_as_plain_dim": int,            # date col with no dim_group
+                "has_primary_key": bool,
+            }
+        }
+
+    Failures (unparseable LookML, missing views) return empty structures —
+    callers must tolerate that since baseline files can drift.
+    """
+    try:
+        import lkml  # local import to keep module-import cost down
+        tree = lkml.load(lkml_text)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("baseline parse failed; skipping structured fields: %s", e)
+        return {
+            "dimensions": [],
+            "dimension_groups": [],
+            "measures": [],
+            "quality_signals": {},
+        }
+
+    views = tree.get("views") or []
+    if not views:
+        return {
+            "dimensions": [],
+            "dimension_groups": [],
+            "measures": [],
+            "quality_signals": {},
+        }
+
+    # First view in the file is canonical (Looker-generated baselines have one).
+    view = views[0]
+    dims = list(view.get("dimensions") or [])
+    dgs = list(view.get("dimension_groups") or [])
+    msrs = list(view.get("measures") or [])
+
+    dims_missing_desc = sum(1 for d in dims if not (d.get("description") or "").strip())
+    dims_short_desc = sum(
+        1 for d in dims
+        if 0 < len((d.get("description") or "").strip()) < _DESCRIPTION_QUALITY_THRESHOLD
+    )
+    dims_missing_label = sum(1 for d in dims if not (d.get("label") or "").strip())
+    dims_missing_tags = sum(1 for d in dims if not d.get("tags"))
+    msrs_missing_vf = sum(
+        1 for m in msrs
+        if not (m.get("value_format_name") or m.get("value_format"))
+    )
+    has_pk = any(
+        (d.get("primary_key") or "").lower() in {"yes", "true"} for d in dims
+    )
+
+    # Date columns from sqlglot fingerprint that don't appear as dim_groups
+    # are "still plain dims" — a SKILL.md violation we want enrichment to fix.
+    dg_source_cols: set[str] = set()
+    for dg in dgs:
+        sql = (dg.get("sql") or "").lower()
+        if sql:
+            # ${TABLE}.col_name → col_name
+            for tok in sql.replace("${TABLE}.", "").replace("${table}.", "").split():
+                tok = tok.strip(";`,()").lower()
+                if tok and tok.isidentifier():
+                    dg_source_cols.add(tok)
+        if dg.get("name"):
+            dg_source_cols.add(dg["name"].lower())
+    date_cols_from_fp = {
+        (df.get("column") or "").lower() for df in (date_functions or []) if df.get("column")
+    }
+    dates_as_plain = len(date_cols_from_fp - dg_source_cols)
+
+    return {
+        "dimensions": dims,
+        "dimension_groups": dgs,
+        "measures": msrs,
+        "quality_signals": {
+            "dims_total": len(dims),
+            "dims_missing_description": dims_missing_desc,
+            "dims_short_description": dims_short_desc,
+            "dims_missing_label": dims_missing_label,
+            "dims_missing_tags": dims_missing_tags,
+            "measures_total": len(msrs),
+            "measures_missing_value_format": msrs_missing_vf,
+            "dates_as_plain_dim": dates_as_plain,
+            "has_primary_key": has_pk,
+        },
+    }
 
 
 def _find_baseline_view(baseline_dir: Path, table_name: str) -> str | None:

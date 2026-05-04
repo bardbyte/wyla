@@ -45,8 +45,23 @@ class TableContext(BaseModel):
     mdm_table_description: str | None = None
     mdm_coverage_pct: float = 0.0
 
-    # From baseline (file read)
+    # From baseline (file read + lkml parse)
     existing_view_lkml: str | None = None
+    # Parsed once at discover-time so the planner + enricher can reason
+    # about WHICH baseline fields are auto-generated stubs vs human-curated.
+    # Each item carries the lkml dict + a 'quality' string:
+    #   "rich"  — human-edited (description ≥ 30 chars, has label, has tags)
+    #   "stub"  — auto-generated (no description or < 30 chars, no label)
+    #   "ok"    — has description but missing other niceties
+    baseline_dimensions: list[dict] = Field(default_factory=list)
+    baseline_dimension_groups: list[dict] = Field(default_factory=list)
+    baseline_measures: list[dict] = Field(default_factory=list)
+    # Aggregated counts so the planner can render a one-line "what's missing"
+    # summary in review_queue/<table>.plan.md without re-walking the lists.
+    # Keys: dims_total, dims_missing_description, dims_short_description (<30 chars),
+    #       dims_missing_label, measures_total, measures_missing_value_format,
+    #       dates_as_plain_dim (date column with no dimension_group).
+    baseline_quality_signals: dict = Field(default_factory=dict)
 
     # Cross-query context
     queries_using_this: list[str]      # which input SQLs reference this table
@@ -134,6 +149,15 @@ class EnrichmentPlan(BaseModel):
         default_factory=list,
         description="Optional explicit asks: 'Should X be many_to_one or many_to_many?'",
     )
+    # Surgical scope for the Enrich call — what specific gaps in the
+    # baseline this plan intends to fix. Drives the review markdown's
+    # "what's missing" line and lets the enrich prompt say "enrich ONLY
+    # these N fields" instead of regenerating wholesale.
+    fields_to_enrich: list[dict] = Field(
+        default_factory=list,
+        description="[{name, kind: dim|dim_group|measure, gap: missing_description|"
+                    "short_description|missing_label|missing_value_format|promote_to_dim_group}]",
+    )
 
 
 ApprovalSource = Literal["human", "auto_low_risk", "auto_skip", "pending"]
@@ -185,6 +209,13 @@ class EnrichedOutput(BaseModel):
     filter_catalog: list[dict] = Field(default_factory=list)
     metric_catalog: list[dict] = Field(default_factory=list)
     nl_questions: list[NLQuestionVariant] = Field(default_factory=list)
+    # When the LLM judges an existing baseline description as wrong (not
+    # just terse), it puts the proposed replacement here instead of
+    # silently overwriting. Publish routes these to a side file —
+    # output/proposed_overwrites.md — for human review next iteration.
+    # Each item: {field_kind, field_name, attribute, baseline_value,
+    #             proposed_value, reason}
+    proposed_overwrites: list[dict] = Field(default_factory=list)
 
 
 # ─── Session 4: Validate ─────────────────────────────────────

@@ -55,6 +55,13 @@ logger = logging.getLogger("lumi.publish")
 _PRESERVE_FIELDS = ("sql", "type", "primary_key", "hidden", "datatype", "convert_tz")
 _ADDITIVE_FIELDS = ("label", "description", "group_label", "tags", "value_format",
                     "value_format_name", "filters", "drill_fields")
+# Baseline values shorter than this are treated as auto-generated stubs that
+# can be replaced by enrichment without violating "additive only". Above the
+# threshold we assume human curation and preserve.
+_DESCRIPTION_QUALITY_THRESHOLD = 30
+# Track every override we did due to the quality threshold so we can emit
+# proposed_overwrites.md at publish time. Reset per merge call.
+_OVERWRITE_LEDGER_KEY = "_overwrite_ledger"
 
 
 def _index_by_name(items: list[dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
@@ -63,14 +70,28 @@ def _index_by_name(items: list[dict[str, Any]] | None) -> dict[str, dict[str, An
     return {it.get("name", ""): it for it in items if it.get("name")}
 
 
-def _merge_field(baseline: dict[str, Any], enriched: dict[str, Any]) -> dict[str, Any]:
+def _merge_field(
+    baseline: dict[str, Any],
+    enriched: dict[str, Any],
+    ledger: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Merge one dimension/measure/dim_group dict.
 
-    Baseline is authoritative for ``sql``/``type``/``primary_key``/etc.
-    Enriched may CONTRIBUTE description/label/tags/value_format if absent in
-    baseline. Tags are unioned (preserving order, baseline first).
+    Policy (per the design discussion in the docs):
+      - Tags: unioned (preserving order, baseline first). Always cumulative.
+      - Description: keep baseline if it's ≥ 30 chars (assumed human-curated).
+        Replace with enriched if baseline is missing OR < 30 chars
+        (assumed Looker-auto-generated stub like "Customer ID"). Every
+        such replacement is recorded in `ledger` for the proposed_overwrites
+        side file.
+      - Label / group_label / value_format / value_format_name / filters /
+        drill_fields: keep baseline if present, else add enriched.
+      - sql / type / primary_key / hidden / datatype / convert_tz: NEVER
+        overwrite baseline. Schema decisions are sacred.
     """
     merged = dict(baseline)
+    field_name = baseline.get("name") or enriched.get("name") or "<unnamed>"
+
     for field in _ADDITIVE_FIELDS:
         if field == "tags":
             base_tags = baseline.get("tags") or []
@@ -84,10 +105,48 @@ def _merge_field(baseline: dict[str, Any], enriched: dict[str, Any]) -> dict[str
             if unioned:
                 merged["tags"] = unioned
             continue
+
+        if field == "description":
+            base_desc = (baseline.get("description") or "").strip()
+            enr_desc = (enriched.get("description") or "").strip()
+            if not enr_desc:
+                # Nothing to add; preserve baseline (which may also be empty).
+                continue
+            if not base_desc:
+                # Pure additive — baseline lacks description.
+                merged["description"] = enr_desc
+                continue
+            if len(base_desc) < _DESCRIPTION_QUALITY_THRESHOLD:
+                # Auto-generated stub — replace, but log so a human can
+                # double-check next iteration via proposed_overwrites.md.
+                if base_desc != enr_desc:
+                    merged["description"] = enr_desc
+                    if ledger is not None:
+                        ledger.append({
+                            "field_kind": _kind_from_dict(baseline),
+                            "field_name": field_name,
+                            "attribute": "description",
+                            "baseline_value": base_desc,
+                            "proposed_value": enr_desc,
+                            "reason": (
+                                f"baseline description was {len(base_desc)} chars "
+                                f"(< {_DESCRIPTION_QUALITY_THRESHOLD} threshold) "
+                                "— treated as auto-generated stub"
+                            ),
+                        })
+                continue
+            # Baseline description ≥ threshold → preserve. If LLM strongly
+            # disagrees, it can put the alternative on EnrichedOutput.
+            # proposed_overwrites and we'll surface that separately at
+            # publish time (handled in publish_to_disk, not here).
+            continue
+
+        # Default additive: only fill if baseline lacks the field.
         if field in baseline and baseline[field]:
             continue
         if field in enriched and enriched[field]:
             merged[field] = enriched[field]
+
     # NEVER overwrite preserve fields from baseline.
     for field in _PRESERVE_FIELDS:
         if field in baseline:
@@ -95,11 +154,32 @@ def _merge_field(baseline: dict[str, Any], enriched: dict[str, Any]) -> dict[str
     return merged
 
 
-def additive_merge_view(baseline_lkml: str, enriched_lkml: str) -> str:
+def _kind_from_dict(field_dict: dict[str, Any]) -> str:
+    """Infer dimension / dimension_group / measure from the dict shape."""
+    if "type" in field_dict and field_dict.get("type") == "time":
+        return "dimension_group"
+    # Heuristic: measures usually have a sum/count/avg type.
+    measure_types = {"count", "sum", "average", "min", "max",
+                     "count_distinct", "median", "number"}
+    if (field_dict.get("type") or "").lower() in measure_types:
+        return "measure"
+    return "dimension"
+
+
+def additive_merge_view(
+    baseline_lkml: str,
+    enriched_lkml: str,
+    ledger: list[dict[str, Any]] | None = None,
+) -> str:
     """Merge enriched view INTO baseline. Returns serialised LookML string.
 
     If baseline is empty/unparseable, the enriched view is returned as-is
     (this happens for brand-new tables that had no Looker-generated baseline).
+
+    Args:
+        ledger: optional list — appended to with one entry per "we replaced
+            a stub baseline value with enriched content" event. Used by
+            publish_to_disk to emit output/proposed_overwrites.md.
     """
     if not (baseline_lkml or "").strip():
         return enriched_lkml
@@ -128,7 +208,7 @@ def additive_merge_view(baseline_lkml: str, enriched_lkml: str) -> str:
         if ev is None:
             merged_views.append(bv)
             continue
-        merged_views.append(_merge_one_view(bv, ev))
+        merged_views.append(_merge_one_view(bv, ev, ledger=ledger))
     # Add any enriched-only views (e.g. derived_table views from CTEs).
     for ev in enr_views:
         if ev.get("name", "") not in seen_view_names:
@@ -138,7 +218,11 @@ def additive_merge_view(baseline_lkml: str, enriched_lkml: str) -> str:
     return lkml.dump(out_tree)
 
 
-def _merge_one_view(baseline: dict[str, Any], enriched: dict[str, Any]) -> dict[str, Any]:
+def _merge_one_view(
+    baseline: dict[str, Any],
+    enriched: dict[str, Any],
+    ledger: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Merge a single view dict — preserves baseline structure, adds enriched fields."""
     merged = dict(baseline)
     base_dims = _index_by_name(baseline.get("dimensions"))
@@ -151,7 +235,7 @@ def _merge_one_view(baseline: dict[str, Any], enriched: dict[str, Any]) -> dict[
     out_dims: list[dict[str, Any]] = []
     for name, bd in base_dims.items():
         ed = enr_dims.get(name)
-        out_dims.append(_merge_field(bd, ed) if ed else bd)
+        out_dims.append(_merge_field(bd, ed, ledger=ledger) if ed else bd)
     for name, ed in enr_dims.items():
         if name not in base_dims:
             out_dims.append(ed)
@@ -159,7 +243,7 @@ def _merge_one_view(baseline: dict[str, Any], enriched: dict[str, Any]) -> dict[
     out_dgs: list[dict[str, Any]] = []
     for name, bd in base_dgs.items():
         ed = enr_dgs.get(name)
-        out_dgs.append(_merge_field(bd, ed) if ed else bd)
+        out_dgs.append(_merge_field(bd, ed, ledger=ledger) if ed else bd)
     for name, ed in enr_dgs.items():
         if name not in base_dgs:
             out_dgs.append(ed)
@@ -167,7 +251,7 @@ def _merge_one_view(baseline: dict[str, Any], enriched: dict[str, Any]) -> dict[
     out_msrs: list[dict[str, Any]] = []
     for name, bm in base_msrs.items():
         em = enr_msrs.get(name)
-        out_msrs.append(_merge_field(bm, em) if em else bm)
+        out_msrs.append(_merge_field(bm, em, ledger=ledger) if em else bm)
     for name, em in enr_msrs.items():
         if name not in base_msrs:
             out_msrs.append(em)
@@ -298,10 +382,27 @@ def publish_to_disk(
 
     written: list[str] = []
     explore_includes: list[str] = []
+    # Aggregate ledger across every table's merge — entries here become
+    # output/proposed_overwrites.md so a human can sanity-check the
+    # quality-threshold decisions before the next iteration.
+    overwrite_ledger: list[dict[str, Any]] = []
 
     for table_name, eo in enriched_outputs.items():
         baseline_lkml = _read_baseline(baseline, table_name)
-        merged = additive_merge_view(baseline_lkml, eo.view_lkml)
+        per_table_ledger: list[dict[str, Any]] = []
+        merged = additive_merge_view(
+            baseline_lkml, eo.view_lkml, ledger=per_table_ledger
+        )
+        # Tag every ledger entry with the table it came from.
+        for entry in per_table_ledger:
+            entry["table"] = table_name
+        overwrite_ledger.extend(per_table_ledger)
+        # LLM-flagged "this baseline value is wrong, not just terse" entries
+        # bypass the merge entirely — they live on EnrichedOutput.proposed_
+        # overwrites and we just append them.
+        for entry in eo.proposed_overwrites or []:
+            row = {**entry, "table": table_name, "source": "llm_flagged"}
+            overwrite_ledger.append(row)
         view_path = views_dir / f"{table_name}.view.lkml"
         view_path.write_text(merged, encoding="utf-8")
         written.append(str(view_path))
@@ -350,4 +451,54 @@ def publish_to_disk(
         )
         written.append(str(cov_path))
 
+    # proposed_overwrites.md — every place we replaced a stub baseline value
+    # with enriched content. Empty file is fine (means baseline was already
+    # in good shape OR the LLM proposed nothing).
+    overwrites_path = out / "proposed_overwrites.md"
+    overwrites_path.write_text(
+        _render_overwrites_md(overwrite_ledger), encoding="utf-8"
+    )
+    written.append(str(overwrites_path))
+
     return {"status": "ok", "error": None, "files_written": written}
+
+
+def _render_overwrites_md(ledger: list[dict[str, Any]]) -> str:
+    """Render the merge ledger to a scannable markdown report."""
+    if not ledger:
+        return (
+            "# Proposed overwrites\n\n"
+            "_No baseline values were replaced this run — every existing "
+            "description / label / etc. was either ≥ 30 chars (assumed "
+            "human-curated, preserved) or had no enriched alternative._\n"
+        )
+
+    lines: list[str] = ["# Proposed overwrites", ""]
+    lines.append(
+        "Each entry below is a baseline value that was either replaced "
+        "(because it was a < 30-char stub) or that the LLM flagged as "
+        "actually wrong. Review before the next iteration.\n"
+    )
+    by_table: dict[str, list[dict[str, Any]]] = {}
+    for e in ledger:
+        by_table.setdefault(e.get("table") or "<unknown>", []).append(e)
+
+    for table_name in sorted(by_table.keys()):
+        lines.append(f"## `{table_name}`\n")
+        for e in by_table[table_name]:
+            kind = e.get("field_kind") or "field"
+            name = e.get("field_name") or "<unnamed>"
+            attr = e.get("attribute") or "value"
+            lines.append(f"### {kind} `{name}` — `{attr}`")
+            source = e.get("source")
+            if source == "llm_flagged":
+                lines.append("LLM-flagged as inaccurate (not auto-replaced).")
+            else:
+                lines.append(f"_{e.get('reason', '')}_")
+            lines.append("")
+            lines.append("**baseline:**")
+            lines.append(f"```\n{e.get('baseline_value', '')}\n```")
+            lines.append("**proposed:**")
+            lines.append(f"```\n{e.get('proposed_value', '')}\n```")
+            lines.append("")
+    return "\n".join(lines)

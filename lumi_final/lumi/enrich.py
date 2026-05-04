@@ -238,10 +238,82 @@ def build_enrichment_prompt(
             rendered,
             "## Approved enrichment plan (scope contract — do not exceed)",
             _render_plan_contract(plan),
+            "## Baseline gap analysis (drives surgical enrichment scope)",
+            _render_baseline_gaps(table_context),
             "## LookML patterns reference (from .claude/skills/lookml/SKILL.md)",
             _load_skill_excerpt(),
         ]
     )
+
+
+def _render_baseline_gaps(ctx: TableContext) -> str:
+    """Surface what the baseline lacks so the LLM enriches surgically.
+
+    Auto-generated Looker baselines are full of one-line "Customer ID"-style
+    descriptions and missing labels. Telling the LLM which fields are stubs
+    vs already-curated lets it spend tokens where it matters and stay out of
+    fields a human already wrote good copy for.
+    """
+    sig = ctx.baseline_quality_signals or {}
+    if not sig:
+        return (
+            "(no baseline view available — produce a complete enriched view "
+            "from scratch using the fingerprint + MDM context above)"
+        )
+
+    parts: list[str] = []
+    parts.append(
+        f"Baseline shape: {sig.get('dims_total', 0)} dimensions, "
+        f"{sig.get('measures_total', 0)} measures, "
+        f"primary_key={'yes' if sig.get('has_primary_key') else 'NO — must add one'}"
+    )
+    parts.append("")
+    gaps: list[str] = []
+    if sig.get("dims_missing_description", 0):
+        gaps.append(
+            f"- {sig['dims_missing_description']} dimensions have NO description"
+        )
+    if sig.get("dims_short_description", 0):
+        gaps.append(
+            f"- {sig['dims_short_description']} dimensions have a stub "
+            "description (< 30 chars — likely auto-generated; fine to enrich)"
+        )
+    if sig.get("dims_missing_label", 0):
+        gaps.append(f"- {sig['dims_missing_label']} dimensions have NO label")
+    if sig.get("dims_missing_tags", 0):
+        gaps.append(
+            f"- {sig['dims_missing_tags']} dimensions have NO tags "
+            "(add Radix-friendly synonyms)"
+        )
+    if sig.get("measures_missing_value_format", 0):
+        gaps.append(
+            f"- {sig['measures_missing_value_format']} measures have no "
+            "value_format_name"
+        )
+    if sig.get("dates_as_plain_dim", 0):
+        gaps.append(
+            f"- {sig['dates_as_plain_dim']} date column(s) are still plain "
+            "dimensions — must be promoted to dimension_group"
+        )
+    if not sig.get("has_primary_key"):
+        gaps.append(
+            "- NO primary_key dimension — pick one (look for *_id, *_xref_id, "
+            "or the JOIN-on column)"
+        )
+    if gaps:
+        parts.append("Gaps to fix (surgical enrichment scope):")
+        parts.extend(gaps)
+    else:
+        parts.append("No obvious gaps — only enrich if you can materially improve.")
+
+    parts.append("")
+    parts.append(
+        "MERGE POLICY: descriptions ≥ 30 chars are assumed human-curated — "
+        "DO NOT touch them. If you genuinely think one is wrong (not just terse), "
+        "put your alternative on `proposed_overwrites` (do NOT silently overwrite). "
+        "Tags are cumulative — always safe to add useful synonyms."
+    )
+    return "\n".join(parts)
 
 
 def _interpolate(template: str, placeholders: dict[str, str]) -> str:
