@@ -118,13 +118,23 @@ class TableDigest:
 
 
 def _resolve_key_path(explicit: str | None) -> Path:
+    """Resolve which SA JSON to use. Precedence: --key-file → $LUMI_BQ_KEY_FILE
+    → $GOOGLE_APPLICATION_CREDENTIALS.
+
+    LUMI_BQ_KEY_FILE lets BQ use a different SA than Vertex (which reads the
+    standard GOOGLE_APPLICATION_CREDENTIALS via google-genai), so both can
+    coexist in the same shell.
+    """
     if explicit:
         return Path(explicit).expanduser()
-    env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    env = (
+        os.environ.get("LUMI_BQ_KEY_FILE")
+        or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    )
     if not env:
         raise SystemExit(
-            "ERROR: no service-account key. Set GOOGLE_APPLICATION_CREDENTIALS "
-            "or pass --key-file /path/to/key.json"
+            "ERROR: no service-account key. Set LUMI_BQ_KEY_FILE (preferred for "
+            "BQ-only SA), or GOOGLE_APPLICATION_CREDENTIALS, or pass --key-file."
         )
     return Path(env).expanduser()
 
@@ -403,7 +413,13 @@ def main() -> int:
         )
 
     key_path = _resolve_key_path(args.key_file)
-    print(f"Using credentials: {key_path}")
+    if args.key_file:
+        key_source = "--key-file"
+    elif os.environ.get("LUMI_BQ_KEY_FILE"):
+        key_source = "$LUMI_BQ_KEY_FILE"
+    else:
+        key_source = "$GOOGLE_APPLICATION_CREDENTIALS (fallback)"
+    print(f"Using credentials: {key_path}  ({key_source})")
     print(f"Project:           {args.project}")
     print(f"Dataset:           {args.dataset}")
     print()
