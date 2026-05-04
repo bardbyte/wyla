@@ -72,6 +72,11 @@ class SQLFingerprint:
     aggregations: list[dict[str, Any]] = field(default_factory=list)
     case_whens: list[dict[str, Any]] = field(default_factory=list)
     ctes: list[dict[str, Any]] = field(default_factory=list)
+    # CREATE [OR REPLACE] [TEMP] TABLE x AS SELECT ... — semantically a
+    # CTE-equivalent (named intermediate result over real source tables).
+    # Same shape as a CTE entry: alias, source_tables, structural_filters,
+    # sql, plus is_temp/is_replace for future PDT-candidate detection.
+    temp_tables: list[dict[str, Any]] = field(default_factory=list)
     joins: list[dict[str, Any]] = field(default_factory=list)
     filters: list[dict[str, Any]] = field(default_factory=list)
     date_functions: list[dict[str, Any]] = field(default_factory=list)
@@ -138,7 +143,8 @@ def _parse_one(raw_sql: str) -> SQLFingerprint:
 
     fp.ctes = _extract_ctes(tree)
     cte_aliases = {c["alias"] for c in fp.ctes}
-    create_aliases = _extract_create_aliases(tree)
+    fp.temp_tables = _extract_temp_tables(tree, cte_aliases)
+    create_aliases = {t["alias"] for t in fp.temp_tables}
 
     fp.tables = _extract_tables(tree, exclude=cte_aliases | create_aliases)
     fp.primary_table = fp.tables[0] if fp.tables else None
@@ -162,24 +168,90 @@ def _extract_tables(tree: exp.Expression, exclude: set[str]) -> list[str]:
     return seen
 
 
-def _extract_create_aliases(tree: exp.Expression) -> set[str]:
-    """Names of CREATE [OR REPLACE] [TEMP] TABLE targets.
+def _extract_temp_tables(
+    tree: exp.Expression,
+    cte_aliases: set[str],
+) -> list[dict[str, Any]]:
+    """Capture each `CREATE [OR REPLACE] [TEMP] TABLE x AS SELECT ...` as a
+    CTE-equivalent.
 
-    A statement like `CREATE OR REPLACE TEMP TABLE renewal_fees AS SELECT
-    ... FROM real_table_a JOIN real_table_b ...` declares `renewal_fees`
-    as a transient alias — it is NOT a real BQ table to enrich. The real
-    tables live in the inner SELECT and are picked up via _extract_tables
-    on the rest of the tree.
+    Same fields as a CTE entry plus two flags useful downstream:
+      - is_temp:    BigQuery TEMP qualifier — purely session-scoped.
+      - is_replace: had OR REPLACE — usually means re-run friendliness.
+
+    The alias itself is NOT a real BQ table (Looker can't query a session
+    temp table), so it stays out of fp.tables. But we keep the structural
+    metadata so:
+      - source tables get the temp table's structural filters attributed
+        (same path CTEs use)
+      - the planner can flag temp tables that get reused as Looker PDT
+        (persistent derived table) candidates
+      - business-named intermediates ('renewal_fees', 'active_customers')
+        feed the NL-question / synonym layer
+
+    Pure CREATE TABLE without a SELECT body (e.g. CREATE TABLE foo (id INT64))
+    is skipped — that's a DDL statement, no semantics to extract.
     """
-    aliases: set[str] = set()
+    out: list[dict[str, Any]] = []
     for create in tree.find_all(exp.Create):
+        # Skip non-table CREATEs (CREATE FUNCTION, CREATE PROCEDURE, etc.)
+        kind = (create.args.get("kind") or "").upper()
+        if kind and kind != "TABLE":
+            continue
+
         target = create.this
-        # exp.Create's `.this` is usually exp.Table (the target) or a Schema
-        # wrapping it. Both expose .name.
-        name = getattr(target, "name", None)
-        if isinstance(name, str) and name:
-            aliases.add(name)
-    return aliases
+        alias = getattr(target, "name", None)
+        if not isinstance(alias, str) or not alias:
+            continue
+
+        # The body of CREATE ... AS SELECT lives in `expression`. CREATE TABLE
+        # foo (id INT64) has no expression — pure DDL, skip.
+        body = create.args.get("expression")
+        if body is None:
+            continue
+
+        # sqlglot stores TEMP under .properties as a TemporaryProperty, not a
+        # top-level arg. Walk the Properties node to detect it.
+        is_temp = False
+        props = create.args.get("properties")
+        if props is not None:
+            for prop in props.expressions or []:
+                if isinstance(prop, exp.TemporaryProperty):
+                    is_temp = True
+                    break
+        is_replace = bool(create.args.get("replace"))
+
+        # Structural filters (everything in the inner SELECT's WHERE).
+        body_filters: list[dict[str, Any]] = []
+        where = body.find(exp.Where) if hasattr(body, "find") else None
+        if where is not None:
+            body_filters = _flatten_predicates(where.this)
+            for f in body_filters:
+                f["is_structural"] = True
+
+        # Source tables vs upstream CTE references inside the body.
+        source_tables: list[str] = []
+        cte_dependencies: list[str] = []
+        for t in body.find_all(exp.Table):
+            if not t.name:
+                continue
+            if t.name in cte_aliases:
+                if t.name not in cte_dependencies:
+                    cte_dependencies.append(t.name)
+            else:
+                if t.name not in source_tables:
+                    source_tables.append(t.name)
+
+        out.append({
+            "alias": alias,
+            "structural_filters": body_filters,
+            "sql": body.sql(dialect=BQ_DIALECT),
+            "source_tables": source_tables,
+            "cte_dependencies": cte_dependencies,
+            "is_temp": is_temp,
+            "is_replace": is_replace,
+        })
+    return out
 
 
 def _extract_aggregations(tree: exp.Expression) -> list[dict[str, Any]]:
@@ -514,6 +586,20 @@ def discover_tables(
                 if qid not in ctx["queries_using_this"]:
                     ctx["queries_using_this"].append(qid)
 
+        # CREATE [TEMP] TABLE bodies — semantically same as CTEs. Attribute
+        # back through the same pipeline so source tables pick up the
+        # structural filters and the named intermediate is recorded.
+        for tt in fp.temp_tables:
+            for src in tt.get("source_tables") or []:
+                ctx = contexts.setdefault(src, _empty_context(src))
+                if tt not in ctx["temp_tables_referencing_this"]:
+                    ctx["temp_tables_referencing_this"].append(tt)
+                for sf in tt.get("structural_filters") or []:
+                    if sf not in ctx["filters_on_this"]:
+                        ctx["filters_on_this"].append(sf)
+                if qid not in ctx["queries_using_this"]:
+                    ctx["queries_using_this"].append(qid)
+
     # Now hydrate with MDM + baseline.
     for table_name, raw_ctx in contexts.items():
         mdm = mdm_client.fetch(table_name)
@@ -557,6 +643,7 @@ def _empty_context(table_name: str) -> dict[str, Any]:
         "aggregations": [],
         "case_whens": [],
         "ctes_referencing_this": [],
+        "temp_tables_referencing_this": [],
         "joins_involving_this": [],
         "filters_on_this": [],
         "date_functions": [],

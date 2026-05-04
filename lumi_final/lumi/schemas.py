@@ -32,6 +32,10 @@ class TableContext(BaseModel):
     aggregations: list[dict]           # {function, column, alias, outer_expr}
     case_whens: list[dict]             # {alias, source_column, sql, mapped_values}
     ctes_referencing_this: list[dict]  # {alias, structural_filters, sql, source_tables}
+    # CREATE [TEMP] TABLE bodies that read from this table — semantic
+    # equivalent of CTEs. Same shape plus is_temp/is_replace. Reused
+    # temp tables are PDT (persistent derived table) candidates downstream.
+    temp_tables_referencing_this: list[dict] = Field(default_factory=list)
     joins_involving_this: list[dict]   # {other_table, left_key, right_key, order}
     filters_on_this: list[dict]        # {column, operator, value, is_structural}
     date_functions: list[dict]         # {column, function}

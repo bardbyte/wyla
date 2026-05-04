@@ -205,6 +205,63 @@ def test_create_table_alias_excluded_from_tables():
     assert "real_source" in fp.tables
 
 
+def test_temp_table_captures_structure():
+    """The CREATE TEMP TABLE body's structure (filters, source tables,
+    flags) must be captured on fp.temp_tables — analogous to CTEs.
+    """
+    sql = """CREATE OR REPLACE TEMP TABLE renewal_fees AS
+    SELECT a.cm_id, b.amt
+    FROM `axp-lumi.dw.custins_customer_insights_cardmember` a
+    LEFT JOIN `axp-lumi.dw.pmdl_fin_match` b ON a.cm_id = b.cm_id
+    WHERE a.rpt_dt = '2024-06-01'
+    """
+    fps = parse_sqls([sql])
+    fp = fps[0]
+    assert len(fp.temp_tables) == 1
+    tt = fp.temp_tables[0]
+    assert tt["alias"] == "renewal_fees"
+    assert tt["is_temp"] is True
+    assert tt["is_replace"] is True
+    assert "custins_customer_insights_cardmember" in tt["source_tables"]
+    assert "pmdl_fin_match" in tt["source_tables"]
+    # The WHERE inside the body should land as a structural filter.
+    cols = {f["column"] for f in tt["structural_filters"]}
+    assert "rpt_dt" in cols
+    assert all(f["is_structural"] for f in tt["structural_filters"])
+
+
+def test_temp_table_attributed_to_source_table_context(mock_mdm, empty_baseline_dir):
+    """In discover_tables, a temp table reading from cardmember should
+    appear in cardmember's temp_tables_referencing_this AND its
+    structural filters should land on filters_on_this.
+    """
+    sql = """CREATE OR REPLACE TEMP TABLE renewal_fees AS
+    SELECT cm_id, amt
+    FROM `axp-lumi.dw.cornerstone_metrics`
+    WHERE data_source = 'cornerstone'
+    """
+    contexts = prepare_enrichment_context([sql], mock_mdm, str(empty_baseline_dir))
+    cs = contexts["cornerstone_metrics"]
+    assert len(cs.temp_tables_referencing_this) == 1
+    assert cs.temp_tables_referencing_this[0]["alias"] == "renewal_fees"
+    structural_cols = {
+        f["column"] for f in cs.filters_on_this if f.get("is_structural")
+    }
+    assert "data_source" in structural_cols
+
+
+def test_pure_ddl_create_table_skipped():
+    """CREATE TABLE foo (id INT64) is pure DDL — no SELECT body, no
+    semantics to extract. Must not crash or produce a temp_tables entry.
+    """
+    sql = "CREATE TABLE staging_only (id INT64, name STRING)"
+    fps = parse_sqls([sql])
+    fp = fps[0]
+    assert fp.parse_error is None
+    # The DDL produces no extractable temp-table body (no AS SELECT)
+    assert fp.temp_tables == []
+
+
 # ─── Empty input handling ───────────────────────────────────
 
 
