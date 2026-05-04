@@ -51,26 +51,45 @@ def check_parse_and_discover(
     warnings = []
 
     # Check 1: Parse success — failures are QUARANTINED (warned) not blocking.
-    # 12% Excel-induced parse failures shouldn't kill the run; the pipeline
-    # ships with the parsed corpus and humans fix the failures separately.
-    parse_failures: list[str] = []
+    # Split into empty-cell skips (Excel rows with no SQL) vs. real parser
+    # errors. Empty cells are noise; real errors are the only thing humans
+    # should triage with diagnose_parse_failures.py.
+    empty_cells: list[int] = []
+    real_parse_errors: list[str] = []
     for i, fp in enumerate(fingerprints):
-        if fp is None or fp.get("_parse_error"):
-            err = (fp or {}).get("_parse_error", "unknown error")
-            parse_failures.append(f"SQL #{i + 1}: {err}")
-    parse_pass_count = len(raw_sqls) - len(parse_failures)
+        if fp is None:
+            real_parse_errors.append(f"SQL #{i + 1}: no fingerprint")
+            continue
+        err = fp.get("_parse_error")
+        if not err:
+            continue
+        if err == "empty_input":
+            empty_cells.append(i + 1)
+        else:
+            real_parse_errors.append(f"SQL #{i + 1}: {err}")
+
+    parsed_count = len(raw_sqls) - len(empty_cells) - len(real_parse_errors)
     checks.append({
         "name": "sql_parse_success",
-        "passed": len(parse_failures) == 0,
-        "message": f"{parse_pass_count}/{len(raw_sqls)} SQLs parsed",
+        "passed": not real_parse_errors,
+        "message": (
+            f"{parsed_count} parsed, "
+            f"{len(empty_cells)} empty cells skipped, "
+            f"{len(real_parse_errors)} real parse error(s)"
+        ),
     })
-    if parse_failures:
+    if empty_cells:
         warnings.append(
-            f"{len(parse_failures)} SQL(s) failed to parse — quarantined. "
+            f"{len(empty_cells)} empty SQL cell(s) skipped "
+            f"(rows: {empty_cells[:10]}{' …' if len(empty_cells) > 10 else ''}). "
+            "Likely blank Excel rows — fix at source or filter in excel_to_queries.py."
+        )
+    if real_parse_errors:
+        warnings.append(
+            f"{len(real_parse_errors)} SQL(s) failed to parse — quarantined. "
             f"Run: python scripts/diagnose_parse_failures.py"
         )
-        # Surface the first 5 individually so the trace is actionable.
-        for pf in parse_failures[:5]:
+        for pf in real_parse_errors[:5]:
             warnings.append(pf)
 
     # Check 2: CTE consistency — chained CTEs (depend on another CTE, no real

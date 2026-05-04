@@ -105,6 +105,13 @@ def _trim_for_parse(sql: str) -> str:
 def _parse_one(raw_sql: str) -> SQLFingerprint:
     fp = SQLFingerprint(raw_sql=raw_sql)
     cleaned = _trim_for_parse(raw_sql)
+    # Excel exports often produce empty cells or stringified empties ('').
+    # Mark these with a distinct sentinel so the guardrail can separate
+    # "no SQL to parse" from "real sqlglot error".
+    if not cleaned or cleaned in ("''", '""', "``"):
+        fp.parse_error = "empty_input"
+        return fp
+
     tree: exp.Expression | None = None
     first_error: Exception | None = None
 
@@ -131,8 +138,9 @@ def _parse_one(raw_sql: str) -> SQLFingerprint:
 
     fp.ctes = _extract_ctes(tree)
     cte_aliases = {c["alias"] for c in fp.ctes}
+    create_aliases = _extract_create_aliases(tree)
 
-    fp.tables = _extract_tables(tree, exclude=cte_aliases)
+    fp.tables = _extract_tables(tree, exclude=cte_aliases | create_aliases)
     fp.primary_table = fp.tables[0] if fp.tables else None
     fp.aggregations = _extract_aggregations(tree)
     fp.case_whens = _extract_case_whens(tree)
@@ -143,13 +151,35 @@ def _parse_one(raw_sql: str) -> SQLFingerprint:
 
 
 def _extract_tables(tree: exp.Expression, exclude: set[str]) -> list[str]:
-    """Real tables (not CTE aliases). Preserves first-seen order."""
+    """Real tables (not CTE aliases or CREATE-target tables).
+    Preserves first-seen order.
+    """
     seen: list[str] = []
     for t in tree.find_all(exp.Table):
         name = t.name
         if name and name not in exclude and name not in seen:
             seen.append(name)
     return seen
+
+
+def _extract_create_aliases(tree: exp.Expression) -> set[str]:
+    """Names of CREATE [OR REPLACE] [TEMP] TABLE targets.
+
+    A statement like `CREATE OR REPLACE TEMP TABLE renewal_fees AS SELECT
+    ... FROM real_table_a JOIN real_table_b ...` declares `renewal_fees`
+    as a transient alias — it is NOT a real BQ table to enrich. The real
+    tables live in the inner SELECT and are picked up via _extract_tables
+    on the rest of the tree.
+    """
+    aliases: set[str] = set()
+    for create in tree.find_all(exp.Create):
+        target = create.this
+        # exp.Create's `.this` is usually exp.Table (the target) or a Schema
+        # wrapping it. Both expose .name.
+        name = getattr(target, "name", None)
+        if isinstance(name, str) and name:
+            aliases.add(name)
+    return aliases
 
 
 def _extract_aggregations(tree: exp.Expression) -> list[dict[str, Any]]:

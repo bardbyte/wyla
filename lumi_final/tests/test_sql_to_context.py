@@ -174,6 +174,50 @@ def test_parse_q2_date_function_extraction(q2_sql):
     )
 
 
+# ─── CREATE [TEMP] TABLE handling ───────────────────────────
+
+
+def test_create_temp_table_alias_excluded_from_tables():
+    """CREATE OR REPLACE TEMP TABLE renewal_fees AS SELECT ... — the
+    target name is a transient alias. Only the real source tables in
+    the inner SELECT should land in fp.tables.
+    """
+    sql = """CREATE OR REPLACE TEMP TABLE renewal_fees AS
+    SELECT a.cm_id, b.amt
+    FROM `axp-lumi.dw.custins_customer_insights_cardmember` a
+    LEFT JOIN `axp-lumi.dw.pmdl_fin_match` b ON a.cm_id = b.cm_id
+    """
+    fps = parse_sqls([sql])
+    fp = fps[0]
+    assert fp.parse_error is None
+    assert "renewal_fees" not in fp.tables
+    assert "custins_customer_insights_cardmember" in fp.tables
+    assert "pmdl_fin_match" in fp.tables
+
+
+def test_create_table_alias_excluded_from_tables():
+    """Plain CREATE TABLE foo AS SELECT — same exclusion."""
+    sql = "CREATE TABLE staging_foo AS SELECT id FROM real_source"
+    fps = parse_sqls([sql])
+    fp = fps[0]
+    assert fp.parse_error is None
+    assert "staging_foo" not in fp.tables
+    assert "real_source" in fp.tables
+
+
+# ─── Empty input handling ───────────────────────────────────
+
+
+def test_empty_string_marked_empty_input():
+    """Excel exports often produce empty cells. Distinguish from real
+    sqlglot errors so the guardrail can de-noise the warning summary.
+    """
+    fps = parse_sqls(["", "   ", "''", '""'])
+    for fp in fps:
+        assert fp.parse_error == "empty_input"
+        assert fp.tables == []
+
+
 # ─── Stage 2 unit tests — discover_tables() ─────────────────
 
 
