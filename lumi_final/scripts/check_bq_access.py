@@ -248,6 +248,19 @@ def _resolve_key_path(explicit: str | None) -> Path:
     return Path(env).expanduser()
 
 
+def _read_sa_project(key_path: Path) -> str | None:
+    """Pull the project_id out of an SA JSON. The SA's home project is the
+    most reliable default for billing — using anything else risks 404s on
+    list_datasets when the project name is even slightly wrong.
+    """
+    try:
+        data = json.loads(key_path.read_text(encoding="utf-8"))
+        pid = data.get("project_id")
+        return pid if isinstance(pid, str) and pid else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _build_client(billing_project: str, key_path: Path) -> bigquery.Client:
     """Build a BQ client from the SA JSON.
 
@@ -289,6 +302,15 @@ def probe_auth(
     try:
         billing_ds = list(client.list_datasets(max_results=5))
         out["billing_datasets_visible"] = [d.dataset_id for d in billing_ds]
+    except gcp_exceptions.NotFound as e:
+        out["status"] = "error"
+        out["error"] = (
+            f"404 Not Found on billing project '{client.project}'. The project "
+            f"name doesn't exist or the SA has zero visibility. Check the "
+            f"`project_id` field in your SA JSON — that's almost always the "
+            f"right billing project. Original: {e}"
+        )
+        return out
     except gcp_exceptions.Forbidden as e:
         out["status"] = "error"
         out["error"] = f"Forbidden listing billing project '{client.project}': {e}"
@@ -514,10 +536,11 @@ def main() -> int:
     p.add_argument("--key-file", help="SA JSON; defaults to $LUMI_BQ_KEY_FILE / $GOOGLE_APPLICATION_CREDENTIALS")
     p.add_argument(
         "--billing-project",
-        default=os.environ.get("LUMI_BQ_BILLING_PROJECT", DEFAULT_BILLING_PROJECT),
+        default=None,
         help=(
-            f"Project that pays for queries (SA needs jobUser here). "
-            f"Default: $LUMI_BQ_BILLING_PROJECT or '{DEFAULT_BILLING_PROJECT}'"
+            "Project that pays for queries (SA needs jobUser here). "
+            "Default: $LUMI_BQ_BILLING_PROJECT, else the project_id from "
+            f"your SA JSON, else '{DEFAULT_BILLING_PROJECT}'."
         ),
     )
     p.add_argument(
@@ -591,13 +614,39 @@ def main() -> int:
         key_source = "$LUMI_BQ_KEY_FILE"
     else:
         key_source = "$GOOGLE_APPLICATION_CREDENTIALS (fallback)"
+    sa_project = _read_sa_project(key_path)
+    # Resolve billing project: --billing-project > $LUMI_BQ_BILLING_PROJECT >
+    # SA's own project_id > hardcoded default.
+    billing_project = (
+        args.billing_project
+        or os.environ.get("LUMI_BQ_BILLING_PROJECT")
+        or sa_project
+        or DEFAULT_BILLING_PROJECT
+    )
+    if args.billing_project:
+        bp_source = "--billing-project"
+    elif os.environ.get("LUMI_BQ_BILLING_PROJECT"):
+        bp_source = "$LUMI_BQ_BILLING_PROJECT"
+    elif sa_project:
+        bp_source = "SA JSON project_id"
+    else:
+        bp_source = "hardcoded default"
+
     print(f"Using credentials: {key_path}  ({key_source})")
-    print(f"Billing project:   {args.billing_project}  (pays for queries; needs jobUser)")
+    if sa_project:
+        print(f"SA's home project: {sa_project}  (from SA JSON project_id)")
+    print(f"Billing project:   {billing_project}  ({bp_source}; needs jobUser)")
+    if sa_project and sa_project != billing_project:
+        print(
+            f"  ⚠  billing project differs from SA's home project — that's fine "
+            f"if intended, but a 404 here usually means you should use "
+            f"--billing-project {sa_project}"
+        )
     print(f"Data project:      {args.data_project}  (where tables live; needs dataViewer)")
     print(f"Dataset:           {args.dataset}")
     print()
 
-    client = _build_client(args.billing_project, key_path)
+    client = _build_client(billing_project, key_path)
 
     # Step 1: auth probe — covers BOTH billing and data project access.
     auth_result = probe_auth(client, args.data_project)
