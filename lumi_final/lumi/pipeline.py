@@ -313,9 +313,18 @@ def run_execute_phase(
                 )
         work.append((ctx, plan))
 
+    # Grounding signals need the full corpus of fingerprints + all
+    # discovered contexts, NOT just the current table's. Compute once
+    # outside the per-table loop so we don't re-parse 138 SQLs 29 times.
+    all_fps = parse_sqls(_load_gold_sqls(cfg))
+
     if work:
         enriched_results = asyncio.run(
-            _enrich_many(work, cfg, dry_run=dry_run)
+            _enrich_many(
+                work, cfg, dry_run=dry_run,
+                all_fingerprints=all_fps,
+                contexts_by_table=contexts,
+            )
         )
         for table_name, result_or_err in enriched_results.items():
             if isinstance(result_or_err, EnrichedOutput):
@@ -386,6 +395,8 @@ async def _enrich_many(
     cfg: LumiConfig,
     *,
     dry_run: bool,
+    all_fingerprints: list | None = None,
+    contexts_by_table: dict | None = None,
 ) -> dict[str, EnrichedOutput | Exception]:
     """Run enrich_table concurrently with a Semaphore cap.
 
@@ -393,6 +404,10 @@ async def _enrich_many(
     self-repair retry loop). We just bound how many fire in parallel so we
     don't smash Vertex's per-project QPS limit. ``cfg.max_concurrent_enrichments``
     defaults to 5.
+
+    Args:
+        all_fingerprints / contexts_by_table: passed to enrich_table so it
+            can compute grounding signals against the full corpus.
     """
     sem = asyncio.Semaphore(cfg.max_concurrent_enrichments)
     out: dict[str, EnrichedOutput | Exception] = {}
@@ -404,7 +419,9 @@ async def _enrich_many(
                     eo = _load_dry_run_fixture(ctx.table_name)
                 else:
                     eo = await asyncio.to_thread(
-                        enrich_table, ctx, plan, None, cfg
+                        enrich_table, ctx, plan, None, cfg, 2,
+                        all_fingerprints=all_fingerprints,
+                        contexts_by_table=contexts_by_table,
                     )
                 out[ctx.table_name] = eo
                 logger.info("enriched %s", ctx.table_name)
