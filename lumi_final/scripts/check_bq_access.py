@@ -67,6 +67,7 @@ except ImportError:
 
 try:
     from google.api_core import exceptions as gcp_exceptions
+    from google.api_core.client_options import ClientOptions
     from google.cloud import bigquery
     from google.oauth2 import service_account
 except ImportError as e:
@@ -189,6 +190,11 @@ def _disable_ssl_verification() -> None:
 DEFAULT_BILLING_PROJECT = "prj-d-lumi-gpt"
 DEFAULT_DATA_PROJECT = "axp-lumi"
 DEFAULT_DATASET = "dw"
+# Amex routes BigQuery through Private Service Connect (PSC) — the public
+# bigquery.googleapis.com endpoint isn't reachable from the corp network,
+# but bigquery-dev.p.googleapis.com is. google-cloud-bigquery defaults to
+# the public endpoint and gets 404; we have to override via client_options.
+DEFAULT_API_ENDPOINT = "https://bigquery-dev.p.googleapis.com"
 # Tables small enough to enumerate distinct values without scanning TBs.
 # Strings + bool + small int. We skip wide types (numeric/float/timestamp).
 LOW_CARD_TYPES = {"STRING", "BOOL", "BOOLEAN", "INT64", "INTEGER"}
@@ -261,12 +267,18 @@ def _read_sa_project(key_path: Path) -> str | None:
         return None
 
 
-def _build_client(billing_project: str, key_path: Path) -> bigquery.Client:
+def _build_client(
+    billing_project: str,
+    key_path: Path,
+    api_endpoint: str | None = None,
+) -> bigquery.Client:
     """Build a BQ client from the SA JSON.
 
     Args:
         billing_project: project that pays for queries — SA needs jobUser here.
         key_path: SA JSON.
+        api_endpoint: override BQ API URL (e.g. PSC endpoint on corp networks).
+            None → google-cloud-bigquery's default (bigquery.googleapis.com).
 
     The data project (where tables live) is passed per-query via the
     fully-qualified `project.dataset.table` reference in the SQL.
@@ -277,7 +289,14 @@ def _build_client(billing_project: str, key_path: Path) -> bigquery.Client:
         str(key_path),
         scopes=["https://www.googleapis.com/auth/bigquery.readonly"],
     )
-    return bigquery.Client(project=billing_project, credentials=creds)
+    client_options: ClientOptions | None = None
+    if api_endpoint:
+        client_options = ClientOptions(api_endpoint=api_endpoint)
+    return bigquery.Client(
+        project=billing_project,
+        credentials=creds,
+        client_options=client_options,
+    )
 
 
 # ─── Probes ──────────────────────────────────────────────────
@@ -549,6 +568,15 @@ def main() -> int:
         help=f"Project where tables live (SA needs dataViewer). Default: {DEFAULT_DATA_PROJECT}",
     )
     p.add_argument("--dataset", default=DEFAULT_DATASET, help=f"BQ dataset (default: {DEFAULT_DATASET})")
+    p.add_argument(
+        "--api-endpoint",
+        default=os.environ.get("LUMI_BQ_API_ENDPOINT", DEFAULT_API_ENDPOINT),
+        help=(
+            "BQ API URL. Default: $LUMI_BQ_API_ENDPOINT or "
+            f"'{DEFAULT_API_ENDPOINT}' (Amex PSC endpoint). Pass empty "
+            "string to use Google's public default."
+        ),
+    )
     p.add_argument("--table", action="append", help="Specific table(s) to probe; repeat for many")
     p.add_argument(
         "--from-session1",
@@ -644,9 +672,14 @@ def main() -> int:
         )
     print(f"Data project:      {args.data_project}  (where tables live; needs dataViewer)")
     print(f"Dataset:           {args.dataset}")
+    api_endpoint = args.api_endpoint or None  # empty string → None → use default
+    if api_endpoint:
+        print(f"API endpoint:      {api_endpoint}  (override; PSC / corp routing)")
+    else:
+        print("API endpoint:      bigquery.googleapis.com  (Google default)")
     print()
 
-    client = _build_client(billing_project, key_path)
+    client = _build_client(billing_project, key_path, api_endpoint=api_endpoint)
 
     # Step 1: auth probe — covers BOTH billing and data project access.
     auth_result = probe_auth(client, args.data_project)

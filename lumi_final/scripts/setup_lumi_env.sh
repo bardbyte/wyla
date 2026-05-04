@@ -85,6 +85,9 @@ export GOOGLE_CLOUD_LOCATION=global
 # the project we bill against.
 export LUMI_BQ_KEY_FILE="$BQ_ABS"
 export LUMI_BQ_BILLING_PROJECT=prj-d-lumi-gpt
+# Amex routes BQ through Private Service Connect — public bigquery.googleapis.com
+# 404s on the corp network, this PSC variant is the actual reachable endpoint.
+export LUMI_BQ_API_ENDPOINT=https://bigquery-dev.p.googleapis.com
 
 echo "LUMI env configured:"
 echo "  GOOGLE_APPLICATION_CREDENTIALS = $GOOGLE_APPLICATION_CREDENTIALS"
@@ -93,6 +96,7 @@ echo "  GOOGLE_CLOUD_PROJECT           = $GOOGLE_CLOUD_PROJECT  (Vertex)"
 echo "  GOOGLE_CLOUD_LOCATION          = $GOOGLE_CLOUD_LOCATION"
 echo "  LUMI_BQ_KEY_FILE               = $LUMI_BQ_KEY_FILE"
 echo "  LUMI_BQ_BILLING_PROJECT        = $LUMI_BQ_BILLING_PROJECT  (BQ jobs billed here)"
+echo "  LUMI_BQ_API_ENDPOINT           = $LUMI_BQ_API_ENDPOINT  (Amex PSC route)"
 echo
 echo "Now run any of:"
 echo "  python lumi_final/scripts/check_vertex_gemini.py     # Vertex SA"
