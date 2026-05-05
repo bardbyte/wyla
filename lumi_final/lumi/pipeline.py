@@ -198,6 +198,10 @@ def run_plan_phase(
     # passed to every per-table plan call to compute grounding+narrative.
     fps_for_plan = fps if with_llm else None
 
+    llm_authored = 0
+    skeleton_fallback = 0
+    fallback_reasons: dict[str, int] = {}
+
     for rank, ctx in enumerate(ranked, start=1):
         try:
             plan = build_enrichment_plan(
@@ -215,7 +219,21 @@ def run_plan_phase(
             )
             result.files_written.append(str(md_path))
             result.tables_succeeded += 1
-            logger.info("plan written for %s (rank #%d)", ctx.table_name, rank)
+            # Tally provenance so the user knows how many plans actually
+            # had Gemini's reasoning applied.
+            mode = (plan.authoring or {}).get("mode", "skeleton")
+            if mode == "llm":
+                llm_authored += 1
+            else:
+                skeleton_fallback += 1
+                reason = (plan.authoring or {}).get("reason") or "(unspecified)"
+                # Truncate long ADK error strings into a stable bucket.
+                bucket = reason[:80]
+                fallback_reasons[bucket] = fallback_reasons.get(bucket, 0) + 1
+            logger.info(
+                "plan written for %s (rank #%d, mode=%s)",
+                ctx.table_name, rank, mode,
+            )
         except Exception as e:  # noqa: BLE001
             result.tables_failed += 1
             result.failures.append({
@@ -224,6 +242,19 @@ def run_plan_phase(
                 "error": f"{type(e).__name__}: {e}",
             })
             logger.exception("plan failed for %s", ctx.table_name)
+
+    # Surface authoring stats in the run summary.
+    if with_llm or skeleton_fallback:
+        result.extra["plans_llm_authored"] = llm_authored
+        result.extra["plans_skeleton_fallback"] = skeleton_fallback
+        if fallback_reasons:
+            # Top-3 fallback reasons so the user sees what to fix.
+            top = sorted(
+                fallback_reasons.items(), key=lambda kv: -kv[1],
+            )[:3]
+            result.extra["fallback_reasons_top3"] = [
+                f"{count}× {reason}" for reason, count in top
+            ]
 
     summary_path = queue_dir / "REVIEW.md"
     summary_path.write_text(

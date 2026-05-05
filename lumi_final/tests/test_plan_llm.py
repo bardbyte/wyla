@@ -201,6 +201,60 @@ def test_llm_preserves_skeleton_token_estimates():
 # ─── Prompt assembly ─────────────────────────────────────────
 
 
+def test_parse_plan_handles_markdown_codefence():
+    """Gemini sometimes wraps in ```json ... ``` despite mime hint."""
+    from lumi.plan_builder import _parse_plan_response
+    payload = (
+        "```json\n"
+        '{"table_name": "t", "reasoning": "r", "complexity": "simple",\n'
+        ' "proposed_dimensions": [{"name": "a", "type": "string", "source_column": "a"}],\n'
+        ' "proposed_measures": []}\n'
+        "```"
+    )
+    plan = _parse_plan_response(payload, "t")
+    assert plan is not None
+    assert plan.table_name == "t"
+
+
+def test_parse_plan_handles_trailing_commas():
+    """Trailing commas are JSON-invalid but common LLM output."""
+    from lumi.plan_builder import _parse_plan_response
+    payload = (
+        '{"table_name": "t", "reasoning": "r", "complexity": "simple",\n'
+        ' "proposed_dimensions": [\n'
+        '   {"name": "a", "type": "string", "source_column": "a"},\n'  # trailing
+        ' ],\n'
+        ' "proposed_measures": [],\n'    # trailing comma
+        '}'
+    )
+    plan = _parse_plan_response(payload, "t")
+    assert plan is not None
+    assert plan.proposed_dimensions[0]["name"] == "a"
+
+
+def test_parse_plan_handles_prose_before_json():
+    """Sometimes Gemini puts text before the JSON object."""
+    from lumi.plan_builder import _parse_plan_response
+    payload = (
+        "Here is the plan you requested:\n\n"
+        '{"table_name": "t", "reasoning": "r", "complexity": "simple",\n'
+        ' "proposed_dimensions": [{"name": "a", "type": "string", "source_column": "a"}],\n'
+        ' "proposed_measures": []}\n'
+        "Hope this helps!"
+    )
+    plan = _parse_plan_response(payload, "t")
+    assert plan is not None
+    assert plan.table_name == "t"
+
+
+def test_parse_plan_returns_none_on_unrecoverable():
+    """When all repair strategies fail, return None so the caller falls
+    back to the skeleton."""
+    from lumi.plan_builder import _parse_plan_response
+    plan = _parse_plan_response("this is not json at all", "t")
+    assert plan is None
+
+
 def test_plan_prompt_includes_narrative_and_grounding():
     """The prompt must include the table narrative + grounding signal
     sections + the deterministic skeleton + authoring rules."""
