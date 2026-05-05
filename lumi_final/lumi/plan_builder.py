@@ -41,11 +41,20 @@ logger = logging.getLogger("lumi.plan_builder")
 # ─── Public API ──────────────────────────────────────────────
 
 
-def build_enrichment_plan_skeleton(ctx: TableContext) -> EnrichmentPlan:
+def build_enrichment_plan_skeleton(
+    ctx: TableContext,
+    *,
+    fallback_reason: str | None = None,
+) -> EnrichmentPlan:
     """Deterministic plan from sqlglot + MDM + baseline only.
 
     This is the fallback when LLM authoring is disabled or fails.
     Always succeeds, always reproducible.
+
+    Args:
+        fallback_reason: when the skeleton is being used because the LLM
+            path failed, pass the reason here so it lands on the plan's
+            ``authoring`` field for downstream visibility.
     """
     proposed_dimensions = _propose_dimensions(ctx)
     proposed_dim_groups = _propose_dimension_groups(ctx)
@@ -91,6 +100,7 @@ def build_enrichment_plan_skeleton(ctx: TableContext) -> EnrichmentPlan:
         risks=risks,
         questions_for_reviewer=_questions_for_reviewer(ctx, risks),
         fields_to_enrich=fields_to_enrich,
+        authoring={"mode": "skeleton", "reason": fallback_reason},
     )
 
 
@@ -118,15 +128,17 @@ def build_enrichment_plan(
         EnrichmentPlan. On LLM error or missing prerequisites, falls
         back to the deterministic skeleton — caller never gets None.
     """
-    skeleton = build_enrichment_plan_skeleton(ctx)
     if not with_llm:
-        return skeleton
+        return build_enrichment_plan_skeleton(ctx)
     if all_fingerprints is None:
         logger.warning(
             "build_enrichment_plan(with_llm=True) needs all_fingerprints "
             "to compute grounding/narrative; falling back to skeleton",
         )
-        return skeleton
+        return build_enrichment_plan_skeleton(
+            ctx, fallback_reason="all_fingerprints not provided to build_enrichment_plan",
+        )
+    skeleton = build_enrichment_plan_skeleton(ctx)
     try:
         return _author_plan_with_llm(
             ctx, skeleton, all_fingerprints, contexts_by_table or {},
@@ -137,7 +149,9 @@ def build_enrichment_plan(
             "LLM plan authoring failed for %s, using skeleton: %s",
             ctx.table_name, e,
         )
-        return skeleton
+        return build_enrichment_plan_skeleton(
+            ctx, fallback_reason=f"{type(e).__name__}: {e}",
+        )
 
 
 def _author_plan_with_llm(
@@ -178,7 +192,9 @@ def _author_plan_with_llm(
     refined = _invoke_plan_agent(prompt, ctx.table_name, config)
     if refined is None:
         logger.info("LLM returned no usable plan; using skeleton")
-        return skeleton
+        return build_enrichment_plan_skeleton(
+            ctx, fallback_reason="LLM returned no usable plan (None)",
+        )
 
     # Sanity guard: if the LLM dropped substantive proposals, fall back.
     # The skeleton's count is a floor — Gemini can refine but shouldn't
@@ -187,7 +203,10 @@ def _author_plan_with_llm(
         logger.warning(
             "LLM-authored plan has no dims/measures, falling back to skeleton",
         )
-        return skeleton
+        return build_enrichment_plan_skeleton(
+            ctx,
+            fallback_reason="LLM-authored plan had no dimensions/measures",
+        )
 
     # Preserve fields the LLM is unlikely to refine well.
     refined.estimated_input_tokens = (
@@ -199,6 +218,8 @@ def _author_plan_with_llm(
     refined.fields_to_enrich = (
         refined.fields_to_enrich or skeleton.fields_to_enrich
     )
+    # Stamp authoring as LLM — clears the skeleton default.
+    refined.authoring = {"mode": "llm", "reason": None}
     return refined
 
 
@@ -492,8 +513,30 @@ def format_enrichment_plan_markdown(
     sig = ctx.baseline_quality_signals or {}
     rank_line = f" — rank #{rank}" if rank is not None else ""
 
+    # Authoring badge — first thing the human reviewer should see so they
+    # know whether this plan has Gemini's reasoning or just deterministic
+    # defaults. Failures get the reason inline.
+    authoring = plan.authoring or {}
+    mode = authoring.get("mode", "skeleton")
+    if mode == "llm":
+        authoring_line = "**Authored by**: 🧠 Gemini (full grounded context)"
+    else:
+        reason = authoring.get("reason")
+        if reason:
+            authoring_line = (
+                f"**Authored by**: ⚠ deterministic skeleton — LLM unavailable: "
+                f"_{reason}_"
+            )
+        else:
+            authoring_line = (
+                "**Authored by**: deterministic skeleton "
+                "(re-run with `python -m lumi plan --with-llm` for richer reasoning)"
+            )
+
     lines: list[str] = [
         f"# Enrichment plan: {plan.table_name}{rank_line}",
+        "",
+        authoring_line,
         "",
         f"- complexity: **{plan.complexity}**",
         f"- queries using this table: {len(ctx.queries_using_this)}",

@@ -201,6 +201,14 @@ class EnrichmentPlan(BaseModel):
         description="[{name, kind: dim|dim_group|measure, gap: missing_description|"
                     "short_description|missing_label|missing_value_format|promote_to_dim_group}]",
     )
+    # Provenance: was this plan authored by Gemini or by the deterministic
+    # skeleton? When the LLM call failed, ``reason`` carries the error
+    # message so the human reviewer knows why their plan is less rich.
+    # {"mode": "llm" | "skeleton", "reason": str | None}
+    authoring: dict = Field(
+        default_factory=lambda: {"mode": "skeleton", "reason": None},
+        description="Plan provenance — LLM-authored or deterministic skeleton",
+    )
 
 
 ApprovalSource = Literal["human", "auto_low_risk", "auto_skip", "pending"]
