@@ -80,6 +80,13 @@ class SQLFingerprint:
     joins: list[dict[str, Any]] = field(default_factory=list)
     filters: list[dict[str, Any]] = field(default_factory=list)
     date_functions: list[dict[str, Any]] = field(default_factory=list)
+    # SELECT col AS alias — analysts' own glossary. Per-column list of
+    # aliases observed in this query's SELECT clause. Only meaningful
+    # aliases (passes _alias_quality_filter) are kept; trivial ones
+    # (`a`, `t1`, `tmp`) get filtered out at aggregation time but the
+    # raw capture here keeps everything for traceability.
+    # Format: [{"column": str, "alias": str, "expression": str}]
+    select_aliases: list[dict[str, Any]] = field(default_factory=list)
     parse_error: str | None = None
 
 
@@ -153,6 +160,7 @@ def _parse_one(raw_sql: str) -> SQLFingerprint:
     fp.joins = _extract_joins(tree)
     fp.filters = _extract_filters(tree)
     fp.date_functions = _extract_date_functions(tree)
+    fp.select_aliases = _extract_select_aliases(tree)
     return fp
 
 
@@ -494,6 +502,86 @@ def _col_name(node: exp.Expression | None) -> str | None:
                 for a in arg:
                     if isinstance(a, exp.Column):
                         return a.name
+    return None
+
+
+def _extract_select_aliases(tree: exp.Expression) -> list[dict[str, Any]]:
+    """Capture every ``SELECT col AS alias`` in the query.
+
+    These are the analysts' own glossary — when a query writes
+    ``SUM(billed_business) AS total_revenue``, the author is telling us
+    "billed_business IS revenue in this domain." For columns with cryptic
+    names (cm11, pmdl_*) this is often the most concrete domain signal.
+
+    Captures EVERY alias unfiltered for traceability; the quality filter
+    runs later when we aggregate aliases into the narrative section so
+    Gemini only sees meaningful ones.
+
+    Returns:
+        list of {"column": str | None, "alias": str, "expression": str}
+        — column is the source column when the expression is a simple
+        Column or a 1-arg function; None for complex expressions.
+    """
+    out: list[dict[str, Any]] = []
+    # Only the OUTER SELECT — alias names inside CTEs are CTE-internal
+    # aliases that don't apply to the final output. We get them via
+    # ctes[i].sql when that matters.
+    top_select = tree.find(exp.Select) if hasattr(tree, "find") else None
+    if top_select is None:
+        return out
+    for proj in top_select.expressions or []:
+        if not isinstance(proj, exp.Alias):
+            continue
+        alias_name = proj.alias
+        inner = proj.this
+        # Try to identify the source column. Walk through one or two
+        # wrapper layers to handle COUNT(DISTINCT col), SUM(col),
+        # TRIM(col), DATE(col), etc.
+        column = _peel_to_column(inner)
+        out.append({
+            "column": column,
+            "alias": alias_name,
+            "expression": inner.sql(dialect=BQ_DIALECT) if inner else "",
+        })
+    return out
+
+
+def _peel_to_column(node: exp.Expression | None) -> str | None:
+    """Walk through Func / Distinct wrappers to find the underlying column.
+
+    Handles:
+      - col                    → col
+      - SUM(col)               → col
+      - COUNT(DISTINCT col)    → col  (Distinct wraps Column)
+      - DATE(col), TRIM(col)   → col
+      - SUM(amt) / 1e9         → amt  (the Column inside the Div)
+    Returns None for purely literal expressions (1, 'x', etc.).
+    """
+    if node is None:
+        return None
+    if isinstance(node, exp.Column):
+        return node.name
+    if isinstance(node, exp.Distinct):
+        # Distinct.expressions is a list when DISTINCT col1, col2 is used;
+        # for COUNT(DISTINCT col) it's a single Column inside that list.
+        for ex in node.expressions or []:
+            col = _peel_to_column(ex)
+            if col:
+                return col
+        # Older sqlglot put it on .this
+        return _peel_to_column(node.this)
+    # Walk into any sub-expression that has children.
+    for arg in node.args.values():
+        if isinstance(arg, exp.Expression):
+            col = _peel_to_column(arg)
+            if col:
+                return col
+        elif isinstance(arg, list):
+            for sub in arg:
+                if isinstance(sub, exp.Expression):
+                    col = _peel_to_column(sub)
+                    if col:
+                        return col
     return None
 
 

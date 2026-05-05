@@ -107,6 +107,9 @@ def enrich_table(
         grounding = build_grounding_signals(
             table_context, all_fingerprints, contexts_by_table or {}
         )
+        # Stash for the narrative module to read — same fingerprints,
+        # one parse cost across grounding + narrative.
+        grounding._all_fingerprints = all_fingerprints  # type: ignore[attr-defined]
 
     base_prompt = build_enrichment_prompt(
         table_context, approved_plan, config=cfg, grounding=grounding,
@@ -284,8 +287,18 @@ def build_enrichment_prompt(
         # Lazy import keeps grounding optional for callers that just
         # want the legacy prompt shape (e.g. some unit tests).
         from lumi.grounding import render_grounding_signals
+        from lumi.narrative import build_table_narrative, render_table_narrative
+        # Narrative reads the same fingerprint corpus we already have.
+        # all_fingerprints is attached to grounding by the caller; if not
+        # available, narrative degrades gracefully to per-table-only.
+        all_fps = getattr(grounding, "_all_fingerprints", None)
+        narrative = build_table_narrative(
+            table_context, all_fingerprints=all_fps,
+        )
         sections.extend([
             "",  # visual separator
+            render_table_narrative(narrative),
+            "",
             render_grounding_signals(grounding),  # type: ignore[arg-type]
             "",
             "## Confidence-labeling rules (enforce on every field)",
