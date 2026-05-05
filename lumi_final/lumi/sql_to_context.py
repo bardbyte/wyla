@@ -606,6 +606,10 @@ def discover_tables(
         raw_ctx["mdm_columns"] = mdm.get("columns") or []
         raw_ctx["mdm_table_description"] = mdm.get("table_description")
         raw_ctx["mdm_coverage_pct"] = float(mdm.get("mdm_coverage_pct") or 0.0)
+        # Table-level + ownership: every dataset_details / source / decommission
+        # field MDM exposes, plus *_extra catch-alls for forward-compat.
+        raw_ctx["mdm_dataset_details"] = _build_mdm_dataset_details(mdm)
+        raw_ctx["mdm_ownership"] = mdm.get("ownership") or {}
 
         baseline_text = _find_baseline_view(baseline_dir, table_name)
         if baseline_text is not None:
@@ -886,6 +890,40 @@ def _accumulate_into_context(
     for j in fp.joins:
         if j not in ctx["joins_involving_this"]:
             ctx["joins_involving_this"].append(j)
+
+
+# ─── MDM dataset-level synthesis ────────────────────────────
+
+
+_DATASET_LEVEL_KEYS = (
+    "data_category", "data_sub_category", "data_type", "table_type",
+    "feed_type", "is_internal", "is_searchable", "is_sor_certified",
+    "is_transactional", "is_history_required", "retention_period",
+    "selective_update_required", "enable_sequence_check", "dataset_id",
+    "dataset_parent_id", "key_id", "host_region", "status", "version",
+    "storage_type", "load_type", "country", "region", "feed_id",
+    "base_or_view", "is_decommissioned",
+)
+
+
+def _build_mdm_dataset_details(mdm: dict[str, Any]) -> dict[str, Any]:
+    """Collapse every MDM table-level field plus the *_extra catch-alls
+    into a single dict the planner / enricher can read uniformly.
+
+    Includes the explicit keys we promoted in :func:`lumi.mdm._digest`
+    plus mdm_dataset_extra / mdm_source_extra / mdm_decommission_extra
+    so undocumented future MDM keys still flow through.
+    """
+    out: dict[str, Any] = {}
+    for k in _DATASET_LEVEL_KEYS:
+        if k in mdm and mdm[k] is not None:
+            out[k] = mdm[k]
+    for extra_key in ("mdm_dataset_extra", "mdm_source_extra",
+                      "mdm_decommission_extra"):
+        extras = mdm.get(extra_key) or {}
+        if extras:
+            out[extra_key] = extras
+    return out
 
 
 # ─── One-call wrapper ───────────────────────────────────────

@@ -40,10 +40,23 @@ class TableContext(BaseModel):
     filters_on_this: list[dict]        # {column, operator, value, is_structural}
     date_functions: list[dict]         # {column, function}
 
-    # From MDM (API call)
-    mdm_columns: list[dict]            # {name, type, description, is_pii?}
+    # From MDM (API call) — see lumi.mdm._digest for the full per-column
+    # shape. Each item now carries 30+ keys including: is_primary,
+    # is_dedupe_key, pii_role_id, partition/cluster info, derived_logic,
+    # attribute_format, plus *_extra catch-alls for forward-compat.
+    mdm_columns: list[dict]
     mdm_table_description: str | None = None
     mdm_coverage_pct: float = 0.0
+    # Table-level metadata from MDM dataset_details + dataset_source_details
+    # + decommission_details. Keys: table_type, feed_type, data_category,
+    # data_sub_category, retention_period, is_internal, is_searchable,
+    # is_sor_certified, country, region, mdm_dataset_extra (catch-all), etc.
+    # Empty dict when MDM has no entry for the table.
+    mdm_dataset_details: dict = Field(default_factory=dict)
+    # Ownership: aim_id, imr_queue, app_team_sn_workgroup,
+    # business_contacts (with email + type), tech_contacts (same shape),
+    # status. Drives the view header comment + escalation routing.
+    mdm_ownership: dict = Field(default_factory=dict)
 
     # From baseline (file read + lkml parse)
     existing_view_lkml: str | None = None
