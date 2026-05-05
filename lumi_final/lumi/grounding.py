@@ -667,7 +667,9 @@ def _rank_pk_candidates(
 
         if u.name_signal == "id_like":
             score += 5
-            reasons.append("name pattern matches *_id / *_xref_id / cm{N} / etc.")
+            # Avoid literal "{N}" — ADK's instruction templating interprets
+            # `{var}` as a session-state lookup. Use "cmNN" prose form.
+            reasons.append("name pattern matches *_id / *_xref_id / cmNN / etc.")
         if u.baseline_is_primary_key:
             score += 5
             reasons.append("baseline already declares primary_key: yes")
