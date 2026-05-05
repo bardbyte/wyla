@@ -305,6 +305,71 @@ def _render_skeleton_for_prompt(skeleton: EnrichmentPlan) -> str:
     return "\n".join(out)
 
 
+def _maybe_disable_tls() -> None:
+    """When ``LUMI_INSECURE_TLS=1`` is set, patch every Python TLS layer
+    so corporate-MITM proxies don't kill the Vertex call.
+
+    Mirrors the comprehensive bypass used by check_bq_access.py and
+    check_vertex_gemini.py. Idempotent — patches won't double-stack.
+    Truststore (injected at import) is the preferred path; this is the
+    fallback for when Keychain doesn't carry the corp root CA.
+    """
+    import os
+    if os.environ.get("LUMI_INSECURE_TLS") not in {"1", "true", "yes"}:
+        return
+    if getattr(_maybe_disable_tls, "_applied", False):
+        return
+    import ssl
+    ssl._create_default_https_context = ssl._create_unverified_context  # type: ignore[assignment]
+    os.environ["PYTHONHTTPSVERIFY"] = "0"
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except ImportError:
+        pass
+    try:
+        import google.auth.transport.requests as gat
+        _orig_init = gat.AuthorizedSession.__init__
+
+        def _patched(self, *a, **kw):  # type: ignore[no-untyped-def]
+            _orig_init(self, *a, **kw)
+            self.verify = False
+        gat.AuthorizedSession.__init__ = _patched  # type: ignore[method-assign]
+    except ImportError:
+        pass
+    try:
+        import requests
+        _orig_req_init = requests.Session.__init__
+
+        def _patched_req(self, *a, **kw):  # type: ignore[no-untyped-def]
+            _orig_req_init(self, *a, **kw)
+            self.verify = False
+        requests.Session.__init__ = _patched_req  # type: ignore[method-assign]
+    except ImportError:
+        pass
+    try:
+        import httpx
+        _orig_client = httpx.Client
+        _orig_async = httpx.AsyncClient
+
+        def _client_no_verify(*args, **kwargs):  # type: ignore[no-untyped-def]
+            kwargs.setdefault("verify", False)
+            return _orig_client(*args, **kwargs)
+
+        def _async_no_verify(*args, **kwargs):  # type: ignore[no-untyped-def]
+            kwargs.setdefault("verify", False)
+            return _orig_async(*args, **kwargs)
+        httpx.Client = _client_no_verify  # type: ignore[misc]
+        httpx.AsyncClient = _async_no_verify  # type: ignore[misc]
+    except ImportError:
+        pass
+    _maybe_disable_tls._applied = True  # type: ignore[attr-defined]
+    logger.warning(
+        "LUMI_INSECURE_TLS is set — disabled TLS verification across "
+        "stdlib/requests/httpx/google-auth. Only safe on networks you trust.",
+    )
+
+
 def _invoke_plan_agent(
     prompt: str, table_name: str, config: LumiConfig,
 ) -> EnrichmentPlan | None:
@@ -313,6 +378,7 @@ def _invoke_plan_agent(
     Mirrors the pattern in lumi.enrich._invoke_enrichment_agent. Returns
     None on any error so the caller can fall back to the skeleton.
     """
+    _maybe_disable_tls()
     try:
         from google.adk.agents import LlmAgent
         from google.adk.runners import InMemoryRunner
@@ -322,11 +388,16 @@ def _invoke_plan_agent(
         logger.warning("ADK not importable, skipping LLM planning: %s", e)
         return None
 
+    # ADK treats `instruction` as a template with `{var}` substitution.
+    # Any literal `{` `}` in our prompt (from MDM descriptions, filter
+    # values like `WHERE x = '{N}'`, JSON snippets, etc.) gets parsed
+    # as a state-variable reference. Escape them by doubling.
+    safe_prompt = prompt.replace("{", "{{").replace("}", "}}")
     agent = LlmAgent(
         name=f"plan_{table_name}".replace(".", "_"),
         model=config.model_name,
         description="Authoring an EnrichmentPlan from grounded context.",
-        instruction=prompt,
+        instruction=safe_prompt,
         output_schema=EnrichmentPlan,
         generate_content_config=genai_types.GenerateContentConfig(
             temperature=config.temperature,
