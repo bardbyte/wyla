@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -422,7 +423,12 @@ def _invoke_plan_agent(
         output_schema=EnrichmentPlan,
         generate_content_config=genai_types.GenerateContentConfig(
             temperature=config.temperature,
-            max_output_tokens=4000,
+            # Bumped from 4K — wide tables (e.g. 193-col cardmember_insights)
+            # produce plans that easily exceed 4K output tokens. Truncation
+            # mid-string was the source of "Unterminated string" errors.
+            max_output_tokens=12000,
+            # Force JSON mime so Gemini doesn't wrap in markdown code fences.
+            response_mime_type="application/json",
         ),
     )
     runner = InMemoryRunner(agent=agent, app_name="lumi_plan")
@@ -457,12 +463,115 @@ def _invoke_plan_agent(
 
     if not text:
         return None
+    return _parse_plan_response(text, table_name)
+
+
+def _parse_plan_response(text: str, table_name: str) -> EnrichmentPlan | None:
+    """Tolerant parser: strips markdown fences + trailing commas + retries.
+
+    Gemini occasionally:
+      - wraps JSON in ```json ... ``` despite response_mime_type=json
+      - emits trailing commas after the last item in a list/object
+      - includes prose before/after the JSON object
+      - truncates long output mid-string when token cap is hit
+    We try increasingly permissive repairs before giving up.
+    """
+    # Strategy 1: as-is (the happy path)
+    plan = _try_parse(text)
+    if plan is not None:
+        return plan
+
+    # Strategy 2: strip markdown code-fence wrappers
+    cleaned = _strip_code_fence(text)
+    if cleaned != text:
+        plan = _try_parse(cleaned)
+        if plan is not None:
+            return plan
+
+    # Strategy 3: extract the FIRST balanced {...} block — handles
+    # cases where Gemini precedes the JSON with prose like "Here's the plan:"
+    extracted = _extract_first_json_object(cleaned)
+    if extracted:
+        plan = _try_parse(extracted)
+        if plan is not None:
+            return plan
+        # Strategy 4: drop trailing commas before } and ]
+        repaired = _strip_trailing_commas(extracted)
+        if repaired != extracted:
+            plan = _try_parse(repaired)
+            if plan is not None:
+                return plan
+
+    logger.warning(
+        "plan agent for %s returned unparseable output (tried 4 repair "
+        "strategies, all failed). First 200 chars: %r",
+        table_name, text[:200],
+    )
+    return None
+
+
+def _try_parse(text: str) -> EnrichmentPlan | None:
     try:
         data = json.loads(text)
         return EnrichmentPlan(**data)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("plan agent returned non-JSON or invalid plan: %s", e)
+    except Exception:  # noqa: BLE001
         return None
+
+
+def _strip_code_fence(text: str) -> str:
+    """Drop ```json ... ``` wrappers Gemini sometimes adds."""
+    s = text.strip()
+    if s.startswith("```"):
+        # ```json\n...\n``` → drop opening fence + optional language tag
+        first_newline = s.find("\n")
+        if first_newline != -1:
+            s = s[first_newline + 1:]
+        if s.endswith("```"):
+            s = s[:-3]
+    return s.strip()
+
+
+def _extract_first_json_object(text: str) -> str | None:
+    """Extract the first balanced {...} block from a string.
+
+    Walks the string char-by-char tracking brace depth and quote state.
+    Returns None if no balanced object found.
+    """
+    start = -1
+    depth = 0
+    in_string = False
+    escape_next = False
+
+    for i, ch in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+        if in_string:
+            if ch == "\\":
+                escape_next = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            if start == -1:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start != -1:
+                return text[start:i + 1]
+    return None
+
+
+_TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
+
+
+def _strip_trailing_commas(text: str) -> str:
+    """Replace ,} with } and ,] with ]. Cheap, JSON-spec-compliant repair."""
+    return _TRAILING_COMMA_RE.sub(r"\1", text)
 
 
 # Back-compat: callers that still import build_enrichment_plan with no
