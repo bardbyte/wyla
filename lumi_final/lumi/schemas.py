@@ -40,10 +40,23 @@ class TableContext(BaseModel):
     filters_on_this: list[dict]        # {column, operator, value, is_structural}
     date_functions: list[dict]         # {column, function}
 
-    # From MDM (API call)
-    mdm_columns: list[dict]            # {name, type, description, is_pii?}
+    # From MDM (API call) — see lumi.mdm._digest for the full per-column
+    # shape. Each item now carries 30+ keys including: is_primary,
+    # is_dedupe_key, pii_role_id, partition/cluster info, derived_logic,
+    # attribute_format, plus *_extra catch-alls for forward-compat.
+    mdm_columns: list[dict]
     mdm_table_description: str | None = None
     mdm_coverage_pct: float = 0.0
+    # Table-level metadata from MDM dataset_details + dataset_source_details
+    # + decommission_details. Keys: table_type, feed_type, data_category,
+    # data_sub_category, retention_period, is_internal, is_searchable,
+    # is_sor_certified, country, region, mdm_dataset_extra (catch-all), etc.
+    # Empty dict when MDM has no entry for the table.
+    mdm_dataset_details: dict = Field(default_factory=dict)
+    # Ownership: aim_id, imr_queue, app_team_sn_workgroup,
+    # business_contacts (with email + type), tech_contacts (same shape),
+    # status. Drives the view header comment + escalation routing.
+    mdm_ownership: dict = Field(default_factory=dict)
 
     # From baseline (file read + lkml parse)
     existing_view_lkml: str | None = None
@@ -62,6 +75,36 @@ class TableContext(BaseModel):
     #       dims_missing_label, measures_total, measures_missing_value_format,
     #       dates_as_plain_dim (date column with no dimension_group).
     baseline_quality_signals: dict = Field(default_factory=dict)
+    # View-level + structural baseline signals — every piece of human-
+    # curated work we can preserve for grounding.
+    baseline_view_description: str | None = None
+    baseline_view_label: str | None = None
+    # Authoritative BQ FQN if baseline declares one (overrides LumiConfig
+    # default). Pattern: `axp-lumi.dw.<table>` or `${BQ_PROJECT}.dw.<table>`.
+    baseline_sql_table_name: str | None = None
+    # If the baseline IS a derived_table, its SQL — tells us the team's
+    # modeling preference so enrichment doesn't propose a different shape.
+    baseline_derived_table_sql: str | None = None
+    # Pre-existing primary_key dim NAME (not just bool). Critical for
+    # PK preservation in enrichment.
+    baseline_primary_key_column: str | None = None
+    # Refinement chain: which views this baseline extends (Looker `extends:`).
+    # Tells us where to add new fields without breaking inheritance.
+    baseline_extends_chain: list[str] = Field(default_factory=list)
+    # Pre-curated structural blocks — preserve verbatim, never overwrite.
+    baseline_sets: list[dict] = Field(default_factory=list)
+    baseline_parameters: list[dict] = Field(default_factory=list)
+    baseline_access_filter: list[dict] = Field(default_factory=list)
+    # drill_fields list curated by humans → match style for new dims.
+    baseline_drill_fields_curated: list[str] = Field(default_factory=list)
+    # Pre-filtered measures (e.g. measure: revenue_consumer with
+    # filters: [bus_seg: "Consumer"]) reveal canonical slicing patterns.
+    # Format: {name, type, sql, filters, description}
+    baseline_filtered_measures: list[dict] = Field(default_factory=list)
+    # SQL aliases — when baseline dim NAME differs from the source column
+    # ({dim_name: source_column}). E.g. "customer_segment" -> "bus_seg".
+    # Goldmine for synonym preservation in tags.
+    baseline_sql_aliases: dict[str, str] = Field(default_factory=dict)
 
     # Cross-query context
     queries_using_this: list[str]      # which input SQLs reference this table

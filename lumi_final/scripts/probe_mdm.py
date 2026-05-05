@@ -93,56 +93,24 @@ def fetch_mdm(table: str, endpoint: str = DEFAULT_ENDPOINT) -> dict[str, Any] | 
 
 
 def digest(payload: list | dict) -> dict[str, Any]:
-    """Pull the fields we actually use into a flat per-column structure.
+    """Comprehensive MDM digest — captures every field we know about plus
+    forward-compat catch-alls. Delegates to ``lumi.mdm._digest`` so the
+    runtime client and the probe stay in sync (one source of truth).
 
-    MDM response is array[1] (verified). Columns at [0].schema.schema_attributes;
-    meaty info under each col's attribute_details.
+    See the docstring of ``lumi.mdm._digest`` for the full field-mapping.
     """
     if not isinstance(payload, list) or not payload:
         return {
             "_error": "expected non-empty list at top level",
             "_raw_type": type(payload).__name__,
         }
-
-    data = payload[0]
-    schema = data.get("schema", {})
-    cols = schema.get("schema_attributes") or []
-    dataset = data.get("dataset_details", {})
-    source = data.get("dataset_source_details", {})
-
-    columns = []
-    for col in cols:
-        attr = col.get("attribute_details", {}) or {}
-        sens = col.get("sensitivity_details", {}) or {}
-        columns.append(
-            {
-                "name": attr.get("attribute_name") or col.get("attribute_name"),
-                "business_name": attr.get("business_name"),
-                "type": attr.get("attribute_type"),
-                "description": attr.get("attribute_desc"),
-                "is_partitioned": attr.get("is_partitioned"),
-                "is_pii": sens.get("is_pii"),
-                "is_gdpr": sens.get("is_gdpr"),
-            }
-        )
-
-    described = sum(1 for c in columns if c["description"])
-    coverage_pct = round(described / max(len(columns), 1), 3)
-
-    return {
-        "table_name": data.get("display_name"),
-        "table_business_name": dataset.get("business_name"),
-        "table_description": dataset.get("data_desc"),
-        "data_category": dataset.get("data_category"),
-        "storage_type": data.get("storage_type"),
-        "load_type": data.get("load_type"),
-        "bq_project": source.get("project_id"),
-        "bq_dataset": source.get("dataset_name"),
-        "bq_table": source.get("table_name"),
-        "column_count": len(columns),
-        "mdm_coverage_pct": coverage_pct,
-        "columns": columns,
-    }
+    # Make `lumi` importable when run from scripts/.
+    from pathlib import Path as _Path
+    repo_root = _Path(__file__).resolve().parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from lumi.mdm import _digest  # local import, no circular risk
+    return _digest(payload)
 
 
 # ─── CLI ─────────────────────────────────────────────────────

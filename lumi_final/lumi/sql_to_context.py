@@ -80,6 +80,13 @@ class SQLFingerprint:
     joins: list[dict[str, Any]] = field(default_factory=list)
     filters: list[dict[str, Any]] = field(default_factory=list)
     date_functions: list[dict[str, Any]] = field(default_factory=list)
+    # SELECT col AS alias — analysts' own glossary. Per-column list of
+    # aliases observed in this query's SELECT clause. Only meaningful
+    # aliases (passes _alias_quality_filter) are kept; trivial ones
+    # (`a`, `t1`, `tmp`) get filtered out at aggregation time but the
+    # raw capture here keeps everything for traceability.
+    # Format: [{"column": str, "alias": str, "expression": str}]
+    select_aliases: list[dict[str, Any]] = field(default_factory=list)
     parse_error: str | None = None
 
 
@@ -153,6 +160,7 @@ def _parse_one(raw_sql: str) -> SQLFingerprint:
     fp.joins = _extract_joins(tree)
     fp.filters = _extract_filters(tree)
     fp.date_functions = _extract_date_functions(tree)
+    fp.select_aliases = _extract_select_aliases(tree)
     return fp
 
 
@@ -497,6 +505,86 @@ def _col_name(node: exp.Expression | None) -> str | None:
     return None
 
 
+def _extract_select_aliases(tree: exp.Expression) -> list[dict[str, Any]]:
+    """Capture every ``SELECT col AS alias`` in the query.
+
+    These are the analysts' own glossary — when a query writes
+    ``SUM(billed_business) AS total_revenue``, the author is telling us
+    "billed_business IS revenue in this domain." For columns with cryptic
+    names (cm11, pmdl_*) this is often the most concrete domain signal.
+
+    Captures EVERY alias unfiltered for traceability; the quality filter
+    runs later when we aggregate aliases into the narrative section so
+    Gemini only sees meaningful ones.
+
+    Returns:
+        list of {"column": str | None, "alias": str, "expression": str}
+        — column is the source column when the expression is a simple
+        Column or a 1-arg function; None for complex expressions.
+    """
+    out: list[dict[str, Any]] = []
+    # Only the OUTER SELECT — alias names inside CTEs are CTE-internal
+    # aliases that don't apply to the final output. We get them via
+    # ctes[i].sql when that matters.
+    top_select = tree.find(exp.Select) if hasattr(tree, "find") else None
+    if top_select is None:
+        return out
+    for proj in top_select.expressions or []:
+        if not isinstance(proj, exp.Alias):
+            continue
+        alias_name = proj.alias
+        inner = proj.this
+        # Try to identify the source column. Walk through one or two
+        # wrapper layers to handle COUNT(DISTINCT col), SUM(col),
+        # TRIM(col), DATE(col), etc.
+        column = _peel_to_column(inner)
+        out.append({
+            "column": column,
+            "alias": alias_name,
+            "expression": inner.sql(dialect=BQ_DIALECT) if inner else "",
+        })
+    return out
+
+
+def _peel_to_column(node: exp.Expression | None) -> str | None:
+    """Walk through Func / Distinct wrappers to find the underlying column.
+
+    Handles:
+      - col                    → col
+      - SUM(col)               → col
+      - COUNT(DISTINCT col)    → col  (Distinct wraps Column)
+      - DATE(col), TRIM(col)   → col
+      - SUM(amt) / 1e9         → amt  (the Column inside the Div)
+    Returns None for purely literal expressions (1, 'x', etc.).
+    """
+    if node is None:
+        return None
+    if isinstance(node, exp.Column):
+        return node.name
+    if isinstance(node, exp.Distinct):
+        # Distinct.expressions is a list when DISTINCT col1, col2 is used;
+        # for COUNT(DISTINCT col) it's a single Column inside that list.
+        for ex in node.expressions or []:
+            col = _peel_to_column(ex)
+            if col:
+                return col
+        # Older sqlglot put it on .this
+        return _peel_to_column(node.this)
+    # Walk into any sub-expression that has children.
+    for arg in node.args.values():
+        if isinstance(arg, exp.Expression):
+            col = _peel_to_column(arg)
+            if col:
+                return col
+        elif isinstance(arg, list):
+            for sub in arg:
+                if isinstance(sub, exp.Expression):
+                    col = _peel_to_column(sub)
+                    if col:
+                        return col
+    return None
+
+
 def _extract_date_functions(tree: exp.Expression) -> list[dict[str, Any]]:
     """EXTRACT(YEAR FROM rpt_dt), DATE_TRUNC(rpt_dt, MONTH), DATE(...)."""
     out: list[dict[str, Any]] = []
@@ -606,6 +694,10 @@ def discover_tables(
         raw_ctx["mdm_columns"] = mdm.get("columns") or []
         raw_ctx["mdm_table_description"] = mdm.get("table_description")
         raw_ctx["mdm_coverage_pct"] = float(mdm.get("mdm_coverage_pct") or 0.0)
+        # Table-level + ownership: every dataset_details / source / decommission
+        # field MDM exposes, plus *_extra catch-alls for forward-compat.
+        raw_ctx["mdm_dataset_details"] = _build_mdm_dataset_details(mdm)
+        raw_ctx["mdm_ownership"] = mdm.get("ownership") or {}
 
         baseline_text = _find_baseline_view(baseline_dir, table_name)
         if baseline_text is not None:
@@ -620,6 +712,20 @@ def discover_tables(
             raw_ctx["baseline_dimension_groups"] = parsed["dimension_groups"]
             raw_ctx["baseline_measures"] = parsed["measures"]
             raw_ctx["baseline_quality_signals"] = parsed["quality_signals"]
+            # View-level + structural — preserves every piece of human
+            # curation we can find in the existing baseline.
+            raw_ctx["baseline_view_description"] = parsed["view_description"]
+            raw_ctx["baseline_view_label"] = parsed["view_label"]
+            raw_ctx["baseline_sql_table_name"] = parsed["sql_table_name"]
+            raw_ctx["baseline_derived_table_sql"] = parsed["derived_table_sql"]
+            raw_ctx["baseline_primary_key_column"] = parsed["primary_key_column"]
+            raw_ctx["baseline_extends_chain"] = parsed["extends_chain"]
+            raw_ctx["baseline_sets"] = parsed["sets"]
+            raw_ctx["baseline_parameters"] = parsed["parameters"]
+            raw_ctx["baseline_access_filter"] = parsed["access_filter"]
+            raw_ctx["baseline_drill_fields_curated"] = parsed["drill_fields_curated"]
+            raw_ctx["baseline_filtered_measures"] = parsed["filtered_measures"]
+            raw_ctx["baseline_sql_aliases"] = parsed["sql_aliases"]
 
     return {name: TableContext(**raw) for name, raw in contexts.items()}
 
@@ -637,50 +743,59 @@ def _parse_baseline_view(
     lkml_text: str,
     date_functions: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Parse a baseline .view.lkml string with the lkml lib and surface
-    structured signals for downstream stages.
+    """Parse a baseline .view.lkml file and surface every structured
+    signal we can use for grounding the enrichment.
 
-    Returns:
-        {
-            "dimensions": [<lkml dim dict>...],
-            "dimension_groups": [...],
-            "measures": [...],
-            "quality_signals": {
-                "dims_total": int,
-                "dims_missing_description": int,
-                "dims_short_description": int,        # < threshold chars
-                "dims_missing_label": int,
-                "dims_missing_tags": int,
-                "measures_total": int,
-                "measures_missing_value_format": int,
-                "dates_as_plain_dim": int,            # date col with no dim_group
-                "has_primary_key": bool,
-            }
-        }
+    Beyond just listing dims/measures/dim_groups, this returns:
+      view_description     view-level description: (rare but gold)
+      view_label           view-level label
+      sql_table_name       authoritative BQ FQN if baseline declares one
+      derived_table_sql    if the baseline IS a derived_table, its SQL
+      primary_key_column   actual NAME of the PK dim (not just bool)
+      extends_chain        list of view names this baseline extends
+      sets                 named field bundles (set: { ... })
+      parameters           user-facing parameters: blocks
+      access_filter        security model — must NEVER be touched by enrichment
+      drill_fields_curated baseline's curated drill_fields list
+      filtered_measures    measures with pre-filtered filters: blocks
+                           (canonical slicing patterns Gemini should follow)
+      sql_aliases          {dim_name: source_column} — name renames; goldmine
+                           for synonym preservation
+      quality_signals      counts of gaps for the planner
 
-    Failures (unparseable LookML, missing views) return empty structures —
-    callers must tolerate that since baseline files can drift.
+    All extraction is best-effort: malformed LookML, missing views, or
+    unexpected structures collapse to empty defaults so callers can
+    rely on field presence.
     """
+    empty_result = {
+        "dimensions": [],
+        "dimension_groups": [],
+        "measures": [],
+        "view_description": None,
+        "view_label": None,
+        "sql_table_name": None,
+        "derived_table_sql": None,
+        "primary_key_column": None,
+        "extends_chain": [],
+        "sets": [],
+        "parameters": [],
+        "access_filter": [],
+        "drill_fields_curated": [],
+        "filtered_measures": [],
+        "sql_aliases": {},
+        "quality_signals": {},
+    }
+
     try:
         import lkml  # local import to keep module-import cost down
         tree = lkml.load(lkml_text)
     except Exception as e:  # noqa: BLE001
         logger.warning("baseline parse failed; skipping structured fields: %s", e)
-        return {
-            "dimensions": [],
-            "dimension_groups": [],
-            "measures": [],
-            "quality_signals": {},
-        }
+        return empty_result
 
     views = tree.get("views") or []
     if not views:
-        return {
-            "dimensions": [],
-            "dimension_groups": [],
-            "measures": [],
-            "quality_signals": {},
-        }
+        return empty_result
 
     # First view in the file is canonical (Looker-generated baselines have one).
     view = views[0]
@@ -688,6 +803,83 @@ def _parse_baseline_view(
     dgs = list(view.get("dimension_groups") or [])
     msrs = list(view.get("measures") or [])
 
+    # ── View-level grounding ──
+    view_description = (view.get("description") or "").strip() or None
+    view_label = (view.get("label") or "").strip() or None
+    sql_table_name = (view.get("sql_table_name") or "").strip() or None
+    derived_table = view.get("derived_table") or {}
+    derived_table_sql = (derived_table.get("sql") or "").strip() or None
+    # lkml normalizes top-level repeated keys with __all / plural suffixes:
+    #   extends:        → "extends__all"
+    #   access_filter:  → "access_filters"  (singular block, plural key)
+    #   filters: (in measures) → "filters__all"
+    # Check both forms so we match whatever lkml gave us.
+    extends_chain = (
+        view.get("extends__all")
+        or view.get("extends")
+        or []
+    )
+    extends_chain = list(extends_chain)
+    if extends_chain and isinstance(extends_chain[0], list):
+        extends_chain = [item for sub in extends_chain for item in sub]
+
+    # ── Sets, parameters, access_filter (preserve verbatim) ──
+    sets = list(view.get("sets") or view.get("set") or [])
+    parameters = list(
+        view.get("parameters") or view.get("parameter") or []
+    )
+    access_filter = list(
+        view.get("access_filters")
+        or view.get("access_filter")
+        or []
+    )
+
+    # ── Drill fields curated by humans ──
+    drill_fields_curated = list(
+        view.get("drill_fields")
+        or view.get("drill_fields__all")
+        or []
+    )
+    if drill_fields_curated and isinstance(drill_fields_curated[0], list):
+        drill_fields_curated = [item for sub in drill_fields_curated for item in sub]
+
+    # ── Pre-filtered measures (canonical slicing patterns) ──
+    # lkml stores measure-level `filters: [...]` under `filters__all`.
+    filtered_measures: list[dict[str, Any]] = []
+    for m in msrs:
+        msr_filters = m.get("filters") or m.get("filters__all")
+        if msr_filters:
+            filtered_measures.append({
+                "name": m.get("name"),
+                "type": m.get("type"),
+                "sql": m.get("sql"),
+                "filters": msr_filters,
+                "description": m.get("description"),
+            })
+
+    # ── Primary-key NAME (not just bool) ──
+    primary_key_column: str | None = None
+    for d in dims:
+        if str(d.get("primary_key") or "").lower() in {"yes", "true"}:
+            primary_key_column = d.get("name")
+            break
+
+    # ── SQL aliases — when dim NAME differs from the column it sources ──
+    # Tells us human-curated synonyms: dimension `customer_segment` sourced
+    # from `${TABLE}.bus_seg` means "customer_segment" IS a synonym for bus_seg.
+    sql_aliases: dict[str, str] = {}
+    for d in dims:
+        dim_name = (d.get("name") or "").strip()
+        sql = (d.get("sql") or "").strip()
+        if not dim_name or not sql:
+            continue
+        m_match = re.search(r"\$\{TABLE\}\.([\w_]+)", sql, re.IGNORECASE)
+        if m_match:
+            source_col = m_match.group(1)
+            if source_col.lower() != dim_name.lower():
+                sql_aliases[dim_name] = source_col
+
+    # ── Quality signals (gap counts for the planner) ──
     dims_missing_desc = sum(1 for d in dims if not (d.get("description") or "").strip())
     dims_short_desc = sum(
         1 for d in dims
@@ -699,8 +891,12 @@ def _parse_baseline_view(
         1 for m in msrs
         if not (m.get("value_format_name") or m.get("value_format"))
     )
-    has_pk = any(
-        (d.get("primary_key") or "").lower() in {"yes", "true"} for d in dims
+    msrs_missing_desc = sum(
+        1 for m in msrs if not (m.get("description") or "").strip()
+    )
+    has_pk = primary_key_column is not None
+    hidden_count = sum(
+        1 for d in dims if str(d.get("hidden") or "").lower() in {"yes", "true"}
     )
 
     # Date columns from sqlglot fingerprint that don't appear as dim_groups
@@ -725,14 +921,28 @@ def _parse_baseline_view(
         "dimensions": dims,
         "dimension_groups": dgs,
         "measures": msrs,
+        "view_description": view_description,
+        "view_label": view_label,
+        "sql_table_name": sql_table_name,
+        "derived_table_sql": derived_table_sql,
+        "primary_key_column": primary_key_column,
+        "extends_chain": extends_chain,
+        "sets": sets,
+        "parameters": parameters,
+        "access_filter": access_filter,
+        "drill_fields_curated": drill_fields_curated,
+        "filtered_measures": filtered_measures,
+        "sql_aliases": sql_aliases,
         "quality_signals": {
             "dims_total": len(dims),
             "dims_missing_description": dims_missing_desc,
             "dims_short_description": dims_short_desc,
             "dims_missing_label": dims_missing_label,
             "dims_missing_tags": dims_missing_tags,
+            "dims_hidden_count": hidden_count,
             "measures_total": len(msrs),
             "measures_missing_value_format": msrs_missing_vf,
+            "measures_missing_description": msrs_missing_desc,
             "dates_as_plain_dim": dates_as_plain,
             "has_primary_key": has_pk,
         },
@@ -886,6 +1096,40 @@ def _accumulate_into_context(
     for j in fp.joins:
         if j not in ctx["joins_involving_this"]:
             ctx["joins_involving_this"].append(j)
+
+
+# ─── MDM dataset-level synthesis ────────────────────────────
+
+
+_DATASET_LEVEL_KEYS = (
+    "data_category", "data_sub_category", "data_type", "table_type",
+    "feed_type", "is_internal", "is_searchable", "is_sor_certified",
+    "is_transactional", "is_history_required", "retention_period",
+    "selective_update_required", "enable_sequence_check", "dataset_id",
+    "dataset_parent_id", "key_id", "host_region", "status", "version",
+    "storage_type", "load_type", "country", "region", "feed_id",
+    "base_or_view", "is_decommissioned",
+)
+
+
+def _build_mdm_dataset_details(mdm: dict[str, Any]) -> dict[str, Any]:
+    """Collapse every MDM table-level field plus the *_extra catch-alls
+    into a single dict the planner / enricher can read uniformly.
+
+    Includes the explicit keys we promoted in :func:`lumi.mdm._digest`
+    plus mdm_dataset_extra / mdm_source_extra / mdm_decommission_extra
+    so undocumented future MDM keys still flow through.
+    """
+    out: dict[str, Any] = {}
+    for k in _DATASET_LEVEL_KEYS:
+        if k in mdm and mdm[k] is not None:
+            out[k] = mdm[k]
+    for extra_key in ("mdm_dataset_extra", "mdm_source_extra",
+                      "mdm_decommission_extra"):
+        extras = mdm.get(extra_key) or {}
+        if extras:
+            out[extra_key] = extras
+    return out
 
 
 # ─── One-call wrapper ───────────────────────────────────────

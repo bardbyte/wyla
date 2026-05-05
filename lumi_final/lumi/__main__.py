@@ -58,7 +58,7 @@ def _print_result(label: str, result: Any) -> None:
 
 
 def _cmd_plan(args: argparse.Namespace) -> int:
-    """Phase 1: deterministic Parse → Discover → Stage → Plan."""
+    """Phase 1: Parse → Discover → Stage → Plan."""
     from lumi.config import LumiConfig
     from lumi.pipeline import PipelineHaltError, run_plan_phase
 
@@ -66,10 +66,13 @@ def _cmd_plan(args: argparse.Namespace) -> int:
     if args.input:
         cfg.gold_queries_dir = args.input
 
-    print(f"Phase 1: planning from {cfg.gold_queries_dir}")
+    mode = "Gemini-authored" if args.with_llm else "deterministic"
+    print(f"Phase 1 ({mode}): planning from {cfg.gold_queries_dir}")
     only = args.table or None
     try:
-        result = run_plan_phase(cfg, only_tables=only)
+        result = run_plan_phase(
+            cfg, only_tables=only, with_llm=args.with_llm,
+        )
     except PipelineHaltError as e:
         print(f"\nHALT: {e}", file=sys.stderr)
         return 2
@@ -184,6 +187,15 @@ def main() -> None:
     p_plan.add_argument(
         "--table", action="append",
         help="Plan for one table only; repeat for multiple",
+    )
+    p_plan.add_argument(
+        "--with-llm", action="store_true",
+        help=(
+            "Author each plan with Gemini using full TableContext + "
+            "grounding + narrative. When omitted, plans are deterministic "
+            "skeletons. Either way, plans always succeed — Gemini errors "
+            "fall back gracefully to skeletons per table."
+        ),
     )
     p_plan.set_defaults(func=_cmd_plan)
 

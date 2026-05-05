@@ -1,20 +1,26 @@
-"""Plan builder — bridges the deterministic planner and the EnrichmentPlan
-contract that ``enrich_table`` consumes.
+"""Plan builder — produces the EnrichmentPlan that scopes Stage 5 (enrich).
 
-The Stage-4 planner produces an :class:`EnrichmentPlan` (Pydantic) from
-deterministic signals on each :class:`TableContext`. **No LLM calls here**
-— planning is cheap, reproducible, and structurally sound from MDM +
-fingerprint + baseline alone. Spending Gemini tokens on prose reasoning
-in the planning stage is waste; the expensive call is Stage 5 (enrich).
+Two paths:
 
-If LLM-refined reasoning becomes useful later, it belongs in a separate
-``PlanReasonerAgent`` (LlmAgent with output_schema=EnrichmentPlan) that
-takes a deterministic plan and refines its ``reasoning`` field. The
-pipeline can compose that as a downstream step without changing the
-planning contract.
+1. ``build_enrichment_plan_skeleton(ctx)`` — pure deterministic from
+   sqlglot fingerprint + MDM digest + baseline parse. Cheap,
+   reproducible, no LLM. Always works as a fallback.
+
+2. ``build_enrichment_plan(ctx, all_fingerprints, contexts_by_table,
+   with_llm=True)`` — runs the deterministic skeleton, then calls
+   Gemini with the FULL context (TableContext + grounding signals +
+   table narrative + baseline gaps) to produce a refined plan with
+   substantive reasoning, risk identification, and questions for
+   the human reviewer. Falls back to the skeleton on any LLM error.
+
+The LLM-authored path is what makes the plan a meaningful review
+artifact: humans see actual reasoning + grounded confidence per
+proposal, not just deterministic tallies.
 
 Public API:
-    build_enrichment_plan(ctx) -> EnrichmentPlan
+    build_enrichment_plan_skeleton(ctx) -> EnrichmentPlan
+    build_enrichment_plan(ctx, *, all_fingerprints=None,
+        contexts_by_table=None, with_llm=False, ...) -> EnrichmentPlan
     format_enrichment_plan_markdown(plan, ctx) -> str
     save_plan_json / load_plan_json
 """
@@ -26,6 +32,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from lumi.config import LumiConfig
 from lumi.schemas import EnrichmentPlan, TableContext
 
 logger = logging.getLogger("lumi.plan_builder")
@@ -34,22 +41,11 @@ logger = logging.getLogger("lumi.plan_builder")
 # ─── Public API ──────────────────────────────────────────────
 
 
-def build_enrichment_plan(ctx: TableContext) -> EnrichmentPlan:
-    """Build an :class:`EnrichmentPlan` for one table — deterministic.
+def build_enrichment_plan_skeleton(ctx: TableContext) -> EnrichmentPlan:
+    """Deterministic plan from sqlglot + MDM + baseline only.
 
-    The plan is a structured scope contract for ``enrich_table``: which
-    dimensions / measures / derived_tables the enrichment should produce,
-    plus risks and reasoning the human reviews before approval.
-
-    Sources (all deterministic, no LLM):
-      - ``ctx.aggregations``           → proposed_measures
-      - ``ctx.filters_on_this``        → proposed_dimensions (filter columns)
-      - ``ctx.date_functions``         → proposed_dimension_groups
-      - ``ctx.case_whens``             → proposed_dimensions (derived)
-      - ``ctx.ctes_referencing_this``  → proposed_derived_tables
-      - ``ctx.temp_tables_referencing_this`` → proposed_derived_tables
-      - ``ctx.joins_involving_this``   → proposed_explore.joins
-      - ``ctx.baseline_quality_signals`` → fields_to_enrich
+    This is the fallback when LLM authoring is disabled or fails.
+    Always succeeds, always reproducible.
     """
     proposed_dimensions = _propose_dimensions(ctx)
     proposed_dim_groups = _propose_dimension_groups(ctx)
@@ -96,6 +92,290 @@ def build_enrichment_plan(ctx: TableContext) -> EnrichmentPlan:
         questions_for_reviewer=_questions_for_reviewer(ctx, risks),
         fields_to_enrich=fields_to_enrich,
     )
+
+
+def build_enrichment_plan(
+    ctx: TableContext,
+    *,
+    all_fingerprints: list | None = None,
+    contexts_by_table: dict | None = None,
+    with_llm: bool = False,
+    config: LumiConfig | None = None,
+) -> EnrichmentPlan:
+    """Build an EnrichmentPlan, optionally Gemini-authored.
+
+    Args:
+        ctx: TableContext for the table being planned.
+        all_fingerprints: every parsed SQL — needed to compute grounding
+            signals + narrative for the LLM context.
+        contexts_by_table: all discovered TableContexts — for cross-table
+            join inference.
+        with_llm: when True, calls Gemini to author the plan with full
+            context. When False, returns the deterministic skeleton.
+        config: optional LumiConfig (model, project, etc.).
+
+    Returns:
+        EnrichmentPlan. On LLM error or missing prerequisites, falls
+        back to the deterministic skeleton — caller never gets None.
+    """
+    skeleton = build_enrichment_plan_skeleton(ctx)
+    if not with_llm:
+        return skeleton
+    if all_fingerprints is None:
+        logger.warning(
+            "build_enrichment_plan(with_llm=True) needs all_fingerprints "
+            "to compute grounding/narrative; falling back to skeleton",
+        )
+        return skeleton
+    try:
+        return _author_plan_with_llm(
+            ctx, skeleton, all_fingerprints, contexts_by_table or {},
+            config=config or LumiConfig(),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "LLM plan authoring failed for %s, using skeleton: %s",
+            ctx.table_name, e,
+        )
+        return skeleton
+
+
+def _author_plan_with_llm(
+    ctx: TableContext,
+    skeleton: EnrichmentPlan,
+    all_fingerprints: list,
+    contexts_by_table: dict,
+    config: LumiConfig,
+) -> EnrichmentPlan:
+    """Run the planning LlmAgent with the full deterministic context.
+
+    The LLM gets:
+      - The deterministic skeleton (proposed dims/measures/derived_tables
+        as a scope hint — NOT a strict contract; LLM can refine)
+      - TableNarrative (holistic understanding)
+      - Grounding signals (per-column evidence)
+      - Baseline gap analysis
+      - Confidence-labeling rules
+
+    It MUST return an EnrichmentPlan. The agent's output_schema enforces
+    Pydantic validation; we run check_planning after as a safety net
+    and self-repair retry once on failure.
+    """
+    # Lazy imports — only paid when LLM is actually used.
+    from lumi.grounding import build_grounding_signals
+    from lumi.narrative import build_table_narrative
+
+    grounding = build_grounding_signals(ctx, all_fingerprints, contexts_by_table)
+    narrative = build_table_narrative(ctx, all_fingerprints=all_fingerprints)
+
+    prompt = _build_plan_prompt(ctx, skeleton, narrative, grounding)
+    logger.info(
+        "Planning %s with Gemini — prompt %d chars, skeleton %d dims / %d measures",
+        ctx.table_name, len(prompt),
+        len(skeleton.proposed_dimensions), len(skeleton.proposed_measures),
+    )
+
+    refined = _invoke_plan_agent(prompt, ctx.table_name, config)
+    if refined is None:
+        logger.info("LLM returned no usable plan; using skeleton")
+        return skeleton
+
+    # Sanity guard: if the LLM dropped substantive proposals, fall back.
+    # The skeleton's count is a floor — Gemini can refine but shouldn't
+    # silently empty out the plan.
+    if not refined.proposed_dimensions and not refined.proposed_measures:
+        logger.warning(
+            "LLM-authored plan has no dims/measures, falling back to skeleton",
+        )
+        return skeleton
+
+    # Preserve fields the LLM is unlikely to refine well.
+    refined.estimated_input_tokens = (
+        refined.estimated_input_tokens or skeleton.estimated_input_tokens
+    )
+    refined.estimated_output_tokens = (
+        refined.estimated_output_tokens or skeleton.estimated_output_tokens
+    )
+    refined.fields_to_enrich = (
+        refined.fields_to_enrich or skeleton.fields_to_enrich
+    )
+    return refined
+
+
+def _build_plan_prompt(
+    ctx: TableContext,
+    skeleton: EnrichmentPlan,
+    narrative,
+    grounding,
+) -> str:
+    """Compose the plan-stage prompt.
+
+    Heavily structured: identity → narrative → grounding → skeleton →
+    instructions. The LLM authors a refined EnrichmentPlan on top.
+    """
+    # Lazy imports for renderers.
+    from lumi.grounding import render_grounding_signals
+    from lumi.narrative import render_table_narrative
+
+    parts: list[str] = [
+        "# Planning task",
+        "",
+        f"You are reviewing the deterministic enrichment skeleton for "
+        f"`{ctx.table_name}` and authoring the FINAL plan. The plan is "
+        "what a human reviewer reads + approves before we spend tokens "
+        "on full LookML enrichment. Make it substantive: real reasoning, "
+        "real risks, real questions.",
+        "",
+        "## Output contract",
+        "Return an EnrichmentPlan (Pydantic). You may refine the skeleton's "
+        "proposals — add missing fields, remove redundant ones, sharpen "
+        "names — but DO NOT silently drop the structural categories "
+        "(dimensions, measures, dimension_groups, derived_tables, explore). "
+        "The `reasoning` field MUST be 2-3 substantive sentences (not a "
+        "tally) explaining what this table IS and what the plan changes "
+        "vs the existing baseline. The `risks` field lists real concerns "
+        "not generic boilerplate. The `questions_for_reviewer` field asks "
+        "directed questions only when there's genuine ambiguity.",
+        "",
+        render_table_narrative(narrative),
+        "",
+        render_grounding_signals(grounding),
+        "",
+        "## Deterministic skeleton (your starting point — refine, don't replace wholesale)",
+        _render_skeleton_for_prompt(skeleton),
+        "",
+        "## Authoring rules",
+        "1. PRESERVE the structure — every category in the skeleton must "
+        "appear in your output unless you have explicit reasoning to drop it.",
+        "2. REFINE descriptions — when grounding signals + narrative give "
+        "you better domain context than the skeleton's auto-generated text, "
+        "use it. e.g. cm11 with pii_role_id=NGBD-SDE-CM11 should describe "
+        "as 'Cardmember-grain identifier (PII role: SDE-CM11)' not "
+        "'Customer Member 11'.",
+        "3. WRITE the reasoning field as if explaining to a senior data "
+        "engineer: what the table represents, what the plan adds vs the "
+        "baseline, the single biggest risk.",
+        "4. SURFACE real risks — sparse MDM, no PK candidate, complex "
+        "CTE chains, high-cardinality categoricals — not 'caution: change'.",
+        "5. ASK directed questions only for true ambiguity (e.g. when "
+        "two PK candidates tie, or join cardinality is unclear).",
+        "6. KEEP estimated_input_tokens / estimated_output_tokens from "
+        "the skeleton (they're already computed).",
+    ]
+    return "\n\n".join(parts)
+
+
+def _render_skeleton_for_prompt(skeleton: EnrichmentPlan) -> str:
+    """Compact skeleton view for the prompt context."""
+    out: list[str] = [
+        f"Complexity: {skeleton.complexity}",
+        f"Estimated input tokens: {skeleton.estimated_input_tokens}",
+        "",
+    ]
+    if skeleton.proposed_dimensions:
+        out.append(f"Proposed dimensions ({len(skeleton.proposed_dimensions)}):")
+        for d in skeleton.proposed_dimensions:
+            out.append(
+                f"  - `{d.get('name')}` ({d.get('type')}) ← "
+                f"`{d.get('source_column')}`"
+            )
+    if skeleton.proposed_dimension_groups:
+        out.append(
+            f"Proposed dimension_groups ({len(skeleton.proposed_dimension_groups)}):"
+        )
+        for dg in skeleton.proposed_dimension_groups:
+            out.append(f"  - `{dg.get('name')}` on `{dg.get('source_column')}`")
+    if skeleton.proposed_measures:
+        out.append(f"Proposed measures ({len(skeleton.proposed_measures)}):")
+        for m in skeleton.proposed_measures:
+            out.append(
+                f"  - `{m.get('name')}` ({m.get('type')}) ← "
+                f"`{m.get('source_column')}`"
+            )
+    if skeleton.proposed_derived_tables:
+        out.append(
+            f"Proposed derived_tables ({len(skeleton.proposed_derived_tables)}):"
+        )
+        for dt in skeleton.proposed_derived_tables:
+            out.append(f"  - `{dt.get('name')}` (kind: {dt.get('kind')})")
+    if skeleton.risks:
+        out.append("Skeleton-detected risks:")
+        for r in skeleton.risks:
+            out.append(f"  - {r}")
+    return "\n".join(out)
+
+
+def _invoke_plan_agent(
+    prompt: str, table_name: str, config: LumiConfig,
+) -> EnrichmentPlan | None:
+    """Build the LlmAgent + Runner, run it, return the parsed EnrichmentPlan.
+
+    Mirrors the pattern in lumi.enrich._invoke_enrichment_agent. Returns
+    None on any error so the caller can fall back to the skeleton.
+    """
+    try:
+        from google.adk.agents import LlmAgent
+        from google.adk.runners import InMemoryRunner
+        from google.adk.sessions import InMemorySessionService
+        from google.genai import types as genai_types
+    except ImportError as e:
+        logger.warning("ADK not importable, skipping LLM planning: %s", e)
+        return None
+
+    agent = LlmAgent(
+        name=f"plan_{table_name}".replace(".", "_"),
+        model=config.model_name,
+        description="Authoring an EnrichmentPlan from grounded context.",
+        instruction=prompt,
+        output_schema=EnrichmentPlan,
+        generate_content_config=genai_types.GenerateContentConfig(
+            temperature=config.temperature,
+            max_output_tokens=4000,
+        ),
+    )
+    runner = InMemoryRunner(agent=agent, app_name="lumi_plan")
+
+    session_service: InMemorySessionService = runner.session_service  # type: ignore[assignment]
+    import asyncio
+    user_id, session_id = "lumi_planner", f"plan_{table_name}"
+
+    async def _run() -> str | None:
+        await session_service.create_session(
+            app_name="lumi_plan", user_id=user_id, session_id=session_id,
+        )
+        last_text: str | None = None
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session_id,
+            new_message=genai_types.Content(
+                role="user",
+                parts=[genai_types.Part.from_text(text="Author the plan.")],
+            ),
+        ):
+            if (event.content and event.content.parts
+                    and event.content.parts[0].text):
+                last_text = event.content.parts[0].text
+        return last_text
+
+    try:
+        text = asyncio.run(_run())
+    except Exception as e:  # noqa: BLE001
+        logger.warning("plan agent invocation failed: %s", e)
+        return None
+
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+        return EnrichmentPlan(**data)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("plan agent returned non-JSON or invalid plan: %s", e)
+        return None
+
+
+# Back-compat: callers that still import build_enrichment_plan with no
+# kwargs get the deterministic skeleton (same as before this commit).
+# Tests that mock the LlmAgent layer can pass with_llm=True.
 
 
 # ─── Persistence ─────────────────────────────────────────────

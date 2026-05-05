@@ -105,12 +105,19 @@ def run_plan_phase(
     config: LumiConfig | None = None,
     *,
     only_tables: list[str] | None = None,
+    with_llm: bool = False,
 ) -> PipelineResult:
     """Stages 1-4 — read SQLs, build TableContexts, write plan files.
 
     On completion, ``review_queue/<table>.plan.md`` exists for every
-    discovered table (or just the ``only_tables`` subset). Plans are
-    deterministic — no Gemini tokens spent here.
+    discovered table (or just the ``only_tables`` subset).
+
+    Args:
+        with_llm: when True, each plan is authored by Gemini using the
+            full TableContext + grounding signals + narrative. When
+            False (default), plans are deterministic skeletons. Either
+            way, on Vertex error individual plans gracefully degrade
+            to the skeleton — never crashes the pipeline.
     """
     cfg = config or LumiConfig()
     started = time.time()
@@ -187,9 +194,19 @@ def run_plan_phase(
     )
     result.tables_total = len(ranked)
 
+    # Compute fingerprints once if LLM authoring is enabled — it'll be
+    # passed to every per-table plan call to compute grounding+narrative.
+    fps_for_plan = fps if with_llm else None
+
     for rank, ctx in enumerate(ranked, start=1):
         try:
-            plan = build_enrichment_plan(ctx)
+            plan = build_enrichment_plan(
+                ctx,
+                all_fingerprints=fps_for_plan,
+                contexts_by_table=contexts if with_llm else None,
+                with_llm=with_llm,
+                config=cfg,
+            )
             save_plan_json(plan, plans_dir)
             md_path = queue_dir / f"{ctx.table_name}.plan.md"
             md_path.write_text(
