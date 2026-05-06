@@ -48,6 +48,13 @@ from lumi.guardrails import (
     check_parse_and_discover,
 )
 from lumi.mdm import CachedMDMClient
+from lumi.ontology_store import (
+    OntologyStore,
+    record_cardinalities_from_fingerprints,
+    record_curated_synonyms_from_baseline,
+    record_entity_hints_from_mdm,
+    record_equivalences_from_fingerprints,
+)
 from lumi.plan_builder import (
     build_enrichment_plan,
     format_enrichment_plan_markdown,
@@ -152,6 +159,30 @@ def run_plan_phase(
     fps = parse_sqls(sqls)
     contexts = discover_tables(fps, mdm, str(baseline_dir))
 
+    # Unified ontology pipeline — single store, single read path.
+    # 1. Hooks emit deterministic events from every signal source.
+    # 2. On cold start (no current.json), the seed_fn fires the LLM
+    #    builder and converts its output into events.
+    # 3. promote_candidates() materializes the canonical DomainOntology.
+    # 4. save_current() writes data/ontology/current.json — the only
+    #    ontology consumed by plan, critic, and review.
+    store = OntologyStore()
+    n_eq = record_equivalences_from_fingerprints(store, fps)
+    n_card = record_cardinalities_from_fingerprints(store, fps)
+    n_mdm = 0
+    n_baseline = 0
+    for ctx in contexts.values():
+        n_mdm += record_entity_hints_from_mdm(store, ctx)
+        n_baseline += record_curated_synonyms_from_baseline(store, ctx)
+    logger.info(
+        "ontology events recorded: %d eq + %d card + %d MDM + %d baseline",
+        n_eq, n_card, n_mdm, n_baseline,
+    )
+    result.extra["ontology_events"] = {
+        "equivalence": n_eq, "cardinality": n_card,
+        "mdm": n_mdm, "baseline": n_baseline,
+    }
+
     fp_dicts = [
         {
             "tables": fp.tables,
@@ -198,17 +229,26 @@ def run_plan_phase(
     # passed to every per-table plan call to compute grounding+narrative.
     fps_for_plan = fps if with_llm else None
 
-    # Build (or load) the domain ontology ONCE upfront when LLM is on.
-    # Solves the cardmember↔customer↔cust_xref_id semantic-equivalence
-    # problem at the system level. Cached on disk; only re-runs when
-    # missing.
+    # Materialize the unified ontology from the store. On cold start,
+    # the seed_fn fires the LLM builder and feeds its output into
+    # events. On warm restart, we just promote the existing candidates.
     ontology = None
     if with_llm:
-        from lumi.ontology_builder import ensure_ontology
-        ontology = ensure_ontology(
-            contexts, fps, with_llm=True, config=cfg,
+        from lumi.ontology_builder import _emit_seed_events, build_domain_ontology
+
+        def _seed(s: OntologyStore) -> int:
+            seed_ontology = build_domain_ontology(
+                contexts, fps, with_llm=True, config=cfg,
+            )
+            return _emit_seed_events(s, seed_ontology)
+
+        ontology = store.refresh(
+            seed_fn=_seed,
+            evidence_threshold=1,
+            snapshot_reason="plan_phase_start",
         )
         result.extra["ontology_entities"] = len(ontology.entities)
+        result.extra["ontology_relationships"] = len(ontology.relationships)
         result.extra["ontology_authoring"] = ontology.authoring.get("mode", "?")
         logger.info(
             "domain ontology ready (%d entities, %d relationships, mode=%s)",
@@ -220,16 +260,60 @@ def run_plan_phase(
     skeleton_fallback = 0
     fallback_reasons: dict[str, int] = {}
 
-    for rank, ctx in enumerate(ranked, start=1):
-        try:
-            plan = build_enrichment_plan(
-                ctx,
+    # Parallelize the plan stage — each per-table call is one Vertex
+    # invocation (with self-repair retries). Bound concurrency at
+    # cfg.max_concurrent_plans so we don't smash QPS.
+    if with_llm and len(ranked) > 1:
+        plan_outcomes = asyncio.run(
+            _plan_many(
+                ranked, cfg,
                 all_fingerprints=fps_for_plan,
                 contexts_by_table=contexts if with_llm else None,
                 with_llm=with_llm,
-                config=cfg,
                 ontology=ontology,
             )
+        )
+    else:
+        # Sequential path — used for skeleton-only runs and tests that
+        # need deterministic ordering. Same logic, no event loop overhead.
+        plan_outcomes = {}
+        for ctx in ranked:
+            try:
+                plan_outcomes[ctx.table_name] = build_enrichment_plan(
+                    ctx,
+                    all_fingerprints=fps_for_plan,
+                    contexts_by_table=contexts if with_llm else None,
+                    with_llm=with_llm,
+                    config=cfg,
+                    ontology=ontology,
+                )
+            except Exception as e:  # noqa: BLE001
+                plan_outcomes[ctx.table_name] = e
+
+    for rank, ctx in enumerate(ranked, start=1):
+        outcome = plan_outcomes.get(ctx.table_name)
+        if isinstance(outcome, Exception):
+            result.tables_failed += 1
+            result.failures.append({
+                "table": ctx.table_name,
+                "stage": "plan",
+                "error": f"{type(outcome).__name__}: {outcome}",
+            })
+            logger.exception(
+                "plan failed for %s: %s", ctx.table_name, outcome,
+            )
+            continue
+        if outcome is None:
+            result.tables_failed += 1
+            result.failures.append({
+                "table": ctx.table_name,
+                "stage": "plan",
+                "error": "no plan produced",
+            })
+            continue
+
+        plan = outcome
+        try:
             save_plan_json(plan, plans_dir)
             md_path = queue_dir / f"{ctx.table_name}.plan.md"
             md_path.write_text(
@@ -238,15 +322,12 @@ def run_plan_phase(
             )
             result.files_written.append(str(md_path))
             result.tables_succeeded += 1
-            # Tally provenance so the user knows how many plans actually
-            # had Gemini's reasoning applied.
             mode = (plan.authoring or {}).get("mode", "skeleton")
             if mode == "llm":
                 llm_authored += 1
             else:
                 skeleton_fallback += 1
                 reason = (plan.authoring or {}).get("reason") or "(unspecified)"
-                # Truncate long ADK error strings into a stable bucket.
                 bucket = reason[:80]
                 fallback_reasons[bucket] = fallback_reasons.get(bucket, 0) + 1
             logger.info(
@@ -257,10 +338,10 @@ def run_plan_phase(
             result.tables_failed += 1
             result.failures.append({
                 "table": ctx.table_name,
-                "stage": "plan",
+                "stage": "plan_write",
                 "error": f"{type(e).__name__}: {e}",
             })
-            logger.exception("plan failed for %s", ctx.table_name)
+            logger.exception("plan write failed for %s", ctx.table_name)
 
     # Surface authoring stats in the run summary.
     if with_llm or skeleton_fallback:
@@ -281,6 +362,18 @@ def run_plan_phase(
         encoding="utf-8",
     )
     result.files_written.append(str(summary_path))
+
+    # End-of-phase ontology refresh — critic findings during the plan
+    # stage emitted entity_refinement events; promote them now and
+    # snapshot so the next phase reads improved synonyms/grain hints.
+    final_ontology = store.refresh(
+        evidence_threshold=1,
+        snapshot_reason="plan_phase_complete",
+    )
+    result.extra["ontology_final"] = {
+        "entities": len(final_ontology.entities),
+        "relationships": len(final_ontology.relationships),
+    }
 
     result.finished_at = time.time()
     return result
@@ -330,6 +423,23 @@ def run_execute_phase(
     if only_tables:
         wanted = set(only_tables)
         approved = [a for a in approved if a.table_name in wanted]
+
+    # Hook 4: vocabulary lock + plan-content mining for every approved
+    # plan. Boosts the entity, locks renames as curated synonyms, and
+    # mines explicit primary_key dims as curated PKs.
+    if approved:
+        store = OntologyStore()
+        from lumi.ontology_store import record_approval_lock
+        n_locks = 0
+        for a in approved:
+            ctx = contexts.get(a.table_name)
+            plan = load_plan_json(plans_dir, a.table_name)
+            n_locks += record_approval_lock(store, a, ctx, plan=plan)
+        if n_locks:
+            logger.info(
+                "ontology approval events recorded: %d", n_locks,
+            )
+            result.extra["vocabulary_locks"] = n_locks
     if not approved:
         result.finished_at = time.time()
         result.extra["note"] = (
@@ -345,6 +455,7 @@ def run_execute_phase(
     enriched: dict[str, EnrichedOutput] = {}
 
     work: list[tuple[TableContext, EnrichmentPlan]] = []
+    rejected_skipped = 0
     for a in approved:
         ctx = contexts.get(a.table_name)
         if ctx is None:
@@ -364,6 +475,22 @@ def run_execute_phase(
             })
             result.tables_failed += 1
             continue
+        # Plans the critic rejected (or flip-flop-escalated) must NOT
+        # spend enrichment tokens — even if the human ticked APPROVED,
+        # that approval was on a known-bad plan. We log + skip.
+        reason = (plan.authoring or {}).get("reason") or ""
+        if reason in {"rejected_by_critic", "flip_flop_detected"}:
+            logger.warning(
+                "skipping enrichment for %s — plan flagged %s by critic",
+                a.table_name, reason,
+            )
+            rejected_skipped += 1
+            result.failures.append({
+                "table": a.table_name,
+                "stage": "critic_gate",
+                "error": f"plan {reason} — fix the plan before enriching",
+            })
+            continue
         cached = enriched_dir / f"{a.table_name}.json"
         if cached.exists() and not force:
             try:
@@ -379,6 +506,9 @@ def run_execute_phase(
                     a.table_name, e,
                 )
         work.append((ctx, plan))
+
+    if rejected_skipped:
+        result.extra["rejected_by_critic"] = rejected_skipped
 
     # Grounding signals need the full corpus of fingerprints + all
     # discovered contexts, NOT just the current table's. Compute once
@@ -450,8 +580,61 @@ def run_execute_phase(
             "error": publish_result.get("error") or "publish failed",
         })
 
+    # End-of-execute ontology refresh — vocabulary_lock + plan-mining
+    # events accumulated during this phase. Promote + snapshot.
+    store = OntologyStore()
+    final_ontology = store.refresh(
+        evidence_threshold=1,
+        snapshot_reason="execute_phase_complete",
+    )
+    result.extra["ontology_final"] = {
+        "entities": len(final_ontology.entities),
+        "relationships": len(final_ontology.relationships),
+    }
+
     result.finished_at = time.time()
     return result
+
+
+# ─── Concurrent planning ─────────────────────────────────────
+
+
+async def _plan_many(
+    ranked: list[TableContext],
+    cfg: LumiConfig,
+    *,
+    all_fingerprints: list | None,
+    contexts_by_table: dict | None,
+    with_llm: bool,
+    ontology=None,  # type: ignore[no-untyped-def]
+) -> dict[str, EnrichmentPlan | Exception]:
+    """Run build_enrichment_plan concurrently with a Semaphore cap.
+
+    Each per-table call may itself fire 1-3 Gemini calls (planner + critic
+    + repair retries), so we bound at cfg.max_concurrent_plans (default 5)
+    to keep total QPS sane.
+    """
+    sem = asyncio.Semaphore(cfg.max_concurrent_plans)
+    out: dict[str, EnrichmentPlan | Exception] = {}
+
+    async def _one(ctx: TableContext) -> None:
+        async with sem:
+            try:
+                plan = await asyncio.to_thread(
+                    build_enrichment_plan, ctx,
+                    all_fingerprints=all_fingerprints,
+                    contexts_by_table=contexts_by_table,
+                    with_llm=with_llm,
+                    config=cfg,
+                    ontology=ontology,
+                )
+                out[ctx.table_name] = plan
+            except Exception as e:  # noqa: BLE001
+                logger.exception("plan failed for %s", ctx.table_name)
+                out[ctx.table_name] = e
+
+    await asyncio.gather(*[_one(c) for c in ranked])
+    return out
 
 
 # ─── Concurrent enrichment ───────────────────────────────────

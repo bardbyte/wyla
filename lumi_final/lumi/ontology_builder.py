@@ -40,6 +40,7 @@ import json
 import logging
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from lumi.config import LumiConfig
 from lumi.ontology import EquivalenceMap, compute_equivalence_classes
@@ -50,6 +51,9 @@ from lumi.schemas import (
     TableContext,
 )
 from lumi.sql_to_context import SQLFingerprint
+
+if TYPE_CHECKING:
+    from lumi.ontology_store import OntologyStore
 
 logger = logging.getLogger("lumi.ontology_builder")
 
@@ -138,16 +142,72 @@ def ensure_ontology(
     with_llm: bool = True,
     config: LumiConfig | None = None,
 ) -> DomainOntology:
-    """Load from disk; if missing or refresh=True, build and save."""
+    """DEPRECATED — use ``OntologyStore.refresh(seed_fn=...)`` instead.
+
+    Kept for the ``python -m lumi ontology`` standalone CLI. The active
+    pipeline now reads from the unified store at ``data/ontology/``,
+    not the legacy single-file path. This function still works for
+    backward-compatible CLI use but routes through the store under the
+    hood so seed events feed the candidates index.
+    """
+    from lumi.ontology_store import OntologyStore
+
+    # Backward-compat: honor the legacy path-file cache when caller
+    # passed a custom path (tests use tmp_path). The unified store path
+    # below is the canonical flow for the pipeline.
     if not refresh:
-        existing = load_ontology(path)
-        if existing is not None:
-            return existing
-    ontology = build_domain_ontology(
-        contexts, all_fingerprints, with_llm=with_llm, config=config,
+        existing_at_path = load_ontology(path)
+        if existing_at_path is not None:
+            return existing_at_path
+
+    store = OntologyStore()
+
+    def _seed(s: "OntologyStore") -> int:
+        ontology = build_domain_ontology(
+            contexts, all_fingerprints,
+            with_llm=with_llm, config=config,
+        )
+        return _emit_seed_events(s, ontology)
+
+    out = store.refresh(
+        seed_fn=_seed,
+        force_seed=refresh,  # refresh=True forces rebuild even if current.json exists
+        evidence_threshold=1,
+        snapshot_reason="ensure_ontology() seed",
     )
-    save_ontology(ontology, path)
-    return ontology
+    save_ontology(out, path)
+    return out
+
+
+def _emit_seed_events(store: "OntologyStore", ontology: DomainOntology) -> int:
+    """Convert a built DomainOntology into events recorded in the store."""
+    from lumi.schemas import OntologyEvent
+
+    n = 0
+    for ent in ontology.entities:
+        for tbl, cols in ent.grain_columns.items():
+            for col in cols:
+                store.record(OntologyEvent(
+                    event_type="entity_hint",
+                    source="llm_seed",
+                    table_name=tbl,
+                    column_name=col,
+                    entity_name=ent.name,
+                    confidence=0.85,
+                    evidence=f"LLM-authored ontology seed: {ent.name}",
+                ))
+                n += 1
+        for syn in ent.synonyms:
+            store.record(OntologyEvent(
+                event_type="synonym_candidate",
+                source="llm_seed",
+                entity_name=ent.name,
+                payload={"canonical": ent.name, "synonym": syn},
+                confidence=0.85,
+                evidence=f"LLM-authored seed synonym for {ent.name}",
+            ))
+            n += 1
+    return n
 
 
 # ─── Deterministic skeleton ──────────────────────────────────

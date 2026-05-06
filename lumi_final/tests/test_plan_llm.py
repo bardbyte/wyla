@@ -121,7 +121,7 @@ def test_llm_returns_refined_plan_used():
 
     with patch("lumi.plan_builder._invoke_plan_agent", return_value=refined):
         plan = build_enrichment_plan(
-            ctx, all_fingerprints=fps, with_llm=True,
+            ctx, all_fingerprints=fps, with_llm=True, with_critic=False,
         )
     assert "LLM-refined" in plan.proposed_dimensions[0]["description_summary"]
     assert "cornerstone daily metrics" in plan.reasoning
@@ -136,7 +136,7 @@ def test_llm_error_falls_back_to_skeleton():
         side_effect=RuntimeError("Vertex unreachable"),
     ):
         plan = build_enrichment_plan(
-            ctx, all_fingerprints=fps, with_llm=True,
+            ctx, all_fingerprints=fps, with_llm=True, with_critic=False,
         )
     skeleton = build_enrichment_plan_skeleton(ctx)
     assert plan.reasoning == skeleton.reasoning
@@ -156,7 +156,7 @@ def test_llm_empty_proposals_falls_back():
     )
     with patch("lumi.plan_builder._invoke_plan_agent", return_value=bad):
         plan = build_enrichment_plan(
-            ctx, all_fingerprints=fps, with_llm=True,
+            ctx, all_fingerprints=fps, with_llm=True, with_critic=False,
         )
     skeleton = build_enrichment_plan_skeleton(ctx)
     assert plan.proposed_measures == skeleton.proposed_measures
@@ -169,7 +169,7 @@ def test_llm_returns_none_falls_back():
     fps = parse_sqls(["SELECT a FROM cornerstone_metrics"])
     with patch("lumi.plan_builder._invoke_plan_agent", return_value=None):
         plan = build_enrichment_plan(
-            ctx, all_fingerprints=fps, with_llm=True,
+            ctx, all_fingerprints=fps, with_llm=True, with_critic=False,
         )
     skeleton = build_enrichment_plan_skeleton(ctx)
     assert plan.reasoning == skeleton.reasoning
@@ -191,7 +191,7 @@ def test_llm_preserves_skeleton_token_estimates():
     )
     with patch("lumi.plan_builder._invoke_plan_agent", return_value=refined):
         plan = build_enrichment_plan(
-            ctx, all_fingerprints=fps, with_llm=True,
+            ctx, all_fingerprints=fps, with_llm=True, with_critic=False,
         )
     skeleton = build_enrichment_plan_skeleton(ctx)
     assert plan.estimated_input_tokens == skeleton.estimated_input_tokens
@@ -253,6 +253,136 @@ def test_parse_plan_returns_none_on_unrecoverable():
     from lumi.plan_builder import _parse_plan_response
     plan = _parse_plan_response("this is not json at all", "t")
     assert plan is None
+
+
+# ─── Self-repair loop ────────────────────────────────────────
+
+
+def test_self_repair_retries_on_blocking_critique():
+    """When the critic returns a blocking issue, the planner re-prompts
+    once with the critique appended and uses the second-round plan."""
+    ctx = _ctx()
+    fps = parse_sqls(["SELECT bus_seg FROM cornerstone_metrics"])
+
+    bad_plan = EnrichmentPlan(
+        table_name="cornerstone_metrics",
+        proposed_dimensions=[
+            {"name": "?", "type": "string", "source_column": "bus_seg"},
+        ],
+        proposed_measures=[
+            {"name": "total_bb", "type": "sum", "source_column": "billed_business",
+             "value_format_name": "usd"},
+        ],
+        complexity="simple",
+        reasoning="Plan adds dims for cornerstone metrics on cardmember entity. "
+                  "Two new measures plus PK preservation.",
+    )
+    good_plan = EnrichmentPlan(
+        table_name="cornerstone_metrics",
+        proposed_dimensions=[
+            {"name": "business_segment", "type": "string",
+             "source_column": "bus_seg",
+             "description_summary": "Cardmember business segment"},
+        ],
+        proposed_measures=[
+            {"name": "total_bb", "type": "sum", "source_column": "billed_business",
+             "value_format_name": "usd"},
+        ],
+        complexity="simple",
+        reasoning="Plan adds dims for cornerstone metrics on cardmember entity. "
+                  "Two new measures plus PK preservation.",
+    )
+
+    call_log: list[str] = []
+
+    def fake_invoke(prompt, table, config):
+        call_log.append(prompt)
+        return bad_plan if len(call_log) == 1 else good_plan
+
+    with patch("lumi.plan_builder._invoke_plan_agent", side_effect=fake_invoke), \
+         patch("lumi.critic._llm_critique", return_value=None):
+        plan = build_enrichment_plan(
+            ctx, all_fingerprints=fps, with_llm=True, with_critic=True,
+        )
+
+    # Two rounds happened — the second prompt has the critique addendum.
+    assert len(call_log) >= 2
+    assert "Critic feedback" in call_log[1]
+    # We ended up with the good plan (no placeholder).
+    assert plan.proposed_dimensions[0]["name"] == "business_segment"
+
+
+def test_self_repair_caps_at_max_rounds():
+    """If the model never resolves block issues, we stop at max_rounds + 1
+    invocations and return whatever the last refined plan was."""
+    from lumi.config import LumiConfig
+    cfg = LumiConfig()
+    cfg.plan_repair_max_rounds = 1  # 1 retry → 2 total invocations max
+
+    ctx = _ctx()
+    fps = parse_sqls(["SELECT bus_seg FROM cornerstone_metrics"])
+
+    bad_plan = EnrichmentPlan(
+        table_name="cornerstone_metrics",
+        proposed_dimensions=[
+            {"name": "?", "type": "string", "source_column": "bus_seg"},
+        ],
+        proposed_measures=[
+            {"name": "x", "type": "number", "source_column": "billed_business"},
+        ],
+        complexity="simple",
+        reasoning="Plan adds dims. Cardmember entity context goes here too.",
+    )
+    call_count = [0]
+
+    def fake_invoke(prompt, table, config):
+        call_count[0] += 1
+        return bad_plan
+
+    with patch("lumi.plan_builder._invoke_plan_agent", side_effect=fake_invoke), \
+         patch("lumi.critic._llm_critique", return_value=None):
+        plan = build_enrichment_plan(
+            ctx, all_fingerprints=fps, with_llm=True, with_critic=True, config=cfg,
+        )
+
+    # 1 initial + 1 retry = 2 total
+    assert call_count[0] == 2
+    # Plan still has the placeholder — guard kicks in only when first
+    # candidate triggers excessive-placeholder fallback. Here we have just
+    # one placeholder out of two, under the threshold, so the plan is used.
+    assert plan is not None
+
+
+def test_critic_disabled_no_repair_loop():
+    """with_critic=False bypasses the loop — single planner invocation."""
+    ctx = _ctx()
+    fps = parse_sqls(["SELECT bus_seg FROM cornerstone_metrics"])
+    refined = EnrichmentPlan(
+        table_name="cornerstone_metrics",
+        proposed_dimensions=[
+            {"name": "bus_seg", "type": "string", "source_column": "bus_seg"},
+        ],
+        proposed_measures=[
+            {"name": "total_bb", "type": "sum", "source_column": "billed_business",
+             "value_format_name": "usd"},
+        ],
+        complexity="simple",
+        reasoning="Cardmember table at point-in-time grain. Plan adds bus_seg + total_bb.",
+    )
+    call_count = [0]
+
+    def fake_invoke(prompt, table, config):
+        call_count[0] += 1
+        return refined
+
+    with patch("lumi.plan_builder._invoke_plan_agent", side_effect=fake_invoke):
+        build_enrichment_plan(
+            ctx, all_fingerprints=fps, with_llm=True, with_critic=False,
+        )
+    assert call_count[0] == 1
+
+
+# ─── Prompt assembly ─────────────────────────────────────────
 
 
 def test_plan_prompt_includes_narrative_and_grounding():

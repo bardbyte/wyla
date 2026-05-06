@@ -39,12 +39,18 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
 import lkml
 
-from lumi.schemas import CoverageReport, EnrichedOutput
+from lumi.schemas import (
+    CoverageReport,
+    EnrichedOutput,
+    ExploreDescription,
+    ViewDescription,
+)
 
 logger = logging.getLogger("lumi.publish")
 
@@ -403,6 +409,9 @@ def publish_to_disk(
         for entry in eo.proposed_overwrites or []:
             row = {**entry, "table": table_name, "source": "llm_flagged"}
             overwrite_ledger.append(row)
+        # Render disambiguating description (B): comment block + inject
+        # description: parameter into the view body.
+        merged = _apply_view_description(merged, eo.view_description)
         view_path = views_dir / f"{table_name}.view.lkml"
         view_path.write_text(merged, encoding="utf-8")
         written.append(str(view_path))
@@ -421,7 +430,10 @@ def publish_to_disk(
     model_lines.append("")
     for table_name, eo in enriched_outputs.items():
         if eo.explore_lkml and eo.explore_lkml.strip():
-            model_lines.append(eo.explore_lkml.rstrip())
+            explore_text = _apply_explore_description(
+                eo.explore_lkml, eo.explore_description,
+            )
+            model_lines.append(explore_text.rstrip())
             model_lines.append("")
     model_path = models_dir / "lumi_enriched.model.lkml"
     model_path.write_text("\n".join(model_lines), encoding="utf-8")
@@ -587,3 +599,194 @@ def _render_overwrites_md(ledger: list[dict[str, Any]]) -> str:
             lines.append(f"```\n{e.get('proposed_value', '')}\n```")
             lines.append("")
     return "\n".join(lines)
+
+
+# ─── Disambiguating description rendering (B) ────────────────
+
+
+def _apply_view_description(
+    view_lkml: str, vd: ViewDescription | None,
+) -> str:
+    """Inject a disambiguation comment block + description: parameter.
+
+    Two output surfaces:
+      1. ``# === DISAMBIGUATION ===`` comment block above ``view:`` —
+         indexable by Radix, readable for humans editing the file.
+      2. LookML ``description:`` parameter inside the view body — this
+         is the field Looker shows in the UI. Synthesized from one_liner +
+         grain + scope.
+
+    No-op when vd is None or has no content. Idempotent: re-applying
+    on a previously-decorated view replaces the existing block so we
+    don't accumulate stale disambiguation as the plan iterates.
+    """
+    if vd is None:
+        return view_lkml
+    has_content = any([
+        vd.one_liner, vd.grain, vd.scope,
+        vd.when_to_use, vd.when_not_to_use, vd.distinguishes_from,
+    ])
+    if not has_content:
+        return view_lkml
+
+    # Build comment block.
+    block_lines = ["# === DISAMBIGUATION ==="]
+    if vd.one_liner:
+        block_lines.append(f"# summary: {vd.one_liner}")
+    if vd.grain:
+        block_lines.append(f"# grain: {vd.grain}")
+    if vd.scope:
+        block_lines.append(f"# scope: {vd.scope}")
+    if vd.when_to_use:
+        block_lines.append(f"# use_when: {vd.when_to_use}")
+    if vd.when_not_to_use:
+        block_lines.append(f"# do_not_use_when: {vd.when_not_to_use}")
+    if vd.distinguishes_from:
+        block_lines.append("# distinguishes_from:")
+        for entry in vd.distinguishes_from:
+            vn = entry.get("view_name", "?")
+            diff = entry.get("how_it_differs", "")
+            block_lines.append(f"#   - {vn}: {diff}")
+    block_lines.append("# === END DISAMBIGUATION ===")
+    block = "\n".join(block_lines)
+
+    # Strip any prior disambiguation block (idempotency).
+    text = re.sub(
+        r"# === DISAMBIGUATION ===.*?# === END DISAMBIGUATION ===\n?",
+        "", view_lkml, flags=re.DOTALL,
+    )
+
+    # IMPORTANT: inject `description:` FIRST. ``lkml.dump`` re-emits the
+    # entire file, which strips comments — so the comment block must be
+    # prepended AFTER the lkml round-trip.
+    synthesized = _synthesize_view_description(vd)
+    if synthesized:
+        text = _inject_view_description_param(text, synthesized)
+
+    # Now find the view: keyword and prepend block above it.
+    view_match = re.search(r"^(\s*)view:\s*", text, flags=re.MULTILINE)
+    if view_match:
+        idx = view_match.start()
+        text = text[:idx] + block + "\n\n" + text[idx:]
+    else:
+        # No view: keyword found — prepend at top.
+        text = block + "\n\n" + text
+    return text
+
+
+def _synthesize_view_description(vd: ViewDescription) -> str:
+    """Compose a single LookML description: value from structured fields."""
+    parts: list[str] = []
+    if vd.one_liner:
+        parts.append(vd.one_liner.strip().rstrip("."))
+    if vd.grain:
+        parts.append(f"Grain: {vd.grain.strip().rstrip('.')}")
+    if vd.scope:
+        parts.append(f"Scope: {vd.scope.strip().rstrip('.')}")
+    text = ". ".join(p for p in parts if p)
+    if len(text) > 240:
+        text = text[:237] + "..."
+    return text
+
+
+def _inject_view_description_param(view_lkml: str, desc: str) -> str:
+    """Add or replace the ``description:`` parameter inside ``view: x { ... }``.
+
+    Uses lkml.parse to be safe; falls back to no-op if the parser can't
+    find a single view block.
+    """
+    try:
+        parsed = lkml.load(view_lkml)
+    except Exception:  # noqa: BLE001
+        return view_lkml
+    views = parsed.get("views") or []
+    if not views or len(views) != 1:
+        return view_lkml
+    view = views[0]
+    # Quote-escape the description for LookML — wrap in double quotes,
+    # escape internal double quotes.
+    safe = desc.replace('"', '\\"')
+    view["description"] = safe
+    try:
+        dumped = lkml.dump(parsed)
+        return dumped if dumped is not None else view_lkml
+    except Exception:  # noqa: BLE001
+        return view_lkml
+
+
+def _apply_explore_description(
+    explore_lkml: str, ed: ExploreDescription | None,
+) -> str:
+    """Inject a disambiguation comment block + description: parameter for an explore.
+
+    Same idempotency as _apply_view_description. Renders primary_questions
+    and anti_questions as structured comments so Radix indexing can pick
+    them up; canonical_filters and join_paths surface in both block and
+    LookML description.
+    """
+    if ed is None:
+        return explore_lkml
+    has_content = any([
+        ed.one_liner, ed.primary_questions, ed.anti_questions,
+        ed.canonical_filters, ed.join_paths,
+    ])
+    if not has_content:
+        return explore_lkml
+
+    block_lines = ["# === EXPLORE DISAMBIGUATION ==="]
+    if ed.one_liner:
+        block_lines.append(f"# summary: {ed.one_liner}")
+    if ed.join_paths:
+        block_lines.append("# join_paths:")
+        for jp in ed.join_paths:
+            block_lines.append(f"#   - {jp}")
+    if ed.canonical_filters:
+        block_lines.append("# canonical_filters:")
+        for k, v in ed.canonical_filters.items():
+            block_lines.append(f"#   - {k}: {v}")
+    if ed.primary_questions:
+        block_lines.append("# primary_questions (use this explore):")
+        for q in ed.primary_questions:
+            block_lines.append(f"#   - {q}")
+    if ed.anti_questions:
+        block_lines.append("# anti_questions (use a sibling explore):")
+        for q in ed.anti_questions:
+            block_lines.append(f"#   - {q}")
+    block_lines.append("# === END EXPLORE DISAMBIGUATION ===")
+    block = "\n".join(block_lines)
+
+    text = re.sub(
+        r"# === EXPLORE DISAMBIGUATION ===.*?# === END EXPLORE DISAMBIGUATION ===\n?",
+        "", explore_lkml, flags=re.DOTALL,
+    )
+
+    # Inject description param BEFORE prepending the comment block —
+    # lkml.dump strips comments on re-emit.
+    if ed.one_liner:
+        text = _inject_explore_description_param(text, ed.one_liner)
+
+    explore_match = re.search(r"^(\s*)explore:\s*", text, flags=re.MULTILINE)
+    if explore_match:
+        idx = explore_match.start()
+        text = text[:idx] + block + "\n\n" + text[idx:]
+    else:
+        text = block + "\n\n" + text
+    return text
+
+
+def _inject_explore_description_param(explore_lkml: str, desc: str) -> str:
+    """Add or replace `description:` inside `explore: x { ... }`."""
+    try:
+        parsed = lkml.load(explore_lkml)
+    except Exception:  # noqa: BLE001
+        return explore_lkml
+    explores = parsed.get("explores") or []
+    if not explores or len(explores) != 1:
+        return explore_lkml
+    safe = desc[:240].replace('"', '\\"')
+    explores[0]["description"] = safe
+    try:
+        dumped = lkml.dump(parsed)
+        return dumped if dumped is not None else explore_lkml
+    except Exception:  # noqa: BLE001
+        return explore_lkml

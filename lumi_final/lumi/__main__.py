@@ -168,6 +168,128 @@ def _cmd_ontology(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_review(args: argparse.Namespace) -> int:
+    """Walk plans interactively in the terminal — no editor / web UI needed.
+
+    For each plan in priority order, shows the markdown + critique, then
+    prompts for one keystroke:
+      a — approve
+      r — regenerate (re-runs plan stage with --with-llm for this table)
+      e — open in $EDITOR (vi by default), then re-prompt
+      f — feedback (capture rejection reason; marks REJECTED)
+      s — skip
+      q — quit
+
+    Approve/reject decisions are written into the plan markdown (ticking
+    the `[ ] APPROVED` / `[ ] REJECTED` checkboxes) so collect_approvals
+    picks them up for `python -m lumi execute`.
+    """
+    import os
+    import re
+    from pathlib import Path
+
+    queue_dir = Path(args.queue)
+    plans = sorted(queue_dir.glob("*.plan.md"))
+    if not plans:
+        print(f"No plans in {queue_dir}/. Run `python -m lumi plan` first.")
+        return 1
+
+    print(f"Reviewing {len(plans)} plan(s) in {queue_dir}/")
+    print("Keys: [a]pprove · [r]egenerate · [e]dit · [f]eedback · [s]kip · [q]uit\n")
+
+    approve_count = reject_count = skip_count = 0
+
+    for i, plan_path in enumerate(plans, start=1):
+        table_name = plan_path.stem.replace(".plan", "")
+        if args.table and table_name not in args.table:
+            continue
+        text = plan_path.read_text(encoding="utf-8")
+        print("=" * 80)
+        print(f"[{i}/{len(plans)}] {table_name}")
+        print("=" * 80)
+        print(text)
+        print()
+        while True:
+            try:
+                choice = input(
+                    f"{table_name} → [a/r/e/f/s/q]: "
+                ).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("\nQuitting.")
+                return 0
+            if choice in {"a", "approve"}:
+                new_text = _tick_checkbox(text, approved=True)
+                plan_path.write_text(new_text, encoding="utf-8")
+                approve_count += 1
+                break
+            if choice in {"r", "regen", "regenerate"}:
+                print(
+                    f"Re-running plan stage for {table_name} with --with-llm…"
+                )
+                from lumi.config import LumiConfig
+                from lumi.pipeline import run_plan_phase
+                run_plan_phase(
+                    LumiConfig(), only_tables=[table_name], with_llm=True,
+                )
+                text = plan_path.read_text(encoding="utf-8")
+                print("\n--- regenerated ---\n")
+                print(text)
+                continue
+            if choice in {"e", "edit"}:
+                editor = os.environ.get("EDITOR", "vi")
+                os.system(f"{editor} {plan_path}")
+                text = plan_path.read_text(encoding="utf-8")
+                continue
+            if choice in {"f", "feedback"}:
+                fb = input("Feedback (one line, will be saved as REJECTED): ").strip()
+                new_text = _tick_checkbox(text, approved=False, feedback=fb)
+                plan_path.write_text(new_text, encoding="utf-8")
+                reject_count += 1
+                break
+            if choice in {"s", "skip"}:
+                skip_count += 1
+                break
+            if choice in {"q", "quit"}:
+                print("\nQuitting early.")
+                _ = re  # used below
+                _print_review_summary(approve_count, reject_count, skip_count)
+                return 0
+            print("Invalid key. Use a/r/e/f/s/q.")
+
+    _print_review_summary(approve_count, reject_count, skip_count)
+    return 0
+
+
+def _tick_checkbox(text: str, *, approved: bool, feedback: str = "") -> str:
+    """Tick the APPROVED or REJECTED checkbox in a plan markdown."""
+    if approved:
+        text = text.replace("- [ ] ✅ APPROVED", "- [x] ✅ APPROVED")
+        text = text.replace("- [x] ❌ REJECTED", "- [ ] ❌ REJECTED")
+    else:
+        text = text.replace("- [ ] ❌ REJECTED", "- [x] ❌ REJECTED")
+        text = text.replace("- [x] ✅ APPROVED", "- [ ] ✅ APPROVED")
+        if feedback:
+            if "Feedback (required if rejected):" in text:
+                text = text.replace(
+                    "Feedback (required if rejected):",
+                    f"Feedback (required if rejected):\n\n{feedback}",
+                )
+            else:
+                text = text + f"\n\nFeedback: {feedback}\n"
+    return text
+
+
+def _print_review_summary(approved: int, rejected: int, skipped: int) -> None:
+    print()
+    print("=" * 80)
+    print(
+        f"Review summary: {approved} approved, {rejected} rejected, "
+        f"{skipped} skipped"
+    )
+    if approved:
+        print("\nNext: `python -m lumi execute`")
+
+
 def _cmd_approve(args: argparse.Namespace) -> int:
     """Auto-approve description-only plans, or report pending."""
     from pathlib import Path
@@ -302,6 +424,17 @@ def main() -> None:
     )
     p_approve.add_argument("--queue", default="review_queue", help="Plan queue dir")
     p_approve.set_defaults(func=_cmd_approve)
+
+    p_review = sub.add_parser(
+        "review",
+        help="Walk plans interactively in the terminal — approve/regen/edit/skip",
+    )
+    p_review.add_argument("--queue", default="review_queue", help="Plan queue dir")
+    p_review.add_argument(
+        "--table", action="append",
+        help="Review one table only; repeat for multiple",
+    )
+    p_review.set_defaults(func=_cmd_review)
 
     p_execute = sub.add_parser(
         "execute", help="Phase 2: enrich → validate → publish",

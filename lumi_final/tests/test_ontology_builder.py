@@ -166,18 +166,31 @@ def test_ensure_ontology_loads_existing(tmp_path: Path):
     assert loaded.entities[0].name == "cached_entity"
 
 
-def test_ensure_ontology_rebuilds_on_refresh(tmp_path: Path):
-    ontology = DomainOntology(entities=[OntologyEntity(name="old")])
+def test_ensure_ontology_rebuilds_on_refresh(tmp_path: Path, monkeypatch):
+    """On refresh=True, the builder runs again and its events flow
+    through the unified store. Entities need grain_columns to promote
+    (otherwise there's no evidence for them to exist) — a clean
+    consequence of the event-sourced architecture.
+    """
+    # Isolate the store under tmp_path so we don't pollute cwd.
+    monkeypatch.chdir(tmp_path)
+
+    ontology = DomainOntology(
+        entities=[OntologyEntity(name="old", grain_columns={"t1": ["c1"]})],
+    )
     path = tmp_path / "ontology.json"
     save_ontology(ontology, path)
 
-    fresh = DomainOntology(entities=[OntologyEntity(name="new")])
+    fresh = DomainOntology(
+        entities=[OntologyEntity(name="new", grain_columns={"t2": ["c2"]})],
+    )
     with patch(
         "lumi.ontology_builder.build_domain_ontology",
         return_value=fresh,
     ):
         result = ensure_ontology({}, [], path=path, refresh=True)
-    assert result.entities[0].name == "new"
+    names = {e.name for e in result.entities}
+    assert "new" in names
 
 
 # ─── LLM path with mocks ─────────────────────────────────────

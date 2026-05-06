@@ -143,6 +143,86 @@ class TablePriority(BaseModel):
 PlanComplexity = Literal["simple", "medium", "complex"]
 
 
+class ViewDescription(BaseModel):
+    """Disambiguating description for one view.
+
+    Single-line LookML descriptions don't survive cold-start retrieval:
+    when 5 views all relate to "cardmember", Radix needs to know WHICH
+    one to load for "show me cardmember spend last quarter" vs "show me
+    current cardmember status." This structure forces the planner to
+    surface the disambiguation explicitly.
+
+    Renders into LookML two ways:
+      1. The ``description:`` parameter (Looker UI surface) — synthesized
+         one-liner including grain + scope.
+      2. A ``# DISAMBIGUATION ===`` comment block above the view —
+         indexable by Radix and readable by humans editing the file.
+    """
+    one_liner: str = Field(
+        default="",
+        description="≤140 chars. Plain-English answer to 'what is this view?'",
+    )
+    grain: str = Field(
+        default="",
+        description="What ONE row represents — 'one row per cardmember per day'.",
+    )
+    scope: str = Field(
+        default="",
+        description="Universe / population — 'active US cardmembers, last 90 days'.",
+    )
+    when_to_use: str = Field(
+        default="",
+        description="Question patterns this view IS for — 'use when "
+                    "asking about cardmember demographics or status'.",
+    )
+    when_not_to_use: str = Field(
+        default="",
+        description="Question patterns that belong elsewhere — "
+                    "'don't use for transaction-grain spend; use cm_txn'.",
+    )
+    distinguishes_from: list[dict] = Field(
+        default_factory=list,
+        description="[{view_name, how_it_differs}] — explicit contrast with "
+                    "sibling views sharing the primary entity. Empty list is "
+                    "a critic block when ontology shows siblings.",
+    )
+
+
+class ExploreDescription(BaseModel):
+    """Disambiguating description for one explore.
+
+    The explore is what Radix loads to answer a question — its
+    description shapes retrieval. We capture the question patterns this
+    explore actually answers (so retrieval routes correctly) AND the
+    patterns it does NOT answer (so retrieval doesn't misroute).
+    """
+    one_liner: str = Field(
+        default="",
+        description="≤140 chars. What this explore is FOR.",
+    )
+    primary_questions: list[str] = Field(
+        default_factory=list,
+        description="3-5 NL patterns this explore answers, in analyst "
+                    "vocabulary. Drives Radix retrieval — include "
+                    "canonical entity names + join chain hint.",
+    )
+    anti_questions: list[str] = Field(
+        default_factory=list,
+        description="2-3 NL patterns that BELONG in another explore. "
+                    "Tells Radix where NOT to route.",
+    )
+    canonical_filters: dict = Field(
+        default_factory=dict,
+        description="Filters baked into the explore "
+                    "(e.g. {data_source: 'cornerstone'}). Documented invariants.",
+    )
+    join_paths: list[str] = Field(
+        default_factory=list,
+        description="Human-readable chain summaries mirroring canonical paths "
+                    "— 'cardmember → account → transaction (one_to_many → one_to_many)'.",
+    )
+
+
 class EnrichmentPlan(BaseModel):
     """Output of the Plan step — what we WILL produce, before we produce it.
 
@@ -171,6 +251,18 @@ class EnrichmentPlan(BaseModel):
     proposed_explore: dict | None = Field(
         None,
         description="{base_view, joins:[...], always_filter, sql_always_where}",
+    )
+    # Disambiguating descriptions — what makes Radix retrieval correct.
+    # Authored by the planner using ontology + nearby-tables context.
+    # Empty/missing on legacy plans; critic gates new plans on these
+    # being substantive when the table has sibling-entity tables.
+    proposed_view_description: ViewDescription | None = Field(
+        None,
+        description="Structured view description for Radix retrieval grounding.",
+    )
+    proposed_explore_description: ExploreDescription | None = Field(
+        None,
+        description="Structured explore description for Radix retrieval grounding.",
     )
     proposed_filter_catalog_count: int = 0
     proposed_metric_catalog_count: int = 0
@@ -311,6 +403,190 @@ class DomainOntology(BaseModel):
         ][:limit]
 
 
+# ─── Critic agent — plan quality gate ─────────────────────────
+
+
+CritiqueSeverity = Literal["block", "warn", "info"]
+
+
+CritiqueCategory = Literal[
+    # 1. Will Radix's NL2SQL retrieval find this view for typical questions?
+    #    Names+descriptions+synonyms must align with how analysts ASK.
+    "radix_retrieval_alignment",
+    # 2. Vocabulary completeness — every entity from the ontology that this
+    #    table represents must surface as canonical name + synonyms.
+    "vocabulary_completeness",
+    # 3. Disambiguation — when two columns mean different things despite
+    #    similar names (cm11 the cardmember PK vs. cm15 the spouse FK),
+    #    descriptions must say so explicitly.
+    "disambiguation",
+    # 4. Logical-type correctness — yesno on flag, number on amount,
+    #    string on category, dimension_group on date. Wrong type = wrong SQL.
+    "logical_type",
+    # 5. Ontology consistency — same entity must use the same canonical
+    #    name across tables; synonyms must match the system ontology.
+    "ontology_consistency",
+    # 6. Equivalence preservation — JOIN-proven equivalent columns
+    #    (cm11 ≡ cust_xref_id) must be described as the same entity.
+    "equivalence_preservation",
+    # 7. Partition / freshness coherence — partition column must surface
+    #    as a dim_group with timeframes; freshness must match MDM hints.
+    "partition_freshness",
+    # 8. Primary-key rationality — the proposed PK must actually identify
+    #    one row (not a high-cardinality FK or a dim).
+    "pk_rationality",
+    # 9. Structural-filter baking — filters that are model invariants
+    #    (data_source = 'cornerstone') must NOT be exposed; they must be
+    #    baked into derived_table SQL or sql_always_where.
+    "structural_filter_baking",
+    # 10. Risk acknowledgement — sparse MDM, missing baseline, complex
+    #     CTE chains must show up in `risks`, not be silently glossed.
+    "risk_acknowledgement",
+    # 11. Reasoning grounding — the `reasoning` field must cite real
+    #     evidence (MDM, baseline, query usage). No vague hand-waving.
+    "reasoning_grounding",
+    # 12. JOIN cardinality correctness — proposed_explore.joins[i].relationship
+    #     must match the corpus-inferred cardinality. Wrong relationship
+    #     → silent fan-out → wrong numbers in production.
+    "join_cardinality_correctness",
+    # 13. JOIN path grounding — proposed joins should match canonical
+    #     paths actually observed in queries. Inventing joins no analyst
+    #     uses misroutes Radix retrieval.
+    "join_path_grounding",
+    # 14. Disambiguation completeness — view + explore descriptions must
+    #     name what makes THIS view different from siblings sharing the
+    #     primary entity. Empty distinguishes_from with siblings present
+    #     is a blocking issue: Radix can't route correctly without it.
+    "disambiguation_completeness",
+]
+
+
+class CritiqueIssue(BaseModel):
+    """One issue raised by the critic against a plan.
+
+    Every issue carries severity + category + the precise locus (which
+    field) + cited evidence + a concrete recommendation. The plan's
+    self-repair loop reads these and re-prompts the planner with the
+    issues appended to the prompt.
+    """
+    category: CritiqueCategory
+    severity: CritiqueSeverity = "warn"
+    locus: str = Field(
+        default="",
+        description="What part of the plan this is about — "
+                    "e.g. 'proposed_dimensions[3].name=cm11' or 'reasoning' or "
+                    "'proposed_explore.joins[0]'",
+    )
+    finding: str = Field(
+        ...,
+        description="What's wrong, in one sentence. No vague language.",
+    )
+    evidence: str = Field(
+        default="",
+        description="Cited evidence from MDM / baseline / queries / ontology "
+                    "that supports the finding.",
+    )
+    recommendation: str = Field(
+        ...,
+        description="Concrete fix — what the planner should change on retry.",
+    )
+
+
+class CritiqueReport(BaseModel):
+    """Output of the critic agent for one plan.
+
+    The plan loop reads `block_count > 0` to decide whether to retry.
+    `summary` is shown to the human reviewer in the markdown / interactive
+    review. `radix_retrieval_score` (0-10) is a single overall number
+    asking 'would Radix find this view for the natural questions
+    analysts ask?' — calibrated by the critic itself.
+    """
+    table_name: str
+    issues: list[CritiqueIssue] = Field(default_factory=list)
+    overall_verdict: Literal["approve", "approve_with_warnings", "retry", "reject"] = (
+        "approve_with_warnings"
+    )
+    radix_retrieval_score: int = Field(
+        default=5, ge=0, le=10,
+        description="Will Radix find this view for typical NL questions? 0-10.",
+    )
+    summary: str = Field(
+        default="",
+        description="2-3 sentences for the human — what's strong, what to watch.",
+    )
+    # Convenience tallies — populated post-parse.
+    block_count: int = 0
+    warn_count: int = 0
+    info_count: int = 0
+
+    def recompute_counts(self) -> None:
+        self.block_count = sum(1 for i in self.issues if i.severity == "block")
+        self.warn_count = sum(1 for i in self.issues if i.severity == "warn")
+        self.info_count = sum(1 for i in self.issues if i.severity == "info")
+
+
+# ─── Ontology event store ────────────────────────────────────
+
+
+OntologyEventType = Literal[
+    # parse_sqls hook — every JOIN ON pair is an equivalence claim.
+    "equivalence_observed",
+    # fetch_mdm hook — entity hints from data_category + business_name.
+    "entity_hint",
+    # fetch_mdm hook — synonym candidate from MDM business_name vs column name.
+    "synonym_candidate",
+    # parse_baseline hook — human-curated synonym candidate from sql_aliases.
+    "curated_synonym",
+    # parse_baseline hook — primary_key declared by humans is a strong signal.
+    "curated_pk",
+    # approve_plan hook — the human-approved plan locks in vocabulary.
+    "vocabulary_lock",
+    # critic_finding hook — critic surfaces a refinement.
+    "entity_refinement",
+    # parse_sqls hook (corpus-level) — JOIN cardinality inferred from
+    # GROUP BY + aggregation + join_type evidence.
+    "cardinality_observed",
+    # parse_sqls hook — multi-hop JOIN chain seen in real queries.
+    "join_path_observed",
+]
+
+
+class OntologyEvent(BaseModel):
+    """One append-only event in the ontology store.
+
+    Events are emitted by per-signal-source hooks (parse_sqls, fetch_mdm,
+    parse_baseline, approve_plan). The store collects them in
+    ``data/ontology/events/<date>.jsonl``. Promotion of events into the
+    canonical ontology happens explicitly via ``promote_candidates()``,
+    so anyone can append but only confidence threshold + evidence count
+    promote events into ``current.json``.
+    """
+    event_type: OntologyEventType
+    source: str = Field(
+        ...,
+        description="Which hook emitted this — 'parse_sqls' | 'fetch_mdm' | "
+                    "'parse_baseline' | 'approve_plan' | 'critic'",
+    )
+    table_name: str | None = None
+    column_name: str | None = None
+    entity_name: str | None = None
+    payload: dict = Field(
+        default_factory=dict,
+        description="Event-type-specific data — e.g. {other_table, other_column} "
+                    "for equivalence_observed; {synonym, canonical} for synonyms.",
+    )
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    evidence: str = Field(default="")
+    observed_at: str = Field(
+        default="",
+        description="ISO timestamp — set by the store on append.",
+    )
+    # Deterministic content hash so re-emitting the same event from the
+    # same source is a no-op. Computed from (event_type, source, table,
+    # column, entity, sorted payload). Set by the store on append.
+    content_hash: str = Field(default="")
+
+
 ApprovalSource = Literal["human", "auto_low_risk", "auto_skip", "pending"]
 
 
@@ -382,6 +658,11 @@ class EnrichedOutput(BaseModel):
     # Surfaced via output/uncertain_fields.md so a reviewer can verify
     # before the LookML lands in production.
     uncertain_fields: list[dict] = Field(default_factory=list)
+    # Disambiguating descriptions carried over from the EnrichmentPlan
+    # so publish can render them into the .view.lkml + .explore.lkml.
+    # Empty/None on legacy enrichments — publish degrades gracefully.
+    view_description: ViewDescription | None = None
+    explore_description: ExploreDescription | None = None
 
 
 # ─── Session 4: Validate ─────────────────────────────────────
