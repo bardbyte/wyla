@@ -93,6 +93,81 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ontology(args: argparse.Namespace) -> int:
+    """Build (or refresh) the system-level domain ontology.
+
+    Reads every TableContext + every fingerprint and emits
+    data/ontology.json. One Gemini call when --refresh is passed or
+    the file is missing.
+    """
+    import json as _json
+    from pathlib import Path
+
+    from lumi.config import LumiConfig
+    from lumi.mdm import CachedMDMClient
+    from lumi.ontology_builder import ensure_ontology
+    from lumi.schemas import TableContext
+    from lumi.sql_to_context import discover_tables, parse_sqls
+
+    cfg = LumiConfig()
+    queries_dir = Path(cfg.gold_queries_dir)
+    if not queries_dir.exists():
+        print(f"ERROR: {queries_dir} missing — run probe_mdm first", file=sys.stderr)
+        return 2
+
+    # Try to use cached session1_output.json; otherwise rebuild.
+    s1_path = Path("data/session1_output.json")
+    if s1_path.exists():
+        raw = _json.loads(s1_path.read_text(encoding="utf-8"))
+        contexts = {n: TableContext(**d) for n, d in raw.items()}
+        sqls = [
+            f.read_text(encoding="utf-8")
+            for f in sorted(queries_dir.glob("*.sql"))
+        ]
+        fps = parse_sqls(sqls)
+    else:
+        sqls = [
+            f.read_text(encoding="utf-8")
+            for f in sorted(queries_dir.glob("*.sql"))
+        ]
+        fps = parse_sqls(sqls)
+        mdm = CachedMDMClient(Path(cfg.mdm_cache_dir))
+        contexts = discover_tables(fps, mdm, cfg.baseline_views_dir)
+
+    print(
+        f"Building domain ontology from {len(contexts)} tables × "
+        f"{len(fps)} fingerprints — one Gemini call"
+        f"{' (forced refresh)' if args.refresh else ''}…",
+    )
+    ontology = ensure_ontology(
+        contexts, fps,
+        path=Path(args.path),
+        refresh=args.refresh,
+        with_llm=not args.deterministic_only,
+        config=cfg,
+    )
+    print()
+    print("=" * 78)
+    print(f"  Ontology — {len(ontology.entities)} entities, "
+          f"{len(ontology.relationships)} relationships")
+    print(f"  Authoring: {ontology.authoring.get('mode', '?')}")
+    print("=" * 78)
+    for ent in ontology.entities:
+        syn = f" (a.k.a. {', '.join(ent.synonyms[:5])})" if ent.synonyms else ""
+        n_tables = len(ent.grain_columns)
+        n_cols = sum(len(v) for v in ent.grain_columns.values())
+        print(f"  - {ent.name}{syn}: {n_tables} tables, {n_cols} columns")
+    if ontology.relationships:
+        print()
+        for rel in ontology.relationships[:10]:
+            print(
+                f"  - {rel.from_entity} → {rel.to_entity} ({rel.cardinality})"
+            )
+    print()
+    print(f"Saved to {args.path}")
+    return 0
+
+
 def _cmd_approve(args: argparse.Namespace) -> int:
     """Auto-approve description-only plans, or report pending."""
     from pathlib import Path
@@ -201,6 +276,24 @@ def main() -> None:
 
     p_status = sub.add_parser("status", help="Show 7-stage progress")
     p_status.set_defaults(func=_cmd_status)
+
+    p_ont = sub.add_parser(
+        "ontology",
+        help="Build (or refresh) the domain ontology — one Gemini call",
+    )
+    p_ont.add_argument(
+        "--path", default="data/ontology.json",
+        help="Where to save the ontology JSON (default: data/ontology.json)",
+    )
+    p_ont.add_argument(
+        "--refresh", action="store_true",
+        help="Force rebuild even if data/ontology.json exists",
+    )
+    p_ont.add_argument(
+        "--deterministic-only", action="store_true",
+        help="Skip the LLM call; output a deterministic-only ontology",
+    )
+    p_ont.set_defaults(func=_cmd_ontology)
 
     p_approve = sub.add_parser(
         "approve",

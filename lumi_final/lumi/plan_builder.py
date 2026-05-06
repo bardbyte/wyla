@@ -188,6 +188,7 @@ def build_enrichment_plan(
     contexts_by_table: dict | None = None,
     with_llm: bool = False,
     config: LumiConfig | None = None,
+    ontology=None,  # type: ignore[no-untyped-def]
 ) -> EnrichmentPlan:
     """Build an EnrichmentPlan, optionally Gemini-authored.
 
@@ -220,6 +221,7 @@ def build_enrichment_plan(
         return _author_plan_with_llm(
             ctx, skeleton, all_fingerprints, contexts_by_table or {},
             config=config or LumiConfig(),
+            ontology=ontology,
         )
     except Exception as e:  # noqa: BLE001
         logger.warning(
@@ -237,6 +239,7 @@ def _author_plan_with_llm(
     all_fingerprints: list,
     contexts_by_table: dict,
     config: LumiConfig,
+    ontology=None,  # type: ignore[no-untyped-def]  # lumi.schemas.DomainOntology
 ) -> EnrichmentPlan:
     """Run the planning LlmAgent with the full deterministic context.
 
@@ -265,7 +268,9 @@ def _author_plan_with_llm(
         ctx, all_fingerprints=all_fingerprints, eq_map=eq_map,
     )
 
-    prompt = _build_plan_prompt(ctx, skeleton, narrative, grounding)
+    prompt = _build_plan_prompt(
+        ctx, skeleton, narrative, grounding, ontology=ontology,
+    )
     logger.info(
         "Planning %s with Gemini — prompt %d chars, skeleton %d dims / %d measures",
         ctx.table_name, len(prompt),
@@ -328,11 +333,15 @@ def _build_plan_prompt(
     skeleton: EnrichmentPlan,
     narrative,
     grounding,
+    *,
+    ontology=None,  # type: ignore[no-untyped-def]
 ) -> str:
     """Compose the plan-stage prompt.
 
-    Heavily structured: identity → narrative → grounding → skeleton →
-    instructions. The LLM authors a refined EnrichmentPlan on top.
+    Order: domain ontology (if available) → table narrative → grounding
+    signals → skeleton → instructions. Ontology FIRST so the LLM reads
+    "this table is about cardmember entity (synonyms: card member, cm,
+    cust, customer)" before reasoning about individual columns.
     """
     # Lazy imports for renderers.
     from lumi.grounding import render_grounding_signals
@@ -358,6 +367,16 @@ def _build_plan_prompt(
         "not generic boilerplate. The `questions_for_reviewer` field asks "
         "directed questions only when there's genuine ambiguity.",
         "",
+    ]
+
+    # Domain ontology FIRST — anchors all downstream reasoning.
+    if ontology is not None:
+        from lumi.ontology_builder import render_ontology_for_table
+        ontology_md = render_ontology_for_table(ontology, ctx.table_name)
+        if ontology_md:
+            parts.extend([ontology_md, ""])
+
+    parts.extend([
         render_table_narrative(narrative),
         "",
         render_grounding_signals(grounding),
@@ -373,16 +392,22 @@ def _build_plan_prompt(
         "use it. e.g. cm11 with pii_role_id=NGBD-SDE-CM11 should describe "
         "as 'Cardmember-grain identifier (PII role: SDE-CM11)' not "
         "'Customer Member 11'.",
-        "3. WRITE the reasoning field as if explaining to a senior data "
-        "engineer: what the table represents, what the plan adds vs the "
-        "baseline, the single biggest risk.",
-        "4. SURFACE real risks — sparse MDM, no PK candidate, complex "
+        "3. USE ENTITY VOCABULARY — when the domain ontology shows that "
+        "two columns refer to the same entity (e.g. cm11 ≡ cust_xref_id "
+        "via cardmember entity), describe both as the same entity using "
+        "the canonical entity name. This is how we make the semantic "
+        "layer consistent across tables.",
+        "4. WRITE the reasoning field as if explaining to a senior data "
+        "engineer: what the table represents (cite the primary entity "
+        "from the ontology), what the plan adds vs the baseline, the "
+        "single biggest risk.",
+        "5. SURFACE real risks — sparse MDM, no PK candidate, complex "
         "CTE chains, high-cardinality categoricals — not 'caution: change'.",
-        "5. ASK directed questions only for true ambiguity (e.g. when "
+        "6. ASK directed questions only for true ambiguity (e.g. when "
         "two PK candidates tie, or join cardinality is unclear).",
-        "6. KEEP estimated_input_tokens / estimated_output_tokens from "
+        "7. KEEP estimated_input_tokens / estimated_output_tokens from "
         "the skeleton (they're already computed).",
-    ]
+    ])
     return "\n\n".join(parts)
 
 
