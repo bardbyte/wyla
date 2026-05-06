@@ -18,6 +18,10 @@ class LumiConfig:
 
     # Parallelism
     max_concurrent_enrichments: int = 5  # semaphore for ParallelAgent
+    max_concurrent_plans: int = 5        # semaphore for plan stage
+
+    # Self-repair plan loop
+    plan_repair_max_rounds: int = 2      # critique → retry → re-critique cap
 
     # Quality thresholds
     coverage_target_pct: float = 90.0

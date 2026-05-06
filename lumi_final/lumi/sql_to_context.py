@@ -87,6 +87,11 @@ class SQLFingerprint:
     # raw capture here keeps everything for traceability.
     # Format: [{"column": str, "alias": str, "expression": str}]
     select_aliases: list[dict[str, Any]] = field(default_factory=list)
+    # GROUP BY columns from the top-level SELECT — signals which side of
+    # a join is the dimension (the side we group by) vs the fact (the
+    # side carrying aggregations). Format: [{table: str|None, column: str}].
+    # Used by lumi.joins to infer JOIN cardinality from query semantics.
+    group_by: list[dict[str, Any]] = field(default_factory=list)
     parse_error: str | None = None
 
 
@@ -161,6 +166,7 @@ def _parse_one(raw_sql: str) -> SQLFingerprint:
     fp.filters = _extract_filters(tree)
     fp.date_functions = _extract_date_functions(tree)
     fp.select_aliases = _extract_select_aliases(tree)
+    fp.group_by = _extract_group_by(tree)
     return fp
 
 
@@ -422,6 +428,39 @@ def _extract_joins(tree: exp.Expression) -> list[dict[str, Any]]:
             "join_type": kind,
             "order": order,
         })
+    return out
+
+
+def _extract_group_by(tree: exp.Expression) -> list[dict[str, Any]]:
+    """Top-level GROUP BY columns. Each item: {table, column}.
+
+    Critical for join cardinality inference: the side whose columns
+    appear in GROUP BY is the dimension (one row per group); the side
+    with aggregations is the fact. Combined with join_type and
+    aggregation source, this yields (table_a, key_a) → (table_b, key_b)
+    cardinality with high confidence.
+    """
+    top_select = tree.find(exp.Select)
+    if top_select is None:
+        return []
+    group = top_select.args.get("group")
+    if group is None:
+        return []
+    out: list[dict[str, Any]] = []
+    for expr in group.expressions or []:
+        if isinstance(expr, exp.Column):
+            out.append({
+                "table": expr.table or None,
+                "column": expr.name,
+            })
+        else:
+            # Could be GROUP BY 1, 2 (positional), or expressions.
+            # Walk inner Columns for best-effort capture.
+            for col in expr.find_all(exp.Column):
+                out.append({
+                    "table": col.table or None,
+                    "column": col.name,
+                })
     return out
 
 

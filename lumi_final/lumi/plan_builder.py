@@ -187,6 +187,7 @@ def build_enrichment_plan(
     all_fingerprints: list | None = None,
     contexts_by_table: dict | None = None,
     with_llm: bool = False,
+    with_critic: bool = True,
     config: LumiConfig | None = None,
     ontology=None,  # type: ignore[no-untyped-def]
 ) -> EnrichmentPlan:
@@ -222,6 +223,7 @@ def build_enrichment_plan(
             ctx, skeleton, all_fingerprints, contexts_by_table or {},
             config=config or LumiConfig(),
             ontology=ontology,
+            with_critic=with_critic,
         )
     except Exception as e:  # noqa: BLE001
         logger.warning(
@@ -240,6 +242,7 @@ def _author_plan_with_llm(
     contexts_by_table: dict,
     config: LumiConfig,
     ontology=None,  # type: ignore[no-untyped-def]  # lumi.schemas.DomainOntology
+    with_critic: bool = True,
 ) -> EnrichmentPlan:
     """Run the planning LlmAgent with the full deterministic context.
 
@@ -267,64 +270,203 @@ def _author_plan_with_llm(
     narrative = build_table_narrative(
         ctx, all_fingerprints=all_fingerprints, eq_map=eq_map,
     )
+    # JOIN cardinality + canonical paths — corpus-wide inference. The
+    # planner uses these to author proposed_explore.relationship correctly,
+    # and the critic enforces consistency against them later.
+    from lumi.joins import infer_canonical_paths, infer_join_cardinalities
+    cardinalities = infer_join_cardinalities(all_fingerprints)
+    canonical_paths = infer_canonical_paths(all_fingerprints, top_k=10)
 
-    prompt = _build_plan_prompt(
-        ctx, skeleton, narrative, grounding, ontology=ontology,
+    base_prompt = _build_plan_prompt(
+        ctx, skeleton, narrative, grounding,
+        ontology=ontology, eq_map=eq_map,
+        cardinalities=cardinalities, canonical_paths=canonical_paths,
     )
     logger.info(
         "Planning %s with Gemini — prompt %d chars, skeleton %d dims / %d measures",
-        ctx.table_name, len(prompt),
+        ctx.table_name, len(base_prompt),
         len(skeleton.proposed_dimensions), len(skeleton.proposed_measures),
     )
 
-    refined = _invoke_plan_agent(prompt, ctx.table_name, config)
+    # Self-repair loop: invoke planner → critic → if blocking, append
+    # critique feedback and re-prompt. Capped at config.plan_repair_max_rounds
+    # so we don't loop forever on a model that genuinely can't reach the bar.
+    #
+    # Round history is appended to detect flip-flopping: if the model
+    # fixes issue A but re-introduces issue B that was already noted in
+    # round 1, the next prompt sees the round trail so it doesn't whiplash.
+    max_rounds = config.plan_repair_max_rounds if with_critic else 0
+    repair_prompt_addendum = ""
+    refined: EnrichmentPlan | None = None
+    last_critique = None
+    last_critique_summary: str | None = None
+    round_history: list[dict[str, Any]] = []
+
+    for round_idx in range(max_rounds + 1):  # +1 so we always attempt once
+        full_prompt = base_prompt
+        if round_history:
+            full_prompt += "\n\n" + _render_round_history(round_history)
+        if repair_prompt_addendum:
+            full_prompt += "\n\n" + repair_prompt_addendum
+
+        candidate = _invoke_plan_agent(full_prompt, ctx.table_name, config)
+        if candidate is None:
+            if refined is None:
+                logger.info(
+                    "LLM returned no usable plan (round %d); using skeleton",
+                    round_idx,
+                )
+                return build_enrichment_plan_skeleton(
+                    ctx, fallback_reason="LLM returned no usable plan (None)",
+                )
+            # Keep the prior refined version; stop retrying.
+            break
+
+        # Sanity guards apply to every round's candidate.
+        if not candidate.proposed_dimensions and not candidate.proposed_measures:
+            if refined is None:
+                logger.warning(
+                    "LLM-authored plan has no dims/measures, falling back to skeleton",
+                )
+                return build_enrichment_plan_skeleton(
+                    ctx,
+                    fallback_reason="LLM-authored plan had no dimensions/measures",
+                )
+            break
+
+        if _has_excessive_placeholders(candidate):
+            if refined is None:
+                logger.warning(
+                    "LLM plan for %s has too many placeholder names (?/null), "
+                    "falling back to skeleton",
+                    ctx.table_name,
+                )
+                return build_enrichment_plan_skeleton(
+                    ctx,
+                    fallback_reason=(
+                        "LLM emitted placeholder content (>50% null/? names) — "
+                        "likely sparse context confused the model"
+                    ),
+                )
+            break
+
+        # Preserve fields the LLM is unlikely to refine well + stamp authoring.
+        candidate.estimated_input_tokens = (
+            candidate.estimated_input_tokens or skeleton.estimated_input_tokens
+        )
+        candidate.estimated_output_tokens = (
+            candidate.estimated_output_tokens or skeleton.estimated_output_tokens
+        )
+        candidate.fields_to_enrich = (
+            candidate.fields_to_enrich or skeleton.fields_to_enrich
+        )
+        candidate.authoring = {"mode": "llm", "reason": None}
+        refined = candidate
+
+        if not with_critic:
+            break
+
+        # Critique this round's candidate. If no blocking issues, we're done.
+        try:
+            from lumi.critic import critique_plan, format_issues_for_repair
+        except Exception as e:  # noqa: BLE001
+            logger.debug("critic unavailable, skipping repair: %s", e)
+            break
+
+        critique = critique_plan(
+            ctx, refined,
+            ontology=ontology,
+            all_fingerprints=all_fingerprints,
+            with_llm=True,
+            config=config,
+        )
+        last_critique = critique
+        last_critique_summary = (
+            f"verdict={critique.overall_verdict}, "
+            f"radix={critique.radix_retrieval_score}/10, "
+            f"block={critique.block_count}, warn={critique.warn_count}"
+        )
+        logger.info(
+            "plan critique round %d for %s: %s",
+            round_idx, ctx.table_name, last_critique_summary,
+        )
+
+        # Record round history so the next prompt sees what was tried.
+        round_history.append({
+            "round": round_idx,
+            "summary": last_critique_summary,
+            "blocking_loci": [
+                i.locus for i in critique.issues
+                if i.severity == "block"
+            ][:6],
+        })
+
+        # Hard reject — critic decided this plan is unsalvageable. Stop
+        # immediately and bubble up so execute phase skips the table.
+        if critique.overall_verdict == "reject":
+            logger.warning(
+                "plan rejected for %s — skipping enrichment", ctx.table_name,
+            )
+            refined.authoring = {
+                "mode": "llm",
+                "reason": "rejected_by_critic",
+                "critic": last_critique_summary,
+            }
+            try:
+                object.__setattr__(refined, "_critique", critique)
+            except Exception:  # noqa: BLE001
+                pass
+            return refined
+
+        if critique.block_count == 0 or round_idx >= max_rounds:
+            break
+
+        # Flip-flop detection: if round N finds the SAME blocking locus
+        # as round N-1, the model is stuck. Escalate to reject.
+        if len(round_history) >= 2:
+            prev = set(round_history[-2]["blocking_loci"])
+            curr = set(round_history[-1]["blocking_loci"])
+            if prev and prev == curr:
+                logger.warning(
+                    "plan loop stuck for %s — same blocking loci two rounds in a row, escalating",
+                    ctx.table_name,
+                )
+                critique.overall_verdict = "reject"
+                refined.authoring = {
+                    "mode": "llm",
+                    "reason": "flip_flop_detected",
+                    "critic": last_critique_summary,
+                }
+                try:
+                    object.__setattr__(refined, "_critique", critique)
+                except Exception:  # noqa: BLE001
+                    pass
+                return refined
+
+        addendum = format_issues_for_repair(critique)
+        if not addendum or addendum == repair_prompt_addendum:
+            break  # nothing new to feed back
+        repair_prompt_addendum = addendum
+
     if refined is None:
-        logger.info("LLM returned no usable plan; using skeleton")
         return build_enrichment_plan_skeleton(
             ctx, fallback_reason="LLM returned no usable plan (None)",
         )
 
-    # Sanity guard: if the LLM dropped substantive proposals, fall back.
-    # The skeleton's count is a floor — Gemini can refine but shouldn't
-    # silently empty out the plan.
-    if not refined.proposed_dimensions and not refined.proposed_measures:
-        logger.warning(
-            "LLM-authored plan has no dims/measures, falling back to skeleton",
-        )
-        return build_enrichment_plan_skeleton(
-            ctx,
-            fallback_reason="LLM-authored plan had no dimensions/measures",
-        )
+    # Stash critique on the plan so the markdown render shows it without
+    # rerunning. We can't add a Pydantic field here (cross-cut), so use
+    # a side-channel attribute that downstream code can opt-in to read.
+    if last_critique is not None:
+        try:
+            object.__setattr__(refined, "_critique", last_critique)
+        except Exception:  # noqa: BLE001
+            pass
+        # Persist a critique summary into authoring.reason for visibility
+        # in the markdown badge — short, never overwrites the LLM stamp.
+        existing = refined.authoring or {}
+        existing["critic"] = last_critique_summary
+        refined.authoring = existing
 
-    # Placeholder-content guard: when sparse-source contexts confuse the
-    # LLM, it sometimes emits dim entries with name="?" or null source_
-    # columns. Detect that and fall back rather than serve garbage.
-    if _has_excessive_placeholders(refined):
-        logger.warning(
-            "LLM plan for %s has too many placeholder names (?/null), "
-            "falling back to skeleton",
-            ctx.table_name,
-        )
-        return build_enrichment_plan_skeleton(
-            ctx,
-            fallback_reason=(
-                "LLM emitted placeholder content (>50% null/? names) — "
-                "likely sparse context confused the model"
-            ),
-        )
-
-    # Preserve fields the LLM is unlikely to refine well.
-    refined.estimated_input_tokens = (
-        refined.estimated_input_tokens or skeleton.estimated_input_tokens
-    )
-    refined.estimated_output_tokens = (
-        refined.estimated_output_tokens or skeleton.estimated_output_tokens
-    )
-    refined.fields_to_enrich = (
-        refined.fields_to_enrich or skeleton.fields_to_enrich
-    )
-    # Stamp authoring as LLM — clears the skeleton default.
-    refined.authoring = {"mode": "llm", "reason": None}
     return refined
 
 
@@ -335,6 +477,9 @@ def _build_plan_prompt(
     grounding,
     *,
     ontology=None,  # type: ignore[no-untyped-def]
+    eq_map=None,  # type: ignore[no-untyped-def]
+    cardinalities=None,  # type: ignore[no-untyped-def]
+    canonical_paths=None,  # type: ignore[no-untyped-def]
 ) -> str:
     """Compose the plan-stage prompt.
 
@@ -376,6 +521,35 @@ def _build_plan_prompt(
         if ontology_md:
             parts.extend([ontology_md, ""])
 
+    # Raw equivalence classes — at cold start there are no entities yet,
+    # but eq_map is the proven-by-JOIN floor that always exists.
+    if eq_map is not None:
+        try:
+            from lumi.ontology import render_equivalence_classes_for_table
+            eq_md = render_equivalence_classes_for_table(
+                ctx.table_name, eq_map,
+            )
+            if eq_md:
+                parts.extend([eq_md, ""])
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Inferred JOIN cardinality + canonical multi-hop paths — drives
+    # correct proposed_explore.relationship and tells the planner which
+    # join chains Radix retrieval expects to find on this view.
+    if cardinalities is not None or canonical_paths is not None:
+        try:
+            from lumi.joins import render_joins_for_table
+            joins_md = render_joins_for_table(
+                ctx.table_name,
+                cardinalities or [],
+                canonical_paths or [],
+            )
+            if joins_md:
+                parts.extend([joins_md, ""])
+        except Exception:  # noqa: BLE001
+            pass
+
     parts.extend([
         render_table_narrative(narrative),
         "",
@@ -407,8 +581,41 @@ def _build_plan_prompt(
         "two PK candidates tie, or join cardinality is unclear).",
         "7. KEEP estimated_input_tokens / estimated_output_tokens from "
         "the skeleton (they're already computed).",
+        "8. AUTHOR proposed_explore.joins using the **Observed JOIN "
+        "cardinality** section above. Each join needs `relationship:` "
+        "matching the inferred cardinality — `many_to_one` if the "
+        "evidence shows the joined table is the dim side, `one_to_many` "
+        "for fact side, `many_to_many` for bridge tables. Contradicting "
+        "an observation with confidence ≥ 0.6 will be blocked by the critic.",
+        "9. PREFER canonical join paths — if the corpus already shows "
+        "(table_a → table_b → table_c) chains, design the explore around "
+        "those. Don't propose joins that no real query has ever used.",
     ])
     return "\n\n".join(parts)
+
+
+def _render_round_history(history: list[dict[str, Any]]) -> str:
+    """Render previous repair rounds so the model doesn't flip-flop.
+
+    The history shows what the critic flagged in earlier rounds. The
+    model should aim to fix the CURRENT round's issues without
+    re-introducing problems noted in prior rounds.
+    """
+    lines = [
+        "## Repair history (you have already attempted these rounds)",
+        "",
+        "DO NOT re-introduce issues that earlier rounds raised. If you "
+        "find yourself wanting to swap one violation for another, stop — "
+        "the right answer probably involves restructuring, not toggling.",
+        "",
+    ]
+    for entry in history:
+        lines.append(
+            f"- Round {entry['round']}: {entry['summary']}"
+        )
+        for locus in entry.get("blocking_loci", []):
+            lines.append(f"  - blocking: `{locus}`")
+    return "\n".join(lines)
 
 
 def _render_skeleton_for_prompt(skeleton: EnrichmentPlan) -> str:
@@ -889,6 +1096,17 @@ def format_enrichment_plan_markdown(
         for q in plan.questions_for_reviewer:
             lines.append(f"- {q}")
         lines.append("")
+
+    # Critique block — stashed on the plan via _critique side-channel by
+    # the self-repair loop. Render only when present.
+    critique = getattr(plan, "_critique", None)
+    if critique is not None:
+        try:
+            from lumi.critic import render_critique_markdown
+            lines.append(render_critique_markdown(critique))
+            lines.append("")
+        except Exception:  # noqa: BLE001
+            pass
 
     lines.extend([
         "---",
