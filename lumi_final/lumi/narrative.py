@@ -172,6 +172,20 @@ class TableNarrative:
     # PII / sensitivity tags surfaced from MDM (cm11 → NGBD-SDE-CM11 etc.)
     pii_role_assignments: list[dict[str, str]] = field(default_factory=list)
 
+    # Cross-table semantic equivalences (deterministic, from JOIN ON pairs).
+    # Maps each column on THIS table to its equivalence class members on
+    # OTHER tables. E.g. {"cm11": [("customer_master","cust_id"), ...]}.
+    # The cardmember↔customer↔cust_xref_id grounding signal — solves the
+    # ontology problem where the same entity has different names across
+    # tables. Populated only when build_table_narrative is called with
+    # an EquivalenceMap.
+    column_equivalences: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
+    equivalence_classes_md: str = ""  # rendered markdown for the prompt
+
+    # Per-column query examples (concrete usage > abstract description).
+    # {"cm11": ["SELECT COUNT(DISTINCT cm11) FROM ... WHERE rpt_dt = ...", ...]}
+    column_query_examples: dict[str, list[str]] = field(default_factory=dict)
+
 
 # ─── Builder ─────────────────────────────────────────────────
 
@@ -179,6 +193,8 @@ class TableNarrative:
 def build_table_narrative(
     ctx: TableContext,
     all_fingerprints: list[SQLFingerprint] | None = None,
+    *,
+    eq_map=None,  # type: ignore[no-untyped-def]  # lumi.ontology.EquivalenceMap
 ) -> TableNarrative:
     """Aggregate every metadata source into the structured narrative.
 
@@ -187,6 +203,10 @@ def build_table_narrative(
         all_fingerprints: every parsed SQL — used for alias aggregation
             + filter-value frequency across the corpus. None falls back
             to per-table-level signals only.
+        eq_map: optional EquivalenceMap from lumi.ontology — gives us
+            cross-table semantic equivalences (cm11 ↔ cust_id ↔
+            cust_xref_id) derived from JOIN ON pairs. Solves the
+            cardmember/customer ontology problem.
     """
     n = TableNarrative(table_name=ctx.table_name)
     fps = all_fingerprints or []
@@ -277,6 +297,22 @@ def build_table_narrative(
         for c in (ctx.mdm_columns or [])
         if c.get("pii_role_id")
     ]
+
+    # ── Cross-table semantic equivalences (from JOIN ON closure) ──
+    if eq_map is not None:
+        from lumi.ontology import render_equivalence_classes_for_table
+        for col in (ctx.columns_referenced or []):
+            equivalents = eq_map.equivalences_for(ctx.table_name, col)
+            if equivalents:
+                n.column_equivalences[col] = equivalents
+        n.equivalence_classes_md = render_equivalence_classes_for_table(
+            ctx.table_name, eq_map,
+        )
+
+    # ── Per-column query examples (concrete usage > abstract description) ──
+    # Pick the top-2 most-referenced columns and show 1-2 example queries
+    # for each. Concrete grounding empirically beats abstract description.
+    n.column_query_examples = _pick_query_examples(ctx, relevant_fps)
 
     return n
 
@@ -516,6 +552,86 @@ def _build_temp_concepts(ctx: TableContext) -> list[dict[str, Any]]:
             "source_tables": tt.get("source_tables") or [],
         })
     return out
+
+
+def _pick_query_examples(
+    ctx: TableContext,
+    relevant_fps: list[SQLFingerprint],
+    *,
+    max_columns: int = 8,
+    max_examples_per_column: int = 2,
+) -> dict[str, list[str]]:
+    """For top-N most-referenced columns, pick 1-2 illustrative queries.
+
+    Concrete usage trumps abstract description. When Gemini sees
+    ``SELECT COUNT(DISTINCT cm11) FROM ... JOIN ...``, the column's
+    role is unmistakable in a way that prose descriptions can't match.
+
+    Selection rules:
+      - prefer queries where the column appears in JOIN, COUNT(DISTINCT),
+        or aggregations (richest semantic signal)
+      - skip empty / parse-error fingerprints
+      - trim each query to ~400 chars to keep prompt size bounded
+    """
+    out: dict[str, list[str]] = {}
+    if not relevant_fps:
+        return out
+
+    # Rank columns by how many of THIS table's fingerprints touch them.
+    col_query_count: dict[str, int] = {}
+    for fp in relevant_fps:
+        cols_in_fp: set[str] = set()
+        cols_in_fp.update(c for c in (ctx.columns_referenced or []) if c)
+        for j in fp.joins or []:
+            for k in (j.get("left_key"), j.get("right_key")):
+                if k:
+                    cols_in_fp.add(k)
+        for a in fp.aggregations or []:
+            if a.get("column"):
+                cols_in_fp.add(a["column"])
+        for f in fp.filters or []:
+            if f.get("column"):
+                cols_in_fp.add(f["column"])
+        for col in cols_in_fp:
+            col_query_count[col] = col_query_count.get(col, 0) + 1
+
+    top_cols = sorted(
+        col_query_count.items(), key=lambda kv: -kv[1],
+    )[:max_columns]
+
+    for col, _ in top_cols:
+        examples: list[str] = []
+        for fp in relevant_fps:
+            if not _column_used_richly(col, fp):
+                continue
+            sql = (fp.raw_sql or "").strip()
+            if not sql:
+                continue
+            # Trim long queries to a digestible chunk.
+            snippet = sql[:400] + ("…" if len(sql) > 400 else "")
+            if snippet not in examples:
+                examples.append(snippet)
+            if len(examples) >= max_examples_per_column:
+                break
+        if examples:
+            out[col] = examples
+    return out
+
+
+def _column_used_richly(col: str, fp: SQLFingerprint) -> bool:
+    """A column is 'richly used' in a query if it appears in a JOIN ON,
+    a COUNT(DISTINCT), or any aggregation. Plain WHERE = filter alone
+    doesn't make for an illustrative example."""
+    cl = col.lower()
+    for j in fp.joins or []:
+        if (j.get("left_key") or "").lower() == cl:
+            return True
+        if (j.get("right_key") or "").lower() == cl:
+            return True
+    for a in fp.aggregations or []:
+        if (a.get("column") or "").lower() == cl:
+            return True
+    return False
 
 
 def _aggregate_filter_values(
@@ -770,6 +886,29 @@ def render_table_narrative(n: TableNarrative) -> str:
             lines.append(
                 f"  - `{col_formula['column']}`: {col_formula['derived_logic']}"
             )
+        lines.append("")
+
+    # ── Cross-table semantic equivalences (the ontology layer) ──
+    # Solves the "cm11 = cardmember, cust_xref_id = customer, are these
+    # the same thing?" problem by surfacing JOIN ON closures literally.
+    if n.equivalence_classes_md:
+        lines.append(n.equivalence_classes_md)
+        lines.append("")
+
+    # ── Sample queries per column (concrete usage > abstract description) ──
+    if n.column_query_examples:
+        lines.append("### Sample queries per column (analyst usage examples)")
+        lines.append(
+            "How analysts actually use these columns. Concrete usage is "
+            "stronger semantic grounding than any abstract description; "
+            "describe each column to be consistent with how it's used here."
+        )
+        for col, examples in list(n.column_query_examples.items())[:6]:
+            lines.append(f"\n**`{col}`** (top usage):")
+            for ex in examples:
+                # Render as a code block for readability; collapse whitespace.
+                compact = " ".join(ex.split())
+                lines.append(f"```sql\n{compact}\n```")
         lines.append("")
 
     # ── Inferred grain (the synthesis the LLM should use to anchor) ──
