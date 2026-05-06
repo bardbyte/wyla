@@ -494,6 +494,12 @@ def _deterministic_findings(
             ctx, plan, canonical_paths or [],
         ))
 
+    # 7e. Disambiguation completeness — view/explore descriptions must
+    #     surface what makes THIS view different from sibling tables. Without
+    #     these structured fields, Radix retrieval can't distinguish between
+    #     5 views all relating to "cardmember".
+    issues.extend(_check_disambiguation_completeness(ctx, plan, ontology))
+
     # 8. Risk acknowledgement — sparse contexts must list risks.
     sparse = (
         (ctx.mdm_coverage_pct or 0) < 0.30
@@ -736,6 +742,216 @@ def _check_join_path_grounding(
                 ),
             ))
     return out
+
+
+def _check_disambiguation_completeness(
+    ctx: TableContext,
+    plan: EnrichmentPlan,
+    ontology: DomainOntology | None,
+) -> list[CritiqueIssue]:
+    """Enforce that view + explore descriptions actually disambiguate.
+
+    Rules (in order of severity):
+
+      1. BLOCK: ``proposed_view_description`` is None or empty (no
+         one_liner AND no grain) — the plan didn't even attempt the
+         contract.
+      2. BLOCK: there are sibling tables sharing the primary entity AND
+         ``distinguishes_from`` is empty. Without this, Radix can't
+         route correctly.
+      3. WARN: ``one_liner`` is missing or > 200 chars (Looker UI cap),
+         ``grain`` is empty, or ``when_to_use`` is empty.
+      4. WARN: explore description is missing OR has no
+         ``primary_questions`` OR has no ``anti_questions`` when
+         siblings exist.
+    """
+    out: list[CritiqueIssue] = []
+    vd = plan.proposed_view_description
+    ed = plan.proposed_explore_description
+
+    if vd is None or (not vd.one_liner and not vd.grain):
+        out.append(CritiqueIssue(
+            category="disambiguation_completeness",
+            severity="block",
+            locus="proposed_view_description",
+            finding=(
+                "Plan does not author a `proposed_view_description`. "
+                "Without grain + scope + when_to_use, Radix retrieval "
+                "cannot route questions to this view."
+            ),
+            evidence="proposed_view_description is empty/None",
+            recommendation=(
+                "Author proposed_view_description per the contract: "
+                "one_liner (≤140), grain, scope, when_to_use, when_not_to_use, "
+                "distinguishes_from."
+            ),
+        ))
+    else:
+        if not vd.one_liner:
+            out.append(CritiqueIssue(
+                category="disambiguation_completeness",
+                severity="warn",
+                locus="proposed_view_description.one_liner",
+                finding="Missing `one_liner` — this is what shows in Looker UI.",
+                evidence="one_liner is empty",
+                recommendation=(
+                    "Write a ≤140-char plain-English answer to "
+                    "'what is this view?'"
+                ),
+            ))
+        elif len(vd.one_liner) > 200:
+            out.append(CritiqueIssue(
+                category="disambiguation_completeness",
+                severity="warn",
+                locus="proposed_view_description.one_liner",
+                finding=(
+                    f"`one_liner` is {len(vd.one_liner)} chars — Looker "
+                    "UI truncates around 200."
+                ),
+                evidence=f"len(one_liner) = {len(vd.one_liner)}",
+                recommendation="Shorten to ≤ 140 chars; move detail to scope or grain.",
+            ))
+        if not vd.grain:
+            out.append(CritiqueIssue(
+                category="disambiguation_completeness",
+                severity="warn",
+                locus="proposed_view_description.grain",
+                finding=(
+                    "Missing `grain` — Radix cannot answer cardinality "
+                    "questions without it."
+                ),
+                evidence="grain is empty",
+                recommendation=(
+                    "Write 'one row per <entity> per <time-or-event>' for this view."
+                ),
+            ))
+        if not vd.when_to_use:
+            out.append(CritiqueIssue(
+                category="disambiguation_completeness",
+                severity="warn",
+                locus="proposed_view_description.when_to_use",
+                finding="Missing `when_to_use` — retrieval has no positive signal.",
+                evidence="when_to_use is empty",
+                recommendation=(
+                    "Describe the question patterns this view IS for."
+                ),
+            ))
+
+    # Siblings → distinguishes_from is mandatory.
+    siblings = _siblings_for_table(ctx.table_name, ontology)
+    if siblings:
+        ds = list(vd.distinguishes_from) if vd is not None else []
+        ds_view_names = {
+            (entry.get("view_name") or "").lower() for entry in ds
+        }
+        missing_siblings = [
+            s for s in siblings if s.lower() not in ds_view_names
+        ]
+        if not ds:
+            out.append(CritiqueIssue(
+                category="disambiguation_completeness",
+                severity="block",
+                locus="proposed_view_description.distinguishes_from",
+                finding=(
+                    f"Sibling tables share the primary entity "
+                    f"({', '.join(siblings[:3])}{'…' if len(siblings) > 3 else ''}) "
+                    "but `distinguishes_from` is empty. Radix will not "
+                    "be able to route correctly between these views."
+                ),
+                evidence=(
+                    f"siblings sharing primary entity: {siblings[:5]}"
+                ),
+                recommendation=(
+                    "Add an entry per sibling: "
+                    "{view_name, how_it_differs} explaining the grain, "
+                    "scope, refresh, or purpose difference."
+                ),
+            ))
+        elif missing_siblings:
+            out.append(CritiqueIssue(
+                category="disambiguation_completeness",
+                severity="warn",
+                locus="proposed_view_description.distinguishes_from",
+                finding=(
+                    f"`distinguishes_from` does not cover every sibling. "
+                    f"Missing: {missing_siblings[:5]}"
+                ),
+                evidence=f"covered: {sorted(ds_view_names)[:5]}",
+                recommendation=(
+                    "Add a distinguishes_from entry for each missing sibling."
+                ),
+            ))
+
+    # Explore description checks.
+    if ed is None or (not ed.one_liner and not ed.primary_questions):
+        out.append(CritiqueIssue(
+            category="disambiguation_completeness",
+            severity="warn",
+            locus="proposed_explore_description",
+            finding=(
+                "Plan does not author a `proposed_explore_description`. "
+                "Radix routes queries to explores; without primary_questions "
+                "the explore is invisible to retrieval."
+            ),
+            evidence="proposed_explore_description is empty/None",
+            recommendation=(
+                "Author proposed_explore_description per the contract: "
+                "one_liner, primary_questions (3-5), anti_questions (2-3), "
+                "canonical_filters, join_paths."
+            ),
+        ))
+    else:
+        if len(ed.primary_questions or []) < 3:
+            out.append(CritiqueIssue(
+                category="disambiguation_completeness",
+                severity="warn",
+                locus="proposed_explore_description.primary_questions",
+                finding=(
+                    f"Only {len(ed.primary_questions or [])} primary_questions — "
+                    "Radix needs 3-5 distinct patterns to route reliably."
+                ),
+                evidence=f"primary_questions count = {len(ed.primary_questions or [])}",
+                recommendation=(
+                    "Add NL question patterns covering the main use cases of "
+                    "this explore — use canonical entity vocabulary."
+                ),
+            ))
+        if siblings and not (ed.anti_questions or []):
+            out.append(CritiqueIssue(
+                category="disambiguation_completeness",
+                severity="warn",
+                locus="proposed_explore_description.anti_questions",
+                finding=(
+                    "Sibling explores exist but `anti_questions` is empty. "
+                    "Without negative patterns, Radix may misroute."
+                ),
+                evidence=f"sibling tables: {siblings[:3]}",
+                recommendation=(
+                    "Add 2-3 NL patterns that BELONG in a sibling explore."
+                ),
+            ))
+    return out
+
+
+def _siblings_for_table(
+    table_name: str, ontology: DomainOntology | None,
+) -> list[str]:
+    """Other tables sharing this view's primary entity."""
+    if ontology is None:
+        return []
+    primary = ontology.primary_entity_for_table(table_name)
+    if primary is None:
+        return []
+    siblings: list[str] = []
+    for tbl, ent_name in (ontology.table_to_primary_entity or {}).items():
+        if tbl == table_name:
+            continue
+        if ent_name == primary.name:
+            siblings.append(tbl)
+    for tbl in (primary.grain_columns or {}):
+        if tbl != table_name and tbl not in siblings:
+            siblings.append(tbl)
+    return siblings
 
 
 _VerdictLiteral = Literal["approve", "approve_with_warnings", "retry", "reject"]

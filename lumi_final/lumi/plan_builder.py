@@ -555,8 +555,65 @@ def _build_plan_prompt(
         "",
         render_grounding_signals(grounding),
         "",
+    ])
+
+    # Sibling-table context — what other tables share this view's primary
+    # entity? The planner needs to know so it can author distinguishes_from
+    # entries. The critic blocks empty distinguishes_from when siblings exist.
+    if ontology is not None:
+        sibling_md = _render_sibling_tables_for_prompt(
+            ctx.table_name, ontology,
+        )
+        if sibling_md:
+            parts.extend([sibling_md, ""])
+
+    parts.extend([
         "## Deterministic skeleton (your starting point — refine, don't replace wholesale)",
         _render_skeleton_for_prompt(skeleton),
+        "",
+        "## Disambiguating descriptions — REQUIRED for Radix retrieval",
+        "Every plan MUST author `proposed_view_description` and "
+        "`proposed_explore_description`. These structures are what Radix "
+        "(the downstream NL2SQL retrieval system) uses to decide WHICH "
+        "view + explore to load when an analyst types a question. A "
+        "wrong route is the most common failure mode in production.",
+        "",
+        "**ViewDescription contract:**",
+        "- `one_liner` (≤ 140 chars): the answer to 'what is this view?'",
+        "- `grain`: 'one row per <entity> per <time-or-event>' — be exact.",
+        "- `scope`: filters / population baked in (e.g. 'active US "
+        "cardmembers, cornerstone segment, last 90 days')",
+        "- `when_to_use`: the question patterns this view is meant for",
+        "- `when_not_to_use`: question patterns belonging in a sibling view",
+        "- `distinguishes_from`: when sibling-tables-context above shows "
+        "OTHER views sharing this view's primary entity, you MUST list "
+        "each sibling with how_it_differs (grain difference, scope "
+        "difference, refresh-cadence difference). Empty list with siblings "
+        "present = blocking critic issue.",
+        "",
+        "**ExploreDescription contract:**",
+        "- `one_liner`: what the explore is FOR.",
+        "- `primary_questions` (3-5): NL question patterns this explore "
+        "answers — use canonical entity names from the ontology + hint "
+        "at the join chain.",
+        "- `anti_questions` (2-3): NL patterns that BELONG in another explore.",
+        "- `canonical_filters`: filters baked into the explore (mirrors "
+        "always_filter / sql_always_where).",
+        "- `join_paths`: human-readable chain summaries mirroring the "
+        "Canonical join paths section above.",
+        "",
+        "Examples (these are illustrative — replace with this table's facts):",
+        "  view: `cardmember_dim` →",
+        "    one_liner: 'Cardmember dimension at point-in-time grain — "
+        "demographics, status, segment'",
+        "    grain: 'one row per cardmember per snapshot date'",
+        "    when_to_use: 'asking about cardmember attributes (age, segment, "
+        "status) as of a date'",
+        "    when_not_to_use: 'asking about transactions or spend — use "
+        "cardmember_txn_fact'",
+        "    distinguishes_from: [{view_name: 'cardmember_txn_fact', "
+        "how_it_differs: 'transaction-grain (one row per spend event); "
+        "this view is point-in-time per cardmember'}]",
         "",
         "## Authoring rules",
         "1. PRESERVE the structure — every category in the skeleton must "
@@ -590,8 +647,55 @@ def _build_plan_prompt(
         "9. PREFER canonical join paths — if the corpus already shows "
         "(table_a → table_b → table_c) chains, design the explore around "
         "those. Don't propose joins that no real query has ever used.",
+        "10. AUTHOR proposed_view_description AND proposed_explore_description "
+        "per the contracts above. distinguishes_from is mandatory whenever "
+        "the sibling-tables section lists ANY sibling. anti_questions are "
+        "mandatory whenever sibling explores exist — the more concrete the "
+        "anti-pattern, the more correctly Radix routes.",
     ])
     return "\n\n".join(parts)
+
+
+def _render_sibling_tables_for_prompt(
+    table_name: str,
+    ontology: Any,
+) -> str:
+    """List other tables sharing this table's primary entity.
+
+    Used by the planner to author distinguishes_from. The critic enforces
+    that distinguishes_from is non-empty when this list is non-empty.
+    """
+    primary = ontology.primary_entity_for_table(table_name)
+    if primary is None:
+        return ""
+    siblings: list[str] = []
+    for tbl, ent_name in (ontology.table_to_primary_entity or {}).items():
+        if tbl == table_name:
+            continue
+        if ent_name == primary.name:
+            siblings.append(tbl)
+    # Also include tables where this view's primary entity has any column —
+    # they may not be primary-entity siblings but they still share the entity.
+    for tbl in (primary.grain_columns or {}):
+        if tbl != table_name and tbl not in siblings:
+            siblings.append(tbl)
+    if not siblings:
+        return ""
+    lines = [
+        "## Sibling tables (share this view's primary entity)",
+        "",
+        f"This table's primary entity is `{primary.name}`. The tables below "
+        "ALSO carry the same entity. For Radix to route correctly, your "
+        "`proposed_view_description.distinguishes_from` MUST contain an entry "
+        "for each sibling explaining what makes THIS view different "
+        "(grain, scope, refresh, or purpose).",
+        "",
+    ]
+    for s in siblings[:10]:
+        lines.append(f"- `{s}`")
+    if len(siblings) > 10:
+        lines.append(f"- … and {len(siblings) - 10} more")
+    return "\n".join(lines)
 
 
 def _render_round_history(history: list[dict[str, Any]]) -> str:

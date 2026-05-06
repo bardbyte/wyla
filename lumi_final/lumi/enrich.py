@@ -129,6 +129,13 @@ def enrich_table(
             table_context.table_name, prompt, model_id, cfg
         )
         last_result = _invoke_enrichment_agent(agent, prompt, table_context.table_name)
+        # Carry the plan's disambiguating descriptions through to publish.
+        # The enrich LLM has plenty to do; the descriptions are already
+        # validated by the critic at plan time, so just propagate them.
+        if approved_plan.proposed_view_description is not None:
+            last_result.view_description = approved_plan.proposed_view_description
+        if approved_plan.proposed_explore_description is not None:
+            last_result.explore_description = approved_plan.proposed_explore_description
         gate = check_enrichment(table_context.table_name, last_result, table_context)
         if gate.status != "fail":
             if attempt > 1:

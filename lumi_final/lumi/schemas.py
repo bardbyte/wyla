@@ -143,6 +143,86 @@ class TablePriority(BaseModel):
 PlanComplexity = Literal["simple", "medium", "complex"]
 
 
+class ViewDescription(BaseModel):
+    """Disambiguating description for one view.
+
+    Single-line LookML descriptions don't survive cold-start retrieval:
+    when 5 views all relate to "cardmember", Radix needs to know WHICH
+    one to load for "show me cardmember spend last quarter" vs "show me
+    current cardmember status." This structure forces the planner to
+    surface the disambiguation explicitly.
+
+    Renders into LookML two ways:
+      1. The ``description:`` parameter (Looker UI surface) — synthesized
+         one-liner including grain + scope.
+      2. A ``# DISAMBIGUATION ===`` comment block above the view —
+         indexable by Radix and readable by humans editing the file.
+    """
+    one_liner: str = Field(
+        default="",
+        description="≤140 chars. Plain-English answer to 'what is this view?'",
+    )
+    grain: str = Field(
+        default="",
+        description="What ONE row represents — 'one row per cardmember per day'.",
+    )
+    scope: str = Field(
+        default="",
+        description="Universe / population — 'active US cardmembers, last 90 days'.",
+    )
+    when_to_use: str = Field(
+        default="",
+        description="Question patterns this view IS for — 'use when "
+                    "asking about cardmember demographics or status'.",
+    )
+    when_not_to_use: str = Field(
+        default="",
+        description="Question patterns that belong elsewhere — "
+                    "'don't use for transaction-grain spend; use cm_txn'.",
+    )
+    distinguishes_from: list[dict] = Field(
+        default_factory=list,
+        description="[{view_name, how_it_differs}] — explicit contrast with "
+                    "sibling views sharing the primary entity. Empty list is "
+                    "a critic block when ontology shows siblings.",
+    )
+
+
+class ExploreDescription(BaseModel):
+    """Disambiguating description for one explore.
+
+    The explore is what Radix loads to answer a question — its
+    description shapes retrieval. We capture the question patterns this
+    explore actually answers (so retrieval routes correctly) AND the
+    patterns it does NOT answer (so retrieval doesn't misroute).
+    """
+    one_liner: str = Field(
+        default="",
+        description="≤140 chars. What this explore is FOR.",
+    )
+    primary_questions: list[str] = Field(
+        default_factory=list,
+        description="3-5 NL patterns this explore answers, in analyst "
+                    "vocabulary. Drives Radix retrieval — include "
+                    "canonical entity names + join chain hint.",
+    )
+    anti_questions: list[str] = Field(
+        default_factory=list,
+        description="2-3 NL patterns that BELONG in another explore. "
+                    "Tells Radix where NOT to route.",
+    )
+    canonical_filters: dict = Field(
+        default_factory=dict,
+        description="Filters baked into the explore "
+                    "(e.g. {data_source: 'cornerstone'}). Documented invariants.",
+    )
+    join_paths: list[str] = Field(
+        default_factory=list,
+        description="Human-readable chain summaries mirroring canonical paths "
+                    "— 'cardmember → account → transaction (one_to_many → one_to_many)'.",
+    )
+
+
 class EnrichmentPlan(BaseModel):
     """Output of the Plan step — what we WILL produce, before we produce it.
 
@@ -171,6 +251,18 @@ class EnrichmentPlan(BaseModel):
     proposed_explore: dict | None = Field(
         None,
         description="{base_view, joins:[...], always_filter, sql_always_where}",
+    )
+    # Disambiguating descriptions — what makes Radix retrieval correct.
+    # Authored by the planner using ontology + nearby-tables context.
+    # Empty/missing on legacy plans; critic gates new plans on these
+    # being substantive when the table has sibling-entity tables.
+    proposed_view_description: ViewDescription | None = Field(
+        None,
+        description="Structured view description for Radix retrieval grounding.",
+    )
+    proposed_explore_description: ExploreDescription | None = Field(
+        None,
+        description="Structured explore description for Radix retrieval grounding.",
     )
     proposed_filter_catalog_count: int = 0
     proposed_metric_catalog_count: int = 0
@@ -361,6 +453,11 @@ CritiqueCategory = Literal[
     #     paths actually observed in queries. Inventing joins no analyst
     #     uses misroutes Radix retrieval.
     "join_path_grounding",
+    # 14. Disambiguation completeness — view + explore descriptions must
+    #     name what makes THIS view different from siblings sharing the
+    #     primary entity. Empty distinguishes_from with siblings present
+    #     is a blocking issue: Radix can't route correctly without it.
+    "disambiguation_completeness",
 ]
 
 
@@ -561,6 +658,11 @@ class EnrichedOutput(BaseModel):
     # Surfaced via output/uncertain_fields.md so a reviewer can verify
     # before the LookML lands in production.
     uncertain_fields: list[dict] = Field(default_factory=list)
+    # Disambiguating descriptions carried over from the EnrichmentPlan
+    # so publish can render them into the .view.lkml + .explore.lkml.
+    # Empty/None on legacy enrichments — publish degrades gracefully.
+    view_description: ViewDescription | None = None
+    explore_description: ExploreDescription | None = None
 
 
 # ─── Session 4: Validate ─────────────────────────────────────

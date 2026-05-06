@@ -19,9 +19,34 @@ from lumi.schemas import (
     CritiqueReport,
     DomainOntology,
     EnrichmentPlan,
+    ExploreDescription,
     OntologyEntity,
     TableContext,
+    ViewDescription,
 )
+
+
+def _default_view_description() -> ViewDescription:
+    """A minimally-complete description that satisfies disambiguation gate.
+
+    Used in tests not specifically about disambiguation so the new
+    disambiguation_completeness checks don't pollute the assertions.
+    """
+    return ViewDescription(
+        one_liner="Generic test view for unit tests",
+        grain="one row per test fixture",
+        scope="test scope",
+        when_to_use="for unit tests",
+        when_not_to_use="not for production",
+    )
+
+
+def _default_explore_description() -> ExploreDescription:
+    return ExploreDescription(
+        one_liner="Test explore",
+        primary_questions=["question 1", "question 2", "question 3"],
+        anti_questions=["use a different explore for X"],
+    )
 
 
 def _ctx(**kw) -> TableContext:
@@ -52,6 +77,8 @@ def _plan(**kw) -> EnrichmentPlan:
             "cardmember per day grain. Plan adds N new dimensions and "
             "preserves the baseline PK."
         ),
+        proposed_view_description=_default_view_description(),
+        proposed_explore_description=_default_explore_description(),
     )
     defaults.update(kw)
     return EnrichmentPlan(**defaults)
