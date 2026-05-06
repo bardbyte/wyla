@@ -198,6 +198,24 @@ def run_plan_phase(
     # passed to every per-table plan call to compute grounding+narrative.
     fps_for_plan = fps if with_llm else None
 
+    # Build (or load) the domain ontology ONCE upfront when LLM is on.
+    # Solves the cardmember↔customer↔cust_xref_id semantic-equivalence
+    # problem at the system level. Cached on disk; only re-runs when
+    # missing.
+    ontology = None
+    if with_llm:
+        from lumi.ontology_builder import ensure_ontology
+        ontology = ensure_ontology(
+            contexts, fps, with_llm=True, config=cfg,
+        )
+        result.extra["ontology_entities"] = len(ontology.entities)
+        result.extra["ontology_authoring"] = ontology.authoring.get("mode", "?")
+        logger.info(
+            "domain ontology ready (%d entities, %d relationships, mode=%s)",
+            len(ontology.entities), len(ontology.relationships),
+            ontology.authoring.get("mode", "?"),
+        )
+
     llm_authored = 0
     skeleton_fallback = 0
     fallback_reasons: dict[str, int] = {}
@@ -210,6 +228,7 @@ def run_plan_phase(
                 contexts_by_table=contexts if with_llm else None,
                 with_llm=with_llm,
                 config=cfg,
+                ontology=ontology,
             )
             save_plan_json(plan, plans_dir)
             md_path = queue_dir / f"{ctx.table_name}.plan.md"

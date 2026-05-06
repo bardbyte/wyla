@@ -211,6 +211,106 @@ class EnrichmentPlan(BaseModel):
     )
 
 
+# ─── Domain Ontology (system-level, built once, used by every table) ─
+
+
+class OntologyEntity(BaseModel):
+    """One business entity in the domain ontology.
+
+    Built by ``lumi.ontology_builder`` from a single upfront Gemini call
+    that reads every table's MDM + baseline + the cross-corpus join
+    chains. Each entity carries its synonyms (cardmember = customer = cm
+    = cust) and the columns that identify it across tables.
+    """
+    name: str = Field(description="Canonical entity name in snake_case")
+    synonyms: list[str] = Field(
+        default_factory=list,
+        description="Other names referring to the same entity",
+    )
+    grain_description: str = Field(
+        default="",
+        description="What one row represents (e.g. 'one row per cardmember per day')",
+    )
+    grain_columns: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="table_name → [columns that identify this entity]",
+    )
+    description: str = Field(
+        default="",
+        description="Brief paragraph on what this entity represents",
+    )
+    evidence: list[str] = Field(
+        default_factory=list,
+        description="Why this entity is identified — MDM cite, JOIN evidence, etc.",
+    )
+
+
+class OntologyRelationship(BaseModel):
+    """One relationship between two entities (e.g. cardmember → account)."""
+    from_entity: str
+    to_entity: str
+    cardinality: Literal[
+        "one_to_one", "one_to_many", "many_to_one", "many_to_many", "unknown",
+    ] = "unknown"
+    evidence: str = Field(default="", description="Observed evidence for this relationship")
+
+
+class DomainOntology(BaseModel):
+    """The system-level ontology built once for the whole corpus.
+
+    Persisted to ``data/ontology.json``. Injected as a ``## Domain
+    ontology`` prompt section into both the plan stage and the enrich
+    stage. Solves the cardmember↔customer↔cust_xref_id semantic-
+    equivalence problem at the system level rather than per-table.
+    """
+    entities: list[OntologyEntity] = Field(default_factory=list)
+    relationships: list[OntologyRelationship] = Field(default_factory=list)
+    # Pre-computed lookup: which entity is each table primarily about?
+    # Drives the "## Domain ontology" prompt section's relevance filter.
+    table_to_primary_entity: dict[str, str] = Field(default_factory=dict)
+    # Provenance — was this ontology LLM-authored or deterministic fallback?
+    authoring: dict = Field(
+        default_factory=lambda: {"mode": "deterministic", "reason": None},
+    )
+
+    def entities_for_table(
+        self, table_name: str,
+    ) -> list[OntologyEntity]:
+        """Return entities that have any column on the given table."""
+        out: list[OntologyEntity] = []
+        for entity in self.entities:
+            if table_name in entity.grain_columns:
+                out.append(entity)
+        return out
+
+    def primary_entity_for_table(
+        self, table_name: str,
+    ) -> OntologyEntity | None:
+        primary_name = self.table_to_primary_entity.get(table_name)
+        if not primary_name:
+            return None
+        return next(
+            (e for e in self.entities if e.name == primary_name), None,
+        )
+
+    def related_entities_for_table(
+        self, table_name: str, *, limit: int = 5,
+    ) -> list[OntologyEntity]:
+        """Entities related (via OntologyRelationship) to this table's entity."""
+        primary = self.primary_entity_for_table(table_name)
+        if primary is None:
+            return []
+        related_names: set[str] = set()
+        for rel in self.relationships:
+            if rel.from_entity == primary.name:
+                related_names.add(rel.to_entity)
+            if rel.to_entity == primary.name:
+                related_names.add(rel.from_entity)
+        return [
+            e for e in self.entities if e.name in related_names
+        ][:limit]
+
+
 ApprovalSource = Literal["human", "auto_low_risk", "auto_skip", "pending"]
 
 

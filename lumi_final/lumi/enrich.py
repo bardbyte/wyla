@@ -288,15 +288,31 @@ def build_enrichment_prompt(
         # want the legacy prompt shape (e.g. some unit tests).
         from lumi.grounding import render_grounding_signals
         from lumi.narrative import build_table_narrative, render_table_narrative
+        from lumi.ontology import compute_equivalence_classes
+        from lumi.ontology_builder import load_ontology, render_ontology_for_table
         # Narrative reads the same fingerprint corpus we already have.
         # all_fingerprints is attached to grounding by the caller; if not
         # available, narrative degrades gracefully to per-table-only.
         all_fps = getattr(grounding, "_all_fingerprints", None)
+        # Cross-table equivalence closure — adds the ontology layer.
+        eq_map = compute_equivalence_classes(all_fps) if all_fps else None
         narrative = build_table_narrative(
-            table_context, all_fingerprints=all_fps,
+            table_context, all_fingerprints=all_fps, eq_map=eq_map,
+        )
+        # Domain ontology (system-level synonyms + entity grain) —
+        # loaded from disk if present, silently skipped if not.
+        ontology_md = ""
+        ontology = load_ontology()
+        if ontology is not None:
+            ontology_md = render_ontology_for_table(
+                ontology, table_context.table_name,
+            )
+        ontology_section = (
+            [ontology_md, ""] if ontology_md else []
         )
         sections.extend([
             "",  # visual separator
+            *ontology_section,
             render_table_narrative(narrative),
             "",
             render_grounding_signals(grounding),  # type: ignore[arg-type]

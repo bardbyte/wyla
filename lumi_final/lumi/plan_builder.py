@@ -42,6 +42,59 @@ logger = logging.getLogger("lumi.plan_builder")
 # ─── Public API ──────────────────────────────────────────────
 
 
+# Sparse-table threshold: when MDM coverage is below this AND no baseline
+# AND fewer than this many queries reference the table, the table is
+# "unreviewable" — it has no semantic anchors anywhere and any plan will
+# be guesswork. We still emit a skeleton (so the pipeline doesn't crash)
+# but flag it loudly in the markdown so the human knows to provide
+# manual context before enrichment.
+_SPARSE_MDM_THRESHOLD = 0.10           # < 10% MDM coverage
+_SPARSE_QUERIES_THRESHOLD = 3          # < 3 queries reference the table
+
+
+_PLACEHOLDER_TOKENS = frozenset({None, "", "?", "TBD", "todo", "TODO", "unknown", "Unknown", "UNKNOWN"})
+
+
+def _has_excessive_placeholders(plan: EnrichmentPlan, threshold: float = 0.5) -> bool:
+    """Detect when an LLM-authored plan is mostly placeholder content.
+
+    When a sparse context confuses Gemini (no MDM, no baseline, minimal
+    query usage), the model sometimes emits dim/measure entries with
+    ``name="?"`` or ``source_column=null``. Surfacing such a plan to a
+    human is worse than honest skeleton fallback — it looks reviewable
+    but contains nothing actionable.
+    """
+    bad = 0
+    total = 0
+    for d in (plan.proposed_dimensions or []) + (plan.proposed_measures or []):
+        total += 1
+        name = d.get("name")
+        src = d.get("source_column")
+        if name in _PLACEHOLDER_TOKENS or src in _PLACEHOLDER_TOKENS:
+            bad += 1
+    if total == 0:
+        return False
+    return (bad / total) > threshold
+
+
+def _is_unreviewable(ctx: TableContext) -> tuple[bool, str | None]:
+    """Detect tables with zero semantic anchors.
+
+    Returns ``(is_unreviewable, reason_text)``. The reason is a short
+    sentence explaining what's missing so the human knows how to fix it.
+    """
+    has_mdm = (ctx.mdm_coverage_pct or 0) >= _SPARSE_MDM_THRESHOLD
+    has_baseline = bool(ctx.existing_view_lkml)
+    has_queries = len(ctx.queries_using_this or []) >= _SPARSE_QUERIES_THRESHOLD
+    if has_mdm or has_baseline or has_queries:
+        return False, None
+    parts = []
+    parts.append(f"MDM coverage = {(ctx.mdm_coverage_pct or 0) * 100:.0f}%")
+    parts.append("no baseline LookML view")
+    parts.append(f"only {len(ctx.queries_using_this or [])} quer(y/ies) reference it")
+    return True, "; ".join(parts)
+
+
 def build_enrichment_plan_skeleton(
     ctx: TableContext,
     *,
@@ -64,15 +117,38 @@ def build_enrichment_plan_skeleton(
     proposed_explore = _propose_explore(ctx)
     fields_to_enrich = _build_fields_to_enrich(ctx)
     risks = _identify_risks(ctx)
+    questions = _questions_for_reviewer(ctx, risks)
     complexity = _classify_complexity(
         ctx, proposed_derived=proposed_derived, joins=ctx.joins_involving_this
     )
+
+    # Sparse-table check: if no semantic anchors anywhere, escalate
+    # loudly so the human knows the plan is unreliable.
+    unreviewable, why = _is_unreviewable(ctx)
+    if unreviewable:
+        risks.insert(0, (
+            f"⚠ UNREVIEWABLE: this table has no semantic anchors "
+            f"({why}). Any descriptions in this plan will be best-guess "
+            "name-pattern inference. Provide a manual table description, "
+            "hydrate MDM, or import a baseline view before enrichment."
+        ))
+        questions.insert(0, (
+            "Should this table be enriched at all? It currently has "
+            "no MDM, no baseline, and minimal query usage."
+        ))
+
     reasoning = _deterministic_reasoning(
         ctx,
         n_dims=len(proposed_dimensions),
         n_measures=len(proposed_measures),
         n_derived=len(proposed_derived),
     )
+    if unreviewable:
+        reasoning = (
+            f"⚠ Sparse-source table ({why}). "
+            + reasoning
+            + " All description_summary fields will likely be guessed."
+        )
 
     estimated_input_tokens = _estimate_input_tokens(ctx)
     estimated_output_tokens = (
@@ -99,7 +175,7 @@ def build_enrichment_plan_skeleton(
         estimated_output_tokens=estimated_output_tokens,
         reasoning=reasoning,
         risks=risks,
-        questions_for_reviewer=_questions_for_reviewer(ctx, risks),
+        questions_for_reviewer=questions,
         fields_to_enrich=fields_to_enrich,
         authoring={"mode": "skeleton", "reason": fallback_reason},
     )
@@ -112,6 +188,7 @@ def build_enrichment_plan(
     contexts_by_table: dict | None = None,
     with_llm: bool = False,
     config: LumiConfig | None = None,
+    ontology=None,  # type: ignore[no-untyped-def]
 ) -> EnrichmentPlan:
     """Build an EnrichmentPlan, optionally Gemini-authored.
 
@@ -144,6 +221,7 @@ def build_enrichment_plan(
         return _author_plan_with_llm(
             ctx, skeleton, all_fingerprints, contexts_by_table or {},
             config=config or LumiConfig(),
+            ontology=ontology,
         )
     except Exception as e:  # noqa: BLE001
         logger.warning(
@@ -161,6 +239,7 @@ def _author_plan_with_llm(
     all_fingerprints: list,
     contexts_by_table: dict,
     config: LumiConfig,
+    ontology=None,  # type: ignore[no-untyped-def]  # lumi.schemas.DomainOntology
 ) -> EnrichmentPlan:
     """Run the planning LlmAgent with the full deterministic context.
 
@@ -179,11 +258,19 @@ def _author_plan_with_llm(
     # Lazy imports — only paid when LLM is actually used.
     from lumi.grounding import build_grounding_signals
     from lumi.narrative import build_table_narrative
+    from lumi.ontology import compute_equivalence_classes
 
     grounding = build_grounding_signals(ctx, all_fingerprints, contexts_by_table)
-    narrative = build_table_narrative(ctx, all_fingerprints=all_fingerprints)
+    # Cross-table semantic equivalence closure — deterministic, free.
+    # Adds the cardmember/customer ontology layer to the narrative.
+    eq_map = compute_equivalence_classes(all_fingerprints)
+    narrative = build_table_narrative(
+        ctx, all_fingerprints=all_fingerprints, eq_map=eq_map,
+    )
 
-    prompt = _build_plan_prompt(ctx, skeleton, narrative, grounding)
+    prompt = _build_plan_prompt(
+        ctx, skeleton, narrative, grounding, ontology=ontology,
+    )
     logger.info(
         "Planning %s with Gemini — prompt %d chars, skeleton %d dims / %d measures",
         ctx.table_name, len(prompt),
@@ -209,6 +296,23 @@ def _author_plan_with_llm(
             fallback_reason="LLM-authored plan had no dimensions/measures",
         )
 
+    # Placeholder-content guard: when sparse-source contexts confuse the
+    # LLM, it sometimes emits dim entries with name="?" or null source_
+    # columns. Detect that and fall back rather than serve garbage.
+    if _has_excessive_placeholders(refined):
+        logger.warning(
+            "LLM plan for %s has too many placeholder names (?/null), "
+            "falling back to skeleton",
+            ctx.table_name,
+        )
+        return build_enrichment_plan_skeleton(
+            ctx,
+            fallback_reason=(
+                "LLM emitted placeholder content (>50% null/? names) — "
+                "likely sparse context confused the model"
+            ),
+        )
+
     # Preserve fields the LLM is unlikely to refine well.
     refined.estimated_input_tokens = (
         refined.estimated_input_tokens or skeleton.estimated_input_tokens
@@ -229,11 +333,15 @@ def _build_plan_prompt(
     skeleton: EnrichmentPlan,
     narrative,
     grounding,
+    *,
+    ontology=None,  # type: ignore[no-untyped-def]
 ) -> str:
     """Compose the plan-stage prompt.
 
-    Heavily structured: identity → narrative → grounding → skeleton →
-    instructions. The LLM authors a refined EnrichmentPlan on top.
+    Order: domain ontology (if available) → table narrative → grounding
+    signals → skeleton → instructions. Ontology FIRST so the LLM reads
+    "this table is about cardmember entity (synonyms: card member, cm,
+    cust, customer)" before reasoning about individual columns.
     """
     # Lazy imports for renderers.
     from lumi.grounding import render_grounding_signals
@@ -259,6 +367,16 @@ def _build_plan_prompt(
         "not generic boilerplate. The `questions_for_reviewer` field asks "
         "directed questions only when there's genuine ambiguity.",
         "",
+    ]
+
+    # Domain ontology FIRST — anchors all downstream reasoning.
+    if ontology is not None:
+        from lumi.ontology_builder import render_ontology_for_table
+        ontology_md = render_ontology_for_table(ontology, ctx.table_name)
+        if ontology_md:
+            parts.extend([ontology_md, ""])
+
+    parts.extend([
         render_table_narrative(narrative),
         "",
         render_grounding_signals(grounding),
@@ -274,16 +392,22 @@ def _build_plan_prompt(
         "use it. e.g. cm11 with pii_role_id=NGBD-SDE-CM11 should describe "
         "as 'Cardmember-grain identifier (PII role: SDE-CM11)' not "
         "'Customer Member 11'.",
-        "3. WRITE the reasoning field as if explaining to a senior data "
-        "engineer: what the table represents, what the plan adds vs the "
-        "baseline, the single biggest risk.",
-        "4. SURFACE real risks — sparse MDM, no PK candidate, complex "
+        "3. USE ENTITY VOCABULARY — when the domain ontology shows that "
+        "two columns refer to the same entity (e.g. cm11 ≡ cust_xref_id "
+        "via cardmember entity), describe both as the same entity using "
+        "the canonical entity name. This is how we make the semantic "
+        "layer consistent across tables.",
+        "4. WRITE the reasoning field as if explaining to a senior data "
+        "engineer: what the table represents (cite the primary entity "
+        "from the ontology), what the plan adds vs the baseline, the "
+        "single biggest risk.",
+        "5. SURFACE real risks — sparse MDM, no PK candidate, complex "
         "CTE chains, high-cardinality categoricals — not 'caution: change'.",
-        "5. ASK directed questions only for true ambiguity (e.g. when "
+        "6. ASK directed questions only for true ambiguity (e.g. when "
         "two PK candidates tie, or join cardinality is unclear).",
-        "6. KEEP estimated_input_tokens / estimated_output_tokens from "
+        "7. KEEP estimated_input_tokens / estimated_output_tokens from "
         "the skeleton (they're already computed).",
-    ]
+    ])
     return "\n\n".join(parts)
 
 
@@ -642,9 +766,28 @@ def format_enrichment_plan_markdown(
                 "(re-run with `python -m lumi plan --with-llm` for richer reasoning)"
             )
 
+    # Sparse-source banner: if this table has no semantic anchors, the
+    # plan is best-guess. Make that fact unmissable BEFORE the reviewer
+    # spends time reading proposals they'll have to reject anyway.
+    unreviewable, why = _is_unreviewable(ctx)
+    sparse_banner: list[str] = []
+    if unreviewable:
+        sparse_banner = [
+            "> **⚠ UNREVIEWABLE — this table lacks semantic anchors**",
+            f"> _{why}_",
+            ">",
+            "> Any descriptions in this plan are best-guess from column-name "
+            "patterns alone. To produce a real plan: "
+            "(a) provide a manual table description in `data/learnings.md`, "
+            "(b) re-hydrate MDM with `python scripts/probe_mdm.py --save`, "
+            "or (c) ensure baseline LookML exists in `data/looker_master/`.",
+            "",
+        ]
+
     lines: list[str] = [
         f"# Enrichment plan: {plan.table_name}{rank_line}",
         "",
+        *sparse_banner,
         authoring_line,
         "",
         f"- complexity: **{plan.complexity}**",
