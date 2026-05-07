@@ -458,6 +458,13 @@ CritiqueCategory = Literal[
     #     primary entity. Empty distinguishes_from with siblings present
     #     is a blocking issue: Radix can't route correctly without it.
     "disambiguation_completeness",
+    # 15. Field searchability — every dim/measure embedded into Radix's
+    #     pgvector index needs label + description + hint. Hint is the
+    #     Looker parameter that holds alternative names / business jargon /
+    #     query phrasing — directly improves BGE recall. Missing hints
+    #     on a majority of fields is blocking: the view is invisible to
+    #     analysts who don't already know the canonical column name.
+    "field_searchability",
 ]
 
 

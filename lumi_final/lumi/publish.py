@@ -366,6 +366,9 @@ def publish_to_disk(
     output_dir: str | Path,
     *,
     coverage: CoverageReport | None = None,
+    contexts: dict | None = None,
+    fingerprints: list | None = None,
+    ontology: Any = None,
 ) -> dict[str, Any]:
     """Materialise enriched outputs to ``output_dir``.
 
@@ -373,9 +376,14 @@ def publish_to_disk(
       ``output_dir/views/<table>.view.lkml``     additively merged view
       ``output_dir/models/lumi_enriched.model.lkml`` one explore include per view
       ``output_dir/metric_catalog.json``
-      ``output_dir/filter_catalog.json``
+      ``output_dir/filter_catalog.json``       Radix-shaped (T1.3)
+      ``output_dir/filter_catalog_legacy.json`` per-table aggregates
       ``output_dir/golden_questions.json``
       ``output_dir/coverage_report.json`` (only if ``coverage`` given)
+
+    Optional kwargs ``contexts`` / ``fingerprints`` / ``ontology`` enable
+    the Radix-shaped catalog. When omitted, only the legacy catalog is
+    emitted (back-compat).
 
     Returns a dict with ``status``, ``error``, and the list of files written.
     """
@@ -440,16 +448,41 @@ def publish_to_disk(
     written.append(str(model_path))
 
     metric_catalog = build_metric_catalog(enriched_outputs)
-    filter_catalog = build_filter_catalog(enriched_outputs)
+    legacy_filter_catalog = build_filter_catalog(enriched_outputs)
     golden = build_golden_questions(enriched_outputs)
 
     metric_path = out / "metric_catalog.json"
     metric_path.write_text(json.dumps(metric_catalog, indent=2), encoding="utf-8")
     written.append(str(metric_path))
 
-    filter_path = out / "filter_catalog.json"
-    filter_path.write_text(json.dumps(filter_catalog, indent=2), encoding="utf-8")
-    written.append(str(filter_path))
+    # Radix-shaped filter catalog (T1.3) — primary artifact when contexts
+    # are available. Legacy aggregate kept as filter_catalog_legacy.json.
+    if contexts is not None and fingerprints is not None:
+        from lumi.filter_catalog import (
+            build_filter_catalog as build_radix_catalog,
+        )
+        radix_catalog = build_radix_catalog(
+            contexts, fingerprints, ontology=ontology,
+        )
+        filter_path = out / "filter_catalog.json"
+        filter_path.write_text(
+            json.dumps(radix_catalog, indent=2, default=str),
+            encoding="utf-8",
+        )
+        written.append(str(filter_path))
+        legacy_path = out / "filter_catalog_legacy.json"
+        legacy_path.write_text(
+            json.dumps(legacy_filter_catalog, indent=2),
+            encoding="utf-8",
+        )
+        written.append(str(legacy_path))
+    else:
+        filter_path = out / "filter_catalog.json"
+        filter_path.write_text(
+            json.dumps(legacy_filter_catalog, indent=2),
+            encoding="utf-8",
+        )
+        written.append(str(filter_path))
 
     golden_path = out / "golden_questions.json"
     golden_path.write_text(json.dumps(golden, indent=2), encoding="utf-8")

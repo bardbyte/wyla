@@ -354,6 +354,7 @@ date ranges on large tables — prevents full-table scans.
 | `primary_key: yes` | YES (on one dim) | Without it: symmetric aggregates break, joins fanout silently |
 | `label` | Recommended | Human-readable name for UI + Radix matching |
 | `description` | Recommended | 15-200 chars. Radix embeds this for semantic search |
+| `hint` | Recommended | Alternative names + business jargon + query phrasings. Radix embeds `label + description + hint` per field — hint is the highest-leverage retrieval-recall lever. |
 | `group_label` | Recommended | Groups related dims ("Credit Risk", "Product", "Date") |
 | `tags` | Recommended | Synonyms for Radix field matching |
 | `hidden: yes` | Conditional | For sort-order dims, internal IDs, technical fields |

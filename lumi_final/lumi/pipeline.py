@@ -565,11 +565,17 @@ def run_execute_phase(
     )
     result.extra["sql_reconstruction_status"] = sql_gate.status
 
+    # Load the unified ontology so the Radix-shaped filter catalog can
+    # attach entity-level synonyms.
+    radix_ontology = OntologyStore().current()
     publish_result = publish_to_disk(
         enriched,
         baseline_dir=Path(cfg.baseline_views_dir),
         output_dir=Path(cfg.output_dir),
         coverage=coverage,
+        contexts=contexts,
+        fingerprints=all_fps,
+        ontology=radix_ontology,
     )
     if publish_result.get("status") == "ok":
         result.files_written.extend(publish_result.get("files_written", []))

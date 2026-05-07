@@ -500,6 +500,11 @@ def _deterministic_findings(
     #     5 views all relating to "cardmember".
     issues.extend(_check_disambiguation_completeness(ctx, plan, ontology))
 
+    # 7f. Field searchability — every dim/measure must carry hint + tags
+    #     (BGE embedding fodder). Missing these on most fields is blocking;
+    #     missing per-field is a warn.
+    issues.extend(_check_field_searchability(plan))
+
     # 8. Risk acknowledgement — sparse contexts must list risks.
     sparse = (
         (ctx.mdm_coverage_pct or 0) < 0.30
@@ -952,6 +957,144 @@ def _siblings_for_table(
         if tbl != table_name and tbl not in siblings:
             siblings.append(tbl)
     return siblings
+
+
+def _check_field_searchability(plan: EnrichmentPlan) -> list[CritiqueIssue]:
+    """Enforce label + description + hint + tags on every dim and measure.
+
+    Radix's retrieval embeds ``label + ' — ' + description + ' — ' + hint``
+    per field. Missing hint on a majority of fields means most of this
+    view is invisible to BGE-based retrieval — analysts who phrase
+    questions in business language won't find these fields.
+
+    Severity:
+      - BLOCK: > 50% of fields missing hint, OR every field has empty hint AND empty tags.
+      - WARN per field: missing hint, empty tags, or label looks auto-generated.
+    """
+    out: list[CritiqueIssue] = []
+    fields: list[tuple[str, int, dict[str, Any]]] = []
+    for idx, d in enumerate(plan.proposed_dimensions or []):
+        fields.append(("dim", idx, d))
+    for idx, m in enumerate(plan.proposed_measures or []):
+        fields.append(("measure", idx, m))
+    if not fields:
+        return out
+
+    n_total = len(fields)
+    n_missing_hint = 0
+    n_missing_tags = 0
+    n_missing_label = 0
+    field_warnings: list[CritiqueIssue] = []
+
+    for kind, idx, f in fields:
+        name = f.get("name") or f.get("source_column") or "?"
+        hint = (f.get("hint") or "").strip()
+        tags = f.get("tags") or []
+        label = (f.get("label") or "").strip()
+        desc = (
+            f.get("description")
+            or f.get("description_summary")
+            or ""
+        ).strip()
+
+        if not hint:
+            n_missing_hint += 1
+            field_warnings.append(CritiqueIssue(
+                category="field_searchability",
+                severity="warn",
+                locus=f"proposed_{kind}s[{idx}].hint (name={name})",
+                finding=(
+                    f"`{name}` has no `hint`. BGE embedding will rely "
+                    "only on label + description, missing synonyms / "
+                    "alternative names analysts might use."
+                ),
+                evidence="hint is empty",
+                recommendation=(
+                    "Author hint: alternative names + business jargon + "
+                    "common query phrasings. Mine from MDM business_name, "
+                    "baseline_sql_aliases, ontology synonyms, query SELECT aliases."
+                ),
+            ))
+        if not tags:
+            n_missing_tags += 1
+            field_warnings.append(CritiqueIssue(
+                category="field_searchability",
+                severity="warn",
+                locus=f"proposed_{kind}s[{idx}].tags (name={name})",
+                finding=(
+                    f"`{name}` has empty `tags`. Looker indexes tags as "
+                    "discrete synonym tokens for retrieval."
+                ),
+                evidence="tags is empty",
+                recommendation=(
+                    "Add list of synonym tokens (4-8 items): canonical "
+                    "column name + business names + ontology synonyms."
+                ),
+            ))
+        if not label or label == name or label == name.replace("_", " "):
+            n_missing_label += 1
+            field_warnings.append(CritiqueIssue(
+                category="field_searchability",
+                severity="info",
+                locus=f"proposed_{kind}s[{idx}].label (name={name})",
+                finding=(
+                    f"`{name}` has no human-friendly label "
+                    "(or label equals the raw column name)."
+                ),
+                evidence=f"label = {label!r}",
+                recommendation=(
+                    "Use MDM business_name when available; otherwise "
+                    "Title-Case the column."
+                ),
+            ))
+        # Measure description should open with aggregation verb.
+        if kind == "measure" and desc:
+            first_word = desc.split()[0].lower() if desc.split() else ""
+            agg_verbs = {
+                "sum", "average", "avg", "count", "distinct",
+                "minimum", "min", "maximum", "max", "median", "total",
+                "number",
+            }
+            if first_word not in agg_verbs:
+                field_warnings.append(CritiqueIssue(
+                    category="field_searchability",
+                    severity="info",
+                    locus=f"proposed_measures[{idx}].description (name={name})",
+                    finding=(
+                        f"Measure `{name}` description doesn't open with "
+                        "an aggregation verb. Radix retrieval expects "
+                        "'Sum of X', 'Average of Y' patterns."
+                    ),
+                    evidence=f"description first word: {first_word!r}",
+                    recommendation=(
+                        "Open the description with the aggregation verb "
+                        "matching the measure type."
+                    ),
+                ))
+
+    pct_missing_hint = n_missing_hint / max(1, n_total)
+    if pct_missing_hint > 0.5:
+        out.append(CritiqueIssue(
+            category="field_searchability",
+            severity="block",
+            locus="proposed_dimensions + proposed_measures",
+            finding=(
+                f"{n_missing_hint}/{n_total} fields ({pct_missing_hint:.0%}) "
+                "are missing `hint`. The view is effectively invisible to "
+                "Radix retrieval for any analyst who doesn't already know "
+                "the canonical column name."
+            ),
+            evidence=(
+                f"hint missing on >50% of fields; tags missing on "
+                f"{n_missing_tags}/{n_total}"
+            ),
+            recommendation=(
+                "Author `hint` on every dim and measure. This is the highest-"
+                "leverage retrieval-recall improvement we can make."
+            ),
+        ))
+    out.extend(field_warnings)
+    return out
 
 
 _VerdictLiteral = Literal["approve", "approve_with_warnings", "retry", "reject"]
