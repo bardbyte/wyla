@@ -505,6 +505,11 @@ def _deterministic_findings(
     #     missing per-field is a warn.
     issues.extend(_check_field_searchability(plan))
 
+    # 7g. Symmetric aggregates — when explore has many_to_many joins or
+    #     multi-fact joins, every measure needs symmetric_aggregates: yes
+    #     to prevent silent row fan-out → wrong totals.
+    issues.extend(_check_symmetric_aggregates(plan, cardinalities))
+
     # 8. Risk acknowledgement — sparse contexts must list risks.
     sparse = (
         (ctx.mdm_coverage_pct or 0) < 0.30
@@ -1094,6 +1099,82 @@ def _check_field_searchability(plan: EnrichmentPlan) -> list[CritiqueIssue]:
             ),
         ))
     out.extend(field_warnings)
+    return out
+
+
+def _check_symmetric_aggregates(
+    plan: EnrichmentPlan,
+    cardinalities: list[Any] | None,
+) -> list[CritiqueIssue]:
+    """Block plans where explore needs symmetric_aggregates but measures lack it.
+
+    Trigger conditions for needing symmetric_aggregates on every measure:
+      1. Any join in proposed_explore.joins has relationship=many_to_many.
+      2. The explore joins TWO OR MORE fact-grain tables (multi-fact join):
+         heuristic — count how many joined tables also appear as
+         left_table in other observed cardinalities (i.e., are facts in
+         OTHER joins). If > 1 fact table touched, fan-out risk is real.
+
+    For each measure missing the flag in such an explore, emit a BLOCK.
+    """
+    out: list[CritiqueIssue] = []
+    explore = plan.proposed_explore or {}
+    proposed_joins = explore.get("joins") or []
+    if not proposed_joins:
+        return out
+
+    has_many_to_many = any(
+        (j.get("relationship") or "").lower() == "many_to_many"
+        for j in proposed_joins
+    )
+
+    # Multi-fact heuristic: among observed cardinalities, count tables that
+    # appear on the "many" side (i.e., are facts joined into a dim).
+    fact_tables: set[str] = set()
+    for c in cardinalities or []:
+        if c.cardinality == "many_to_one":
+            fact_tables.add(c.left_table.lower())
+        elif c.cardinality == "one_to_many":
+            fact_tables.add(c.right_table.lower())
+    base = (explore.get("base_view") or plan.table_name or "").lower()
+    explore_tables = {base} | {
+        (j.get("right_table") or "").lower() for j in proposed_joins
+    }
+    multi_fact = len(fact_tables & explore_tables) >= 2
+
+    needs_symmetric = has_many_to_many or multi_fact
+    if not needs_symmetric:
+        return out
+
+    reason = (
+        "many_to_many join present"
+        if has_many_to_many
+        else "multi-fact join detected"
+    )
+    for idx, m in enumerate(plan.proposed_measures or []):
+        sym = m.get("symmetric_aggregates")
+        if sym in (True, "yes"):
+            continue
+        out.append(CritiqueIssue(
+            category="symmetric_aggregates",
+            severity="block",
+            locus=f"proposed_measures[{idx}].symmetric_aggregates",
+            finding=(
+                f"Measure `{m.get('name', '?')}` lacks symmetric_aggregates "
+                f"but the explore has a {reason}. Without "
+                "symmetric_aggregates, Looker fans out values across the "
+                "join → wrong totals, wrong sums, wrong everything."
+            ),
+            evidence=(
+                f"explore joins: "
+                f"{[j.get('right_table') + '/' + (j.get('relationship') or '?') for j in proposed_joins]}"
+            ),
+            recommendation=(
+                "Set `symmetric_aggregates: yes` on this measure. If you "
+                "believe the fan-out is acceptable, add the rationale to "
+                "`risks` so the human reviewer can override."
+            ),
+        ))
     return out
 
 

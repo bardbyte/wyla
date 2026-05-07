@@ -378,7 +378,10 @@ def run_plan_phase(
     # T2: cluster gold queries → ExplorePlans. Persisted to data/explore_plans.json
     # so execute phase + publish can render clustered explores.
     try:
-        from lumi.explore_clusters import build_explore_plans
+        from lumi.explore_clusters import (
+            build_explore_plans,
+            propose_aggregate_tables,
+        )
         from lumi.joins import infer_join_cardinalities
         cardinalities = infer_join_cardinalities(fps)
         explore_plans = build_explore_plans(
@@ -395,9 +398,21 @@ def run_plan_phase(
         )
         result.files_written.append(str(explore_plans_path))
         result.extra["explore_clusters"] = len(explore_plans)
+
+        # T3.2: aggregate_table proposals from hot GROUP BY patterns.
+        agg_tables = propose_aggregate_tables(fps, min_query_count=3)
+        if agg_tables:
+            agg_path = Path("data/aggregate_tables.json")
+            agg_path.parent.mkdir(parents=True, exist_ok=True)
+            agg_path.write_text(
+                json.dumps(agg_tables, indent=2, default=str),
+                encoding="utf-8",
+            )
+            result.files_written.append(str(agg_path))
+            result.extra["aggregate_tables"] = len(agg_tables)
         logger.info(
-            "T2 explore clusters: %d explores designed across %d gold queries",
-            len(explore_plans), len(fps),
+            "T2 explore clusters: %d explores; T3 aggregate_tables: %d",
+            len(explore_plans), len(agg_tables),
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("explore clustering failed: %s", e)

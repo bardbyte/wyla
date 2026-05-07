@@ -302,6 +302,74 @@ def _name_for_cluster(cluster: QueryCluster, base_view: str) -> str:
     )
 
 
+def propose_aggregate_tables(
+    fingerprints: list[SQLFingerprint],
+    *,
+    min_query_count: int = 3,
+    max_proposals: int = 6,
+) -> list[dict[str, Any]]:
+    """Propose ``aggregate_table:`` definitions from hot GROUP BY patterns.
+
+    Looker's aggregate_table is a materialized rollup that answers
+    queries fitting its grain in 5% of the time of the underlying query.
+    The corpus tells us which GROUP BY column sets recur — those are
+    the rollup candidates.
+
+    Returns a list of proposals, each:
+      {
+        "name": "agg__<base_view>__<grouping_signature>",
+        "base_view": str,
+        "group_by": list[str],            # GROUP BY columns (sorted)
+        "measures": list[str],            # aggregation source columns
+        "frequency": int,
+        "filters": dict,                  # canonical filters
+      }
+
+    Sorted by frequency descending. Capped at max_proposals.
+    """
+    pattern_buckets: dict[
+        tuple[str, tuple[str, ...]],
+        dict[str, Any],
+    ] = {}
+
+    for fp in fingerprints:
+        if fp.parse_error or not fp.primary_table:
+            continue
+        # Pattern key: (base_table, sorted GROUP BY columns).
+        gb_keys = tuple(sorted(
+            (g.get("column") or "").lower()
+            for g in (fp.group_by or [])
+            if g.get("column")
+        ))
+        if not gb_keys:
+            continue
+        key = (fp.primary_table, gb_keys)
+        bucket = pattern_buckets.setdefault(key, {
+            "name": "",
+            "base_view": fp.primary_table,
+            "group_by": list(gb_keys),
+            "measures": set(),
+            "frequency": 0,
+            "filters": {},
+        })
+        bucket["frequency"] += 1
+        for a in fp.aggregations or []:
+            col = a.get("column")
+            if col:
+                bucket["measures"].add(col)
+
+    proposals = []
+    for (base, gb), bucket in pattern_buckets.items():
+        if bucket["frequency"] < min_query_count:
+            continue
+        slug = "_".join(c[:8] for c in gb[:3]) or "default"
+        bucket["name"] = f"agg__{base}__{slug}"
+        bucket["measures"] = sorted(bucket["measures"])
+        proposals.append(bucket)
+    proposals.sort(key=lambda p: -p["frequency"])
+    return proposals[:max_proposals]
+
+
 def render_clusters_for_prompt(
     clusters: list[QueryCluster], *, max_clusters: int = 12,
 ) -> str:

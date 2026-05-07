@@ -519,6 +519,11 @@ CritiqueCategory = Literal[
     #     on a majority of fields is blocking: the view is invisible to
     #     analysts who don't already know the canonical column name.
     "field_searchability",
+    # 16. Symmetric aggregates — when an explore has many_to_many joins
+    #     OR joins multiple fact tables, every measure must declare
+    #     `symmetric_aggregates: yes` or Looker silently fans out values
+    #     across the join. Wrong totals, wrong revenue, wrong everything.
+    "symmetric_aggregates",
 ]
 
 

@@ -477,6 +477,17 @@ def publish_to_disk(
         radix_catalog = build_radix_catalog(
             contexts, fingerprints, ontology=ontology,
         )
+        # T3.3: optionally enrich values via BigQuery DISTINCT probe.
+        # Env-gated (LUMI_BQ_ENABLE=1) so it never fires in tests/CI.
+        try:
+            from lumi.bq_probe import is_enabled as _bq_enabled
+            from lumi.bq_probe import probe_distinct_values
+            if _bq_enabled():
+                radix_catalog = probe_distinct_values(
+                    radix_catalog, contexts=contexts,
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("BQ probe failed: %s", e)
         filter_path = out / "filter_catalog.json"
         filter_path.write_text(
             json.dumps(radix_catalog, indent=2, default=str),
