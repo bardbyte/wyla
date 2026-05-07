@@ -375,6 +375,33 @@ def run_plan_phase(
         "relationships": len(final_ontology.relationships),
     }
 
+    # T2: cluster gold queries → ExplorePlans. Persisted to data/explore_plans.json
+    # so execute phase + publish can render clustered explores.
+    try:
+        from lumi.explore_clusters import build_explore_plans
+        from lumi.joins import infer_join_cardinalities
+        cardinalities = infer_join_cardinalities(fps)
+        explore_plans = build_explore_plans(
+            fps, contexts, cardinalities=cardinalities, min_cluster_size=1,
+        )
+        explore_plans_path = Path("data/explore_plans.json")
+        explore_plans_path.parent.mkdir(parents=True, exist_ok=True)
+        explore_plans_path.write_text(
+            json.dumps(
+                [ep.model_dump() for ep in explore_plans],
+                indent=2, default=str,
+            ),
+            encoding="utf-8",
+        )
+        result.files_written.append(str(explore_plans_path))
+        result.extra["explore_clusters"] = len(explore_plans)
+        logger.info(
+            "T2 explore clusters: %d explores designed across %d gold queries",
+            len(explore_plans), len(fps),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("explore clustering failed: %s", e)
+
     result.finished_at = time.time()
     return result
 
@@ -568,6 +595,20 @@ def run_execute_phase(
     # Load the unified ontology so the Radix-shaped filter catalog can
     # attach entity-level synonyms.
     radix_ontology = OntologyStore().current()
+    # Load T2 explore plans if plan phase wrote them.
+    explore_plans_data: list = []
+    explore_plans_path = Path("data/explore_plans.json")
+    if explore_plans_path.exists():
+        try:
+            from lumi.schemas import ExplorePlan
+            raw = json.loads(explore_plans_path.read_text(encoding="utf-8"))
+            explore_plans_data = [ExplorePlan(**ep) for ep in raw]
+            logger.info(
+                "loaded %d clustered explore plans from %s",
+                len(explore_plans_data), explore_plans_path,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("could not load explore plans: %s", e)
     publish_result = publish_to_disk(
         enriched,
         baseline_dir=Path(cfg.baseline_views_dir),
@@ -576,6 +617,7 @@ def run_execute_phase(
         contexts=contexts,
         fingerprints=all_fps,
         ontology=radix_ontology,
+        explore_plans=explore_plans_data,
     )
     if publish_result.get("status") == "ok":
         result.files_written.extend(publish_result.get("files_written", []))

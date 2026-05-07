@@ -369,6 +369,7 @@ def publish_to_disk(
     contexts: dict | None = None,
     fingerprints: list | None = None,
     ontology: Any = None,
+    explore_plans: list | None = None,
 ) -> dict[str, Any]:
     """Materialise enriched outputs to ``output_dir``.
 
@@ -443,6 +444,18 @@ def publish_to_disk(
             )
             model_lines.append(explore_text.rstrip())
             model_lines.append("")
+
+    # T2: clustered explores authored at corpus level. These are the
+    # explores Radix retrieves against — designed per question pattern,
+    # with corpus-validated relationships and partition always_filter.
+    if explore_plans:
+        model_lines.append(
+            "# === T2 CLUSTERED EXPLORES — authored at corpus level ==="
+        )
+        for ep in explore_plans:
+            model_lines.append(_render_clustered_explore(ep))
+            model_lines.append("")
+
     model_path = models_dir / "lumi_enriched.model.lkml"
     model_path.write_text("\n".join(model_lines), encoding="utf-8")
     written.append(str(model_path))
@@ -823,3 +836,72 @@ def _inject_explore_description_param(explore_lkml: str, desc: str) -> str:
         return dumped if dumped is not None else explore_lkml
     except Exception:  # noqa: BLE001
         return explore_lkml
+
+
+# ─── T2: clustered explore rendering ────────────────────────
+
+
+def _render_clustered_explore(ep: Any) -> str:
+    """Render an ExplorePlan as a Looker explore block.
+
+    Includes the disambiguation comment block (description.one_liner +
+    primary_questions + anti_questions if present) above the explore,
+    then the LookML body with joins (each carrying corpus-inferred
+    relationship), always_filter, and sql_always_where.
+    """
+    lines: list[str] = []
+    desc = getattr(ep, "description", None)
+
+    # Disambiguation comment block above the explore.
+    block: list[str] = [f"# === EXPLORE: {ep.explore_name} ==="]
+    block.append(
+        f"# cluster_id: {ep.cluster_id} "
+        f"(serves {ep.member_query_count} gold queries; "
+        f"base_view_bonus≈{ep.base_view_bonus_estimate})"
+    )
+    if desc is not None:
+        if getattr(desc, "one_liner", ""):
+            block.append(f"# summary: {desc.one_liner}")
+        if getattr(desc, "join_paths", None):
+            block.append("# join_paths:")
+            for jp in desc.join_paths:
+                block.append(f"#   - {jp}")
+        if getattr(desc, "primary_questions", None):
+            block.append("# primary_questions:")
+            for q in desc.primary_questions:
+                block.append(f"#   - {q}")
+        if getattr(desc, "anti_questions", None):
+            block.append("# anti_questions:")
+            for q in desc.anti_questions:
+                block.append(f"#   - {q}")
+    block.append(f"# === END EXPLORE: {ep.explore_name} ===")
+    lines.extend(block)
+    lines.append("")
+
+    # Explore body.
+    lines.append(f"explore: {ep.explore_name} {{")
+    if ep.base_view and ep.base_view != ep.explore_name:
+        lines.append(f"  view_name: {ep.base_view}")
+    if desc is not None and getattr(desc, "one_liner", ""):
+        safe_desc = desc.one_liner[:240].replace('"', '\\"')
+        lines.append(f'  description: "{safe_desc}"')
+    if ep.sql_always_where:
+        lines.append(f"  sql_always_where: {ep.sql_always_where} ;;")
+    if ep.always_filter:
+        af_lines = ", ".join(
+            f"{k}: \"{v}\"" for k, v in ep.always_filter.items()
+        )
+        lines.append(f"  always_filter: {{ filters: [{af_lines}] }}")
+    for j in ep.joins:
+        right = j.get("right_table", "?")
+        rel = j.get("relationship", "many_to_one")
+        lk = j.get("left_key", "?")
+        rk = j.get("right_key", "?")
+        lines.append(f"  join: {right} {{")
+        lines.append(f"    relationship: {rel}")
+        lines.append(
+            f"    sql_on: ${{{ep.base_view}.{lk}}} = ${{{right}.{rk}}} ;;"
+        )
+        lines.append("  }")
+    lines.append("}")
+    return "\n".join(lines)

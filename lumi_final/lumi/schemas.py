@@ -188,6 +188,60 @@ class ViewDescription(BaseModel):
     )
 
 
+class ExplorePlan(BaseModel):
+    """An explore designed at the corpus level, not the table level.
+
+    Tier 2's first-principles correction: explores model question
+    patterns, not tables. The corpus's gold queries cluster naturally
+    by (tables touched, GROUP BY shape, structural filters); each
+    cluster IS an explore. This contract carries everything needed to
+    emit a Looker explore that scores well in Radix's coverage³ ×
+    base_view_bonus retrieval ranking.
+    """
+    cluster_id: str
+    explore_name: str = Field(
+        ...,
+        description="LookML explore identifier — snake_case, "
+                    "describes the question pattern.",
+    )
+    base_view: str
+    dim_views: list[str] = Field(
+        default_factory=list,
+        description="Tables joined into the base view.",
+    )
+    joins: list[dict] = Field(
+        default_factory=list,
+        description="[{right_table, left_key, right_key, relationship}] — "
+                    "relationships derived from corpus cardinality inference.",
+    )
+    always_filter: dict = Field(
+        default_factory=dict,
+        description="Mandatory filters on the explore. Partition columns "
+                    "from MDM auto-included with default windows.",
+    )
+    sql_always_where: str = Field(
+        default="",
+        description="WHERE clause baked into every query. Use for "
+                    "structural invariants (data_source = 'cornerstone').",
+    )
+    description: ExploreDescription | None = Field(
+        None,
+        description="Disambiguating description (one_liner, primary_questions, "
+                    "anti_questions, canonical_filters, join_paths) — drives "
+                    "Radix's description_similarity scoring.",
+    )
+    member_query_count: int = Field(
+        default=0,
+        description="How many gold queries match this explore's pattern.",
+    )
+    base_view_bonus_estimate: float = Field(
+        default=1.0, ge=0.0,
+        description="Estimated Radix base_view_bonus (1.0 = no bonus, "
+                    "2.0 = max). Higher = explore is well-aligned to the "
+                    "question pattern.",
+    )
+
+
 class ExploreDescription(BaseModel):
     """Disambiguating description for one explore.
 
