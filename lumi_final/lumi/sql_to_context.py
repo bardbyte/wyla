@@ -92,6 +92,138 @@ class SQLFingerprint:
     # side carrying aggregations). Format: [{table: str|None, column: str}].
     # Used by lumi.joins to infer JOIN cardinality from query semantics.
     group_by: list[dict[str, Any]] = field(default_factory=list)
+
+    # ─── Layer 3: gaps closed in Phase 0 ─────────────────────
+    # Each list is empty when the construct doesn't appear in this SQL —
+    # absence IS a signal (e.g., no HAVING → not a filtered-aggregate query).
+
+    # ORDER BY columns — what analysts sort by; drives drill_fields ranking
+    # and default sort on the explore. Format:
+    # [{column, alias, direction, nulls, is_position_ref}]
+    order_by: list[dict[str, Any]] = field(default_factory=list)
+
+    # HAVING clauses — post-aggregation filters. Each entry carries
+    # threshold semantics that feed Metric.observed_thresholds in the
+    # semantic graph (e.g., "meaningful spender" = >$1000).
+    # Format: [{expression, aggregation, source_column, operator, value, semantic_class}]
+    having: list[dict[str, Any]] = field(default_factory=list)
+
+    # LIMIT / OFFSET — top-N pattern detection when paired with ORDER BY.
+    # Format: {value, offset, is_top_n}
+    limit: dict[str, Any] = field(default_factory=dict)
+
+    # SELECT DISTINCT — top-level dedup intent (separate from DISTINCT
+    # inside aggregations, which is captured on `aggregations[].distinct`).
+    distinct_select: bool = False
+
+    # Window functions — ROW_NUMBER / RANK / LAG / LEAD / NTILE / etc.
+    # Format: [{function, partition_by[], order_by:[{column, direction}], alias, expression}]
+    window_functions: list[dict[str, Any]] = field(default_factory=list)
+
+    # Subqueries — IN (SELECT …), EXISTS, scalar SELECT, derived tables.
+    # Format: [{type, context, tables[], is_correlated, sql}]
+    subqueries: list[dict[str, Any]] = field(default_factory=list)
+
+    # Set operations — UNION / UNION ALL / INTERSECT / EXCEPT.
+    # Format: [{type, branch_count, branches:[{primary_table, fields_summary}]}]
+    set_operations: list[dict[str, Any]] = field(default_factory=list)
+
+    # NULL handlers — COALESCE / IFNULL / NULLIF. Hints for `default_value`
+    # and ratio-denominator protection patterns.
+    # Format: [{function, columns_involved[], default_value, expression}]
+    null_handlers: list[dict[str, Any]] = field(default_factory=list)
+
+    # Type casts — CAST / SAFE_CAST. Repeated cast on the same column hints
+    # MDM type is wrong and should be corrected upstream.
+    # Format: [{column, from_type, to_type, is_safe, expression}]
+    type_casts: list[dict[str, Any]] = field(default_factory=list)
+
+    # String functions — CONCAT / SUBSTR / REGEXP_* / UPPER / LOWER / TRIM.
+    # Derived-dim candidates ("first 3 chars of postal = state").
+    # Format: [{function, columns[], alias, expression}]
+    string_functions: list[dict[str, Any]] = field(default_factory=list)
+
+    # Math functions — ROUND / FLOOR / CEIL / ABS / MOD / etc. Format hint
+    # for value_format_name (frequent ROUND to cents → usd).
+    # Format: [{function, column, alias, expression}]
+    math_functions: list[dict[str, Any]] = field(default_factory=list)
+
+    # Comments — line vs block. Gold source for NL question phrasings
+    # mineable into Explore.primary_questions. Format:
+    # [{type, position, text}]
+    comments: list[dict[str, Any]] = field(default_factory=list)
+
+    # SQL parameters — @param / ${var} placeholders. User-input filter
+    # patterns → always_filter candidates.
+    # Format: [{name, type_inferred, used_in_clause}]
+    parameters: list[dict[str, Any]] = field(default_factory=list)
+
+    # QUALIFY clauses — BigQuery post-window filter; derived-measure logic.
+    # Format: [{expression, window_function, operator, value}]
+    qualify_clauses: list[dict[str, Any]] = field(default_factory=list)
+
+    # Array operations — UNNEST / ARRAY_AGG / ARRAY_LENGTH. Flattened-dim
+    # candidates from nested data.
+    # Format: [{operation, column, context, alias}]
+    array_operations: list[dict[str, Any]] = field(default_factory=list)
+
+    # STRUCT dot-path access — payment.method.type style. First-class
+    # dim proposals from nested fields.
+    # Format: [{path[], root_column, alias}]
+    struct_access: list[dict[str, Any]] = field(default_factory=list)
+
+    # JSON operations — JSON_EXTRACT / JSON_VALUE / JSON_QUERY.
+    # Format: [{function, column, path, alias}]
+    json_operations: list[dict[str, Any]] = field(default_factory=list)
+
+    # Self-joins — same canonical table joined to itself via different
+    # aliases. Drives `from:` + `view_label:` aliasing in explore joins.
+    # Format: [{table, aliases_used[], role_hint}]
+    self_joins: list[dict[str, Any]] = field(default_factory=list)
+
+    # BigQuery partition pseudocolumns — _PARTITIONTIME / _PARTITIONDATE.
+    # Implicit mandatory sql_always_where.
+    # Format: [{column, table, in_clause}]
+    partition_pseudocolumns: list[dict[str, Any]] = field(default_factory=list)
+
+    # Optimizer hints inside /*+ */. Format: [{hint}]
+    sql_hints: list[dict[str, Any]] = field(default_factory=list)
+
+    # Query shape summary — counts + complexity. Drives cluster ranking
+    # and complexity gating in review prioritization.
+    query_shape_summary: dict[str, Any] = field(default_factory=dict)
+
+    # ─── Layer 4: semantic-graph-feeding signals (Phase 0d) ─
+    # Derived from the above — feed directly into the semantic graph.
+
+    # SHA256 of sqlglot-canonicalized SQL. Dedup key at the graph level
+    # so duplicate queries don't double-count evidence.
+    query_fingerprint_hash: str = ""
+
+    # Inferred intent class from query shape (deterministic rules over
+    # aggregations + group_by + filters + window_functions + limit).
+    # Values: single_lookup | aggregate | trend | cohort | attribution
+    #       | top_n | comparison | unknown
+    inferred_intent_class: str = "unknown"
+
+    # MDM data_category tags collected from every table touched.
+    # Format: list of distinct category strings.
+    business_domain_tags: list[str] = field(default_factory=list)
+
+    # Implicit grain inferred from GROUP BY + aggregation source tables.
+    # Example: "cardmember-day-snapshot", "merchant-month-total".
+    # Empty string when grain is undefined (no GROUP BY, no aggregation).
+    implicit_grain: str = ""
+
+    # Derived dimension proposals from CASE WHEN.
+    # Format: [{output_name, source_column, buckets[], bucket_type}]
+    derived_dim_proposals: list[dict[str, Any]] = field(default_factory=list)
+
+    # Cohort scope signal — when a CTE name implies a named cohort
+    # (e.g., active_consumers), capture as graph Cohort node candidate.
+    # Format: [{cohort_name, definition_filters[], source_cte}]
+    cohort_scope_signals: list[dict[str, Any]] = field(default_factory=list)
+
     parse_error: str | None = None
 
 
@@ -167,6 +299,70 @@ def _parse_one(raw_sql: str) -> SQLFingerprint:
     fp.date_functions = _extract_date_functions(tree)
     fp.select_aliases = _extract_select_aliases(tree)
     fp.group_by = _extract_group_by(tree)
+
+    # ─── Layer 3 (Phase 0): per-SQL signal expansion ─────────
+    # Each extractor is best-effort and returns empty when not applicable.
+    # Wrapped in try/except so one malformed clause doesn't kill the whole
+    # fingerprint — same policy as the existing extractors.
+    for attr, fn in (
+        ("order_by", _extract_order_by),
+        ("having", _extract_having),
+        ("limit", _extract_limit),
+        ("distinct_select", _extract_distinct_select),
+        ("window_functions", _extract_window_functions),
+        ("subqueries", _extract_subqueries),
+        ("set_operations", _extract_set_operations),
+        ("null_handlers", _extract_null_handlers),
+        ("type_casts", _extract_type_casts),
+        ("string_functions", _extract_string_functions),
+        ("math_functions", _extract_math_functions),
+        ("comments", _extract_comments),
+        ("parameters", _extract_parameters),
+        ("qualify_clauses", _extract_qualify_clauses),
+        ("array_operations", _extract_array_operations),
+        ("struct_access", _extract_struct_access),
+        ("json_operations", _extract_json_operations),
+        ("self_joins", _extract_self_joins),
+        ("partition_pseudocolumns", _extract_partition_pseudocolumns),
+        ("sql_hints", _extract_sql_hints),
+    ):
+        try:
+            setattr(fp, attr, fn(tree))
+        except Exception as e:
+            logger.debug("layer3 extractor %s failed: %s", attr, e)
+            # leave field at default
+
+    # Pair LIMIT with ORDER BY → is_top_n
+    if fp.limit and fp.order_by:
+        fp.limit["is_top_n"] = bool(fp.limit.get("value")) and bool(fp.order_by)
+
+    # Query shape summary — pure composition.
+    fp.query_shape_summary = _build_query_shape_summary(fp)
+
+    # ─── Layer 4 (Phase 0d): semantic-feeding signals ────────
+    try:
+        fp.query_fingerprint_hash = _compute_query_fingerprint_hash(cleaned)
+    except Exception as e:
+        logger.debug("fingerprint hash failed: %s", e)
+    try:
+        fp.inferred_intent_class = _infer_intent_class(fp)
+    except Exception as e:
+        logger.debug("intent class inference failed: %s", e)
+    try:
+        fp.implicit_grain = _infer_implicit_grain(fp)
+    except Exception as e:
+        logger.debug("implicit grain inference failed: %s", e)
+    try:
+        fp.derived_dim_proposals = _propose_derived_dims(fp)
+    except Exception as e:
+        logger.debug("derived dim proposals failed: %s", e)
+    try:
+        fp.cohort_scope_signals = _detect_cohort_scopes(fp)
+    except Exception as e:
+        logger.debug("cohort scope detection failed: %s", e)
+    # business_domain_tags is populated by discover_tables() later when
+    # MDM data is hydrated; leave empty here
+
     return fp
 
 
@@ -446,21 +642,54 @@ def _extract_group_by(tree: exp.Expression) -> list[dict[str, Any]]:
     group = top_select.args.get("group")
     if group is None:
         return []
+    # Cache top-SELECT expressions for resolving GROUP BY 1, 2 positional refs.
+    select_exprs = list(top_select.expressions or [])
     out: list[dict[str, Any]] = []
     for expr in group.expressions or []:
         if isinstance(expr, exp.Column):
             out.append({
                 "table": expr.table or None,
                 "column": expr.name,
+                "via_position": None,
+                "expression": expr.sql(dialect=BQ_DIALECT),
             })
-        else:
-            # Could be GROUP BY 1, 2 (positional), or expressions.
-            # Walk inner Columns for best-effort capture.
-            for col in expr.find_all(exp.Column):
-                out.append({
-                    "table": col.table or None,
-                    "column": col.name,
-                })
+            continue
+        # Positional ref: GROUP BY 1, 2 — resolve into the matching SELECT expr.
+        if isinstance(expr, exp.Literal) and expr.is_int:
+            try:
+                pos = int(expr.this)
+            except Exception:
+                pos = 0
+            if 1 <= pos <= len(select_exprs):
+                target = select_exprs[pos - 1]
+                # Unwrap alias to get the actual expression
+                inner = target.this if isinstance(target, exp.Alias) else target
+                inner_cols = list(inner.find_all(exp.Column))
+                if inner_cols:
+                    for col in inner_cols:
+                        out.append({
+                            "table": col.table or None,
+                            "column": col.name,
+                            "via_position": pos,
+                            "expression": inner.sql(dialect=BQ_DIALECT),
+                        })
+                else:
+                    # Pure literal in SELECT — preserve the positional ref.
+                    out.append({
+                        "table": None,
+                        "column": None,
+                        "via_position": pos,
+                        "expression": inner.sql(dialect=BQ_DIALECT),
+                    })
+            continue
+        # Expression-style GROUP BY (DATE_TRUNC(x, MONTH), CASE WHEN ...).
+        for col in expr.find_all(exp.Column):
+            out.append({
+                "table": col.table or None,
+                "column": col.name,
+                "via_position": None,
+                "expression": expr.sql(dialect=BQ_DIALECT),
+            })
     return out
 
 
@@ -1184,5 +1413,814 @@ def prepare_enrichment_context(
     return discover_tables(fps, mdm_client, baseline_views_dir)
 
 
-# Suppress unused-import warning for re (helpful even if unused right now).
+# ─── Layer 3 + 4 extractors (Phase 0 — semantic graph substrate) ──
+
+
+def _extract_order_by(tree: exp.Expression) -> list[dict[str, Any]]:
+    """ORDER BY columns from the top SELECT."""
+    top = tree.find(exp.Select)
+    if top is None:
+        return []
+    order_node = top.args.get("order")
+    if order_node is None:
+        return []
+    out: list[dict[str, Any]] = []
+    for expr in order_node.expressions or []:
+        # exp.Ordered carries .this (the column/expression) + .args["desc"]
+        target = getattr(expr, "this", expr)
+        direction = "DESC" if getattr(expr, "args", {}).get("desc") else "ASC"
+        nulls = None
+        if getattr(expr, "args", {}).get("nulls_first"):
+            nulls = "FIRST"
+        elif getattr(expr, "args", {}).get("nulls_last"):
+            nulls = "LAST"
+        col_name = _col_name(target) or target.sql(dialect=BQ_DIALECT)
+        is_position = isinstance(target, exp.Literal) and target.is_int
+        out.append({
+            "column": col_name,
+            "alias": col_name if not is_position else None,
+            "direction": direction,
+            "nulls": nulls,
+            "is_position_ref": is_position,
+        })
+    return out
+
+
+def _extract_having(tree: exp.Expression) -> list[dict[str, Any]]:
+    """HAVING clauses with threshold semantics (e.g., SUM(x) > 1000)."""
+    top = tree.find(exp.Select)
+    if top is None:
+        return []
+    having = top.args.get("having")
+    if having is None:
+        return []
+    out: list[dict[str, Any]] = []
+    # Walk binary-op nodes inside HAVING directly — HAVING typically
+    # has function-wrapped LHS (SUM(x), COUNT(*)) so we don't go through
+    # the WHERE-style _flatten_predicates which strips function wrappers.
+    inner = having.this if hasattr(having, "this") else having
+
+    def walk(node: exp.Expression) -> None:
+        if isinstance(node, exp.And | exp.Or):
+            walk(node.left)
+            walk(node.right)
+            return
+        if not isinstance(node, tuple(_BINARY_OPS.keys())):
+            return
+        op_sym = _BINARY_OPS[type(node)]
+        lhs = node.this
+        rhs = node.expression
+        lhs_sql = lhs.sql(dialect=BQ_DIALECT) if lhs is not None else ""
+        rhs_sql = rhs.sql(dialect=BQ_DIALECT) if rhs is not None else ""
+        agg_func = None
+        source_col = None
+        # Detect aggregation on the LHS by AST type first, then by regex fallback.
+        agg_node = None
+        for agg_cls in (
+            exp.Sum, exp.Count, exp.Avg, exp.Min, exp.Max,
+            exp.Stddev, exp.Variance,
+        ):
+            if isinstance(lhs, agg_cls):
+                agg_node = lhs
+                break
+        if agg_node is not None:
+            agg_func = type(agg_node).__name__.upper()
+            for c in agg_node.find_all(exp.Column):
+                source_col = (c.name or "").lower()
+                break
+        else:
+            m = re.match(
+                r"(SUM|COUNT|AVG|MIN|MAX|MEDIAN|STDDEV|VARIANCE)\s*\(\s*(?:DISTINCT\s+)?([^\)]+)\s*\)",
+                lhs_sql.upper(),
+            )
+            if m:
+                agg_func = m.group(1)
+                source_col = m.group(2).strip().lower()
+        semantic_class = None
+        if agg_func and op_sym in {">", ">=", "<", "<="}:
+            semantic_class = "threshold"
+        elif agg_func and op_sym in {"=", "!="}:
+            semantic_class = "count_filter"
+        out.append({
+            "expression": f"{lhs_sql} {op_sym} {rhs_sql}".strip(),
+            "aggregation": agg_func,
+            "source_column": source_col,
+            "operator": op_sym,
+            "value": rhs_sql,
+            "semantic_class": semantic_class,
+        })
+
+    walk(inner)
+    return out
+
+
+def _extract_limit(tree: exp.Expression) -> dict[str, Any]:
+    """LIMIT [offset, ]value. is_top_n filled by caller after order_by known."""
+    top = tree.find(exp.Select)
+    if top is None:
+        return {}
+    limit_node = top.args.get("limit")
+    offset_node = top.args.get("offset")
+    if limit_node is None and offset_node is None:
+        return {}
+    out: dict[str, Any] = {"value": None, "offset": None, "is_top_n": False}
+    if limit_node is not None:
+        try:
+            out["value"] = int(limit_node.expression.sql(dialect=BQ_DIALECT))
+        except Exception:
+            out["value"] = None
+    if offset_node is not None:
+        try:
+            out["offset"] = int(offset_node.expression.sql(dialect=BQ_DIALECT))
+        except Exception:
+            pass
+    return out
+
+
+def _extract_distinct_select(tree: exp.Expression) -> bool:
+    """SELECT DISTINCT at the top level."""
+    top = tree.find(exp.Select)
+    if top is None:
+        return False
+    distinct_node = top.args.get("distinct")
+    return distinct_node is not None
+
+
+def _extract_window_functions(tree: exp.Expression) -> list[dict[str, Any]]:
+    """ROW_NUMBER / RANK / LAG / LEAD / NTILE / etc. with PARTITION BY + ORDER BY."""
+    out: list[dict[str, Any]] = []
+    for win in tree.find_all(exp.Window):
+        fn_node = win.this
+        fn_name = type(fn_node).__name__.upper() if fn_node else "WINDOW"
+        # Some window functions are anonymous funcs — try to get name
+        if hasattr(fn_node, "sql_name"):
+            try:
+                fn_name = fn_node.sql_name().upper()
+            except Exception:
+                pass
+        elif hasattr(fn_node, "name"):
+            fn_name = (fn_node.name or fn_name).upper()
+        partition_by = []
+        for p in win.args.get("partition_by") or []:
+            n = _col_name(p)
+            if n:
+                partition_by.append(n)
+        order_by = []
+        for o in win.args.get("order") or []:
+            if hasattr(o, "expressions"):
+                for ex in o.expressions:
+                    target = getattr(ex, "this", ex)
+                    direction = "DESC" if getattr(ex, "args", {}).get("desc") else "ASC"
+                    order_by.append({
+                        "column": _col_name(target) or target.sql(dialect=BQ_DIALECT),
+                        "direction": direction,
+                    })
+        out.append({
+            "function": fn_name,
+            "partition_by": partition_by,
+            "order_by": order_by,
+            "alias": getattr(win, "alias", None) or None,
+            "expression": win.sql(dialect=BQ_DIALECT)[:240],
+        })
+    return out
+
+
+def _extract_subqueries(tree: exp.Expression) -> list[dict[str, Any]]:
+    """Subqueries: IN_WHERE, EXISTS, scalar SELECT, derived tables, correlated."""
+    out: list[dict[str, Any]] = []
+    seen: set[int] = set()
+
+    # IN (SELECT ...)
+    for in_node in tree.find_all(exp.In):
+        inner = in_node.args.get("query")
+        if inner is None:
+            continue
+        if id(inner) in seen:
+            continue
+        seen.add(id(inner))
+        out.append({
+            "type": "IN_WHERE",
+            "context": "WHERE",
+            "tables": [t.name for t in inner.find_all(exp.Table)],
+            "is_correlated": False,
+            "sql": inner.sql(dialect=BQ_DIALECT)[:240],
+        })
+
+    # EXISTS / NOT EXISTS
+    for exists_node in tree.find_all(exp.Exists):
+        inner = exists_node.this
+        if id(inner) in seen:
+            continue
+        seen.add(id(inner))
+        # Detect correlation by checking if inner refs an outer column
+        is_correlated = _has_outer_column_refs(inner, tree)
+        out.append({
+            "type": "EXISTS",
+            "context": "WHERE",
+            "tables": [t.name for t in inner.find_all(exp.Table)],
+            "is_correlated": is_correlated,
+            "sql": inner.sql(dialect=BQ_DIALECT)[:240],
+        })
+
+    # Subquery (parenthesized SELECT) in SELECT or FROM
+    for sq in tree.find_all(exp.Subquery):
+        if id(sq) in seen:
+            continue
+        seen.add(id(sq))
+        # Determine context — parent is From → DERIVED_TABLE; parent is
+        # SELECT → SCALAR_SELECT.
+        parent = sq.parent
+        ctx = "FROM" if isinstance(parent, exp.From) else "SELECT"
+        sub_type = "DERIVED_TABLE" if ctx == "FROM" else "SCALAR_SELECT"
+        inner = sq.this if hasattr(sq, "this") else sq
+        out.append({
+            "type": sub_type,
+            "context": ctx,
+            "tables": [t.name for t in inner.find_all(exp.Table)],
+            "is_correlated": False,
+            "sql": sq.sql(dialect=BQ_DIALECT)[:240],
+        })
+    return out
+
+
+def _has_outer_column_refs(inner: exp.Expression, outer: exp.Expression) -> bool:
+    """Cheap correlation check: does `inner` reference an alias only declared
+    in `outer`? Returns True if so. Conservative — may false-positive."""
+    outer_aliases = set()
+    for t in outer.find_all(exp.Table):
+        if isinstance(outer, exp.Subquery) and outer is t.parent:
+            continue
+        a = t.alias_or_name
+        if a:
+            outer_aliases.add(a)
+    inner_aliases = {
+        t.alias_or_name for t in inner.find_all(exp.Table) if t.alias_or_name
+    }
+    for col in inner.find_all(exp.Column):
+        tbl = col.table
+        if tbl and tbl in outer_aliases and tbl not in inner_aliases:
+            return True
+    return False
+
+
+def _extract_set_operations(tree: exp.Expression) -> list[dict[str, Any]]:
+    """UNION / INTERSECT / EXCEPT (and ALL variants)."""
+    out: list[dict[str, Any]] = []
+    for node in tree.find_all((exp.Union, exp.Intersect, exp.Except)):
+        op_name = type(node).__name__.upper()
+        if op_name == "UNION" and getattr(node, "args", {}).get("distinct") is False:
+            op_name = "UNION_ALL"
+        branches = []
+        left = node.left
+        right = node.right
+        for branch in (left, right):
+            primary_t = None
+            for t in branch.find_all(exp.Table):
+                primary_t = t.name
+                break
+            branches.append({
+                "primary_table": primary_t,
+                "fields_summary": branch.sql(dialect=BQ_DIALECT)[:120],
+            })
+        out.append({
+            "type": op_name,
+            "branch_count": len(branches),
+            "branches": branches,
+        })
+    return out
+
+
+def _extract_null_handlers(tree: exp.Expression) -> list[dict[str, Any]]:
+    """COALESCE / IFNULL / NULLIF — default-value hints + ratio guards."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for cls, fn_name in (
+        (exp.Coalesce, "COALESCE"),
+        # IFNULL in sqlglot is often parsed as Coalesce; handle explicit If too
+        (exp.Nullif, "NULLIF"),
+    ):
+        for node in tree.find_all(cls):
+            sql_str = node.sql(dialect=BQ_DIALECT)[:240]
+            if sql_str in seen:
+                continue
+            seen.add(sql_str)
+            cols = []
+            default_val = None
+            for child in node.find_all(exp.Column):
+                n = _col_name(child)
+                if n:
+                    cols.append(n)
+            # The last argument of COALESCE is typically the default
+            if fn_name == "COALESCE":
+                args = node.expressions
+                if args and isinstance(args[-1], exp.Literal):
+                    try:
+                        default_val = args[-1].this
+                    except Exception:
+                        pass
+            out.append({
+                "function": fn_name,
+                "columns_involved": cols,
+                "default_value": default_val,
+                "expression": sql_str,
+            })
+    return out
+
+
+def _extract_type_casts(tree: exp.Expression) -> list[dict[str, Any]]:
+    """CAST / SAFE_CAST — type-mismatch hints."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for cast_node in tree.find_all(exp.Cast):
+        sql_str = cast_node.sql(dialect=BQ_DIALECT)[:240]
+        if sql_str in seen:
+            continue
+        seen.add(sql_str)
+        col = _col_name(cast_node.this)
+        to_type = None
+        if cast_node.args.get("to"):
+            try:
+                to_type = cast_node.args["to"].sql(dialect=BQ_DIALECT).upper()
+            except Exception:
+                pass
+        is_safe = "SAFE_CAST" in sql_str.upper() or "SAFE." in sql_str.upper()
+        out.append({
+            "column": col,
+            "from_type": None,
+            "to_type": to_type,
+            "is_safe": is_safe,
+            "expression": sql_str,
+        })
+    return out
+
+
+_STRING_FN_CLASSES = (
+    exp.Concat, exp.Substring, exp.Upper, exp.Lower, exp.Trim,
+)
+
+
+def _extract_string_functions(tree: exp.Expression) -> list[dict[str, Any]]:
+    """CONCAT / SUBSTR / UPPER / LOWER / TRIM / REGEXP_*. Derived-dim candidates."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for node in tree.find_all(_STRING_FN_CLASSES):
+        sql_str = node.sql(dialect=BQ_DIALECT)[:240]
+        if sql_str in seen:
+            continue
+        seen.add(sql_str)
+        fn_name = type(node).__name__.upper()
+        cols = []
+        for c in node.find_all(exp.Column):
+            n = _col_name(c)
+            if n and n not in cols:
+                cols.append(n)
+        out.append({
+            "function": fn_name,
+            "columns": cols,
+            "alias": None,
+            "expression": sql_str,
+        })
+    # REGEXP_* functions parse as Anonymous func — pick them up separately.
+    for anon in tree.find_all(exp.Anonymous):
+        name = (anon.name or "").upper()
+        if not name.startswith("REGEXP"):
+            continue
+        sql_str = anon.sql(dialect=BQ_DIALECT)[:240]
+        if sql_str in seen:
+            continue
+        seen.add(sql_str)
+        cols = [_col_name(c) for c in anon.find_all(exp.Column) if _col_name(c)]
+        out.append({
+            "function": name,
+            "columns": cols,
+            "alias": None,
+            "expression": sql_str,
+        })
+    return out
+
+
+_MATH_FN_CLASSES = (
+    exp.Round, exp.Floor, exp.Ceil, exp.Abs,
+)
+
+
+def _extract_math_functions(tree: exp.Expression) -> list[dict[str, Any]]:
+    """ROUND / FLOOR / CEIL / ABS — format hints (frequent ROUND→cents → usd)."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for node in tree.find_all(_MATH_FN_CLASSES):
+        sql_str = node.sql(dialect=BQ_DIALECT)[:240]
+        if sql_str in seen:
+            continue
+        seen.add(sql_str)
+        fn_name = type(node).__name__.upper()
+        col = None
+        for c in node.find_all(exp.Column):
+            col = _col_name(c)
+            break
+        out.append({
+            "function": fn_name,
+            "column": col,
+            "alias": None,
+            "expression": sql_str,
+        })
+    return out
+
+
+_LINE_COMMENT_RE = re.compile(r"--[^\n]*")
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def _extract_comments(tree: exp.Expression) -> list[dict[str, Any]]:
+    """Comments in the SQL — line vs block. Mineable for NL phrasings.
+
+    Notes: this extracts from the RAW SQL string when present on the
+    Expression; otherwise no-op. sqlglot does carry comments on nodes
+    but for simplicity we re-scan the raw SQL.
+    """
+    out: list[dict[str, Any]] = []
+    # sqlglot exposes comments on `tree.comments` for top-level
+    for c in (getattr(tree, "comments", None) or []):
+        out.append({"type": "block", "position": "before_select", "text": c})
+    # Also pull from raw SQL if accessible (the Expression keeps it)
+    raw = getattr(tree, "sql", lambda **kw: "")(dialect=BQ_DIALECT)
+    for m in _LINE_COMMENT_RE.findall(raw):
+        out.append({"type": "line", "position": "inline", "text": m.lstrip("-").strip()})
+    for m in _BLOCK_COMMENT_RE.findall(raw):
+        out.append({
+            "type": "block", "position": "inline",
+            "text": m.strip("/*").strip("*/").strip(),
+        })
+    return out
+
+
+_PARAM_RE = re.compile(r"@(\w+)|\$\{(\w+)\}")
+
+
+def _extract_parameters(tree: exp.Expression) -> list[dict[str, Any]]:
+    """@param / ${var} placeholders — user-input filter patterns."""
+    raw = getattr(tree, "sql", lambda **kw: "")(dialect=BQ_DIALECT)
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for m in _PARAM_RE.finditer(raw):
+        name = m.group(1) or m.group(2)
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        # Try to determine which clause it appears in via location heuristic.
+        idx = m.start()
+        # Find nearest preceding clause keyword.
+        clause = "WHERE"
+        for kw in ("WHERE", "HAVING", "SELECT", "FROM", "JOIN", "GROUP BY"):
+            kw_idx = raw[:idx].upper().rfind(kw)
+            if kw_idx != -1:
+                clause = kw if kw != "GROUP BY" else "GROUP_BY"
+                break
+        out.append({
+            "name": name, "type_inferred": None, "used_in_clause": clause,
+        })
+    return out
+
+
+def _extract_qualify_clauses(tree: exp.Expression) -> list[dict[str, Any]]:
+    """BigQuery QUALIFY — post-window filter."""
+    top = tree.find(exp.Select)
+    if top is None:
+        return []
+    qualify = top.args.get("qualify")
+    if qualify is None:
+        return []
+    sql_str = qualify.sql(dialect=BQ_DIALECT)[:240]
+    win_fn = None
+    for w in qualify.find_all(exp.Window):
+        win_fn = type(w.this).__name__.upper() if w.this else None
+        break
+    return [{
+        "expression": sql_str,
+        "window_function": win_fn,
+        "operator": "",
+        "value": "",
+    }]
+
+
+def _extract_array_operations(tree: exp.Expression) -> list[dict[str, Any]]:
+    """UNNEST / ARRAY_AGG / ARRAY_LENGTH — flattened-dim candidates."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for node in tree.find_all(exp.Unnest):
+        sql_str = node.sql(dialect=BQ_DIALECT)[:240]
+        if sql_str in seen:
+            continue
+        seen.add(sql_str)
+        col = None
+        for c in node.find_all(exp.Column):
+            col = _col_name(c)
+            break
+        out.append({
+            "operation": "UNNEST",
+            "column": col,
+            "context": "FROM",
+            "alias": getattr(node, "alias", None) or None,
+        })
+    for anon in tree.find_all(exp.Anonymous):
+        name = (anon.name or "").upper()
+        if name not in {"ARRAY_AGG", "ARRAY_LENGTH"}:
+            continue
+        sql_str = anon.sql(dialect=BQ_DIALECT)[:240]
+        if sql_str in seen:
+            continue
+        seen.add(sql_str)
+        col = None
+        for c in anon.find_all(exp.Column):
+            col = _col_name(c)
+            break
+        out.append({
+            "operation": name, "column": col,
+            "context": "SELECT", "alias": None,
+        })
+    return out
+
+
+def _extract_struct_access(tree: exp.Expression) -> list[dict[str, Any]]:
+    """Dot-path access on nested STRUCT fields (e.g., payment.method.type)."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for dot in tree.find_all(exp.Dot):
+        sql_str = dot.sql(dialect=BQ_DIALECT)[:240]
+        if sql_str in seen:
+            continue
+        seen.add(sql_str)
+        # Walk the dot chain
+        path: list[str] = []
+        cur: exp.Expression | None = dot
+        while isinstance(cur, exp.Dot):
+            right = cur.expression if hasattr(cur, "expression") else None
+            if right is not None and hasattr(right, "name"):
+                path.insert(0, right.name)
+            cur = cur.this
+        root = None
+        if cur is not None and hasattr(cur, "name"):
+            root = cur.name
+            path.insert(0, root)
+        if len(path) < 2:
+            continue
+        out.append({
+            "path": path,
+            "root_column": root,
+            "alias": None,
+        })
+    return out
+
+
+def _extract_json_operations(tree: exp.Expression) -> list[dict[str, Any]]:
+    """JSON_EXTRACT / JSON_VALUE / JSON_QUERY / JSON_EXTRACT_ARRAY."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for anon in tree.find_all(exp.Anonymous):
+        name = (anon.name or "").upper()
+        if not name.startswith("JSON_"):
+            continue
+        sql_str = anon.sql(dialect=BQ_DIALECT)[:240]
+        if sql_str in seen:
+            continue
+        seen.add(sql_str)
+        col = None
+        path = None
+        if anon.expressions:
+            first = anon.expressions[0]
+            col = _col_name(first) or first.sql(dialect=BQ_DIALECT)
+            if len(anon.expressions) > 1:
+                second = anon.expressions[1]
+                if isinstance(second, exp.Literal):
+                    path = second.this
+        out.append({
+            "function": name, "column": col, "path": path, "alias": None,
+        })
+    return out
+
+
+def _extract_self_joins(tree: exp.Expression) -> list[dict[str, Any]]:
+    """Same canonical table joined to itself via different aliases."""
+    top = tree.find(exp.Select)
+    if top is None:
+        return []
+    by_table: dict[str, list[str]] = {}
+    # FROM clause table — use exp.From walk (sqlglot uses `from_` key,
+    # not `from`, in current versions; find(exp.From) sidesteps that).
+    from_node = tree.find(exp.From)
+    if from_node is not None:
+        for t in from_node.find_all(exp.Table):
+            by_table.setdefault(t.name, []).append(t.alias_or_name or t.name)
+    # Joined tables
+    for j in top.args.get("joins") or []:
+        if isinstance(j.this, exp.Table):
+            by_table.setdefault(j.this.name, []).append(
+                j.this.alias_or_name or j.this.name
+            )
+    out: list[dict[str, Any]] = []
+    for table, aliases in by_table.items():
+        if len(set(aliases)) >= 2:
+            out.append({
+                "table": table,
+                "aliases_used": sorted(set(aliases)),
+                "role_hint": None,
+            })
+    return out
+
+
+def _extract_partition_pseudocolumns(tree: exp.Expression) -> list[dict[str, Any]]:
+    """BigQuery _PARTITIONTIME / _PARTITIONDATE references."""
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for c in tree.find_all(exp.Column):
+        n = (c.name or "").upper()
+        if n not in {"_PARTITIONTIME", "_PARTITIONDATE"}:
+            continue
+        tbl = c.table or ""
+        key = (n, tbl)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "column": n, "table": tbl or None, "in_clause": "WHERE",
+        })
+    return out
+
+
+_HINT_RE = re.compile(r"/\*\+(.+?)\*/", re.DOTALL)
+
+
+def _extract_sql_hints(tree: exp.Expression) -> list[dict[str, Any]]:
+    """/*+ ... */ optimizer hints."""
+    raw = getattr(tree, "sql", lambda **kw: "")(dialect=BQ_DIALECT)
+    return [{"hint": m.strip()} for m in _HINT_RE.findall(raw)]
+
+
+def _build_query_shape_summary(fp: "SQLFingerprint") -> dict[str, Any]:
+    """Aggregate counts + complexity score from the populated fingerprint."""
+    complexity = 0
+    if fp.ctes:
+        complexity += 1
+    if fp.joins:
+        complexity += 2
+    if fp.case_whens:
+        complexity += 1
+    if fp.window_functions:
+        complexity += 1
+    if fp.subqueries:
+        complexity += 1
+    if fp.set_operations:
+        complexity += 1
+    return {
+        "n_tables": len(fp.tables),
+        "n_joins": len(fp.joins),
+        "n_aggregations": len(fp.aggregations),
+        "n_filters": len(fp.filters),
+        "n_ctes": len(fp.ctes),
+        "n_group_by": len(fp.group_by),
+        "n_select_columns": len(fp.select_aliases),
+        "has_having": bool(fp.having),
+        "has_order_by": bool(fp.order_by),
+        "has_limit": bool(fp.limit),
+        "has_distinct": bool(fp.distinct_select),
+        "has_window_function": bool(fp.window_functions),
+        "has_subquery": bool(fp.subqueries),
+        "has_set_operation": bool(fp.set_operations),
+        "dialect": "bigquery",
+        "complexity_score": complexity,
+    }
+
+
+# ─── Layer 4: semantic-graph-feeding signals ────────────────
+
+
+def _compute_query_fingerprint_hash(sql: str) -> str:
+    """SHA256 over a canonicalized form of the SQL.
+
+    Canonicalization: lowercased, whitespace-collapsed, comments stripped.
+    Two queries with identical semantics modulo formatting hash to the same value.
+    """
+    import hashlib
+    s = _LINE_COMMENT_RE.sub("", sql or "")
+    s = _BLOCK_COMMENT_RE.sub("", s)
+    s = " ".join(s.split()).lower()
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
+
+
+def _infer_intent_class(fp: "SQLFingerprint") -> str:
+    """Rule-based intent classification.
+
+    single_lookup: WHERE on PK-shaped column, no GROUP BY, no agg.
+    aggregate: has GROUP BY + aggregations, no time grain.
+    trend: has aggregations + date_function GROUP BY.
+    cohort: has CTE whose name suggests cohort + downstream JOIN.
+    attribution: window function detected (ranks/lags).
+    top_n: ORDER BY + LIMIT.
+    comparison: has set_operations (UNION/INTERSECT/EXCEPT).
+    """
+    has_agg = bool(fp.aggregations)
+    has_gb = bool(fp.group_by)
+    # Date-in-GROUP-BY: either the source date column is in group_by, OR
+    # the date function's output alias (e.g. `m` in DATE_TRUNC(x,MONTH) AS m
+    # when GROUP BY m). The latter requires cross-referencing select_aliases.
+    date_cols = {(d.get("column") or "").lower() for d in (fp.date_functions or [])}
+    # Date column → its SELECT alias (when one of the date functions
+    # wraps this column in a SELECT projection).
+    date_aliases: set[str] = set()
+    for sa in (fp.select_aliases or []):
+        sa_col = (sa.get("column") or "").lower()
+        sa_alias = (sa.get("alias") or "").lower()
+        expr = (sa.get("expression") or "").upper()
+        if sa_col in date_cols or "DATE_TRUNC" in expr or "EXTRACT" in expr:
+            if sa_alias:
+                date_aliases.add(sa_alias)
+    gb_cols = {(g.get("column") or "").lower() for g in (fp.group_by or [])}
+    has_date_in_gb = bool((date_cols | date_aliases) & gb_cols)
+    has_window = bool(fp.window_functions)
+    has_top_n = bool(fp.limit and fp.order_by)
+    has_set_ops = bool(fp.set_operations)
+    has_cohort_cte = any(
+        any(kw in (c.get("alias") or "").lower()
+            for kw in ("active", "high_value", "engaged", "cohort", "eligible"))
+        for c in (fp.ctes or [])
+    )
+    if has_set_ops:
+        return "comparison"
+    if has_window:
+        return "attribution"
+    if has_top_n:
+        return "top_n"
+    if has_cohort_cte and has_agg:
+        return "cohort"
+    if has_agg and has_date_in_gb:
+        return "trend"
+    if has_agg and has_gb:
+        return "aggregate"
+    if not has_agg and not has_gb and fp.filters:
+        return "single_lookup"
+    return "unknown"
+
+
+def _infer_implicit_grain(fp: "SQLFingerprint") -> str:
+    """Derive grain string from GROUP BY + aggregation source table.
+
+    Example: GROUP BY cm11, rpt_dt_month on cardmember_dim → 'cardmember_dim-cm11-month'.
+    Empty when no GROUP BY or no aggregation.
+    """
+    if not fp.group_by:
+        return ""
+    base = fp.primary_table or ""
+    gb_parts: list[str] = []
+    for g in fp.group_by:
+        col = (g.get("column") or "").lower()
+        if not col:
+            continue
+        gb_parts.append(col)
+    # Date granularity from date_functions
+    for df in (fp.date_functions or []):
+        gran = (df.get("granularity") or "").lower()
+        if gran:
+            gb_parts.append(gran)
+    if not gb_parts:
+        return ""
+    return f"{base}-" + "-".join(gb_parts)
+
+
+def _propose_derived_dims(fp: "SQLFingerprint") -> list[dict[str, Any]]:
+    """Each CASE WHEN with buckets is a derived-dim proposal."""
+    out: list[dict[str, Any]] = []
+    for cw in fp.case_whens or []:
+        if not cw.get("mapped_values"):
+            continue
+        out.append({
+            "output_name": cw.get("alias"),
+            "source_column": cw.get("source_column"),
+            "buckets": cw.get("mapped_values"),
+            "bucket_type": "categorical",
+        })
+    return out
+
+
+_COHORT_KEYWORDS = (
+    "active", "high_value", "engaged", "premium", "delinquent", "eligible",
+    "cohort", "loyal", "returning", "new", "churned", "at_risk",
+)
+
+
+def _detect_cohort_scopes(fp: "SQLFingerprint") -> list[dict[str, Any]]:
+    """CTE names that imply a named cohort → graph Cohort candidates."""
+    out: list[dict[str, Any]] = []
+    for cte in fp.ctes or []:
+        alias = (cte.get("alias") or "").lower()
+        if not any(kw in alias for kw in _COHORT_KEYWORDS):
+            continue
+        out.append({
+            "cohort_name": alias,
+            "definition_filters": cte.get("structural_filters") or [],
+            "source_cte": cte.get("alias"),
+        })
+    return out
+
+
+# Suppress unused-import warning for re.
 _ = re
