@@ -556,10 +556,20 @@ def run_phase2(jsonl_total: int) -> Phase2Stats:
 
     events_dir = REPO_ROOT / "data" / "ontology" / "events"
     try:
-        replayed = replay.replay_all(events_dir, rebuild=True)
-        stats.n_events_replayed = int(replayed)
+        # replay_all returns a dict of counts; we want the projected count.
+        counts = replay.replay_all(events_dir, rebuild=True)
+        if isinstance(counts, dict):
+            stats.n_events_replayed = int(counts.get("projected", 0))
+            n_read = int(counts.get("read", 0))
+            n_err = int(counts.get("errors", 0))
+            _pass(
+                f"replayed {stats.n_events_replayed}/{n_read} events"
+                f" ({n_err} errors)"
+            )
+        else:
+            stats.n_events_replayed = int(counts)
+            _pass(f"replayed {stats.n_events_replayed} events into AGE")
         stats.replay_ok = True
-        _pass(f"replayed {stats.n_events_replayed} events into AGE")
     except Exception as e:
         stats.replay_error = f"replay: {type(e).__name__}: {e}"
         _fail(stats.replay_error)

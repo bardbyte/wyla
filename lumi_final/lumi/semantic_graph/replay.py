@@ -114,7 +114,14 @@ def verify(events_dir: Path = _DEFAULT_EVENTS_DIR) -> dict[str, int]:
                         f"$$) AS (ev ag_catalog.agtype);"
                     )
                     row = cur.fetchone()
-                    age_count = int(row[0]) if row else 0
+                    # cypher() returns rows of agtype; SELECT count(*) over
+                    # that gives a bigint as row[0]. Coerce defensively —
+                    # if AGE ever wraps it in agtype the str→int still works.
+                    if row:
+                        try:
+                            age_count = int(row[0])
+                        except (TypeError, ValueError):
+                            age_count = int(str(row[0]).strip())
         except Exception as e:  # noqa: BLE001
             logger.error("AGE count query failed: %s", e)
     return {
