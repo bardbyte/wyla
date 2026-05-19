@@ -362,7 +362,7 @@ def run_phase1(fps: list[Any], *, with_mdm: bool) -> Phase1Stats:
     if with_mdm:
         try:
             from lumi.mdm import CachedMDMClient
-            from lumi.ontology_builder import discover_tables
+            from lumi.sql_to_context import discover_tables
 
             mdm_cache_dir = REPO_ROOT / "data" / "mdm_cache"
             baseline_dir = REPO_ROOT / "data" / "baseline_views"
