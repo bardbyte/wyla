@@ -500,6 +500,16 @@ def _deterministic_findings(
     #     5 views all relating to "cardmember".
     issues.extend(_check_disambiguation_completeness(ctx, plan, ontology))
 
+    # 7f. Field searchability — every dim/measure must carry hint + tags
+    #     (BGE embedding fodder). Missing these on most fields is blocking;
+    #     missing per-field is a warn.
+    issues.extend(_check_field_searchability(plan))
+
+    # 7g. Symmetric aggregates — when explore has many_to_many joins or
+    #     multi-fact joins, every measure needs symmetric_aggregates: yes
+    #     to prevent silent row fan-out → wrong totals.
+    issues.extend(_check_symmetric_aggregates(plan, cardinalities))
+
     # 8. Risk acknowledgement — sparse contexts must list risks.
     sparse = (
         (ctx.mdm_coverage_pct or 0) < 0.30
@@ -952,6 +962,220 @@ def _siblings_for_table(
         if tbl != table_name and tbl not in siblings:
             siblings.append(tbl)
     return siblings
+
+
+def _check_field_searchability(plan: EnrichmentPlan) -> list[CritiqueIssue]:
+    """Enforce label + description + hint + tags on every dim and measure.
+
+    Radix's retrieval embeds ``label + ' — ' + description + ' — ' + hint``
+    per field. Missing hint on a majority of fields means most of this
+    view is invisible to BGE-based retrieval — analysts who phrase
+    questions in business language won't find these fields.
+
+    Severity:
+      - BLOCK: > 50% of fields missing hint, OR every field has empty hint AND empty tags.
+      - WARN per field: missing hint, empty tags, or label looks auto-generated.
+    """
+    out: list[CritiqueIssue] = []
+    fields: list[tuple[str, int, dict[str, Any]]] = []
+    for idx, d in enumerate(plan.proposed_dimensions or []):
+        fields.append(("dim", idx, d))
+    for idx, m in enumerate(plan.proposed_measures or []):
+        fields.append(("measure", idx, m))
+    if not fields:
+        return out
+
+    n_total = len(fields)
+    n_missing_hint = 0
+    n_missing_tags = 0
+    n_missing_label = 0
+    field_warnings: list[CritiqueIssue] = []
+
+    for kind, idx, f in fields:
+        name = f.get("name") or f.get("source_column") or "?"
+        hint = (f.get("hint") or "").strip()
+        tags = f.get("tags") or []
+        label = (f.get("label") or "").strip()
+        desc = (
+            f.get("description")
+            or f.get("description_summary")
+            or ""
+        ).strip()
+
+        if not hint:
+            n_missing_hint += 1
+            field_warnings.append(CritiqueIssue(
+                category="field_searchability",
+                severity="warn",
+                locus=f"proposed_{kind}s[{idx}].hint (name={name})",
+                finding=(
+                    f"`{name}` has no `hint`. BGE embedding will rely "
+                    "only on label + description, missing synonyms / "
+                    "alternative names analysts might use."
+                ),
+                evidence="hint is empty",
+                recommendation=(
+                    "Author hint: alternative names + business jargon + "
+                    "common query phrasings. Mine from MDM business_name, "
+                    "baseline_sql_aliases, ontology synonyms, query SELECT aliases."
+                ),
+            ))
+        if not tags:
+            n_missing_tags += 1
+            field_warnings.append(CritiqueIssue(
+                category="field_searchability",
+                severity="warn",
+                locus=f"proposed_{kind}s[{idx}].tags (name={name})",
+                finding=(
+                    f"`{name}` has empty `tags`. Looker indexes tags as "
+                    "discrete synonym tokens for retrieval."
+                ),
+                evidence="tags is empty",
+                recommendation=(
+                    "Add list of synonym tokens (4-8 items): canonical "
+                    "column name + business names + ontology synonyms."
+                ),
+            ))
+        if not label or label == name or label == name.replace("_", " "):
+            n_missing_label += 1
+            field_warnings.append(CritiqueIssue(
+                category="field_searchability",
+                severity="info",
+                locus=f"proposed_{kind}s[{idx}].label (name={name})",
+                finding=(
+                    f"`{name}` has no human-friendly label "
+                    "(or label equals the raw column name)."
+                ),
+                evidence=f"label = {label!r}",
+                recommendation=(
+                    "Use MDM business_name when available; otherwise "
+                    "Title-Case the column."
+                ),
+            ))
+        # Measure description should open with aggregation verb.
+        if kind == "measure" and desc:
+            first_word = desc.split()[0].lower() if desc.split() else ""
+            agg_verbs = {
+                "sum", "average", "avg", "count", "distinct",
+                "minimum", "min", "maximum", "max", "median", "total",
+                "number",
+            }
+            if first_word not in agg_verbs:
+                field_warnings.append(CritiqueIssue(
+                    category="field_searchability",
+                    severity="info",
+                    locus=f"proposed_measures[{idx}].description (name={name})",
+                    finding=(
+                        f"Measure `{name}` description doesn't open with "
+                        "an aggregation verb. Radix retrieval expects "
+                        "'Sum of X', 'Average of Y' patterns."
+                    ),
+                    evidence=f"description first word: {first_word!r}",
+                    recommendation=(
+                        "Open the description with the aggregation verb "
+                        "matching the measure type."
+                    ),
+                ))
+
+    pct_missing_hint = n_missing_hint / max(1, n_total)
+    if pct_missing_hint > 0.5:
+        out.append(CritiqueIssue(
+            category="field_searchability",
+            severity="block",
+            locus="proposed_dimensions + proposed_measures",
+            finding=(
+                f"{n_missing_hint}/{n_total} fields ({pct_missing_hint:.0%}) "
+                "are missing `hint`. The view is effectively invisible to "
+                "Radix retrieval for any analyst who doesn't already know "
+                "the canonical column name."
+            ),
+            evidence=(
+                f"hint missing on >50% of fields; tags missing on "
+                f"{n_missing_tags}/{n_total}"
+            ),
+            recommendation=(
+                "Author `hint` on every dim and measure. This is the highest-"
+                "leverage retrieval-recall improvement we can make."
+            ),
+        ))
+    out.extend(field_warnings)
+    return out
+
+
+def _check_symmetric_aggregates(
+    plan: EnrichmentPlan,
+    cardinalities: list[Any] | None,
+) -> list[CritiqueIssue]:
+    """Block plans where explore needs symmetric_aggregates but measures lack it.
+
+    Trigger conditions for needing symmetric_aggregates on every measure:
+      1. Any join in proposed_explore.joins has relationship=many_to_many.
+      2. The explore joins TWO OR MORE fact-grain tables (multi-fact join):
+         heuristic — count how many joined tables also appear as
+         left_table in other observed cardinalities (i.e., are facts in
+         OTHER joins). If > 1 fact table touched, fan-out risk is real.
+
+    For each measure missing the flag in such an explore, emit a BLOCK.
+    """
+    out: list[CritiqueIssue] = []
+    explore = plan.proposed_explore or {}
+    proposed_joins = explore.get("joins") or []
+    if not proposed_joins:
+        return out
+
+    has_many_to_many = any(
+        (j.get("relationship") or "").lower() == "many_to_many"
+        for j in proposed_joins
+    )
+
+    # Multi-fact heuristic: among observed cardinalities, count tables that
+    # appear on the "many" side (i.e., are facts joined into a dim).
+    fact_tables: set[str] = set()
+    for c in cardinalities or []:
+        if c.cardinality == "many_to_one":
+            fact_tables.add(c.left_table.lower())
+        elif c.cardinality == "one_to_many":
+            fact_tables.add(c.right_table.lower())
+    base = (explore.get("base_view") or plan.table_name or "").lower()
+    explore_tables = {base} | {
+        (j.get("right_table") or "").lower() for j in proposed_joins
+    }
+    multi_fact = len(fact_tables & explore_tables) >= 2
+
+    needs_symmetric = has_many_to_many or multi_fact
+    if not needs_symmetric:
+        return out
+
+    reason = (
+        "many_to_many join present"
+        if has_many_to_many
+        else "multi-fact join detected"
+    )
+    for idx, m in enumerate(plan.proposed_measures or []):
+        sym = m.get("symmetric_aggregates")
+        if sym in (True, "yes"):
+            continue
+        out.append(CritiqueIssue(
+            category="symmetric_aggregates",
+            severity="block",
+            locus=f"proposed_measures[{idx}].symmetric_aggregates",
+            finding=(
+                f"Measure `{m.get('name', '?')}` lacks symmetric_aggregates "
+                f"but the explore has a {reason}. Without "
+                "symmetric_aggregates, Looker fans out values across the "
+                "join → wrong totals, wrong sums, wrong everything."
+            ),
+            evidence=(
+                f"explore joins: "
+                f"{[j.get('right_table') + '/' + (j.get('relationship') or '?') for j in proposed_joins]}"
+            ),
+            recommendation=(
+                "Set `symmetric_aggregates: yes` on this measure. If you "
+                "believe the fan-out is acceptable, add the rationale to "
+                "`risks` so the human reviewer can override."
+            ),
+        ))
+    return out
 
 
 _VerdictLiteral = Literal["approve", "approve_with_warnings", "retry", "reject"]

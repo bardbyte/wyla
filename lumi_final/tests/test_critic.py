@@ -49,6 +49,37 @@ def _default_explore_description() -> ExploreDescription:
     )
 
 
+def _dim(name: str, src: str | None = None, **overrides) -> dict:
+    """Dim dict with all Tier-1 retrieval keys populated by default."""
+    base = {
+        "name": name,
+        "source_column": src or name,
+        "type": "string",
+        "label": name.replace("_", " ").title(),
+        "description": f"Description for {name}",
+        "hint": f"Alternative names for {name}",
+        "tags": [name],
+    }
+    base.update(overrides)
+    return base
+
+
+def _measure(name: str, src: str | None = None, agg: str = "sum", **overrides) -> dict:
+    """Measure dict with all Tier-1 retrieval keys populated by default."""
+    base = {
+        "name": name,
+        "source_column": src or name,
+        "type": agg,
+        "value_format_name": "decimal_2",
+        "label": name.replace("_", " ").title(),
+        "description": f"Sum of {src or name}",
+        "hint": f"Total / aggregate / volume of {src or name}",
+        "tags": [name, src or name],
+    }
+    base.update(overrides)
+    return base
+
+
 def _ctx(**kw) -> TableContext:
     return TableContext(
         table_name=kw.get("table_name", "t1"),
@@ -101,9 +132,7 @@ def test_placeholder_name_is_blocking():
 
 def test_clean_plan_produces_no_blockers():
     ctx = _ctx()
-    plan = _plan(proposed_dimensions=[
-        {"name": "card_member_id", "source_column": "cm11", "type": "string"},
-    ])
+    plan = _plan(proposed_dimensions=[_dim("card_member_id", src="cm11")])
     issues = _deterministic_findings(ctx, plan, ontology=None)
     assert not [i for i in issues if i.severity == "block"]
 
@@ -282,9 +311,7 @@ def test_critique_with_block_yields_retry_verdict():
 
 def test_critique_clean_plan_approves():
     ctx = _ctx()
-    plan = _plan(proposed_dimensions=[
-        {"name": "id", "source_column": "id", "type": "string"},
-    ])
+    plan = _plan(proposed_dimensions=[_dim("id")])
     report = critique_plan(ctx, plan, with_llm=False)
     assert report.overall_verdict in {"approve", "approve_with_warnings"}
 

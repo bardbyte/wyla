@@ -669,11 +669,22 @@ def _render_plan_contract(plan: EnrichmentPlan) -> str:
     if plan.proposed_dimensions:
         lines.append(f"### Approved dimensions ({len(plan.proposed_dimensions)})")
         for d in plan.proposed_dimensions:
-            lines.append(
+            base = (
                 f"- `{d.get('name', '?')}` ({d.get('type', '?')}) "
                 f"← `{d.get('source_column', '?')}` "
                 f"— {d.get('description_summary', '(no summary)')}"
             )
+            lines.append(base)
+            # Surface label / hint / tags so the LLM emits them in LookML.
+            label = d.get("label")
+            hint = d.get("hint")
+            tags = d.get("tags")
+            if label:
+                lines.append(f"    label: \"{label}\"")
+            if hint:
+                lines.append(f"    hint: \"{hint}\"")
+            if tags:
+                lines.append(f"    tags: {tags}")
         lines.append("")
 
     if plan.proposed_dimension_groups:
@@ -689,11 +700,21 @@ def _render_plan_contract(plan: EnrichmentPlan) -> str:
     if plan.proposed_measures:
         lines.append(f"### Approved measures ({len(plan.proposed_measures)})")
         for m in plan.proposed_measures:
-            lines.append(
+            base = (
                 f"- `{m.get('name', '?')}` ({m.get('type', '?')}) "
                 f"← `{m.get('source_column', '?')}` "
                 f"— {m.get('description_summary', '(no summary)')}"
             )
+            lines.append(base)
+            label = m.get("label")
+            hint = m.get("hint")
+            tags = m.get("tags")
+            if label:
+                lines.append(f"    label: \"{label}\"")
+            if hint:
+                lines.append(f"    hint: \"{hint}\"")
+            if tags:
+                lines.append(f"    tags: {tags}")
         lines.append("")
 
     if plan.proposed_derived_tables:

@@ -375,6 +375,93 @@ def run_plan_phase(
         "relationships": len(final_ontology.relationships),
     }
 
+    # T2: cluster gold queries → ExplorePlans. Persisted to data/explore_plans.json
+    # so execute phase + publish can render clustered explores.
+    try:
+        from lumi.explore_clusters import (
+            build_explore_plans,
+            propose_aggregate_tables,
+        )
+        from lumi.joins import infer_join_cardinalities
+        cardinalities = infer_join_cardinalities(fps)
+        explore_plans = build_explore_plans(
+            fps, contexts, cardinalities=cardinalities, min_cluster_size=1,
+        )
+        explore_plans_path = Path("data/explore_plans.json")
+        explore_plans_path.parent.mkdir(parents=True, exist_ok=True)
+        explore_plans_path.write_text(
+            json.dumps(
+                [ep.model_dump() for ep in explore_plans],
+                indent=2, default=str,
+            ),
+            encoding="utf-8",
+        )
+        result.files_written.append(str(explore_plans_path))
+        result.extra["explore_clusters"] = len(explore_plans)
+
+        # T3.2: aggregate_table proposals from hot GROUP BY patterns.
+        agg_tables = propose_aggregate_tables(fps, min_query_count=3)
+        if agg_tables:
+            agg_path = Path("data/aggregate_tables.json")
+            agg_path.parent.mkdir(parents=True, exist_ok=True)
+            agg_path.write_text(
+                json.dumps(agg_tables, indent=2, default=str),
+                encoding="utf-8",
+            )
+            result.files_written.append(str(agg_path))
+            result.extra["aggregate_tables"] = len(agg_tables)
+        logger.info(
+            "T2 explore clusters: %d explores; T3 aggregate_tables: %d",
+            len(explore_plans), len(agg_tables),
+        )
+
+        # T4.3: end-to-end coverage validator — every gold query →
+        # matched explore + every referenced column resolvable.
+        from lumi.coverage import validate_corpus_coverage
+        coverage_corpus = validate_corpus_coverage(
+            fps, explore_plans, contexts, ontology=ontology,
+        )
+        coverage_path = Path("data/explore_coverage.json")
+        coverage_path.parent.mkdir(parents=True, exist_ok=True)
+        coverage_path.write_text(
+            json.dumps(
+                {
+                    "total_queries": coverage_corpus.total_queries,
+                    "covered": coverage_corpus.covered,
+                    "coverage_pct": coverage_corpus.coverage_pct,
+                    "uncovered_top_reasons": coverage_corpus.uncovered_top_reasons,
+                    "per_query": [
+                        {
+                            "query_index": r.query_index,
+                            "raw_sql_excerpt": r.raw_sql_excerpt,
+                            "matched_explore": r.matched_explore,
+                            "is_covered": r.is_covered,
+                            "measures_missing": r.measures_missing,
+                            "dimensions_missing": r.dimensions_missing,
+                            "filters_missing": r.filters_missing,
+                            "notes": r.notes,
+                        }
+                        for r in coverage_corpus.per_query
+                    ],
+                },
+                indent=2, default=str,
+            ),
+            encoding="utf-8",
+        )
+        result.files_written.append(str(coverage_path))
+        result.extra["explore_coverage_pct"] = coverage_corpus.coverage_pct
+        result.extra["explore_coverage_top_gaps"] = (
+            coverage_corpus.uncovered_top_reasons[:3]
+        )
+        logger.info(
+            "T4 explore coverage: %d/%d queries covered (%.1f%%); top gaps: %s",
+            coverage_corpus.covered, coverage_corpus.total_queries,
+            coverage_corpus.coverage_pct,
+            coverage_corpus.uncovered_top_reasons[:3],
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("explore clustering failed: %s", e)
+
     result.finished_at = time.time()
     return result
 
@@ -565,11 +652,48 @@ def run_execute_phase(
     )
     result.extra["sql_reconstruction_status"] = sql_gate.status
 
+    # Load the unified ontology so the Radix-shaped filter catalog can
+    # attach entity-level synonyms.
+    radix_ontology = OntologyStore().current()
+    # Load T2 explore plans if plan phase wrote them.
+    explore_plans_data: list = []
+    explore_plans_path = Path("data/explore_plans.json")
+    if explore_plans_path.exists():
+        try:
+            from lumi.schemas import ExplorePlan
+            raw = json.loads(explore_plans_path.read_text(encoding="utf-8"))
+            explore_plans_data = [ExplorePlan(**ep) for ep in raw]
+            logger.info(
+                "loaded %d clustered explore plans from %s",
+                len(explore_plans_data), explore_plans_path,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("could not load explore plans: %s", e)
+
+    # T4.1: load aggregate_table proposals from plan phase.
+    aggregate_tables_data: list = []
+    agg_path = Path("data/aggregate_tables.json")
+    if agg_path.exists():
+        try:
+            aggregate_tables_data = json.loads(
+                agg_path.read_text(encoding="utf-8"),
+            )
+            logger.info(
+                "loaded %d aggregate_table proposals", len(aggregate_tables_data),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("could not load aggregate tables: %s", e)
+
     publish_result = publish_to_disk(
         enriched,
         baseline_dir=Path(cfg.baseline_views_dir),
         output_dir=Path(cfg.output_dir),
         coverage=coverage,
+        contexts=contexts,
+        fingerprints=all_fps,
+        ontology=radix_ontology,
+        explore_plans=explore_plans_data,
+        aggregate_tables=aggregate_tables_data,
     )
     if publish_result.get("status") == "ok":
         result.files_written.extend(publish_result.get("files_written", []))

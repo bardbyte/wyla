@@ -366,6 +366,11 @@ def publish_to_disk(
     output_dir: str | Path,
     *,
     coverage: CoverageReport | None = None,
+    contexts: dict | None = None,
+    fingerprints: list | None = None,
+    ontology: Any = None,
+    explore_plans: list | None = None,
+    aggregate_tables: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Materialise enriched outputs to ``output_dir``.
 
@@ -373,9 +378,14 @@ def publish_to_disk(
       ``output_dir/views/<table>.view.lkml``     additively merged view
       ``output_dir/models/lumi_enriched.model.lkml`` one explore include per view
       ``output_dir/metric_catalog.json``
-      ``output_dir/filter_catalog.json``
+      ``output_dir/filter_catalog.json``       Radix-shaped (T1.3)
+      ``output_dir/filter_catalog_legacy.json`` per-table aggregates
       ``output_dir/golden_questions.json``
       ``output_dir/coverage_report.json`` (only if ``coverage`` given)
+
+    Optional kwargs ``contexts`` / ``fingerprints`` / ``ontology`` enable
+    the Radix-shaped catalog. When omitted, only the legacy catalog is
+    emitted (back-compat).
 
     Returns a dict with ``status``, ``error``, and the list of files written.
     """
@@ -435,21 +445,75 @@ def publish_to_disk(
             )
             model_lines.append(explore_text.rstrip())
             model_lines.append("")
+
+    # T2: clustered explores authored at corpus level. These are the
+    # explores Radix retrieves against — designed per question pattern,
+    # with corpus-validated relationships and partition always_filter.
+    if explore_plans:
+        model_lines.append(
+            "# === T2 CLUSTERED EXPLORES — authored at corpus level ==="
+        )
+        # T4.2: detect dim views used by multiple explores → propose
+        # view_label aliases so each explore can label the dim with its
+        # role in this explore's question pattern.
+        explore_plans = _annotate_with_aliasing(explore_plans)
+        for ep in explore_plans:
+            model_lines.append(_render_clustered_explore(
+                ep, aggregate_tables=aggregate_tables,
+            ))
+            model_lines.append("")
+
     model_path = models_dir / "lumi_enriched.model.lkml"
     model_path.write_text("\n".join(model_lines), encoding="utf-8")
     written.append(str(model_path))
 
     metric_catalog = build_metric_catalog(enriched_outputs)
-    filter_catalog = build_filter_catalog(enriched_outputs)
+    legacy_filter_catalog = build_filter_catalog(enriched_outputs)
     golden = build_golden_questions(enriched_outputs)
 
     metric_path = out / "metric_catalog.json"
     metric_path.write_text(json.dumps(metric_catalog, indent=2), encoding="utf-8")
     written.append(str(metric_path))
 
-    filter_path = out / "filter_catalog.json"
-    filter_path.write_text(json.dumps(filter_catalog, indent=2), encoding="utf-8")
-    written.append(str(filter_path))
+    # Radix-shaped filter catalog (T1.3) — primary artifact when contexts
+    # are available. Legacy aggregate kept as filter_catalog_legacy.json.
+    if contexts is not None and fingerprints is not None:
+        from lumi.filter_catalog import (
+            build_filter_catalog as build_radix_catalog,
+        )
+        radix_catalog = build_radix_catalog(
+            contexts, fingerprints, ontology=ontology,
+        )
+        # T3.3: optionally enrich values via BigQuery DISTINCT probe.
+        # Env-gated (LUMI_BQ_ENABLE=1) so it never fires in tests/CI.
+        try:
+            from lumi.bq_probe import is_enabled as _bq_enabled
+            from lumi.bq_probe import probe_distinct_values
+            if _bq_enabled():
+                radix_catalog = probe_distinct_values(
+                    radix_catalog, contexts=contexts,
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("BQ probe failed: %s", e)
+        filter_path = out / "filter_catalog.json"
+        filter_path.write_text(
+            json.dumps(radix_catalog, indent=2, default=str),
+            encoding="utf-8",
+        )
+        written.append(str(filter_path))
+        legacy_path = out / "filter_catalog_legacy.json"
+        legacy_path.write_text(
+            json.dumps(legacy_filter_catalog, indent=2),
+            encoding="utf-8",
+        )
+        written.append(str(legacy_path))
+    else:
+        filter_path = out / "filter_catalog.json"
+        filter_path.write_text(
+            json.dumps(legacy_filter_catalog, indent=2),
+            encoding="utf-8",
+        )
+        written.append(str(filter_path))
 
     golden_path = out / "golden_questions.json"
     golden_path.write_text(json.dumps(golden, indent=2), encoding="utf-8")
@@ -790,3 +854,210 @@ def _inject_explore_description_param(explore_lkml: str, desc: str) -> str:
         return dumped if dumped is not None else explore_lkml
     except Exception:  # noqa: BLE001
         return explore_lkml
+
+
+# ─── T2: clustered explore rendering ────────────────────────
+
+
+def _render_clustered_explore(
+    ep: Any, *, aggregate_tables: list[dict[str, Any]] | None = None,
+) -> str:
+    """Render an ExplorePlan as a Looker explore block.
+
+    Includes the disambiguation comment block (description.one_liner +
+    primary_questions + anti_questions if present) above the explore,
+    then the LookML body with joins (each carrying corpus-inferred
+    relationship), always_filter, sql_always_where, and any
+    aggregate_table proposals matching this explore's base_view.
+    """
+    lines: list[str] = []
+    desc = getattr(ep, "description", None)
+
+    # Disambiguation comment block above the explore.
+    block: list[str] = [f"# === EXPLORE: {ep.explore_name} ==="]
+    block.append(
+        f"# cluster_id: {ep.cluster_id} "
+        f"(serves {ep.member_query_count} gold queries; "
+        f"base_view_bonus≈{ep.base_view_bonus_estimate})"
+    )
+    if desc is not None:
+        if getattr(desc, "one_liner", ""):
+            block.append(f"# summary: {desc.one_liner}")
+        if getattr(desc, "join_paths", None):
+            block.append("# join_paths:")
+            for jp in desc.join_paths:
+                block.append(f"#   - {jp}")
+        if getattr(desc, "primary_questions", None):
+            block.append("# primary_questions:")
+            for q in desc.primary_questions:
+                block.append(f"#   - {q}")
+        if getattr(desc, "anti_questions", None):
+            block.append("# anti_questions:")
+            for q in desc.anti_questions:
+                block.append(f"#   - {q}")
+    block.append(f"# === END EXPLORE: {ep.explore_name} ===")
+    lines.extend(block)
+    lines.append("")
+
+    # Explore body.
+    lines.append(f"explore: {ep.explore_name} {{")
+    if ep.base_view and ep.base_view != ep.explore_name:
+        lines.append(f"  view_name: {ep.base_view}")
+    if desc is not None and getattr(desc, "one_liner", ""):
+        safe_desc = desc.one_liner[:240].replace('"', '\\"')
+        lines.append(f'  description: "{safe_desc}"')
+    if ep.sql_always_where:
+        lines.append(f"  sql_always_where: {ep.sql_always_where} ;;")
+    if ep.always_filter:
+        af_lines = ", ".join(
+            f"{k}: \"{v}\"" for k, v in ep.always_filter.items()
+        )
+        lines.append(f"  always_filter: {{ filters: [{af_lines}] }}")
+    for j in ep.joins:
+        right = j.get("right_table", "?")
+        rel = j.get("relationship", "many_to_one")
+        lk = j.get("left_key", "?")
+        rk = j.get("right_key", "?")
+        # T4.2: when the dim view is used by multiple explores in the
+        # corpus, propose an aliased join name via `from:` so the
+        # explore can have a role-specific label without colliding
+        # with sibling explores' use of the same view.
+        from_alias = j.get("from")
+        view_label = j.get("view_label")
+        join_name = j.get("alias") or right
+        lines.append(f"  join: {join_name} {{")
+        if from_alias and from_alias != join_name:
+            lines.append(f"    from: {from_alias}")
+        if view_label:
+            safe = view_label.replace('"', '\\"')
+            lines.append(f'    view_label: "{safe}"')
+        lines.append(f"    relationship: {rel}")
+        lines.append(
+            f"    sql_on: ${{{ep.base_view}.{lk}}} = ${{{join_name}.{rk}}} ;;"
+        )
+        lines.append("  }")
+
+    # T4.1: aggregate_table proposals matching this explore's base_view.
+    matching_aggs = [
+        a for a in (aggregate_tables or [])
+        if (a.get("base_view") or "").lower() == (ep.base_view or "").lower()
+    ]
+    for agg in matching_aggs:
+        lines.append("")
+        lines.append(_render_aggregate_table(agg))
+
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _render_aggregate_table(agg: dict[str, Any]) -> str:
+    """Render one aggregate_table block for inclusion inside an explore.
+
+    Aggregate tables are Looker's materialized rollup mechanism: queries
+    fitting the (dimensions, measures, filters) shape get answered from
+    the rollup in 5% of the underlying-query time. Generated proposals
+    come from corpus hot-GROUP-BYs (T3.2 propose_aggregate_tables).
+
+    Refresh strategy: ``sql_trigger_value: SELECT CURRENT_DATE() ;;``
+    rebuilds daily — safe default for analytical workloads. Operators
+    can tune per their freshness SLO.
+    """
+    name = agg.get("name", "agg_default")
+    dims = agg.get("group_by") or []
+    measures = agg.get("measures") or []
+    base = agg.get("base_view", "?")
+    # Measures in aggregate_table reference the explore's measure names —
+    # we use a heuristic of "total_<col>" since that's our skeleton naming.
+    # Real measure names get mapped via the metric catalog post-publish.
+    measure_refs = [f"{base}.total_{m}" for m in measures]
+    dim_refs = [f"{base}.{d}" for d in dims]
+
+    lines = [
+        f"  # Materialized rollup — answers {agg.get('frequency', '?')} "
+        f"corpus queries in 5% of base time.",
+        f"  aggregate_table: {name} {{",
+        "    materialization: {",
+        "      sql_trigger_value: SELECT CURRENT_DATE() ;;",
+        "    }",
+        "    query: {",
+    ]
+    if dim_refs:
+        lines.append(f"      dimensions: [{', '.join(dim_refs)}]")
+    if measure_refs:
+        lines.append(f"      measures: [{', '.join(measure_refs)}]")
+    if agg.get("filters"):
+        filt_pairs = ", ".join(
+            f'{k}: "{v}"' for k, v in (agg["filters"] or {}).items()
+        )
+        lines.append(f"      filters: [{filt_pairs}]")
+    lines.append("      timezone: \"UTC\"")
+    lines.append("    }")
+    lines.append("  }")
+    return "\n".join(lines)
+
+
+# ─── T4.2: view_label / from for re-used dims ───────────────
+
+
+def _annotate_with_aliasing(
+    explore_plans: list[Any],
+) -> list[Any]:
+    """Tag joins with `view_label` when the dim view is shared across explores.
+
+    Heuristic: if a dim view appears as a join target in ≥ 2 distinct
+    explores, each of those explore-level joins gets a view_label tied
+    to the explore's role for that dim. This prevents Looker UI showing
+    the same view name three times when the analyst is browsing.
+
+    The annotation lands on the join dict (j["view_label"]). Renderer
+    picks it up via the `view_label:` LookML parameter.
+    """
+    # Tally dim usage across explores.
+    dim_usage: dict[str, int] = {}
+    for ep in explore_plans:
+        for j in (ep.joins or []):
+            right = (j.get("right_table") or "").lower()
+            if right:
+                dim_usage[right] = dim_usage.get(right, 0) + 1
+
+    for ep in explore_plans:
+        explore_role_word = _role_word_for_explore(ep)
+        for j in (ep.joins or []):
+            right = (j.get("right_table") or "").lower()
+            if dim_usage.get(right, 0) >= 2:
+                # Annotate with explore-scoped label so the same dim
+                # gets different labels in different explores. Include
+                # the base view (e.g. "Transaction") so labels never
+                # collide when role words match across explores.
+                base_pretty = _humanize_view_name(ep.base_view)
+                role = explore_role_word or "Joined"
+                pretty = _humanize_view_name(j.get("right_table"))
+                j["view_label"] = (
+                    f"{base_pretty} {pretty}".strip()
+                    if base_pretty
+                    else f"{role} {pretty}".strip()
+                )
+    return explore_plans
+
+
+def _role_word_for_explore(ep: Any) -> str:
+    """Extract a role word from the explore_name suffix.
+
+    For ``transaction_by_cm``, returns "By Cm".
+    For ``cardmember_dim``, returns "" (no role suffix).
+    """
+    name = (ep.explore_name or "").lower()
+    base = (ep.base_view or "").lower()
+    if name.startswith(base + "_by_"):
+        suffix = name[len(base) + 4:]
+        return " ".join(w.capitalize() for w in suffix.split("_"))
+    if name.startswith(base + "_for_"):
+        suffix = name[len(base) + 5:]
+        return " ".join(w.capitalize() for w in suffix.split("_"))
+    return ""
+
+
+def _humanize_view_name(view: str | None) -> str:
+    if not view:
+        return ""
+    return " ".join(w.capitalize() for w in view.split("_"))

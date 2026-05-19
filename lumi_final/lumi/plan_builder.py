@@ -571,6 +571,49 @@ def _build_plan_prompt(
         "## Deterministic skeleton (your starting point — refine, don't replace wholesale)",
         _render_skeleton_for_prompt(skeleton),
         "",
+        "## Field-level retrieval keys — REQUIRED on every dim and measure",
+        "Radix's NL2SQL retrieval embeds each LookML field as "
+        "`label + ' — ' + description + ' — ' + hint` and indexes the "
+        "vector in pgvector. Top-k retrieval matches the analyst's "
+        "question against these field embeddings. **Every dim and "
+        "measure you propose MUST carry the four fields below** or the "
+        "field is effectively invisible to retrieval:",
+        "",
+        "- `name` (LookML identifier — snake_case)",
+        "- `label` (display name — Title Case, ≤ 50 chars). "
+        "Use MDM business_name when present; otherwise humanize the column.",
+        "- `description` (15-200 chars). "
+        "For measures, ALWAYS open with the aggregation: "
+        "'Sum of …', 'Average of …', 'Distinct count of …'. "
+        "Cite MDM description verbatim when it's substantive.",
+        "- `hint` (alternative names + query phrasings the analyst might use). "
+        "This is the highest-leverage retrieval signal because BGE picks up "
+        "synonyms here that wouldn't fit the description. Mine from: "
+        "(a) MDM business_name when it differs from the column name, "
+        "(b) baseline_sql_aliases (the dim renames the human authored), "
+        "(c) ontology synonyms for the entity this column identifies, "
+        "(d) query SELECT aliases the analysts wrote (`SELECT cm11 AS card_member_id`).",
+        "- `tags` (list of synonym strings). Looker indexes these. "
+        "Same sources as hint, but as discrete tokens rather than prose.",
+        "",
+        "Worked example for `cm11` on cardmember_dim:",
+        "  - name: card_member_id",
+        "  - label: \"Card Member ID\"",
+        "  - description: \"Unique cardmember identifier (PII role: NGBD-SDE-CM11). "
+        "Equivalent to cust_xref_id on customer_master.\"",
+        "  - hint: \"Also called cardmember number, cm number, customer ID, "
+        "cust xref. Use this for any cardmember-grain question.\"",
+        "  - tags: [\"cm11\", \"cardmember_id\", \"customer_id\", \"cust_xref_id\"]",
+        "",
+        "Worked example for `total_billed_business` on a fact view:",
+        "  - name: total_billed_business",
+        "  - label: \"Total Billed Business\"",
+        "  - description: \"Sum of settled transaction amount in USD. "
+        "Aggregates billed_amount across the cardmember-transaction grain.\"",
+        "  - hint: \"Also called total volume, billed amount, gross billings, BB, "
+        "total spend. Common groupings: card_product, region, bu, time period.\"",
+        "  - tags: [\"billed_business\", \"billings\", \"volume\", \"gross_billings\", \"BB\"]",
+        "",
         "## Disambiguating descriptions — REQUIRED for Radix retrieval",
         "Every plan MUST author `proposed_view_description` and "
         "`proposed_explore_description`. These structures are what Radix "
@@ -652,6 +695,12 @@ def _build_plan_prompt(
         "the sibling-tables section lists ANY sibling. anti_questions are "
         "mandatory whenever sibling explores exist — the more concrete the "
         "anti-pattern, the more correctly Radix routes.",
+        "11. POPULATE label, description, hint, tags on EVERY dim and measure "
+        "per the field-level retrieval contract above. Hint and tags are "
+        "the synonym surface that lets Radix retrieve a field when the "
+        "analyst phrases the question differently than the canonical "
+        "column name. Missing hint on more than half of fields is a "
+        "blocking critic issue.",
     ])
     return "\n\n".join(parts)
 
@@ -1280,11 +1329,16 @@ def _propose_dimensions(ctx: TableContext) -> list[dict[str, Any]]:
             lk_type = "string"
 
         desc = (mdm.get("description") or mdm.get("attribute_desc") or "").strip()
+        bus_name = (mdm.get("business_name") or "").strip()
         out.append({
             "name": col,
             "type": lk_type,
             "source_column": col,
             "description_summary": desc[:120] if desc else "",
+            # Tier 1 retrieval keys — skeleton-empty when LLM fills them.
+            "label": bus_name or _humanize(col),
+            "hint": "",
+            "tags": [],
         })
 
     # Append CASE WHEN derived dimensions.
@@ -1300,9 +1354,19 @@ def _propose_dimensions(ctx: TableContext) -> list[dict[str, Any]]:
             "description_summary": "Derived from CASE WHEN — see sql",
             "is_derived": True,
             "case_when_sql": cw.get("sql"),
+            "label": _humanize(alias),
+            "hint": "",
+            "tags": [],
         })
 
     return out
+
+
+def _humanize(name: str) -> str:
+    """Best-effort title-case for skeleton labels — replaced by LLM."""
+    return " ".join(
+        w.capitalize() for w in (name or "").replace("_", " ").split()
+    ) or name
 
 
 def _propose_dimension_groups(ctx: TableContext) -> list[dict[str, Any]]:
@@ -1358,12 +1422,17 @@ def _propose_measures(ctx: TableContext) -> list[dict[str, Any]]:
             "sum": "total_", "count": "count_", "count_distinct": "unique_",
             "average": "avg_", "min": "min_", "max": "max_",
         }.get(lk_type, "")
+        measure_name = f"{name_prefix}{col}"
         out.append({
-            "name": f"{name_prefix}{col}",
+            "name": measure_name,
             "type": lk_type,
             "source_column": col,
             "value_format_name": vfmt,
             "description_summary": f"{lk_type.replace('_', ' ').title()} of {col}",
+            # Tier 1 retrieval keys — LLM fills these substantively.
+            "label": _humanize(measure_name),
+            "hint": "",
+            "tags": [],
         })
 
     return out
