@@ -631,6 +631,24 @@ OntologyEventType = Literal[
     # fetch_mdm hook — is_decommissioned at table OR column level.
     # Drives DEPRECATES edge and demotion.
     "deprecation_observed",
+    # parse_sqls hook — corpus aggregations (SUM/AVG/COUNT_DISTINCT...).
+    # Each unique (table, column, fn) becomes a Metric candidate.
+    "metric_observed",
+    # parse_sqls hook — CASE WHEN boundaries + derived_dim_proposals.
+    # (source_column, kind, value, business_meaning) → Threshold node.
+    "threshold_observed",
+    # parse_sqls hook — WHERE predicates (including IN-lists).
+    # Filter node + N FilterValue children.
+    "filter_observed",
+    # parse_sqls hook — date_function inference (DATE_TRUNC, EXTRACT).
+    # Complement to partition_observed; corpus-side grain signal.
+    "time_grain_observed",
+    # parse_sqls hook (corpus-level) — explore-cluster signature.
+    # QuestionPattern node + member_query_ids.
+    "question_pattern_observed",
+    # parse_sqls hook — cohort_scope_signals (named CTE cohorts).
+    # Cohort node + applied-to relations.
+    "cohort_observed",
 ]
 
 

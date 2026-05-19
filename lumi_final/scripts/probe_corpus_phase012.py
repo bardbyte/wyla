@@ -237,6 +237,7 @@ class MDMTableAudit:
 class Phase1Stats:
     n_equivalence: int = 0
     n_cardinality: int = 0
+    n_corpus_facts: int = 0
     n_mdm: int = 0
     n_baseline: int = 0
     n_contexts: int = 0
@@ -335,6 +336,7 @@ def run_phase1(fps: list[Any], *, with_mdm: bool) -> Phase1Stats:
     from lumi.ontology_store import (
         OntologyStore,
         record_cardinalities_from_fingerprints,
+        record_corpus_facts,
         record_curated_synonyms_from_baseline,
         record_entity_hints_from_mdm,
         record_equivalences_from_fingerprints,
@@ -350,6 +352,12 @@ def run_phase1(fps: list[Any], *, with_mdm: bool) -> Phase1Stats:
     _info("emitting cardinalities …")
     stats.n_cardinality = record_cardinalities_from_fingerprints(store, fps)
     _info(f"  → {stats.n_cardinality} events")
+
+    _info("emitting corpus semantic facts (verb layer) …")
+    stats.n_corpus_facts = record_corpus_facts(store, fps)
+    _info(f"  → {stats.n_corpus_facts} events "
+          f"(metric / threshold / filter / time_grain / cohort / "
+          f"question_pattern)")
 
     if with_mdm:
         try:
@@ -686,6 +694,9 @@ def write_report(
     md.append("\n## Phase 1 — event emission\n")
     md.append(f"- equivalence events: **{p1.n_equivalence}**")
     md.append(f"- cardinality events: **{p1.n_cardinality}**")
+    md.append(f"- corpus semantic facts (verb layer): **{p1.n_corpus_facts}**")
+    md.append("  - = metric / threshold / filter / time_grain / cohort / "
+              "question_pattern events")
     md.append(f"- MDM entity-hint events: **{p1.n_mdm}** "
               f"({'attempted' if p1.mdm_attempted else 'skipped'})")
     md.append(f"- baseline-synonym events: **{p1.n_baseline}**")
@@ -867,6 +878,7 @@ def write_report(
         "phase1": {
             "n_equivalence": p1.n_equivalence,
             "n_cardinality": p1.n_cardinality,
+            "n_corpus_facts": p1.n_corpus_facts,
             "n_mdm": p1.n_mdm,
             "n_baseline": p1.n_baseline,
             "n_contexts": p1.n_contexts,

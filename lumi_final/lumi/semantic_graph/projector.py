@@ -541,6 +541,220 @@ def _project_deprecation_observed(
         _project_event_provenance(pgconn, event, target_label="Table", target_uri=t_uri)
 
 
+# ─── Corpus-derived semantic projectors (the "verb layer") ───
+
+
+def _project_metric_observed(pgconn: Any, event: OntologyEvent) -> None:
+    """Corpus aggregation → Metric node + COMPUTED_FROM Column edge.
+
+    Same Metric URI as MDM-derived metrics — MERGE accumulates evidence
+    from both sources on the same node."""
+    table = event.table_name
+    col = event.column_name
+    if not (table and col):
+        return
+    p = event.payload
+    fn = (p.get("function") or "").lower()
+    alias = p.get("alias") or f"{fn}_{col}"
+    distinct = bool(p.get("distinct"))
+    kind = {
+        "sum": "sum", "count": "count_distinct" if distinct else "count",
+        "avg": "avg", "min": "min", "max": "max",
+        "approxcountdistinct": "distinct_count",
+    }.get(fn, fn or "sum")
+    env = _envelope_for(event)
+    t_uri = _canonical_uri("table", table)
+    c_uri = _canonical_uri("column", table, col)
+    m_uri = _canonical_uri("metric", table, alias)
+    _cypher(pgconn, (
+        f"MERGE (t:Table {{canonical_uri: {_safe(t_uri)}}}) "
+        f"ON CREATE SET t += {_props({'name': table, **env})} "
+        f"MERGE (c:Column {{canonical_uri: {_safe(c_uri)}}}) "
+        f"ON CREATE SET c += {_props({'name': col, 'table_name': table, **env})} "
+        f"MERGE (t)-[:CONTAINS]->(c) "
+        f"MERGE (m:Metric {{canonical_uri: {_safe(m_uri)}}}) "
+        f"ON CREATE SET m += {_props({'view': table, 'name': alias, 'kind': kind, 'aggregation': fn, 'distinct': distinct, **env})} "
+        f"ON MATCH SET m.evidence_count = coalesce(m.evidence_count, 0) + {int(p.get('count', 1))} "
+        f"MERGE (m)-[r:COMPUTED_FROM]->(c) "
+        f"ON CREATE SET r += {_props({'aggregation': fn, 'distinct': distinct, **env})}"
+    ))
+    _project_event_provenance(pgconn, event, target_label="Metric", target_uri=m_uri)
+
+
+def _project_threshold_observed(pgconn: Any, event: OntologyEvent) -> None:
+    """CASE WHEN boundary → Threshold node + relationship to source Column.
+
+    Drives derived dimensions (Prime/Near-Prime/Sub from fico bands) and
+    filtered_measure value_format hints."""
+    table = event.table_name
+    col = event.column_name  # source column being thresholded
+    if not (table and col):
+        return
+    p = event.payload
+    kind = p.get("kind") or "boundary"  # high | low | target | boundary
+    value = p.get("value")
+    label = p.get("label")  # business_meaning (e.g. 'Prime')
+    if value is None and not label:
+        return
+    env = _envelope_for(event)
+    th_uri = _canonical_uri(
+        "threshold", table, col, str(kind), str(value or label),
+    )
+    c_uri = _canonical_uri("column", table, col)
+    t_uri = _canonical_uri("table", table)
+    _cypher(pgconn, (
+        f"MERGE (t:Table {{canonical_uri: {_safe(t_uri)}}}) "
+        f"ON CREATE SET t += {_props({'name': table, **env})} "
+        f"MERGE (c:Column {{canonical_uri: {_safe(c_uri)}}}) "
+        f"ON CREATE SET c += {_props({'name': col, 'table_name': table, **env})} "
+        f"MERGE (t)-[:CONTAINS]->(c) "
+        f"MERGE (th:Threshold {{canonical_uri: {_safe(th_uri)}}}) "
+        f"ON CREATE SET th += {_props({'source_column': col, 'table_name': table, 'kind': kind, 'value': value, 'business_meaning': label, **env})} "
+        f"ON MATCH SET th.evidence_count = coalesce(th.evidence_count, 0) + {int(p.get('count', 1))}"
+    ))
+    _project_event_provenance(pgconn, event, target_label="Threshold", target_uri=th_uri)
+
+
+def _project_filter_observed(pgconn: Any, event: OntologyEvent) -> None:
+    """WHERE predicate → Filter node + N FilterValue children.
+
+    is_structural filters (CTE-scoped, present in >50% of cluster
+    members) drive always_filter; non-structural drive filter_catalog."""
+    table = event.table_name
+    col = event.column_name
+    if not (table and col):
+        return
+    p = event.payload
+    op = p.get("operator") or "="
+    is_structural = bool(p.get("is_structural"))
+    values = p.get("values") or ([p.get("value")] if p.get("value") is not None else [])
+    env = _envelope_for(event)
+    t_uri = _canonical_uri("table", table)
+    c_uri = _canonical_uri("column", table, col)
+    f_uri = _canonical_uri("filter", table, col)
+    _cypher(pgconn, (
+        f"MERGE (t:Table {{canonical_uri: {_safe(t_uri)}}}) "
+        f"ON CREATE SET t += {_props({'name': table, **env})} "
+        f"MERGE (c:Column {{canonical_uri: {_safe(c_uri)}}}) "
+        f"ON CREATE SET c += {_props({'name': col, 'table_name': table, **env})} "
+        f"MERGE (t)-[:CONTAINS]->(c) "
+        f"MERGE (f:Filter {{canonical_uri: {_safe(f_uri)}}}) "
+        f"ON CREATE SET f += {_props({'table_name': table, 'column_name': col, 'operator': op, 'is_structural': is_structural, **env})} "
+        f"ON MATCH SET f.evidence_count = coalesce(f.evidence_count, 0) + {int(p.get('count', 1))}, "
+        f"f.is_structural = f.is_structural OR {('true' if is_structural else 'false')}"
+    ))
+    # FilterValue children
+    for v in values:
+        if v is None or v == "":
+            continue
+        fv_uri = _canonical_uri("filtervalue", table, col, str(v))
+        _cypher(pgconn, (
+            f"MERGE (fv:FilterValue {{canonical_uri: {_safe(fv_uri)}}}) "
+            f"ON CREATE SET fv += {_props({'value': v, 'table_name': table, 'column_name': col, 'count_obs': p.get('count', 1), **env})} "
+            f"ON MATCH SET fv.count_obs = coalesce(fv.count_obs, 0) + {int(p.get('count', 1))}"
+        ))
+    _project_event_provenance(pgconn, event, target_label="Filter", target_uri=f_uri)
+
+
+def _project_time_grain_observed(pgconn: Any, event: OntologyEvent) -> None:
+    """date_function on a Column → TimeGrain node (corpus-side).
+
+    Complements partition_observed; here grain is INFERRED from how
+    queries truncate/extract from the date column, not declared by MDM."""
+    table = event.table_name
+    col = event.column_name
+    if not (table and col):
+        return
+    p = event.payload
+    grain = (p.get("grain") or "").lower()
+    if not grain:
+        return
+    env = _envelope_for(event)
+    t_uri = _canonical_uri("table", table)
+    c_uri = _canonical_uri("column", table, col)
+    g_uri = _canonical_uri("timegrain", table, col, grain)
+    _cypher(pgconn, (
+        f"MERGE (t:Table {{canonical_uri: {_safe(t_uri)}}}) "
+        f"ON CREATE SET t += {_props({'name': table, **env})} "
+        f"MERGE (c:Column {{canonical_uri: {_safe(c_uri)}}}) "
+        f"ON CREATE SET c += {_props({'name': col, 'table_name': table, **env})} "
+        f"MERGE (t)-[:CONTAINS]->(c) "
+        f"MERGE (g:TimeGrain {{canonical_uri: {_safe(g_uri)}}}) "
+        f"ON CREATE SET g += {_props({'table_name': table, 'column_name': col, 'grain': grain, 'partition_aligned': False, 'frequency': p.get('count', 1), **env})} "
+        f"ON MATCH SET g.frequency = coalesce(g.frequency, 0) + {int(p.get('count', 1))}"
+    ))
+    _project_event_provenance(pgconn, event, target_label="TimeGrain", target_uri=g_uri)
+
+
+def _project_question_pattern_observed(
+    pgconn: Any, event: OntologyEvent,
+) -> None:
+    """Explore cluster signature → QuestionPattern node + per-table reach.
+
+    This is the surface Radix queries for NL2SQL retrieval. Each cluster
+    is one question shape; member_query_ids enable backtracking from a
+    matched pattern to canonical gold SQL."""
+    p = event.payload
+    cluster_id = p.get("cluster_id")
+    if not cluster_id:
+        return
+    env = _envelope_for(event)
+    qp_uri = _canonical_uri("questionpattern", str(cluster_id))
+    tables = p.get("tables") or []
+    members = p.get("member_query_ids") or []
+    _cypher(pgconn, (
+        f"MERGE (qp:QuestionPattern {{canonical_uri: {_safe(qp_uri)}}}) "
+        f"ON CREATE SET qp += {_props({'cluster_id': cluster_id, 'member_query_count': len(members), 'group_by_keys': ','.join(p.get('group_by_keys') or []), 'frequency': p.get('frequency', len(members)), 'sample_query': (p.get('sample_query') or '')[:200], **env})} "
+        f"ON MATCH SET qp.member_query_count = {len(members)}, "
+        f"qp.frequency = {int(p.get('frequency', len(members)))}"
+    ))
+    # Link to each table the QP reaches (drives ANSWERS edges later when
+    # Explore nodes exist). For now, materialize as edges to Tables.
+    for tbl in tables:
+        t_uri = _canonical_uri("table", tbl)
+        _cypher(pgconn, (
+            f"MERGE (t:Table {{canonical_uri: {_safe(t_uri)}}}) "
+            f"ON CREATE SET t += {_props({'name': tbl, **env})} "
+            f"WITH t "
+            f"MATCH (qp:QuestionPattern {{canonical_uri: {_safe(qp_uri)}}}) "
+            f"MERGE (qp)-[r:RELATES_TO]->(t) "
+            f"ON CREATE SET r += {_props(env)}"
+        ))
+    _project_event_provenance(pgconn, event, target_label="QuestionPattern", target_uri=qp_uri)
+
+
+def _project_cohort_observed(pgconn: Any, event: OntologyEvent) -> None:
+    """Named CTE cohort (e.g., 'active_consumers') → Cohort node.
+
+    Drives reusable cohort filters and Explore-level cohort default
+    filters."""
+    p = event.payload
+    name = p.get("cohort_name") or event.entity_name
+    if not name:
+        return
+    env = _envelope_for(event)
+    co_uri = _canonical_uri("cohort", name)
+    _cypher(pgconn, (
+        f"MERGE (co:Cohort {{canonical_uri: {_safe(co_uri)}}}) "
+        f"ON CREATE SET co += {_props({'name': name, 'source_filters': str(p.get('source_filters') or []), 'frequency': p.get('count', 1), **env})} "
+        f"ON MATCH SET co.frequency = coalesce(co.frequency, 0) + {int(p.get('count', 1))}"
+    ))
+    # Link to tables the cohort scopes
+    for tbl in (p.get("tables") or []):
+        if not tbl:
+            continue
+        t_uri = _canonical_uri("table", tbl)
+        _cypher(pgconn, (
+            f"MERGE (t:Table {{canonical_uri: {_safe(t_uri)}}}) "
+            f"ON CREATE SET t += {_props({'name': tbl, **env})} "
+            f"WITH t "
+            f"MATCH (co:Cohort {{canonical_uri: {_safe(co_uri)}}}) "
+            f"MERGE (co)-[r:RELATES_TO]->(t) "
+            f"ON CREATE SET r += {_props(env)}"
+        ))
+    _project_event_provenance(pgconn, event, target_label="Cohort", target_uri=co_uri)
+
+
 def _project_event_provenance(
     pgconn: Any, event: OntologyEvent,
     *, target_label: str, target_uri: str,
@@ -589,6 +803,12 @@ _DISPATCH: dict[str, Callable[[Any, OntologyEvent], None]] = {
     "derived_formula_observed": _project_derived_formula_observed,
     "table_metadata_observed": _project_table_metadata_observed,
     "deprecation_observed": _project_deprecation_observed,
+    "metric_observed": _project_metric_observed,
+    "threshold_observed": _project_threshold_observed,
+    "filter_observed": _project_filter_observed,
+    "time_grain_observed": _project_time_grain_observed,
+    "question_pattern_observed": _project_question_pattern_observed,
+    "cohort_observed": _project_cohort_observed,
 }
 
 

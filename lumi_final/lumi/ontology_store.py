@@ -754,6 +754,238 @@ def record_equivalences_from_fingerprints(
     return len(events)
 
 
+def record_corpus_facts(
+    store: OntologyStore, fingerprints: list[SQLFingerprint],
+) -> int:
+    """Hook 1b — every corpus signal becomes a graph event (the "verb layer").
+
+    Symmetric with ``record_entity_hints_from_mdm``: where MDM gives us
+    nouns (Table/Column/Entity/PII/Partition), the 122 queries give us
+    verbs (Metric / Threshold / Filter / FilterValue / TimeGrain /
+    QuestionPattern / Cohort). Without this, the graph has structure but
+    not semantics.
+
+    Pattern follows ``record_equivalences_from_fingerprints``: pre-aggregate
+    counts across the corpus, then emit ONE event per unique fact with
+    ``count`` in the payload. Idempotent re-runs accumulate count via MERGE.
+
+    Emits (per unique fact across all fps):
+      - metric_observed         (table, column, function, distinct)
+      - threshold_observed      (table, source_column, kind, value, label)
+      - filter_observed         (table, column, operator, values, is_structural)
+      - time_grain_observed     (table, column, grain)
+      - cohort_observed         (cohort_name, tables, source_filters)
+      - question_pattern_observed (cluster signature, member_query_ids)
+    """
+    # ── Per-fact aggregation ──
+    metrics: dict[tuple[str, str, str, bool, str], int] = {}
+    thresholds: dict[tuple[str, str, str, Any, str], int] = {}
+    filters: dict[tuple[str, str, str, bool, tuple], int] = {}
+    grains: dict[tuple[str, str, str], int] = {}
+    cohorts: dict[str, dict[str, Any]] = {}
+
+    for fp in fingerprints:
+        if fp.parse_error:
+            continue
+        primary = fp.primary_table or (fp.tables[0] if fp.tables else None)
+        if not primary:
+            continue
+
+        # 1. metric_observed — aggregations
+        for agg in fp.aggregations or []:
+            fn = (agg.get("function") or "").upper()
+            col = agg.get("column")
+            alias = agg.get("alias") or ""
+            distinct = bool(agg.get("distinct"))
+            if not (fn and col):
+                continue
+            key = (primary, str(col), fn, distinct, str(alias))
+            metrics[key] = metrics.get(key, 0) + 1
+
+        # 2. threshold_observed — case_whens + derived_dim_proposals
+        for cw in fp.case_whens or []:
+            src = cw.get("source_column")
+            if not src:
+                continue
+            for label, sql_or_bound in (cw.get("mapped_values") or {}).items():
+                key = (primary, str(src), "boundary", sql_or_bound, str(label))
+                thresholds[key] = thresholds.get(key, 0) + 1
+        for prop in getattr(fp, "derived_dim_proposals", None) or []:
+            src = prop.get("source_column")
+            if not src:
+                continue
+            for bucket in (prop.get("buckets") or []):
+                if isinstance(bucket, dict):
+                    val = bucket.get("threshold") or bucket.get("value")
+                    label = bucket.get("label") or bucket.get("name") or ""
+                    kind = bucket.get("kind") or "boundary"
+                else:
+                    val, label, kind = bucket, "", "boundary"
+                key = (primary, str(src), kind, val, str(label))
+                thresholds[key] = thresholds.get(key, 0) + 1
+
+        # 3. filter_observed — WHERE predicates (skip is_structural=None safety)
+        for flt in fp.filters or []:
+            col = flt.get("column")
+            if not col:
+                continue
+            op = (flt.get("operator") or "=").upper()
+            is_struct = bool(flt.get("is_structural"))
+            val = flt.get("value")
+            # Normalize IN-list values for stable hash
+            if op == "IN" and isinstance(val, str):
+                vals = tuple(sorted(
+                    v.strip().strip("'\"") for v in
+                    val.strip("()").split(",") if v.strip()
+                ))
+            elif val is None or val == "":
+                vals = ()
+            else:
+                vals = (str(val).strip().strip("'\""),)
+            key = (primary, str(col), op, is_struct, vals)
+            filters[key] = filters.get(key, 0) + 1
+
+        # 4. time_grain_observed — date_functions
+        for dfn in fp.date_functions or []:
+            col = dfn.get("column")
+            fn = (dfn.get("function") or "").upper()
+            if not (col and fn):
+                continue
+            grain = ""
+            if fn.startswith("DATE_TRUNC_"):
+                grain = fn.replace("DATE_TRUNC_", "").lower()
+            elif fn in {"YEAR", "MONTH", "WEEK", "QUARTER", "DAY"}:
+                grain = fn.lower()
+            elif fn == "EXTRACT":
+                grain = (dfn.get("granularity") or "").lower()
+            if not grain:
+                continue
+            key = (primary, str(col), grain)
+            grains[key] = grains.get(key, 0) + 1
+
+        # 5. cohort_observed — cohort_scope_signals
+        for ch in getattr(fp, "cohort_scope_signals", None) or []:
+            name = ch.get("cohort_name") or ch.get("name")
+            if not name:
+                continue
+            entry = cohorts.setdefault(name, {
+                "tables": set(), "source_filters": [], "count": 0,
+            })
+            entry["count"] += 1
+            for t in (ch.get("tables") or [primary]):
+                entry["tables"].add(t)
+            for sf in (ch.get("source_filters") or []):
+                if sf not in entry["source_filters"]:
+                    entry["source_filters"].append(sf)
+
+    events: list[OntologyEvent] = []
+
+    for (table, col, fn, distinct, alias), count in metrics.items():
+        events.append(OntologyEvent(
+            event_type="metric_observed",
+            source="parse_sqls",
+            table_name=table,
+            column_name=col,
+            payload={
+                "function": fn, "alias": alias, "distinct": distinct,
+                "count": count,
+            },
+            confidence=min(0.95, 0.5 + 0.05 * count),
+            evidence=f"{fn}({col}) observed in {count} query(ies)",
+        ))
+
+    for (table, col, kind, value, label), count in thresholds.items():
+        events.append(OntologyEvent(
+            event_type="threshold_observed",
+            source="parse_sqls",
+            table_name=table,
+            column_name=col,
+            payload={
+                "kind": kind, "value": value, "label": label, "count": count,
+            },
+            confidence=min(0.9, 0.5 + 0.05 * count),
+            evidence=f"CASE WHEN on {col} → {label or value} ({count}x)",
+        ))
+
+    for (table, col, op, is_struct, vals), count in filters.items():
+        events.append(OntologyEvent(
+            event_type="filter_observed",
+            source="parse_sqls",
+            table_name=table,
+            column_name=col,
+            payload={
+                "operator": op,
+                "is_structural": is_struct,
+                "values": list(vals),
+                "count": count,
+            },
+            confidence=0.85 if is_struct else min(0.9, 0.5 + 0.05 * count),
+            evidence=(
+                f"WHERE {col} {op} {list(vals) or '?'} in {count} query(ies)"
+                + (" (structural — CTE-scoped)" if is_struct else "")
+            ),
+        ))
+
+    for (table, col, grain), count in grains.items():
+        events.append(OntologyEvent(
+            event_type="time_grain_observed",
+            source="parse_sqls",
+            table_name=table,
+            column_name=col,
+            payload={"grain": grain, "count": count},
+            confidence=min(0.9, 0.5 + 0.05 * count),
+            evidence=f"{grain.upper()} grain on {col} in {count} query(ies)",
+        ))
+
+    for name, entry in cohorts.items():
+        events.append(OntologyEvent(
+            event_type="cohort_observed",
+            source="parse_sqls",
+            entity_name=name,
+            payload={
+                "cohort_name": name,
+                "tables": sorted(entry["tables"]),
+                "source_filters": entry["source_filters"],
+                "count": entry["count"],
+            },
+            confidence=min(0.85, 0.5 + 0.05 * entry["count"]),
+            evidence=f"cohort '{name}' observed in {entry['count']} query(ies)",
+        ))
+
+    # 6. question_pattern_observed — corpus-level clustering pass
+    try:
+        from lumi.explore_clusters import cluster_queries
+
+        clusters = cluster_queries(fingerprints, min_cluster_size=1)
+        for cl in clusters:
+            members = cl.member_query_indices
+            events.append(OntologyEvent(
+                event_type="question_pattern_observed",
+                source="parse_sqls",
+                payload={
+                    "cluster_id": cl.cluster_id,
+                    "tables": cl.tables,
+                    "group_by_keys": cl.group_by_keys,
+                    "structural_filters": cl.structural_filters,
+                    "canonical_filters": cl.canonical_filters,
+                    "aggregation_columns": cl.aggregation_columns,
+                    "member_query_ids": [f"Q{i+1:02d}" for i in members],
+                    "frequency": cl.frequency,
+                    "sample_query": (cl.sample_queries or [""])[0],
+                },
+                confidence=min(0.9, 0.5 + 0.05 * cl.frequency),
+                evidence=(
+                    f"cluster {cl.cluster_id} — {cl.frequency} member queries "
+                    f"over {len(cl.tables)} table(s)"
+                ),
+            ))
+    except ImportError:
+        pass  # explore_clusters may not be available in minimal envs
+
+    store.record_many(events)
+    return len(events)
+
+
 def record_entity_hints_from_mdm(
     store: OntologyStore, ctx: TableContext,
 ) -> int:

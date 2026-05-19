@@ -382,3 +382,111 @@ def test_hook_approval_lock_only_for_approved(tmp_path: Path):
     # vocabulary_lock should boost evidence count by 5
     c = store.candidates()
     assert c["entities"]["cardmember"]["evidence_count"] >= 5
+
+
+# ─── corpus-facts hook (verb layer) ─────────────────────────
+
+
+def test_corpus_facts_emits_metric_from_aggregation(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "SELECT bus_seg, SUM(billed_business) AS tbb "
+        "FROM cornerstone_metrics GROUP BY bus_seg",
+    ])
+    record_corpus_facts(store, fps)
+    types = _read_event_types(store)
+    assert "metric_observed" in types
+
+
+def test_corpus_facts_aggregates_metric_count_across_queries(tmp_path: Path):
+    """Same SUM(x) across 3 queries → one metric_observed event with
+    payload.count = 3 (the pre-aggregation pattern)."""
+    import json
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "SELECT SUM(billed_business) FROM cornerstone_metrics",
+        "SELECT SUM(billed_business) FROM cornerstone_metrics WHERE x=1",
+        "SELECT SUM(billed_business) FROM cornerstone_metrics GROUP BY y",
+    ])
+    record_corpus_facts(store, fps)
+    # Find the metric event
+    metric_payload = None
+    for f in store.events_dir.glob("*.jsonl"):
+        for line in f.read_text().splitlines():
+            if not line.strip():
+                continue
+            ev = json.loads(line)
+            if ev["event_type"] == "metric_observed":
+                metric_payload = ev["payload"]
+                break
+    assert metric_payload is not None
+    assert metric_payload["count"] == 3
+    assert metric_payload["function"] == "SUM"
+
+
+def test_corpus_facts_emits_threshold_from_case_when(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "SELECT CASE WHEN fico >= 740 THEN 'Prime' "
+        "WHEN fico >= 670 THEN 'Near-Prime' ELSE 'Sub' END AS fico_band "
+        "FROM customers",
+    ])
+    record_corpus_facts(store, fps)
+    assert "threshold_observed" in _read_event_types(store)
+
+
+def test_corpus_facts_emits_filter_observed(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "SELECT bus_seg FROM cornerstone_metrics WHERE data_source = 'cornerstone'",
+    ])
+    record_corpus_facts(store, fps)
+    assert "filter_observed" in _read_event_types(store)
+
+
+def test_corpus_facts_emits_time_grain_from_date_trunc(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "SELECT DATE_TRUNC(rpt_dt, MONTH) AS m, SUM(x) "
+        "FROM cornerstone_metrics GROUP BY m",
+    ])
+    record_corpus_facts(store, fps)
+    assert "time_grain_observed" in _read_event_types(store)
+
+
+def test_corpus_facts_emits_cohort_from_named_cte(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "WITH active_consumers AS ("
+        "  SELECT id FROM users WHERE status='Active'"
+        ") "
+        "SELECT bus_seg, SUM(x) FROM cornerstone_metrics t "
+        "JOIN active_consumers a ON t.id = a.id GROUP BY bus_seg",
+    ])
+    record_corpus_facts(store, fps)
+    assert "cohort_observed" in _read_event_types(store)
+
+
+def test_corpus_facts_emits_question_pattern_from_clustering(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    # Same shape twice → one cluster
+    fps = parse_sqls([
+        "SELECT bus_seg, SUM(billed_business) FROM cornerstone_metrics "
+        "GROUP BY bus_seg",
+        "SELECT bus_seg, SUM(billed_business) FROM cornerstone_metrics "
+        "WHERE flag=1 GROUP BY bus_seg",
+    ])
+    record_corpus_facts(store, fps)
+    assert "question_pattern_observed" in _read_event_types(store)
+
+
+def test_corpus_facts_no_events_on_parse_errors(tmp_path: Path):
+    """Parse-error fingerprints must not bleed into corpus events."""
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls(["this is not sql at all"])
+    n = record_corpus_facts(store, fps)
+    # Question-pattern clustering may still emit zero events; the
+    # important assertion is no crash and no metric/filter events.
+    types = _read_event_types(store)
+    assert "metric_observed" not in types
+    assert "filter_observed" not in types
