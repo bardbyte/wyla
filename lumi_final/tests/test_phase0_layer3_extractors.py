@@ -276,8 +276,45 @@ def test_layer3_fields_default_empty_on_simple_query():
     assert fp.window_functions == []
     assert fp.subqueries == []
     assert fp.set_operations == []
-    # Some semantic signals fire even on simple queries
-    assert fp.inferred_intent_class in {"single_lookup", "unknown"}
+    # Bare projection now classifies as 'extract' (was 'unknown')
+    assert fp.inferred_intent_class == "extract"
+
+
+def test_intent_class_scalar_aggregate_is_aggregate():
+    """SELECT SUM(x) FROM t — no GROUP BY but still an aggregate."""
+    fps = parse_sqls(["SELECT SUM(amount) AS total FROM t"])
+    assert fps[0].inferred_intent_class == "aggregate"
+
+
+def test_intent_class_distinct_extract():
+    fps = parse_sqls(["SELECT DISTINCT bus_seg FROM t"])
+    assert fps[0].inferred_intent_class == "distinct_extract"
+
+
+def test_intent_class_subquery_filter():
+    fps = parse_sqls([
+        "SELECT a FROM t1 WHERE a IN (SELECT id FROM t2)",
+    ])
+    assert fps[0].inferred_intent_class == "subquery_filter"
+
+
+def test_intent_class_join_exploration():
+    """Multi-table JOIN, no agg, no WHERE — exploration."""
+    fps = parse_sqls([
+        "SELECT a.x, b.y FROM t1 a JOIN t2 b ON a.id = b.id",
+    ])
+    assert fps[0].inferred_intent_class == "join_exploration"
+
+
+def test_intent_class_sample():
+    """Bare LIMIT, no ORDER BY → sample, not unknown."""
+    fps = parse_sqls(["SELECT a FROM t LIMIT 10"])
+    assert fps[0].inferred_intent_class == "sample"
+
+
+def test_intent_class_extract():
+    fps = parse_sqls(["SELECT a, b FROM t"])
+    assert fps[0].inferred_intent_class == "extract"
 
 
 def test_parse_error_doesnt_kill_fingerprint():

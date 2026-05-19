@@ -2110,13 +2110,21 @@ def _compute_query_fingerprint_hash(sql: str) -> str:
 def _infer_intent_class(fp: "SQLFingerprint") -> str:
     """Rule-based intent classification.
 
-    single_lookup: WHERE on PK-shaped column, no GROUP BY, no agg.
-    aggregate: has GROUP BY + aggregations, no time grain.
-    trend: has aggregations + date_function GROUP BY.
-    cohort: has CTE whose name suggests cohort + downstream JOIN.
-    attribution: window function detected (ranks/lags).
-    top_n: ORDER BY + LIMIT.
-    comparison: has set_operations (UNION/INTERSECT/EXCEPT).
+    Bucket order is most-specific to least-specific:
+
+    comparison       — set_operations (UNION/INTERSECT/EXCEPT)
+    attribution      — window function (ROW_NUMBER, RANK, LAG, LEAD, ...)
+    top_n            — ORDER BY + LIMIT
+    cohort           — CTE-named cohort + aggregation
+    trend            — aggregation + date in GROUP BY (or date alias in GB)
+    aggregate        — any aggregation (scalar OR grouped)
+    subquery_filter  — IN-subquery or EXISTS-subquery in WHERE
+    distinct_extract — SELECT DISTINCT, no agg
+    single_lookup    — WHERE-filtered SELECT, no agg
+    join_exploration — multi-table JOIN, no agg, no WHERE
+    sample           — bare LIMIT (no ORDER BY, no other shape)
+    extract          — plain projection (SELECT cols FROM t), no shape signals
+    unknown          — fallback (should be vanishingly rare; parse errors mostly)
     """
     has_agg = bool(fp.aggregations)
     has_gb = bool(fp.group_by)
@@ -2124,8 +2132,6 @@ def _infer_intent_class(fp: "SQLFingerprint") -> str:
     # the date function's output alias (e.g. `m` in DATE_TRUNC(x,MONTH) AS m
     # when GROUP BY m). The latter requires cross-referencing select_aliases.
     date_cols = {(d.get("column") or "").lower() for d in (fp.date_functions or [])}
-    # Date column → its SELECT alias (when one of the date functions
-    # wraps this column in a SELECT projection).
     date_aliases: set[str] = set()
     for sa in (fp.select_aliases or []):
         sa_col = (sa.get("column") or "").lower()
@@ -2136,14 +2142,28 @@ def _infer_intent_class(fp: "SQLFingerprint") -> str:
                 date_aliases.add(sa_alias)
     gb_cols = {(g.get("column") or "").lower() for g in (fp.group_by or [])}
     has_date_in_gb = bool((date_cols | date_aliases) & gb_cols)
+
     has_window = bool(fp.window_functions)
-    has_top_n = bool(fp.limit and fp.order_by)
+    has_top_n = bool(fp.limit) and bool(fp.order_by)
     has_set_ops = bool(fp.set_operations)
     has_cohort_cte = any(
         any(kw in (c.get("alias") or "").lower()
-            for kw in ("active", "high_value", "engaged", "cohort", "eligible"))
+            for kw in (
+                "active", "high_value", "engaged", "cohort", "eligible",
+                "premium", "delinquent", "loyal", "returning", "churned",
+                "at_risk", "new",
+            ))
         for c in (fp.ctes or [])
     )
+    has_filter = bool(fp.filters)
+    has_join = bool(fp.joins) or len(fp.tables or []) > 1
+    has_where_subquery = any(
+        (s.get("type") or "") in {"IN_WHERE", "EXISTS", "CORRELATED"}
+        for s in (fp.subqueries or [])
+    )
+    distinct = bool(fp.distinct_select)
+    has_limit_only = bool(fp.limit) and not fp.order_by
+
     if has_set_ops:
         return "comparison"
     if has_window:
@@ -2154,10 +2174,23 @@ def _infer_intent_class(fp: "SQLFingerprint") -> str:
         return "cohort"
     if has_agg and has_date_in_gb:
         return "trend"
-    if has_agg and has_gb:
+    if has_agg:
+        # Scalar agg (no GB) is still an aggregate intent — was 'unknown'
+        # before, which masked dozens of valid metric-style queries.
         return "aggregate"
-    if not has_agg and not has_gb and fp.filters:
+    if has_where_subquery:
+        return "subquery_filter"
+    if distinct and not has_filter:
+        return "distinct_extract"
+    if has_filter:
         return "single_lookup"
+    if has_join:
+        return "join_exploration"
+    if has_limit_only:
+        return "sample"
+    # Plain projection — SELECT cols FROM t.
+    if fp.tables:
+        return "extract"
     return "unknown"
 
 
