@@ -1,0 +1,13 @@
+{
+  "snapshot_reason": "ensure_ontology() seed",
+  "snapshot_at": "2026-05-06T06:30:32+00:00",
+  "ontology": {
+    "entities": [],
+    "relationships": [],
+    "table_to_primary_entity": {},
+    "authoring": {
+      "mode": "event_sourced",
+      "reason": "promoted from candidates with threshold evidence>=1, equivalence>=1"
+    }
+  }
+}

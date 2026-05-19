@@ -169,17 +169,20 @@ def run_plan_phase(
     store = OntologyStore()
     n_eq = record_equivalences_from_fingerprints(store, fps)
     n_card = record_cardinalities_from_fingerprints(store, fps)
+    n_corpus = record_corpus_facts(store, fps)
     n_mdm = 0
     n_baseline = 0
     for ctx in contexts.values():
         n_mdm += record_entity_hints_from_mdm(store, ctx)
         n_baseline += record_curated_synonyms_from_baseline(store, ctx)
     logger.info(
-        "ontology events recorded: %d eq + %d card + %d MDM + %d baseline",
-        n_eq, n_card, n_mdm, n_baseline,
+        "ontology events recorded: %d eq + %d card + %d corpus-facts + "
+        "%d MDM + %d baseline",
+        n_eq, n_card, n_corpus, n_mdm, n_baseline,
     )
     result.extra["ontology_events"] = {
         "equivalence": n_eq, "cardinality": n_card,
+        "corpus_facts": n_corpus,
         "mdm": n_mdm, "baseline": n_baseline,
     }
 

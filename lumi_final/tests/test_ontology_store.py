@@ -207,6 +207,150 @@ def test_hook_entity_hints_from_mdm(tmp_path: Path):
     assert "cardmember" in c["entities"]
 
 
+def _read_event_types(store: OntologyStore) -> set[str]:
+    """Helper — collect every event_type recorded under this store."""
+    import json
+    types: set[str] = set()
+    for f in store.events_dir.glob("*.jsonl"):
+        for line in f.read_text().splitlines():
+            if line.strip():
+                types.add(json.loads(line)["event_type"])
+    return types
+
+
+def test_mdm_emits_curated_pk_for_is_primary(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_dim",
+        mdm_columns=[
+            {"name": "cm11", "is_primary": True, "type": "STRING"},
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "curated_pk" in _read_event_types(store)
+
+
+def test_mdm_emits_curated_pk_for_is_dedupe_key(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_dim",
+        mdm_columns=[
+            {"name": "natural_id", "is_dedupe_key": True, "type": "STRING"},
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "curated_pk" in _read_event_types(store)
+
+
+def test_mdm_emits_column_governance(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_dim",
+        mdm_columns=[
+            {
+                "name": "ssn",
+                "is_pii": True,
+                "pii_role_id": "PII_ROLE_42",
+                "is_critical_data_element": True,
+                "is_mandatory": True,
+                "is_clustered": True,
+                "format": "STRING(11)",
+            },
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "column_governance_observed" in _read_event_types(store)
+
+
+def test_mdm_emits_partition_observed(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_metrics",
+        mdm_columns=[
+            {
+                "name": "rpt_dt", "is_partitioned": True,
+                "partition_position": 1, "time_partition_type": "DAY",
+            },
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "partition_observed" in _read_event_types(store)
+
+
+def test_mdm_emits_derived_formula(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_metrics",
+        mdm_columns=[
+            {
+                "name": "tbb_usd",
+                "derived_logic": "CASE WHEN currency='USD' THEN amount ELSE amount*fx END",
+            },
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "derived_formula_observed" in _read_event_types(store)
+
+
+def test_mdm_emits_external_reference_as_cardinality(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_dim",
+        mdm_columns=[
+            {
+                "name": "acct_id",
+                "external_references": [
+                    {"table": "acct_dim", "column": "id",
+                     "cardinality": "many_to_one"},
+                ],
+            },
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "cardinality_observed" in _read_event_types(store)
+
+
+def test_mdm_emits_table_metadata(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_dim",
+        mdm_dataset_details={
+            "table_type": "DIM", "feed_type": "DAILY",
+            "data_category": "Cardmember",
+            "bq_project": "axp-lumi", "bq_dataset": "dw",
+            "bq_table": "cm_dim",
+        },
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "table_metadata_observed" in _read_event_types(store)
+
+
+def test_mdm_emits_deprecation_for_decommissioned_table(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="old_table",
+        mdm_dataset_details={
+            "is_decommissioned": True,
+            "data_category": "Cardmember",
+        },
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "deprecation_observed" in _read_event_types(store)
+
+
+def test_mdm_omits_governance_when_no_facts(tmp_path: Path):
+    """Column with no governance flags should NOT emit a governance event."""
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_dim",
+        mdm_columns=[
+            {"name": "neutral_col", "business_name": "Neutral", "type": "STRING"},
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "column_governance_observed" not in _read_event_types(store)
+
+
 def test_hook_curated_synonyms_from_baseline(tmp_path: Path):
     store = OntologyStore(tmp_path)
     ctx = _ctx(
@@ -238,3 +382,111 @@ def test_hook_approval_lock_only_for_approved(tmp_path: Path):
     # vocabulary_lock should boost evidence count by 5
     c = store.candidates()
     assert c["entities"]["cardmember"]["evidence_count"] >= 5
+
+
+# ─── corpus-facts hook (verb layer) ─────────────────────────
+
+
+def test_corpus_facts_emits_metric_from_aggregation(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "SELECT bus_seg, SUM(billed_business) AS tbb "
+        "FROM cornerstone_metrics GROUP BY bus_seg",
+    ])
+    record_corpus_facts(store, fps)
+    types = _read_event_types(store)
+    assert "metric_observed" in types
+
+
+def test_corpus_facts_aggregates_metric_count_across_queries(tmp_path: Path):
+    """Same SUM(x) across 3 queries → one metric_observed event with
+    payload.count = 3 (the pre-aggregation pattern)."""
+    import json
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "SELECT SUM(billed_business) FROM cornerstone_metrics",
+        "SELECT SUM(billed_business) FROM cornerstone_metrics WHERE x=1",
+        "SELECT SUM(billed_business) FROM cornerstone_metrics GROUP BY y",
+    ])
+    record_corpus_facts(store, fps)
+    # Find the metric event
+    metric_payload = None
+    for f in store.events_dir.glob("*.jsonl"):
+        for line in f.read_text().splitlines():
+            if not line.strip():
+                continue
+            ev = json.loads(line)
+            if ev["event_type"] == "metric_observed":
+                metric_payload = ev["payload"]
+                break
+    assert metric_payload is not None
+    assert metric_payload["count"] == 3
+    assert metric_payload["function"] == "SUM"
+
+
+def test_corpus_facts_emits_threshold_from_case_when(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "SELECT CASE WHEN fico >= 740 THEN 'Prime' "
+        "WHEN fico >= 670 THEN 'Near-Prime' ELSE 'Sub' END AS fico_band "
+        "FROM customers",
+    ])
+    record_corpus_facts(store, fps)
+    assert "threshold_observed" in _read_event_types(store)
+
+
+def test_corpus_facts_emits_filter_observed(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "SELECT bus_seg FROM cornerstone_metrics WHERE data_source = 'cornerstone'",
+    ])
+    record_corpus_facts(store, fps)
+    assert "filter_observed" in _read_event_types(store)
+
+
+def test_corpus_facts_emits_time_grain_from_date_trunc(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "SELECT DATE_TRUNC(rpt_dt, MONTH) AS m, SUM(x) "
+        "FROM cornerstone_metrics GROUP BY m",
+    ])
+    record_corpus_facts(store, fps)
+    assert "time_grain_observed" in _read_event_types(store)
+
+
+def test_corpus_facts_emits_cohort_from_named_cte(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "WITH active_consumers AS ("
+        "  SELECT id FROM users WHERE status='Active'"
+        ") "
+        "SELECT bus_seg, SUM(x) FROM cornerstone_metrics t "
+        "JOIN active_consumers a ON t.id = a.id GROUP BY bus_seg",
+    ])
+    record_corpus_facts(store, fps)
+    assert "cohort_observed" in _read_event_types(store)
+
+
+def test_corpus_facts_emits_question_pattern_from_clustering(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    # Same shape twice → one cluster
+    fps = parse_sqls([
+        "SELECT bus_seg, SUM(billed_business) FROM cornerstone_metrics "
+        "GROUP BY bus_seg",
+        "SELECT bus_seg, SUM(billed_business) FROM cornerstone_metrics "
+        "WHERE flag=1 GROUP BY bus_seg",
+    ])
+    record_corpus_facts(store, fps)
+    assert "question_pattern_observed" in _read_event_types(store)
+
+
+def test_corpus_facts_no_events_on_parse_errors(tmp_path: Path):
+    """Parse-error fingerprints must not bleed into corpus events."""
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls(["this is not sql at all"])
+    n = record_corpus_facts(store, fps)
+    # Question-pattern clustering may still emit zero events; the
+    # important assertion is no crash and no metric/filter events.
+    types = _read_event_types(store)
+    assert "metric_observed" not in types
+    assert "filter_observed" not in types

@@ -754,19 +754,273 @@ def record_equivalences_from_fingerprints(
     return len(events)
 
 
+def record_corpus_facts(
+    store: OntologyStore, fingerprints: list[SQLFingerprint],
+) -> int:
+    """Hook 1b — every corpus signal becomes a graph event (the "verb layer").
+
+    Symmetric with ``record_entity_hints_from_mdm``: where MDM gives us
+    nouns (Table/Column/Entity/PII/Partition), the 122 queries give us
+    verbs (Metric / Threshold / Filter / FilterValue / TimeGrain /
+    QuestionPattern / Cohort). Without this, the graph has structure but
+    not semantics.
+
+    Pattern follows ``record_equivalences_from_fingerprints``: pre-aggregate
+    counts across the corpus, then emit ONE event per unique fact with
+    ``count`` in the payload. Idempotent re-runs accumulate count via MERGE.
+
+    Emits (per unique fact across all fps):
+      - metric_observed         (table, column, function, distinct)
+      - threshold_observed      (table, source_column, kind, value, label)
+      - filter_observed         (table, column, operator, values, is_structural)
+      - time_grain_observed     (table, column, grain)
+      - cohort_observed         (cohort_name, tables, source_filters)
+      - question_pattern_observed (cluster signature, member_query_ids)
+    """
+    # ── Per-fact aggregation ──
+    metrics: dict[tuple[str, str, str, bool, str], int] = {}
+    thresholds: dict[tuple[str, str, str, Any, str], int] = {}
+    filters: dict[tuple[str, str, str, bool, tuple], int] = {}
+    grains: dict[tuple[str, str, str], int] = {}
+    cohorts: dict[str, dict[str, Any]] = {}
+
+    for fp in fingerprints:
+        if fp.parse_error:
+            continue
+        primary = fp.primary_table or (fp.tables[0] if fp.tables else None)
+        if not primary:
+            continue
+
+        # 1. metric_observed — aggregations
+        for agg in fp.aggregations or []:
+            fn = (agg.get("function") or "").upper()
+            col = agg.get("column")
+            alias = agg.get("alias") or ""
+            distinct = bool(agg.get("distinct"))
+            if not (fn and col):
+                continue
+            key = (primary, str(col), fn, distinct, str(alias))
+            metrics[key] = metrics.get(key, 0) + 1
+
+        # 2. threshold_observed — case_whens + derived_dim_proposals
+        for cw in fp.case_whens or []:
+            src = cw.get("source_column")
+            if not src:
+                continue
+            for label, sql_or_bound in (cw.get("mapped_values") or {}).items():
+                key = (primary, str(src), "boundary", sql_or_bound, str(label))
+                thresholds[key] = thresholds.get(key, 0) + 1
+        for prop in getattr(fp, "derived_dim_proposals", None) or []:
+            src = prop.get("source_column")
+            if not src:
+                continue
+            for bucket in (prop.get("buckets") or []):
+                if isinstance(bucket, dict):
+                    val = bucket.get("threshold") or bucket.get("value")
+                    label = bucket.get("label") or bucket.get("name") or ""
+                    kind = bucket.get("kind") or "boundary"
+                else:
+                    val, label, kind = bucket, "", "boundary"
+                key = (primary, str(src), kind, val, str(label))
+                thresholds[key] = thresholds.get(key, 0) + 1
+
+        # 3. filter_observed — WHERE predicates (skip is_structural=None safety)
+        for flt in fp.filters or []:
+            col = flt.get("column")
+            if not col:
+                continue
+            op = (flt.get("operator") or "=").upper()
+            is_struct = bool(flt.get("is_structural"))
+            val = flt.get("value")
+            # Normalize IN-list values for stable hash
+            if op == "IN" and isinstance(val, str):
+                vals = tuple(sorted(
+                    v.strip().strip("'\"") for v in
+                    val.strip("()").split(",") if v.strip()
+                ))
+            elif val is None or val == "":
+                vals = ()
+            else:
+                vals = (str(val).strip().strip("'\""),)
+            key = (primary, str(col), op, is_struct, vals)
+            filters[key] = filters.get(key, 0) + 1
+
+        # 4. time_grain_observed — date_functions
+        for dfn in fp.date_functions or []:
+            col = dfn.get("column")
+            fn = (dfn.get("function") or "").upper()
+            if not (col and fn):
+                continue
+            grain = ""
+            if fn.startswith("DATE_TRUNC_"):
+                grain = fn.replace("DATE_TRUNC_", "").lower()
+            elif fn in {"YEAR", "MONTH", "WEEK", "QUARTER", "DAY"}:
+                grain = fn.lower()
+            elif fn == "EXTRACT":
+                grain = (dfn.get("granularity") or "").lower()
+            if not grain:
+                continue
+            key = (primary, str(col), grain)
+            grains[key] = grains.get(key, 0) + 1
+
+        # 5. cohort_observed — cohort_scope_signals
+        for ch in getattr(fp, "cohort_scope_signals", None) or []:
+            name = ch.get("cohort_name") or ch.get("name")
+            if not name:
+                continue
+            entry = cohorts.setdefault(name, {
+                "tables": set(), "source_filters": [], "count": 0,
+            })
+            entry["count"] += 1
+            for t in (ch.get("tables") or [primary]):
+                entry["tables"].add(t)
+            for sf in (ch.get("source_filters") or []):
+                if sf not in entry["source_filters"]:
+                    entry["source_filters"].append(sf)
+
+    events: list[OntologyEvent] = []
+
+    for (table, col, fn, distinct, alias), count in metrics.items():
+        events.append(OntologyEvent(
+            event_type="metric_observed",
+            source="parse_sqls",
+            table_name=table,
+            column_name=col,
+            payload={
+                "function": fn, "alias": alias, "distinct": distinct,
+                "count": count,
+            },
+            confidence=min(0.95, 0.5 + 0.05 * count),
+            evidence=f"{fn}({col}) observed in {count} query(ies)",
+        ))
+
+    for (table, col, kind, value, label), count in thresholds.items():
+        events.append(OntologyEvent(
+            event_type="threshold_observed",
+            source="parse_sqls",
+            table_name=table,
+            column_name=col,
+            payload={
+                "kind": kind, "value": value, "label": label, "count": count,
+            },
+            confidence=min(0.9, 0.5 + 0.05 * count),
+            evidence=f"CASE WHEN on {col} → {label or value} ({count}x)",
+        ))
+
+    for (table, col, op, is_struct, vals), count in filters.items():
+        events.append(OntologyEvent(
+            event_type="filter_observed",
+            source="parse_sqls",
+            table_name=table,
+            column_name=col,
+            payload={
+                "operator": op,
+                "is_structural": is_struct,
+                "values": list(vals),
+                "count": count,
+            },
+            confidence=0.85 if is_struct else min(0.9, 0.5 + 0.05 * count),
+            evidence=(
+                f"WHERE {col} {op} {list(vals) or '?'} in {count} query(ies)"
+                + (" (structural — CTE-scoped)" if is_struct else "")
+            ),
+        ))
+
+    for (table, col, grain), count in grains.items():
+        events.append(OntologyEvent(
+            event_type="time_grain_observed",
+            source="parse_sqls",
+            table_name=table,
+            column_name=col,
+            payload={"grain": grain, "count": count},
+            confidence=min(0.9, 0.5 + 0.05 * count),
+            evidence=f"{grain.upper()} grain on {col} in {count} query(ies)",
+        ))
+
+    for name, entry in cohorts.items():
+        events.append(OntologyEvent(
+            event_type="cohort_observed",
+            source="parse_sqls",
+            entity_name=name,
+            payload={
+                "cohort_name": name,
+                "tables": sorted(entry["tables"]),
+                "source_filters": entry["source_filters"],
+                "count": entry["count"],
+            },
+            confidence=min(0.85, 0.5 + 0.05 * entry["count"]),
+            evidence=f"cohort '{name}' observed in {entry['count']} query(ies)",
+        ))
+
+    # 6. question_pattern_observed — corpus-level clustering pass
+    try:
+        from lumi.explore_clusters import cluster_queries
+
+        clusters = cluster_queries(fingerprints, min_cluster_size=1)
+        for cl in clusters:
+            members = cl.member_query_indices
+            events.append(OntologyEvent(
+                event_type="question_pattern_observed",
+                source="parse_sqls",
+                payload={
+                    "cluster_id": cl.cluster_id,
+                    "tables": cl.tables,
+                    "group_by_keys": cl.group_by_keys,
+                    "structural_filters": cl.structural_filters,
+                    "canonical_filters": cl.canonical_filters,
+                    "aggregation_columns": cl.aggregation_columns,
+                    "member_query_ids": [f"Q{i+1:02d}" for i in members],
+                    "frequency": cl.frequency,
+                    "sample_query": (cl.sample_queries or [""])[0],
+                },
+                confidence=min(0.9, 0.5 + 0.05 * cl.frequency),
+                evidence=(
+                    f"cluster {cl.cluster_id} — {cl.frequency} member queries "
+                    f"over {len(cl.tables)} table(s)"
+                ),
+            ))
+    except ImportError:
+        pass  # explore_clusters may not be available in minimal envs
+
+    store.record_many(events)
+    return len(events)
+
+
 def record_entity_hints_from_mdm(
     store: OntologyStore, ctx: TableContext,
 ) -> int:
-    """Hook 2 — MDM business names + data_category give entity hints.
+    """Hook 2 — every MDM signal becomes a graph event.
 
-    For each MDM column with a recognizable naming pattern, emit an
-    entity_hint event. Plus when MDM business_name differs from column
-    name, emit a synonym_candidate.
+    Originally just entity_hint + synonym_candidate. Now exhaustive over
+    the MDM digest surface (the patentable graph IS the product — every
+    MDM fact a grounded claim):
+
+      Per column:
+        - entity_hint            (column naming pattern → Entity)
+        - synonym_candidate      (business_name ≠ column_name)
+        - curated_pk             (is_primary OR is_dedupe_key)
+        - column_governance_observed
+                                 (PII, CDE, GDPR, sensitive, mandatory,
+                                  clustered, format, length, publish_code)
+        - partition_observed     (is_partitioned → TimeGrain + always_filter)
+        - derived_formula_observed
+                                 (derived_logic → Metric)
+        - cardinality_observed   (external_references → declared FK)
+        - deprecation_observed   (is_decommissioned)
+
+      Per table:
+        - table_metadata_observed
+                                 (table_type, feed_type, data_category,
+                                  bq_fqn, ownership)
+        - deprecation_observed   (table-level is_decommissioned)
+
+    Every event flows through ``store.record`` → JSONL + (optional) AGE.
+    Source weight ``mdm = 3`` is multiplied into evidence accumulation
+    by the promotion gate.
     """
     events: list[OntologyEvent] = []
     table = ctx.table_name
 
-    # Table-level hint from MDM data_category / dataset business_name.
     ds = ctx.mdm_dataset_details or {}
     cat = (ds.get("data_category") or "").lower()
     sub = (ds.get("data_sub_category") or "").lower()
@@ -777,12 +1031,53 @@ def record_entity_hints_from_mdm(
             table_entity = cand
             break
 
-    # Per-column entity classification.
+    # ── Table-level metadata + deprecation ──
+    table_meta_payload = {
+        k: ds.get(k) for k in (
+            "table_type", "feed_type", "load_type",
+            "data_category", "data_sub_category",
+            "is_internal", "is_sor_certified", "is_searchable",
+            "is_transactional", "retention_period",
+            "bq_project", "bq_dataset", "bq_table",
+            "table_business_name", "table_description",
+        ) if ds.get(k) is not None
+    }
+    bq_fqn = ".".join(filter(None, [
+        ds.get("bq_project"), ds.get("bq_dataset"), ds.get("bq_table"),
+    ]))
+    if bq_fqn:
+        table_meta_payload["bq_fqn"] = bq_fqn
+    own = ctx.mdm_ownership or {}
+    if own:
+        table_meta_payload["ownership_imr_queue"] = own.get("imr_queue")
+        table_meta_payload["ownership_aim_id"] = own.get("aim_id")
+    if table_meta_payload:
+        events.append(OntologyEvent(
+            event_type="table_metadata_observed",
+            source="fetch_mdm",
+            table_name=table,
+            payload=table_meta_payload,
+            confidence=0.85,
+            evidence=f"MDM table-level facts: {sorted(table_meta_payload.keys())}",
+        ))
+    if ds.get("is_decommissioned"):
+        events.append(OntologyEvent(
+            event_type="deprecation_observed",
+            source="fetch_mdm",
+            table_name=table,
+            payload={"reason": "MDM is_decommissioned=true"},
+            confidence=0.95,
+            evidence="MDM dataset_details.is_decommissioned",
+        ))
+
+    # ── Per-column passes ──
     for col in (ctx.mdm_columns or []):
         cn = col.get("name")
         if not cn:
             continue
         ent = _classify_to_entity(cn) or table_entity
+
+        # 1. entity_hint (pre-existing behavior)
         if ent:
             events.append(OntologyEvent(
                 event_type="entity_hint",
@@ -800,7 +1095,8 @@ def record_entity_hints_from_mdm(
                     f"category={cat or '(none)'}"
                 ),
             ))
-        # Synonym candidate from MDM business_name.
+
+        # 2. synonym_candidate (pre-existing behavior)
         bn = (col.get("business_name") or "").strip()
         if bn and bn.lower() != cn.lower() and ent:
             events.append(OntologyEvent(
@@ -813,6 +1109,116 @@ def record_entity_hints_from_mdm(
                 confidence=0.55,
                 evidence=f"MDM business_name='{bn}' for column '{cn}'",
             ))
+
+        # 3. curated_pk (is_primary OR is_dedupe_key)
+        if col.get("is_primary") or col.get("is_dedupe_key"):
+            role = "pk" if col.get("is_primary") else "dedupe_key"
+            events.append(OntologyEvent(
+                event_type="curated_pk",
+                source="fetch_mdm",
+                table_name=table,
+                column_name=cn,
+                payload={
+                    "role": role,
+                    "is_primary": bool(col.get("is_primary")),
+                    "is_dedupe_key": bool(col.get("is_dedupe_key")),
+                },
+                confidence=0.9 if role == "pk" else 0.75,
+                evidence=f"MDM sensitivity_details.{role}=true",
+            ))
+
+        # 4. column_governance_observed (PII/CDE/GDPR/mandatory/clustered/format)
+        gov_keys = {
+            "is_pii": col.get("is_pii"),
+            "pii_role_id": col.get("pii_role_id"),
+            "is_critical_data_element": col.get("is_critical_data_element"),
+            "is_gdpr": col.get("is_gdpr"),
+            "is_sensitive": col.get("is_sensitive"),
+            "is_mandatory": col.get("is_mandatory"),
+            "is_clustered": col.get("is_clustered"),
+            "cluster_position": col.get("cluster_position"),
+            "attribute_format": col.get("format"),
+            "attribute_length": col.get("length"),
+            "publish_code": col.get("publish_code"),
+            "is_meta_column": col.get("is_meta_column"),
+        }
+        gov_facts = {k: v for k, v in gov_keys.items() if v not in (None, False)}
+        if gov_facts:
+            events.append(OntologyEvent(
+                event_type="column_governance_observed",
+                source="fetch_mdm",
+                table_name=table,
+                column_name=cn,
+                payload=gov_facts,
+                confidence=0.85,
+                evidence=f"MDM governance facts: {sorted(gov_facts.keys())}",
+            ))
+
+        # 5. partition_observed
+        if col.get("is_partitioned") or col.get("partition_column"):
+            events.append(OntologyEvent(
+                event_type="partition_observed",
+                source="fetch_mdm",
+                table_name=table,
+                column_name=cn,
+                payload={
+                    "partition_position": col.get("partition_position"),
+                    "time_partition_type": col.get("time_partition_type"),
+                },
+                confidence=0.95,
+                evidence="MDM attribute_details.is_partitioned=true",
+            ))
+
+        # 6. derived_formula_observed
+        derived = col.get("derived_logic")
+        if derived:
+            events.append(OntologyEvent(
+                event_type="derived_formula_observed",
+                source="fetch_mdm",
+                table_name=table,
+                column_name=cn,
+                payload={"derived_logic": str(derived)},
+                confidence=0.8,
+                evidence=(
+                    f"MDM derived_logic length={len(str(derived))} chars"
+                ),
+            ))
+
+        # 7. cardinality_observed for declared external_references (FKs)
+        for ref in (col.get("external_references") or []):
+            other_t = (ref.get("table") or ref.get("ref_table")
+                       or ref.get("target_table"))
+            other_c = (ref.get("column") or ref.get("ref_column")
+                       or ref.get("target_column"))
+            if not (other_t and other_c):
+                continue
+            events.append(OntologyEvent(
+                event_type="cardinality_observed",
+                source="fetch_mdm",
+                payload={
+                    "left_table": table, "left_column": cn,
+                    "right_table": other_t, "right_column": other_c,
+                    "cardinality": ref.get("cardinality", "many_to_one"),
+                    "role": "external_reference",
+                },
+                confidence=0.9,
+                evidence=(
+                    f"MDM external_references: {table}.{cn} → {other_t}.{other_c}"
+                ),
+            ))
+
+        # 8. column-level deprecation
+        if col.get("is_decommissioned") or col.get("status") == "decommissioned":
+            events.append(OntologyEvent(
+                event_type="deprecation_observed",
+                source="fetch_mdm",
+                table_name=table,
+                column_name=cn,
+                payload={"reason": "MDM column is_decommissioned/status"},
+                confidence=0.95,
+                evidence="MDM column-level decommission flag",
+            ))
+
     store.record_many(events)
     return len(events)
 

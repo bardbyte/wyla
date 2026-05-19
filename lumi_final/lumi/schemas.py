@@ -603,17 +603,52 @@ OntologyEventType = Literal[
     "synonym_candidate",
     # parse_baseline hook — human-curated synonym candidate from sql_aliases.
     "curated_synonym",
-    # parse_baseline hook — primary_key declared by humans is a strong signal.
+    # parse_baseline + fetch_mdm hook — primary_key (and is_dedupe_key) is
+    # a strong PK-class identity claim.
     "curated_pk",
     # approve_plan hook — the human-approved plan locks in vocabulary.
     "vocabulary_lock",
     # critic_finding hook — critic surfaces a refinement.
     "entity_refinement",
     # parse_sqls hook (corpus-level) — JOIN cardinality inferred from
-    # GROUP BY + aggregation + join_type evidence.
+    # GROUP BY + aggregation + join_type evidence. Also re-used by
+    # fetch_mdm for column.external_references (declared FKs).
     "cardinality_observed",
     # parse_sqls hook — multi-hop JOIN chain seen in real queries.
     "join_path_observed",
+    # fetch_mdm hook — column governance facts: PII, CDE, GDPR, sensitive,
+    # mandatory, attribute_format, clustered. Properties on the Column
+    # node; don't promote to entities but enrich grounding.
+    "column_governance_observed",
+    # fetch_mdm hook — partition + time_partition_type declared in MDM.
+    # Creates TimeGrain node + always-filter candidate.
+    "partition_observed",
+    # fetch_mdm hook — derived_logic in MDM is a Metric formula candidate.
+    "derived_formula_observed",
+    # fetch_mdm hook — table-level metadata (table_type, feed_type,
+    # data_category, ownership, bq_fqn). Properties on the Table node.
+    "table_metadata_observed",
+    # fetch_mdm hook — is_decommissioned at table OR column level.
+    # Drives DEPRECATES edge and demotion.
+    "deprecation_observed",
+    # parse_sqls hook — corpus aggregations (SUM/AVG/COUNT_DISTINCT...).
+    # Each unique (table, column, fn) becomes a Metric candidate.
+    "metric_observed",
+    # parse_sqls hook — CASE WHEN boundaries + derived_dim_proposals.
+    # (source_column, kind, value, business_meaning) → Threshold node.
+    "threshold_observed",
+    # parse_sqls hook — WHERE predicates (including IN-lists).
+    # Filter node + N FilterValue children.
+    "filter_observed",
+    # parse_sqls hook — date_function inference (DATE_TRUNC, EXTRACT).
+    # Complement to partition_observed; corpus-side grain signal.
+    "time_grain_observed",
+    # parse_sqls hook (corpus-level) — explore-cluster signature.
+    # QuestionPattern node + member_query_ids.
+    "question_pattern_observed",
+    # parse_sqls hook — cohort_scope_signals (named CTE cohorts).
+    # Cohort node + applied-to relations.
+    "cohort_observed",
 ]
 
 
