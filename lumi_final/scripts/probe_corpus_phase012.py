@@ -256,11 +256,16 @@ def _audit_mdm_context(ctx: Any, cache_misses: set[str]) -> MDMTableAudit:
     raw_cols = ctx.mdm_columns or []
     cols = [c for c in raw_cols if isinstance(c, dict)]
     sql_refs = [c.lower() for c in (ctx.columns_referenced or [])]
-    mdm_col_names = {
-        str(c.get("business_name") or c.get("attribute_name") or c.get("name") or "").lower()
-        for c in cols
-    }
-    mdm_col_names.discard("")
+    # Match SQL refs against ALL technical names — name / attribute_name
+    # / current_col_name. business_name is the human label ("Card Member
+    # ID"), not what SQL refers to ("cm11"). Including it here would
+    # always miss.
+    mdm_col_names: set[str] = set()
+    for c in cols:
+        for k in ("name", "attribute_name", "current_col_name"):
+            v = c.get(k)
+            if v:
+                mdm_col_names.add(str(v).lower())
     missing_in_mdm = [c for c in sql_refs if c not in mdm_col_names]
 
     ds = ctx.mdm_dataset_details if isinstance(
@@ -784,7 +789,7 @@ def write_report(
                 return "✓" if b else "—"
             md.append(
                 f"| `{a.table_name}` | {a.sql_columns_referenced} | "
-                f"{a.mdm_columns} | {a.mdm_coverage_pct:.0f}% | "
+                f"{a.mdm_columns} | {a.mdm_coverage_pct * 100:.0f}% | "
                 f"{y(a.cache_hit)} | "
                 f"{a.n_cols_with_business_name} | "
                 f"{a.n_cols_with_attribute_desc} | "
