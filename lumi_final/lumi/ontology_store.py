@@ -1024,7 +1024,15 @@ def record_entity_hints_from_mdm(
     events: list[OntologyEvent] = []
     table = ctx.table_name
 
-    ds = ctx.mdm_dataset_details or {}
+    # Defensive: real MDM cache JSONs occasionally serialize a field as
+    # a string when the API returned a stringified blob. Coerce anything
+    # we expect to be a dict to {} so .get() doesn't blow up downstream.
+    ds = ctx.mdm_dataset_details if isinstance(
+        ctx.mdm_dataset_details, dict,
+    ) else {}
+    own = ctx.mdm_ownership if isinstance(
+        ctx.mdm_ownership, dict,
+    ) else {}
     cat = (ds.get("data_category") or "").lower()
     sub = (ds.get("data_sub_category") or "").lower()
     blob = f"{cat} {sub}"
@@ -1050,7 +1058,6 @@ def record_entity_hints_from_mdm(
     ]))
     if bq_fqn:
         table_meta_payload["bq_fqn"] = bq_fqn
-    own = ctx.mdm_ownership or {}
     if own:
         table_meta_payload["ownership_imr_queue"] = own.get("imr_queue")
         table_meta_payload["ownership_aim_id"] = own.get("aim_id")
@@ -1075,6 +1082,10 @@ def record_entity_hints_from_mdm(
 
     # ── Per-column passes ──
     for col in (ctx.mdm_columns or []):
+        # Defensive: skip malformed entries silently. Cache files seen
+        # in the wild occasionally contain a stringified column name.
+        if not isinstance(col, dict):
+            continue
         cn = col.get("name")
         if not cn:
             continue
@@ -1187,8 +1198,16 @@ def record_entity_hints_from_mdm(
                 ),
             ))
 
-        # 7. cardinality_observed for declared external_references (FKs)
-        for ref in (col.get("external_references") or []):
+        # 7. cardinality_observed for declared external_references (FKs).
+        # Real-cache shape is wild — sometimes list[dict], sometimes
+        # list[str] ("other_table.other_col"), sometimes a single dict.
+        # Skip whatever isn't a usable dict.
+        ext_refs = col.get("external_references") or []
+        if isinstance(ext_refs, dict):
+            ext_refs = [ext_refs]
+        for ref in ext_refs:
+            if not isinstance(ref, dict):
+                continue
             other_t = (ref.get("table") or ref.get("ref_table")
                        or ref.get("target_table"))
             other_c = (ref.get("column") or ref.get("ref_column")
