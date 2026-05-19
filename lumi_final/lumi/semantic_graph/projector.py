@@ -58,7 +58,10 @@ def _connect() -> Iterator[Any]:
 
 
 def _cypher(pgconn: Any, query: str) -> list[Any]:
-    """Run a Cypher statement via AGE's cypher() wrapper. Returns rows."""
+    """Run a Cypher statement via AGE's cypher() wrapper. Returns rows.
+
+    On any error we re-raise with the failing query attached — silent
+    failures with no Cypher to inspect were the #1 debugging pain."""
     conn_params = gconfig.AGEConnection()
     # AGE wraps Cypher inside cypher('graph_name', $$ ... $$) AS (col agtype)
     wrapped = (
@@ -66,12 +69,28 @@ def _cypher(pgconn: Any, query: str) -> list[Any]:
         f"{query} "
         f"$$) AS (result ag_catalog.agtype);"
     )
-    with pgconn.cursor() as cur:
-        cur.execute(wrapped)
-        try:
-            return cur.fetchall()
-        except Exception:
-            return []
+    try:
+        with pgconn.cursor() as cur:
+            cur.execute(wrapped)
+            try:
+                return cur.fetchall()
+            except Exception:
+                return []
+    except Exception as e:
+        # Re-raise with the failing Cypher so projector errors are
+        # diagnosable. Truncate long queries to keep logs readable.
+        snippet = query if len(query) <= 800 else query[:800] + "…"
+        raise RuntimeError(
+            f"AGE Cypher failed ({type(e).__name__}: {e}) — query: {snippet}"
+        ) from e
+
+
+# Cypher string literals can't contain raw newlines, tabs, or quotes.
+# JSON-encoding then stripping the outer quotes is the safest way to
+# get a Cypher-legal escape for arbitrary Python strings (handles
+# unicode, control chars, embedded quotes — every edge case json
+# already solved).
+import json as _json
 
 
 def _safe(s: Any) -> str:
@@ -88,9 +107,13 @@ def _safe(s: Any) -> str:
         return "true" if s else "false"
     if isinstance(s, (int, float)):
         return str(s)
-    # String — escape single quotes + backslashes
-    escaped = str(s).replace("\\", "\\\\").replace("'", "\\'")
-    return f"'{escaped}'"
+    # JSON-encode → \n \r \t \" unicode escapes → swap " for ' for Cypher.
+    # ensure_ascii keeps everything in 7-bit ASCII (safer for AGE).
+    encoded = _json.dumps(str(s), ensure_ascii=True)
+    # _json gives "...\"...\n..." — replace outer/inner " with ' and
+    # un-escape internal \" since they came from us.
+    body = encoded[1:-1].replace("'", "\\'").replace('\\"', '"')
+    return f"'{body}'"
 
 
 def _props(props: dict[str, Any]) -> str:
