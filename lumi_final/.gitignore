@@ -6,6 +6,14 @@ output/*.json
 # Keep output dir structure
 !output/.gitkeep
 
+# Pipeline-generated ontology state — derivable from JSONL events;
+# probes write here too. Never checked in.
+data/ontology/current.json
+data/ontology/versions/
+data/ontology/events/
+data/probe/
+review_queue/CORPUS_PROBE_REPORT.md
+
 # Python
 __pycache__/
 *.pyc
