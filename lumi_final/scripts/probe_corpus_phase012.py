@@ -196,6 +196,28 @@ def run_phase0(input_dir: Path) -> tuple[list[Any], Phase0Stats]:
 # ─── Phase 1 — event emission ─────────────────────────────────
 
 @dataclass
+class MDMTableAudit:
+    table_name: str
+    sql_columns_referenced: int
+    mdm_columns: int
+    mdm_coverage_pct: float
+    cache_hit: bool
+    table_description_present: bool
+    dataset_details_present: bool
+    ownership_present: bool
+    n_cols_with_business_name: int
+    n_cols_with_attribute_desc: int
+    n_cols_with_attribute_type: int
+    n_cols_pii: int
+    n_cols_is_primary: int
+    n_cols_is_dedupe_key: int
+    n_cols_partition: int
+    n_cols_with_derived_logic: int
+    has_external_references: bool
+    sql_cols_not_in_mdm: list[str]  # SQL refs that MDM doesn't know about
+
+
+@dataclass
 class Phase1Stats:
     n_equivalence: int = 0
     n_cardinality: int = 0
@@ -204,8 +226,66 @@ class Phase1Stats:
     n_contexts: int = 0
     mdm_attempted: bool = False
     mdm_error: str = ""
+    mdm_cache_dir: str = ""
+    mdm_cache_misses: list[str] = field(default_factory=list)
+    mdm_audits: list[MDMTableAudit] = field(default_factory=list)
     jsonl_total_lines: int = 0
     jsonl_files: list[str] = field(default_factory=list)
+
+
+def _audit_mdm_context(ctx: Any, cache_misses: set[str]) -> MDMTableAudit:
+    """Profile MDM richness for one TableContext."""
+    cols = ctx.mdm_columns or []
+    sql_refs = [c.lower() for c in (ctx.columns_referenced or [])]
+    mdm_col_names = {
+        str(c.get("business_name") or c.get("attribute_name") or "").lower()
+        for c in cols
+    }
+    mdm_col_names.discard("")
+    missing_in_mdm = [c for c in sql_refs if c not in mdm_col_names]
+
+    def _count(key_path: str) -> int:
+        n = 0
+        for c in cols:
+            v = c
+            for k in key_path.split("."):
+                v = (v or {}).get(k) if isinstance(v, dict) else None
+            if v:
+                n += 1
+        return n
+
+    return MDMTableAudit(
+        table_name=ctx.table_name,
+        sql_columns_referenced=len(sql_refs),
+        mdm_columns=len(cols),
+        mdm_coverage_pct=ctx.mdm_coverage_pct,
+        cache_hit=ctx.table_name not in cache_misses,
+        table_description_present=bool(ctx.mdm_table_description),
+        dataset_details_present=bool(ctx.mdm_dataset_details),
+        ownership_present=bool(ctx.mdm_ownership),
+        n_cols_with_business_name=sum(1 for c in cols if c.get("business_name")),
+        n_cols_with_attribute_desc=sum(
+            1 for c in cols if c.get("attribute_desc") or c.get("description")
+        ),
+        n_cols_with_attribute_type=sum(
+            1 for c in cols if c.get("attribute_type") or c.get("type")
+        ),
+        n_cols_pii=sum(1 for c in cols if c.get("is_pii")),
+        n_cols_is_primary=sum(1 for c in cols if c.get("is_primary")),
+        n_cols_is_dedupe_key=sum(1 for c in cols if c.get("is_dedupe_key")),
+        n_cols_partition=sum(
+            1 for c in cols
+            if c.get("is_partitioned") or c.get("partition_column")
+        ),
+        n_cols_with_derived_logic=sum(
+            1 for c in cols if c.get("derived_logic")
+        ),
+        has_external_references=bool(
+            ctx.mdm_dataset_details.get("external_reference_details")
+            or any(c.get("external_reference") for c in cols)
+        ),
+        sql_cols_not_in_mdm=missing_in_mdm[:20],
+    )
 
 
 def run_phase1(fps: list[Any], *, with_mdm: bool) -> Phase1Stats:
@@ -232,23 +312,48 @@ def run_phase1(fps: list[Any], *, with_mdm: bool) -> Phase1Stats:
 
     if with_mdm:
         try:
-            from lumi.mdm import MDMClient
+            from lumi.mdm import CachedMDMClient
             from lumi.ontology_builder import discover_tables
 
+            mdm_cache_dir = REPO_ROOT / "data" / "mdm_cache"
             baseline_dir = REPO_ROOT / "data" / "baseline_views"
-            mdm = MDMClient()
+            if not mdm_cache_dir.exists():
+                raise FileNotFoundError(
+                    f"MDM cache dir not found: {mdm_cache_dir}. "
+                    "Populate it with: python scripts/probe_mdm.py --save "
+                    f"{mdm_cache_dir}"
+                )
+            mdm = CachedMDMClient(mdm_cache_dir)
+            stats.mdm_cache_dir = str(mdm_cache_dir)
             contexts = discover_tables(
                 fps, mdm, str(baseline_dir) if baseline_dir.exists() else "",
             )
             stats.n_contexts = len(contexts)
             stats.mdm_attempted = True
             _info(f"  discovered {len(contexts)} table context(s)")
+            # Audit MDM richness BEFORE emitting events so we can correlate
+            # event counts to MDM coverage.
+            cache_misses_set = set(mdm.cache_misses)
+            for ctx in contexts.values():
+                stats.mdm_audits.append(
+                    _audit_mdm_context(ctx, cache_misses_set),
+                )
             for ctx in contexts.values():
                 stats.n_mdm += record_entity_hints_from_mdm(store, ctx)
                 stats.n_baseline += record_curated_synonyms_from_baseline(
                     store, ctx,
                 )
             _info(f"  → {stats.n_mdm} MDM + {stats.n_baseline} baseline events")
+            stats.mdm_cache_misses = list(mdm.cache_misses)
+            if stats.mdm_cache_misses:
+                _warn(f"  {len(stats.mdm_cache_misses)} MDM cache miss(es): "
+                      f"{stats.mdm_cache_misses[:5]}"
+                      f"{' …' if len(stats.mdm_cache_misses) > 5 else ''}")
+            # Diagnostic: any table with 0 MDM coverage is a red flag
+            zero_cov = [a for a in stats.mdm_audits if a.mdm_columns == 0]
+            if zero_cov:
+                _warn(f"  {len(zero_cov)} table(s) have ZERO MDM coverage: "
+                      f"{[a.table_name for a in zero_cov[:5]]}")
         except Exception as e:
             stats.mdm_error = f"{type(e).__name__}: {e}"
             _warn(f"MDM step skipped: {stats.mdm_error}")
@@ -442,9 +547,39 @@ def run_phase2(jsonl_total: int) -> Phase2Stats:
                 "ok": (int(str(rows[0][0]).strip()) if rows else 0) == 0,
             }
 
+            # I4: MDM-sourced Entity nodes (proxy for "did MDM events
+            # actually project into the graph?")
+            rows = _cypher_one(
+                cur,
+                "MATCH (e:Event) WHERE e.source = 'fetch_mdm' "
+                "RETURN count(e) AS k",
+                return_cols="k agtype",
+            )
+            mdm_events = int(str(rows[0][0]).strip()) if rows else 0
+            inv["mdm_events_projected"] = {
+                "count": mdm_events,
+                "ok": mdm_events > 0,  # zero MDM events = MDM is dead
+            }
+
+            # I5: Columns carrying MDM-derived properties
+            rows = _cypher_one(
+                cur,
+                "MATCH (c:Column) "
+                "WHERE c.mdm_business_name IS NOT NULL "
+                "   OR c.attribute_desc IS NOT NULL "
+                "   OR c.is_pii IS NOT NULL "
+                "RETURN count(c) AS k",
+                return_cols="k agtype",
+            )
+            mdm_columns = int(str(rows[0][0]).strip()) if rows else 0
+            inv["columns_with_mdm_properties"] = {
+                "count": mdm_columns,
+                "ok": True,  # informational, not gating
+            }
+
             stats.invariants = inv
 
-            # I4: JSONL line count vs AGE Event node count
+            # I6: JSONL line count vs AGE Event node count
             n_event_nodes = stats.node_counts.get("Event", 0)
             stats.jsonl_vs_age_event_delta = jsonl_total - n_event_nodes
 
@@ -519,6 +654,74 @@ def write_report(
     md.append(f"\n- JSONL files: **{len(p1.jsonl_files)}**")
     md.append(f"- JSONL total event lines: **{p1.jsonl_total_lines}**")
 
+    # ── MDM richness audit ──
+    if p1.mdm_audits:
+        md.append("\n## Phase 1.5 — MDM richness audit\n")
+        md.append(f"_cache dir:_ `{p1.mdm_cache_dir}`")
+        md.append(f"- tables profiled: **{len(p1.mdm_audits)}**")
+        md.append(f"- cache misses: **{len(p1.mdm_cache_misses)}** "
+                  f"({', '.join(p1.mdm_cache_misses[:10])}"
+                  f"{' …' if len(p1.mdm_cache_misses) > 10 else ''})")
+
+        # overall coverage stats
+        total_sql_refs = sum(a.sql_columns_referenced for a in p1.mdm_audits)
+        total_unknown = sum(len(a.sql_cols_not_in_mdm) for a in p1.mdm_audits)
+        md.append(f"- SQL columns referenced across corpus: **{total_sql_refs}**")
+        md.append(f"- SQL columns NOT in MDM: **{total_unknown}** "
+                  f"({100 * total_unknown / max(total_sql_refs, 1):.1f}%)")
+
+        md.append("\n### Per-table MDM profile")
+        md.append("\n| table | SQL refs | MDM cols | cov % | "
+                  "cache | desc | dataset | own | "
+                  "biz | desc | type | PII | PK | dedupe | part | derived | ext-ref | "
+                  "SQL refs missing |")
+        md.append("|---|---:|---:|---:|:-:|:-:|:-:|:-:|"
+                  "---:|---:|---:|---:|---:|---:|---:|---:|:-:|---|")
+        for a in sorted(p1.mdm_audits, key=lambda x: -x.mdm_coverage_pct):
+            def y(b: bool) -> str:
+                return "✓" if b else "—"
+            missing = ", ".join(a.sql_cols_not_in_mdm[:5])
+            if len(a.sql_cols_not_in_mdm) > 5:
+                missing += f" (+{len(a.sql_cols_not_in_mdm) - 5} more)"
+            md.append(
+                f"| `{a.table_name}` | {a.sql_columns_referenced} | "
+                f"{a.mdm_columns} | {a.mdm_coverage_pct:.0f}% | "
+                f"{y(a.cache_hit)} | {y(a.table_description_present)} | "
+                f"{y(a.dataset_details_present)} | {y(a.ownership_present)} | "
+                f"{a.n_cols_with_business_name} | "
+                f"{a.n_cols_with_attribute_desc} | "
+                f"{a.n_cols_with_attribute_type} | "
+                f"{a.n_cols_pii} | {a.n_cols_is_primary} | "
+                f"{a.n_cols_is_dedupe_key} | {a.n_cols_partition} | "
+                f"{a.n_cols_with_derived_logic} | "
+                f"{y(a.has_external_references)} | "
+                f"{missing or '—'} |"
+            )
+
+        md.append("\n_Column legend (per-col counts within MDM):_")
+        md.append("- **biz** = has `business_name`")
+        md.append("- **desc** = has `attribute_desc`")
+        md.append("- **type** = has `attribute_type`")
+        md.append("- **PII** = `is_pii=true`")
+        md.append("- **PK** = `is_primary=true`")
+        md.append("- **dedupe** = `is_dedupe_key=true`")
+        md.append("- **part** = is a partition column")
+        md.append("- **derived** = has `derived_logic`")
+        md.append("- **ext-ref** = has `external_reference_details` (cross-table FK)")
+
+        md.append("\n### MDM coverage health check")
+        zero_cov = [a for a in p1.mdm_audits if a.mdm_columns == 0]
+        no_desc = [a for a in p1.mdm_audits if a.mdm_columns > 0
+                   and a.n_cols_with_attribute_desc == 0]
+        no_dataset = [a for a in p1.mdm_audits if not a.dataset_details_present]
+        no_owner = [a for a in p1.mdm_audits if not a.ownership_present]
+        md.append(f"- ❌ tables with ZERO MDM columns: **{len(zero_cov)}** "
+                  f"{[a.table_name for a in zero_cov[:5]]}")
+        md.append(f"- ⚠ tables with MDM cols but NO attribute_desc anywhere: "
+                  f"**{len(no_desc)}** {[a.table_name for a in no_desc[:5]]}")
+        md.append(f"- ⚠ tables missing dataset_details: **{len(no_dataset)}**")
+        md.append(f"- ⚠ tables missing ownership: **{len(no_owner)}**")
+
     md.append("\n## Phase 2 — AGE projection + verification\n")
     md.append(f"- AGE enabled: **{p2.age_enabled}**")
     if not p2.age_enabled:
@@ -592,6 +795,9 @@ def write_report(
             "n_contexts": p1.n_contexts,
             "mdm_attempted": p1.mdm_attempted,
             "mdm_error": p1.mdm_error,
+            "mdm_cache_dir": p1.mdm_cache_dir,
+            "mdm_cache_misses": p1.mdm_cache_misses,
+            "mdm_audits": [a.__dict__ for a in p1.mdm_audits],
             "jsonl_total_lines": p1.jsonl_total_lines,
             "jsonl_files": p1.jsonl_files,
         },
