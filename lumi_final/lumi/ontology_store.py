@@ -802,26 +802,24 @@ def record_corpus_facts(
             key = (primary, str(col), fn, distinct, str(alias))
             metrics[key] = metrics.get(key, 0) + 1
 
-        # 2. threshold_observed — case_whens + derived_dim_proposals
+        # 2. threshold_observed — case_whens (mapped_values is a
+        # list[{when, then}], NOT a dict). The 'when' string contains the
+        # boundary expression (e.g. "fico >= 740"); 'then' is the label.
+        # derived_dim_proposals.buckets points at the same list — skip
+        # to avoid double-counting.
         for cw in fp.case_whens or []:
             src = cw.get("source_column")
-            if not src:
+            mv = cw.get("mapped_values") or []
+            if not src or not isinstance(mv, list):
                 continue
-            for label, sql_or_bound in (cw.get("mapped_values") or {}).items():
-                key = (primary, str(src), "boundary", sql_or_bound, str(label))
-                thresholds[key] = thresholds.get(key, 0) + 1
-        for prop in getattr(fp, "derived_dim_proposals", None) or []:
-            src = prop.get("source_column")
-            if not src:
-                continue
-            for bucket in (prop.get("buckets") or []):
-                if isinstance(bucket, dict):
-                    val = bucket.get("threshold") or bucket.get("value")
-                    label = bucket.get("label") or bucket.get("name") or ""
-                    kind = bucket.get("kind") or "boundary"
-                else:
-                    val, label, kind = bucket, "", "boundary"
-                key = (primary, str(src), kind, val, str(label))
+            for bucket in mv:
+                if not isinstance(bucket, dict):
+                    continue
+                when_sql = bucket.get("when") or ""
+                label = bucket.get("then") or ""
+                if not (when_sql or label):
+                    continue
+                key = (primary, str(src), "boundary", when_sql, str(label))
                 thresholds[key] = thresholds.get(key, 0) + 1
 
         # 3. filter_observed — WHERE predicates (skip is_structural=None safety)
@@ -863,7 +861,10 @@ def record_corpus_facts(
             key = (primary, str(col), grain)
             grains[key] = grains.get(key, 0) + 1
 
-        # 5. cohort_observed — cohort_scope_signals
+        # 5. cohort_observed — cohort_scope_signals. Real shape per
+        # _detect_cohort_scopes: {cohort_name, definition_filters,
+        # source_cte}. Tables come from the fp (the cohort scopes the
+        # query, not vice versa).
         for ch in getattr(fp, "cohort_scope_signals", None) or []:
             name = ch.get("cohort_name") or ch.get("name")
             if not name:
@@ -872,9 +873,11 @@ def record_corpus_facts(
                 "tables": set(), "source_filters": [], "count": 0,
             })
             entry["count"] += 1
-            for t in (ch.get("tables") or [primary]):
-                entry["tables"].add(t)
-            for sf in (ch.get("source_filters") or []):
+            for t in (fp.tables or []):
+                if t:
+                    entry["tables"].add(t)
+            for sf in (ch.get("definition_filters")
+                       or ch.get("source_filters") or []):
                 if sf not in entry["source_filters"]:
                     entry["source_filters"].append(sf)
 
