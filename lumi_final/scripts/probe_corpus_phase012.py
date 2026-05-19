@@ -229,8 +229,17 @@ class MDMTableAudit:
     n_cols_with_derived_logic: int
     n_cols_with_external_references: int
     has_external_references: bool
-    # gap signal
-    sql_cols_not_in_mdm: list[str]  # SQL refs that MDM doesn't know about
+    # gap signal — every missing SQL ref classified
+    sql_cols_not_in_mdm: list[str]
+    # breakdown of WHY each missing name isn't in MDM:
+    #   metric    — alias of an aggregation (SUM/COUNT/...) — captured by metric_observed
+    #   threshold — alias of a CASE WHEN expression — captured by threshold_observed
+    #   synonym?  — fuzzy match to an MDM technical name (e.g., cm_id ≈ cm11)
+    #   real_gap  — none of the above; investigate / refresh MDM
+    missing_metric: list[str]
+    missing_threshold: list[str]
+    missing_synonym: list[tuple[str, str]]  # (sql_name, suggested_mdm_name)
+    missing_real_gap: list[str]
 
 
 @dataclass
@@ -253,6 +262,8 @@ class Phase1Stats:
 def _audit_mdm_context(ctx: Any, cache_misses: set[str]) -> MDMTableAudit:
     """Profile MDM richness for one TableContext. Defensive against
     real-cache shape drift — any non-dict entry is silently skipped."""
+    import difflib
+
     raw_cols = ctx.mdm_columns or []
     cols = [c for c in raw_cols if isinstance(c, dict)]
     sql_refs = [c.lower() for c in (ctx.columns_referenced or [])]
@@ -267,6 +278,39 @@ def _audit_mdm_context(ctx: Any, cache_misses: set[str]) -> MDMTableAudit:
             if v:
                 mdm_col_names.add(str(v).lower())
     missing_in_mdm = [c for c in sql_refs if c not in mdm_col_names]
+
+    # ── Classify each missing column ──
+    # Build alias-source maps from the TableContext (aggregations and
+    # case_whens come accumulated across every fp that touched this table).
+    metric_aliases = {
+        (a.get("alias") or "").lower()
+        for a in (ctx.aggregations or [])
+        if a.get("alias")
+    }
+    threshold_aliases = {
+        (cw.get("alias") or "").lower()
+        for cw in (ctx.case_whens or [])
+        if cw.get("alias")
+    }
+    mdm_names_list = sorted(mdm_col_names)
+
+    missing_metric: list[str] = []
+    missing_threshold: list[str] = []
+    missing_synonym: list[tuple[str, str]] = []
+    missing_real_gap: list[str] = []
+    for m in missing_in_mdm:
+        if m in metric_aliases:
+            missing_metric.append(m)
+        elif m in threshold_aliases:
+            missing_threshold.append(m)
+        else:
+            # Fuzzy match — 0.75 cutoff catches cm_id↔cm11, acct_id↔acct,
+            # as_of_dt↔rpt_dt at the edge; below that returns no match.
+            cand = difflib.get_close_matches(m, mdm_names_list, n=1, cutoff=0.75)
+            if cand:
+                missing_synonym.append((m, cand[0]))
+            else:
+                missing_real_gap.append(m)
 
     ds = ctx.mdm_dataset_details if isinstance(
         ctx.mdm_dataset_details, dict,
@@ -328,6 +372,10 @@ def _audit_mdm_context(ctx: Any, cache_misses: set[str]) -> MDMTableAudit:
             c.get("external_references") for c in cols
         ),
         sql_cols_not_in_mdm=missing_in_mdm[:20],
+        missing_metric=missing_metric,
+        missing_threshold=missing_threshold,
+        missing_synonym=missing_synonym,
+        missing_real_gap=missing_real_gap,
     )
 
 
@@ -806,20 +854,72 @@ def write_report(
                 f"{a.n_cols_with_external_references} |"
             )
 
-        md.append("\n### Per-table MDM gaps — SQL refs unknown in MDM")
-        md.append("\n| table | count | columns |")
-        md.append("|---|---:|---|")
+        md.append("\n### Per-table MDM gaps — classified")
+        md.append(
+            "\n_Each 'missing' SQL ref classified by WHY MDM doesn't have it._\n"
+            "- **metric** = aggregation alias → already captured as "
+            "`metric_observed` event (Metric node)\n"
+            "- **threshold** = CASE WHEN alias → captured as "
+            "`threshold_observed` event (Threshold node)\n"
+            "- **synonym?** = fuzzy match to an MDM technical name "
+            "(synonym candidate — should mint HAS_SYNONYM)\n"
+            "- **real_gap** = actual MDM gap — refresh cache or "
+            "escalate to data governance"
+        )
+        md.append("\n| table | total | metric | threshold | synonym? | real_gap |")
+        md.append("|---|---:|---:|---:|---:|---:|")
+        # corpus-wide totals
+        tot_m = sum(len(a.missing_metric) for a in p1.mdm_audits)
+        tot_t = sum(len(a.missing_threshold) for a in p1.mdm_audits)
+        tot_s = sum(len(a.missing_synonym) for a in p1.mdm_audits)
+        tot_g = sum(len(a.missing_real_gap) for a in p1.mdm_audits)
+        tot_tot = tot_m + tot_t + tot_s + tot_g
+        md.append(
+            f"| **CORPUS TOTAL** | **{tot_tot}** | **{tot_m}** | "
+            f"**{tot_t}** | **{tot_s}** | **{tot_g}** |"
+        )
         for a in sorted(p1.mdm_audits,
-                        key=lambda x: -len(x.sql_cols_not_in_mdm)):
-            if not a.sql_cols_not_in_mdm:
+                        key=lambda x: -(len(x.missing_metric)
+                                        + len(x.missing_threshold)
+                                        + len(x.missing_synonym)
+                                        + len(x.missing_real_gap))):
+            n_total = (len(a.missing_metric) + len(a.missing_threshold)
+                       + len(a.missing_synonym) + len(a.missing_real_gap))
+            if n_total == 0:
                 continue
-            missing = ", ".join(a.sql_cols_not_in_mdm[:10])
-            if len(a.sql_cols_not_in_mdm) > 10:
-                missing += f" (+{len(a.sql_cols_not_in_mdm) - 10} more)"
             md.append(
-                f"| `{a.table_name}` | {len(a.sql_cols_not_in_mdm)} | "
-                f"{missing} |"
+                f"| `{a.table_name}` | {n_total} | "
+                f"{len(a.missing_metric)} | {len(a.missing_threshold)} | "
+                f"{len(a.missing_synonym)} | {len(a.missing_real_gap)} |"
             )
+
+        # Detailed breakdown for the *actionable* categories: synonyms
+        # (mint HAS_SYNONYM) and real_gaps (refresh MDM). Skip metric +
+        # threshold detail — we already capture them as Metric/Threshold
+        # nodes, no human action needed.
+        synonym_lines = []
+        gap_lines = []
+        for a in p1.mdm_audits:
+            for sql_name, mdm_match in a.missing_synonym:
+                synonym_lines.append(
+                    f"  - `{a.table_name}.{sql_name}` ≈ `{mdm_match}`"
+                )
+            for sql_name in a.missing_real_gap:
+                gap_lines.append(f"  - `{a.table_name}.{sql_name}`")
+        if synonym_lines:
+            md.append(f"\n#### Synonym candidates ({len(synonym_lines)})")
+            md.append("_Each is a candidate `HAS_SYNONYM` edge from "
+                      "the corpus-name to the MDM technical name._\n")
+            md.extend(synonym_lines[:50])
+            if len(synonym_lines) > 50:
+                md.append(f"  - … and {len(synonym_lines) - 50} more")
+        if gap_lines:
+            md.append(f"\n#### Real MDM gaps ({len(gap_lines)})")
+            md.append("_Columns the SQL uses that MDM doesn't have — "
+                      "refresh cache or escalate to data governance._\n")
+            md.extend(gap_lines[:50])
+            if len(gap_lines) > 50:
+                md.append(f"  - … and {len(gap_lines) - 50} more")
 
         md.append("\n_Column legend (per-col counts within MDM):_")
         md.append("- **biz** = has `business_name`")
