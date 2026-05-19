@@ -251,27 +251,21 @@ class Phase1Stats:
 
 
 def _audit_mdm_context(ctx: Any, cache_misses: set[str]) -> MDMTableAudit:
-    """Profile MDM richness for one TableContext."""
-    cols = ctx.mdm_columns or []
+    """Profile MDM richness for one TableContext. Defensive against
+    real-cache shape drift — any non-dict entry is silently skipped."""
+    raw_cols = ctx.mdm_columns or []
+    cols = [c for c in raw_cols if isinstance(c, dict)]
     sql_refs = [c.lower() for c in (ctx.columns_referenced or [])]
     mdm_col_names = {
-        str(c.get("business_name") or c.get("attribute_name") or "").lower()
+        str(c.get("business_name") or c.get("attribute_name") or c.get("name") or "").lower()
         for c in cols
     }
     mdm_col_names.discard("")
     missing_in_mdm = [c for c in sql_refs if c not in mdm_col_names]
 
-    def _count(key_path: str) -> int:
-        n = 0
-        for c in cols:
-            v = c
-            for k in key_path.split("."):
-                v = (v or {}).get(k) if isinstance(v, dict) else None
-            if v:
-                n += 1
-        return n
-
-    ds = ctx.mdm_dataset_details or {}
+    ds = ctx.mdm_dataset_details if isinstance(
+        ctx.mdm_dataset_details, dict,
+    ) else {}
     bq_fqn = ".".join(filter(None, [
         ds.get("bq_project"), ds.get("bq_dataset"), ds.get("bq_table"),
     ]))
@@ -285,7 +279,9 @@ def _audit_mdm_context(ctx: Any, cache_misses: set[str]) -> MDMTableAudit:
         # table-level
         table_description_present=bool(ctx.mdm_table_description),
         dataset_details_present=bool(ds),
-        ownership_present=bool(ctx.mdm_ownership),
+        ownership_present=bool(
+            isinstance(ctx.mdm_ownership, dict) and ctx.mdm_ownership,
+        ),
         table_type=str(ds.get("table_type") or ""),
         feed_type=str(ds.get("feed_type") or ""),
         data_category=str(ds.get("data_category") or ""),
@@ -372,6 +368,40 @@ def run_phase1(fps: list[Any], *, with_mdm: bool) -> Phase1Stats:
                     "Populate it with: python scripts/probe_mdm.py --save "
                     f"{mdm_cache_dir}"
                 )
+
+            # ── MDM cache health check (before we use it) ──
+            _info("  validating MDM cache files …")
+            cache_files = sorted(mdm_cache_dir.glob("*.json"))
+            malformed: list[str] = []
+            empty_cols: list[str] = []
+            for f in cache_files:
+                try:
+                    blob = json.loads(f.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as e:
+                    malformed.append(f"{f.name}: {type(e).__name__}")
+                    continue
+                if not isinstance(blob, dict):
+                    malformed.append(f"{f.name}: top-level not a dict")
+                    continue
+                cols = blob.get("columns")
+                if not isinstance(cols, list):
+                    malformed.append(f"{f.name}: columns not a list")
+                    continue
+                non_dict_cols = sum(1 for c in cols if not isinstance(c, dict))
+                if non_dict_cols:
+                    malformed.append(
+                        f"{f.name}: {non_dict_cols} non-dict column entry(ies)"
+                    )
+                if not cols:
+                    empty_cols.append(f.name)
+            _info(f"  {len(cache_files)} cache files, "
+                  f"{len(malformed)} malformed, {len(empty_cols)} empty")
+            if malformed:
+                for m in malformed[:10]:
+                    _warn(f"    {m}")
+                if len(malformed) > 10:
+                    _info(f"    …and {len(malformed) - 10} more")
+
             mdm = CachedMDMClient(mdm_cache_dir)
             stats.mdm_cache_dir = str(mdm_cache_dir)
             contexts = discover_tables(
@@ -404,8 +434,12 @@ def run_phase1(fps: list[Any], *, with_mdm: bool) -> Phase1Stats:
                 _warn(f"  {len(zero_cov)} table(s) have ZERO MDM coverage: "
                       f"{[a.table_name for a in zero_cov[:5]]}")
         except Exception as e:
+            import traceback
             stats.mdm_error = f"{type(e).__name__}: {e}"
             _warn(f"MDM step skipped: {stats.mdm_error}")
+            # Print the traceback so we never have to guess which line.
+            for line in traceback.format_exc().splitlines()[-8:]:
+                _info(line)
     else:
         _info("MDM step skipped (--no-mdm)")
 
