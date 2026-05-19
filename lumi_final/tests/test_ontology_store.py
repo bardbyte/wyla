@@ -207,6 +207,150 @@ def test_hook_entity_hints_from_mdm(tmp_path: Path):
     assert "cardmember" in c["entities"]
 
 
+def _read_event_types(store: OntologyStore) -> set[str]:
+    """Helper — collect every event_type recorded under this store."""
+    import json
+    types: set[str] = set()
+    for f in store.events_dir.glob("*.jsonl"):
+        for line in f.read_text().splitlines():
+            if line.strip():
+                types.add(json.loads(line)["event_type"])
+    return types
+
+
+def test_mdm_emits_curated_pk_for_is_primary(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_dim",
+        mdm_columns=[
+            {"name": "cm11", "is_primary": True, "type": "STRING"},
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "curated_pk" in _read_event_types(store)
+
+
+def test_mdm_emits_curated_pk_for_is_dedupe_key(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_dim",
+        mdm_columns=[
+            {"name": "natural_id", "is_dedupe_key": True, "type": "STRING"},
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "curated_pk" in _read_event_types(store)
+
+
+def test_mdm_emits_column_governance(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_dim",
+        mdm_columns=[
+            {
+                "name": "ssn",
+                "is_pii": True,
+                "pii_role_id": "PII_ROLE_42",
+                "is_critical_data_element": True,
+                "is_mandatory": True,
+                "is_clustered": True,
+                "format": "STRING(11)",
+            },
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "column_governance_observed" in _read_event_types(store)
+
+
+def test_mdm_emits_partition_observed(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_metrics",
+        mdm_columns=[
+            {
+                "name": "rpt_dt", "is_partitioned": True,
+                "partition_position": 1, "time_partition_type": "DAY",
+            },
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "partition_observed" in _read_event_types(store)
+
+
+def test_mdm_emits_derived_formula(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_metrics",
+        mdm_columns=[
+            {
+                "name": "tbb_usd",
+                "derived_logic": "CASE WHEN currency='USD' THEN amount ELSE amount*fx END",
+            },
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "derived_formula_observed" in _read_event_types(store)
+
+
+def test_mdm_emits_external_reference_as_cardinality(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_dim",
+        mdm_columns=[
+            {
+                "name": "acct_id",
+                "external_references": [
+                    {"table": "acct_dim", "column": "id",
+                     "cardinality": "many_to_one"},
+                ],
+            },
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "cardinality_observed" in _read_event_types(store)
+
+
+def test_mdm_emits_table_metadata(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_dim",
+        mdm_dataset_details={
+            "table_type": "DIM", "feed_type": "DAILY",
+            "data_category": "Cardmember",
+            "bq_project": "axp-lumi", "bq_dataset": "dw",
+            "bq_table": "cm_dim",
+        },
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "table_metadata_observed" in _read_event_types(store)
+
+
+def test_mdm_emits_deprecation_for_decommissioned_table(tmp_path: Path):
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="old_table",
+        mdm_dataset_details={
+            "is_decommissioned": True,
+            "data_category": "Cardmember",
+        },
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "deprecation_observed" in _read_event_types(store)
+
+
+def test_mdm_omits_governance_when_no_facts(tmp_path: Path):
+    """Column with no governance flags should NOT emit a governance event."""
+    store = OntologyStore(tmp_path)
+    ctx = _ctx(
+        table_name="cm_dim",
+        mdm_columns=[
+            {"name": "neutral_col", "business_name": "Neutral", "type": "STRING"},
+        ],
+    )
+    record_entity_hints_from_mdm(store, ctx)
+    assert "column_governance_observed" not in _read_event_types(store)
+
+
 def test_hook_curated_synonyms_from_baseline(tmp_path: Path):
     store = OntologyStore(tmp_path)
     ctx = _ctx(

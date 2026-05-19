@@ -356,6 +356,191 @@ def _project_entity_refinement(pgconn: Any, event: OntologyEvent) -> None:
     _project_entity_hint(pgconn, event)
 
 
+# ─── MDM-derived fact projectors ─────────────────────────────
+
+
+def _project_column_governance_observed(
+    pgconn: Any, event: OntologyEvent,
+) -> None:
+    """MDM column-level governance facts → properties on the Column node.
+
+    Captures: is_pii, pii_role_id, is_critical_data_element, is_gdpr,
+    is_sensitive, is_mandatory, is_clustered, attribute_format,
+    attribute_length, publish_code. Each of these is a grounded fact;
+    they enrich the Column node but don't promote to entities."""
+    table = event.table_name
+    col = event.column_name
+    if not (table and col):
+        return
+    env = _envelope_for(event)
+    t_uri = _canonical_uri("table", table)
+    c_uri = _canonical_uri("column", table, col)
+    p = event.payload
+    # Only set keys actually present (no silent nulls clobbering prior facts)
+    keys = (
+        "is_pii", "pii_role_id", "is_critical_data_element",
+        "is_gdpr", "is_sensitive", "is_mandatory", "is_clustered",
+        "cluster_position", "attribute_format", "attribute_length",
+        "publish_code", "is_meta_column",
+    )
+    col_props = {
+        "canonical_uri": c_uri,
+        "name": col,
+        "table_name": table,
+        **{k: p[k] for k in keys if k in p and p[k] is not None},
+        **env,
+    }
+    _cypher(pgconn, (
+        f"MERGE (t:Table {{canonical_uri: {_safe(t_uri)}}}) "
+        f"ON CREATE SET t += {_props({'name': table, **env})} "
+        f"MERGE (c:Column {{canonical_uri: {_safe(c_uri)}}}) "
+        f"ON CREATE SET c += {_props(col_props)} "
+        f"ON MATCH SET c += {_props({k: p[k] for k in keys if k in p and p[k] is not None})} "
+        f"MERGE (t)-[:CONTAINS]->(c)"
+    ))
+    _project_event_provenance(pgconn, event, target_label="Column", target_uri=c_uri)
+
+
+def _project_partition_observed(pgconn: Any, event: OntologyEvent) -> None:
+    """MDM partition declaration → Column flags + TimeGrain node + Filter
+    candidate.
+
+    Partition columns are the single most reliable always_filter signal —
+    they're the BQ physical layout the warehouse enforces. Time-typed
+    partitions also produce a TimeGrain node so OBSERVED_AT_GRAIN edges
+    can resolve their default grain."""
+    table = event.table_name
+    col = event.column_name
+    if not (table and col):
+        return
+    env = _envelope_for(event)
+    p = event.payload
+    t_uri = _canonical_uri("table", table)
+    c_uri = _canonical_uri("column", table, col)
+    grain = (p.get("time_partition_type") or "").lower()  # DAY, MONTH, YEAR
+    _cypher(pgconn, (
+        f"MERGE (t:Table {{canonical_uri: {_safe(t_uri)}}}) "
+        f"ON CREATE SET t += {_props({'name': table, **env})} "
+        f"MERGE (c:Column {{canonical_uri: {_safe(c_uri)}}}) "
+        f"ON CREATE SET c += {_props({'name': col, 'table_name': table, 'is_partition': True, **env})} "
+        f"ON MATCH SET c.is_partition = true, "
+        f"c.partition_position = {_safe(p.get('partition_position'))}, "
+        f"c.time_partition_type = {_safe(p.get('time_partition_type'))} "
+        f"MERGE (t)-[:CONTAINS]->(c)"
+    ))
+    # Always_filter candidate: a Filter node referencing this column.
+    f_uri = _canonical_uri("filter", table, col)
+    _cypher(pgconn, (
+        f"MERGE (f:Filter {{canonical_uri: {_safe(f_uri)}}}) "
+        f"ON CREATE SET f += {_props({'table_name': table, 'column_name': col, 'is_partition': True, 'is_structural': True, **env})}"
+    ))
+    # TimeGrain node when MDM declares a time partition.
+    if grain:
+        g_uri = _canonical_uri("timegrain", table, col, grain)
+        _cypher(pgconn, (
+            f"MERGE (g:TimeGrain {{canonical_uri: {_safe(g_uri)}}}) "
+            f"ON CREATE SET g += {_props({'table_name': table, 'column_name': col, 'grain': grain, 'partition_aligned': True, **env})}"
+        ))
+    _project_event_provenance(pgconn, event, target_label="Column", target_uri=c_uri)
+
+
+def _project_derived_formula_observed(
+    pgconn: Any, event: OntologyEvent,
+) -> None:
+    """MDM derived_logic → Metric candidate with formula + COMPUTED_FROM edge."""
+    table = event.table_name
+    col = event.column_name
+    if not (table and col):
+        return
+    env = _envelope_for(event)
+    p = event.payload
+    formula = p.get("derived_logic") or ""
+    m_uri = _canonical_uri("metric", table, col)
+    c_uri = _canonical_uri("column", table, col)
+    t_uri = _canonical_uri("table", table)
+    _cypher(pgconn, (
+        f"MERGE (t:Table {{canonical_uri: {_safe(t_uri)}}}) "
+        f"ON CREATE SET t += {_props({'name': table, **env})} "
+        f"MERGE (c:Column {{canonical_uri: {_safe(c_uri)}}}) "
+        f"ON CREATE SET c += {_props({'name': col, 'table_name': table, 'is_derived': True, **env})} "
+        f"ON MATCH SET c.is_derived = true, c.derived_logic = {_safe(formula)} "
+        f"MERGE (t)-[:CONTAINS]->(c) "
+        f"MERGE (m:Metric {{canonical_uri: {_safe(m_uri)}}}) "
+        f"ON CREATE SET m += {_props({'view': table, 'name': col, 'formula': formula, 'kind': 'derived', **env})} "
+        f"ON MATCH SET m.formula = {_safe(formula)} "
+        f"MERGE (m)-[r:COMPUTED_FROM]->(c) "
+        f"ON CREATE SET r += {_props({'formula': formula, **env})}"
+    ))
+    _project_event_provenance(pgconn, event, target_label="Metric", target_uri=m_uri)
+
+
+def _project_table_metadata_observed(
+    pgconn: Any, event: OntologyEvent,
+) -> None:
+    """Table-level MDM facts → properties on the Table node.
+
+    Carries: table_type, feed_type, data_category, data_sub_category,
+    bq_fqn (project.dataset.table), ownership_imr_queue, business_contacts.
+    These drive the view header comment, governance lookups, and freshness
+    annotations."""
+    table = event.table_name
+    if not table:
+        return
+    env = _envelope_for(event)
+    p = event.payload
+    t_uri = _canonical_uri("table", table)
+    keys = (
+        "table_type", "feed_type", "load_type", "data_category",
+        "data_sub_category", "is_internal", "is_sor_certified",
+        "is_searchable", "is_transactional", "retention_period",
+        "bq_fqn", "bq_project", "bq_dataset", "bq_table",
+        "ownership_imr_queue", "ownership_aim_id",
+        "table_business_name", "table_description",
+    )
+    table_props = {
+        "canonical_uri": t_uri,
+        "name": table,
+        **{k: p[k] for k in keys if k in p and p[k] is not None},
+        **env,
+    }
+    _cypher(pgconn, (
+        f"MERGE (t:Table {{canonical_uri: {_safe(t_uri)}}}) "
+        f"ON CREATE SET t += {_props(table_props)} "
+        f"ON MATCH SET t += {_props({k: p[k] for k in keys if k in p and p[k] is not None})}"
+    ))
+    _project_event_provenance(pgconn, event, target_label="Table", target_uri=t_uri)
+
+
+def _project_deprecation_observed(
+    pgconn: Any, event: OntologyEvent,
+) -> None:
+    """is_decommissioned → set status='deprecated' on Table (and Column if
+    column-level). Driver of DEPRECATES + demotion."""
+    table = event.table_name
+    col = event.column_name
+    if not table:
+        return
+    env = _envelope_for(event)
+    env["status"] = "deprecated"
+    env["confidence"] = "deprecated"
+    t_uri = _canonical_uri("table", table)
+    if col:
+        c_uri = _canonical_uri("column", table, col)
+        _cypher(pgconn, (
+            f"MERGE (c:Column {{canonical_uri: {_safe(c_uri)}}}) "
+            f"ON CREATE SET c += {_props({'name': col, 'table_name': table, **env})} "
+            f"ON MATCH SET c.status = 'deprecated', c.confidence = 'deprecated'"
+        ))
+        _project_event_provenance(pgconn, event, target_label="Column", target_uri=c_uri)
+    else:
+        _cypher(pgconn, (
+            f"MERGE (t:Table {{canonical_uri: {_safe(t_uri)}}}) "
+            f"ON CREATE SET t += {_props({'name': table, **env})} "
+            f"ON MATCH SET t.status = 'deprecated', t.confidence = 'deprecated'"
+        ))
+        _project_event_provenance(pgconn, event, target_label="Table", target_uri=t_uri)
+
+
 def _project_event_provenance(
     pgconn: Any, event: OntologyEvent,
     *, target_label: str, target_uri: str,
@@ -399,6 +584,11 @@ _DISPATCH: dict[str, Callable[[Any, OntologyEvent], None]] = {
     "entity_refinement": _project_entity_refinement,
     "cardinality_observed": _project_cardinality_observed,
     "join_path_observed": _project_join_path_observed,
+    "column_governance_observed": _project_column_governance_observed,
+    "partition_observed": _project_partition_observed,
+    "derived_formula_observed": _project_derived_formula_observed,
+    "table_metadata_observed": _project_table_metadata_observed,
+    "deprecation_observed": _project_deprecation_observed,
 }
 
 

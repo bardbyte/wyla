@@ -757,16 +757,38 @@ def record_equivalences_from_fingerprints(
 def record_entity_hints_from_mdm(
     store: OntologyStore, ctx: TableContext,
 ) -> int:
-    """Hook 2 — MDM business names + data_category give entity hints.
+    """Hook 2 — every MDM signal becomes a graph event.
 
-    For each MDM column with a recognizable naming pattern, emit an
-    entity_hint event. Plus when MDM business_name differs from column
-    name, emit a synonym_candidate.
+    Originally just entity_hint + synonym_candidate. Now exhaustive over
+    the MDM digest surface (the patentable graph IS the product — every
+    MDM fact a grounded claim):
+
+      Per column:
+        - entity_hint            (column naming pattern → Entity)
+        - synonym_candidate      (business_name ≠ column_name)
+        - curated_pk             (is_primary OR is_dedupe_key)
+        - column_governance_observed
+                                 (PII, CDE, GDPR, sensitive, mandatory,
+                                  clustered, format, length, publish_code)
+        - partition_observed     (is_partitioned → TimeGrain + always_filter)
+        - derived_formula_observed
+                                 (derived_logic → Metric)
+        - cardinality_observed   (external_references → declared FK)
+        - deprecation_observed   (is_decommissioned)
+
+      Per table:
+        - table_metadata_observed
+                                 (table_type, feed_type, data_category,
+                                  bq_fqn, ownership)
+        - deprecation_observed   (table-level is_decommissioned)
+
+    Every event flows through ``store.record`` → JSONL + (optional) AGE.
+    Source weight ``mdm = 3`` is multiplied into evidence accumulation
+    by the promotion gate.
     """
     events: list[OntologyEvent] = []
     table = ctx.table_name
 
-    # Table-level hint from MDM data_category / dataset business_name.
     ds = ctx.mdm_dataset_details or {}
     cat = (ds.get("data_category") or "").lower()
     sub = (ds.get("data_sub_category") or "").lower()
@@ -777,12 +799,53 @@ def record_entity_hints_from_mdm(
             table_entity = cand
             break
 
-    # Per-column entity classification.
+    # ── Table-level metadata + deprecation ──
+    table_meta_payload = {
+        k: ds.get(k) for k in (
+            "table_type", "feed_type", "load_type",
+            "data_category", "data_sub_category",
+            "is_internal", "is_sor_certified", "is_searchable",
+            "is_transactional", "retention_period",
+            "bq_project", "bq_dataset", "bq_table",
+            "table_business_name", "table_description",
+        ) if ds.get(k) is not None
+    }
+    bq_fqn = ".".join(filter(None, [
+        ds.get("bq_project"), ds.get("bq_dataset"), ds.get("bq_table"),
+    ]))
+    if bq_fqn:
+        table_meta_payload["bq_fqn"] = bq_fqn
+    own = ctx.mdm_ownership or {}
+    if own:
+        table_meta_payload["ownership_imr_queue"] = own.get("imr_queue")
+        table_meta_payload["ownership_aim_id"] = own.get("aim_id")
+    if table_meta_payload:
+        events.append(OntologyEvent(
+            event_type="table_metadata_observed",
+            source="fetch_mdm",
+            table_name=table,
+            payload=table_meta_payload,
+            confidence=0.85,
+            evidence=f"MDM table-level facts: {sorted(table_meta_payload.keys())}",
+        ))
+    if ds.get("is_decommissioned"):
+        events.append(OntologyEvent(
+            event_type="deprecation_observed",
+            source="fetch_mdm",
+            table_name=table,
+            payload={"reason": "MDM is_decommissioned=true"},
+            confidence=0.95,
+            evidence="MDM dataset_details.is_decommissioned",
+        ))
+
+    # ── Per-column passes ──
     for col in (ctx.mdm_columns or []):
         cn = col.get("name")
         if not cn:
             continue
         ent = _classify_to_entity(cn) or table_entity
+
+        # 1. entity_hint (pre-existing behavior)
         if ent:
             events.append(OntologyEvent(
                 event_type="entity_hint",
@@ -800,7 +863,8 @@ def record_entity_hints_from_mdm(
                     f"category={cat or '(none)'}"
                 ),
             ))
-        # Synonym candidate from MDM business_name.
+
+        # 2. synonym_candidate (pre-existing behavior)
         bn = (col.get("business_name") or "").strip()
         if bn and bn.lower() != cn.lower() and ent:
             events.append(OntologyEvent(
@@ -813,6 +877,116 @@ def record_entity_hints_from_mdm(
                 confidence=0.55,
                 evidence=f"MDM business_name='{bn}' for column '{cn}'",
             ))
+
+        # 3. curated_pk (is_primary OR is_dedupe_key)
+        if col.get("is_primary") or col.get("is_dedupe_key"):
+            role = "pk" if col.get("is_primary") else "dedupe_key"
+            events.append(OntologyEvent(
+                event_type="curated_pk",
+                source="fetch_mdm",
+                table_name=table,
+                column_name=cn,
+                payload={
+                    "role": role,
+                    "is_primary": bool(col.get("is_primary")),
+                    "is_dedupe_key": bool(col.get("is_dedupe_key")),
+                },
+                confidence=0.9 if role == "pk" else 0.75,
+                evidence=f"MDM sensitivity_details.{role}=true",
+            ))
+
+        # 4. column_governance_observed (PII/CDE/GDPR/mandatory/clustered/format)
+        gov_keys = {
+            "is_pii": col.get("is_pii"),
+            "pii_role_id": col.get("pii_role_id"),
+            "is_critical_data_element": col.get("is_critical_data_element"),
+            "is_gdpr": col.get("is_gdpr"),
+            "is_sensitive": col.get("is_sensitive"),
+            "is_mandatory": col.get("is_mandatory"),
+            "is_clustered": col.get("is_clustered"),
+            "cluster_position": col.get("cluster_position"),
+            "attribute_format": col.get("format"),
+            "attribute_length": col.get("length"),
+            "publish_code": col.get("publish_code"),
+            "is_meta_column": col.get("is_meta_column"),
+        }
+        gov_facts = {k: v for k, v in gov_keys.items() if v not in (None, False)}
+        if gov_facts:
+            events.append(OntologyEvent(
+                event_type="column_governance_observed",
+                source="fetch_mdm",
+                table_name=table,
+                column_name=cn,
+                payload=gov_facts,
+                confidence=0.85,
+                evidence=f"MDM governance facts: {sorted(gov_facts.keys())}",
+            ))
+
+        # 5. partition_observed
+        if col.get("is_partitioned") or col.get("partition_column"):
+            events.append(OntologyEvent(
+                event_type="partition_observed",
+                source="fetch_mdm",
+                table_name=table,
+                column_name=cn,
+                payload={
+                    "partition_position": col.get("partition_position"),
+                    "time_partition_type": col.get("time_partition_type"),
+                },
+                confidence=0.95,
+                evidence="MDM attribute_details.is_partitioned=true",
+            ))
+
+        # 6. derived_formula_observed
+        derived = col.get("derived_logic")
+        if derived:
+            events.append(OntologyEvent(
+                event_type="derived_formula_observed",
+                source="fetch_mdm",
+                table_name=table,
+                column_name=cn,
+                payload={"derived_logic": str(derived)},
+                confidence=0.8,
+                evidence=(
+                    f"MDM derived_logic length={len(str(derived))} chars"
+                ),
+            ))
+
+        # 7. cardinality_observed for declared external_references (FKs)
+        for ref in (col.get("external_references") or []):
+            other_t = (ref.get("table") or ref.get("ref_table")
+                       or ref.get("target_table"))
+            other_c = (ref.get("column") or ref.get("ref_column")
+                       or ref.get("target_column"))
+            if not (other_t and other_c):
+                continue
+            events.append(OntologyEvent(
+                event_type="cardinality_observed",
+                source="fetch_mdm",
+                payload={
+                    "left_table": table, "left_column": cn,
+                    "right_table": other_t, "right_column": other_c,
+                    "cardinality": ref.get("cardinality", "many_to_one"),
+                    "role": "external_reference",
+                },
+                confidence=0.9,
+                evidence=(
+                    f"MDM external_references: {table}.{cn} → {other_t}.{other_c}"
+                ),
+            ))
+
+        # 8. column-level deprecation
+        if col.get("is_decommissioned") or col.get("status") == "decommissioned":
+            events.append(OntologyEvent(
+                event_type="deprecation_observed",
+                source="fetch_mdm",
+                table_name=table,
+                column_name=cn,
+                payload={"reason": "MDM column is_decommissioned/status"},
+                confidence=0.95,
+                evidence="MDM column-level decommission flag",
+            ))
+
     store.record_many(events)
     return len(events)
 
