@@ -1,9 +1,0 @@
-{
-  "entities": [],
-  "relationships": [],
-  "table_to_primary_entity": {},
-  "authoring": {
-    "mode": "event_sourced",
-    "reason": "promoted from candidates with threshold evidence>=1, equivalence>=1"
-  }
-}
