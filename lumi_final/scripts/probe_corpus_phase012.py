@@ -240,6 +240,10 @@ class MDMTableAudit:
     missing_threshold: list[str]
     missing_synonym: list[tuple[str, str]]  # (sql_name, suggested_mdm_name)
     missing_real_gap: list[str]
+    # Provenance: for each missing column, where it surfaced in the corpus.
+    # {column_name: [{qid, clause, snippet}, ...]} — answers "how did this
+    # column end up attributed to this table?"
+    missing_provenance: dict[str, list[dict[str, str]]]
 
 
 @dataclass
@@ -259,7 +263,106 @@ class Phase1Stats:
     jsonl_files: list[str] = field(default_factory=list)
 
 
-def _audit_mdm_context(ctx: Any, cache_misses: set[str]) -> MDMTableAudit:
+def _build_column_provenance(
+    fps: list[Any],
+) -> dict[tuple[str, str], list[dict[str, str]]]:
+    """For every column reference in every fingerprint, record (qid,
+    clause, snippet). Keyed by (table_name, column_name lowercased).
+
+    The point: when a column lands in a table's audit as 'real_gap', we
+    can show *exactly* which query and which SQL clause put it there.
+    That's how we tell apart real MDM gaps from discover_tables
+    over-attribution (column belongs to a joined table, not the
+    primary)."""
+    prov: dict[tuple[str, str], list[dict[str, str]]] = {}
+
+    def _add(tbl: str | None, col: str | None, qid: str, clause: str, snippet: str) -> None:
+        if not (tbl and col):
+            return
+        key = (str(tbl).lower(), str(col).lower())
+        prov.setdefault(key, []).append({
+            "qid": qid, "clause": clause, "snippet": snippet[:120],
+        })
+
+    for i, fp in enumerate(fps, start=1):
+        if getattr(fp, "parse_error", None):
+            continue
+        qid = f"Q{i:02d}"
+        primary = fp.primary_table or (fp.tables[0] if fp.tables else None)
+
+        # JOINs — these are the ONLY place we have proper qualifier info.
+        # Use it to attribute keys to the correct table.
+        for j in (fp.joins or []):
+            lt = j.get("left_table") or j.get("from_table") or primary
+            rt = j.get("right_table") or j.get("other_table")
+            lk = j.get("left_key")
+            rk = j.get("right_key")
+            snip = f"{lt}.{lk} = {rt}.{rk}"
+            _add(lt, lk, qid, "JOIN ON", snip)
+            _add(rt, rk, qid, "JOIN ON", snip)
+
+        # SELECT projections / aliases (attributed to primary; SQL doesn't
+        # always qualify them, so this can be wrong)
+        for sa in (fp.select_aliases or []):
+            col = sa.get("column")
+            alias = sa.get("alias")
+            expr = sa.get("expression") or ""
+            if col:
+                _add(primary, col, qid, "SELECT", expr or str(col))
+            if alias and alias != col:
+                _add(primary, alias, qid, "SELECT alias",
+                     f"{col or '?'} AS {alias}")
+
+        # Aggregations
+        for agg in (fp.aggregations or []):
+            col = agg.get("column")
+            alias = agg.get("alias")
+            fn = agg.get("function") or ""
+            if col:
+                _add(primary, col, qid, f"AGG/{fn}", f"{fn}({col})")
+            if alias:
+                _add(primary, alias, qid, "AGG alias",
+                     f"{fn}({col or '?'}) AS {alias}")
+
+        # CASE WHEN
+        for cw in (fp.case_whens or []):
+            src = cw.get("source_column")
+            alias = cw.get("alias")
+            if src:
+                _add(primary, src, qid, "CASE WHEN src",
+                     f"CASE WHEN ... {src} ...")
+            if alias:
+                _add(primary, alias, qid, "CASE WHEN alias",
+                     f"... AS {alias}")
+
+        # WHERE / filters (attribution depends on extractor — usually primary)
+        for flt in (fp.filters or []):
+            col = flt.get("column")
+            op = flt.get("operator") or "?"
+            val = str(flt.get("value") or "")[:30]
+            if col:
+                _add(primary, col, qid, "WHERE", f"{col} {op} {val}")
+
+        # GROUP BY
+        for g in (fp.group_by or []):
+            col = g.get("column")
+            if col:
+                _add(primary, col, qid, "GROUP BY", str(col))
+
+        # date_functions
+        for d in (fp.date_functions or []):
+            col = d.get("column")
+            fn = d.get("function") or ""
+            if col:
+                _add(primary, col, qid, "DATE_FN", f"{fn}({col})")
+
+    return prov
+
+
+def _audit_mdm_context(
+    ctx: Any, cache_misses: set[str],
+    column_provenance: dict[tuple[str, str], list[dict[str, str]]] | None = None,
+) -> MDMTableAudit:
     """Profile MDM richness for one TableContext. Defensive against
     real-cache shape drift — any non-dict entry is silently skipped."""
     import difflib
@@ -376,6 +479,14 @@ def _audit_mdm_context(ctx: Any, cache_misses: set[str]) -> MDMTableAudit:
         missing_threshold=missing_threshold,
         missing_synonym=missing_synonym,
         missing_real_gap=missing_real_gap,
+        missing_provenance=(
+            {
+                m: (column_provenance or {}).get(
+                    (ctx.table_name.lower(), m.lower()), [],
+                )
+                for m in missing_in_mdm
+            } if column_provenance is not None else {}
+        ),
     )
 
 
@@ -463,12 +574,13 @@ def run_phase1(fps: list[Any], *, with_mdm: bool) -> Phase1Stats:
             stats.n_contexts = len(contexts)
             stats.mdm_attempted = True
             _info(f"  discovered {len(contexts)} table context(s)")
-            # Audit MDM richness BEFORE emitting events so we can correlate
-            # event counts to MDM coverage.
+            # Build column-provenance once across all fps — used by audit
+            # to show WHERE each missing column was surfaced from.
+            column_provenance = _build_column_provenance(fps)
             cache_misses_set = set(mdm.cache_misses)
             for ctx in contexts.values():
                 stats.mdm_audits.append(
-                    _audit_mdm_context(ctx, cache_misses_set),
+                    _audit_mdm_context(ctx, cache_misses_set, column_provenance),
                 )
             for ctx in contexts.values():
                 stats.n_mdm += record_entity_hints_from_mdm(store, ctx)
@@ -903,33 +1015,68 @@ def write_report(
                 f"{len(a.missing_synonym)} | {len(a.missing_real_gap)} |"
             )
 
-        # Detailed breakdown for the *actionable* categories: synonyms
-        # (mint HAS_SYNONYM) and real_gaps (refresh MDM). Skip metric +
-        # threshold detail — we already capture them as Metric/Threshold
-        # nodes, no human action needed.
-        synonym_lines = []
-        gap_lines = []
+        # Detailed breakdown with PROVENANCE — under each entry we show
+        # exactly which query + clause + snippet surfaced the column.
+        # Lets you tell apart real gaps from discover_tables over-attribution
+        # (e.g., column comes from JOIN to a different table).
+
+        def _render_provenance(a: MDMTableAudit, col: str) -> list[str]:
+            entries = a.missing_provenance.get(col, [])
+            if not entries:
+                return ["    - _(no provenance found — extractor may have "
+                        "missed it)_"]
+            # Deduplicate identical (qid, clause, snippet) trips
+            seen: set[tuple[str, str, str]] = set()
+            lines: list[str] = []
+            for e in entries:
+                key = (e["qid"], e["clause"], e["snippet"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                lines.append(
+                    f"    - **{e['qid']}** `{e['clause']}` → `{e['snippet']}`"
+                )
+                if len(lines) >= 5:
+                    remaining = len(entries) - len(lines)
+                    if remaining > 0:
+                        lines.append(f"    - _(+{remaining} more occurrences)_")
+                    break
+            return lines
+
+        synonym_blocks: list[str] = []
+        gap_blocks: list[str] = []
         for a in p1.mdm_audits:
             for sql_name, mdm_match in a.missing_synonym:
-                synonym_lines.append(
-                    f"  - `{a.table_name}.{sql_name}` ≈ `{mdm_match}`"
-                )
+                block = [
+                    f"\n- `{a.table_name}.{sql_name}` ≈ MDM has `{mdm_match}`",
+                ]
+                block.extend(_render_provenance(a, sql_name))
+                synonym_blocks.append("\n".join(block))
             for sql_name in a.missing_real_gap:
-                gap_lines.append(f"  - `{a.table_name}.{sql_name}`")
-        if synonym_lines:
-            md.append(f"\n#### Synonym candidates ({len(synonym_lines)})")
-            md.append("_Each is a candidate `HAS_SYNONYM` edge from "
-                      "the corpus-name to the MDM technical name._\n")
-            md.extend(synonym_lines[:50])
-            if len(synonym_lines) > 50:
-                md.append(f"  - … and {len(synonym_lines) - 50} more")
-        if gap_lines:
-            md.append(f"\n#### Real MDM gaps ({len(gap_lines)})")
-            md.append("_Columns the SQL uses that MDM doesn't have — "
-                      "refresh cache or escalate to data governance._\n")
-            md.extend(gap_lines[:50])
-            if len(gap_lines) > 50:
-                md.append(f"  - … and {len(gap_lines) - 50} more")
+                block = [f"\n- `{a.table_name}.{sql_name}`"]
+                block.extend(_render_provenance(a, sql_name))
+                gap_blocks.append("\n".join(block))
+
+        if synonym_blocks:
+            md.append(f"\n#### Synonym candidates ({len(synonym_blocks)})")
+            md.append("_Provenance below tells you where the corpus name "
+                      "came from — useful for deciding whether to mint a "
+                      "`HAS_SYNONYM` edge._")
+            md.extend(synonym_blocks[:30])
+            if len(synonym_blocks) > 30:
+                md.append(f"\n_… and {len(synonym_blocks) - 30} more_")
+
+        if gap_blocks:
+            md.append(f"\n#### Real MDM gaps ({len(gap_blocks)})")
+            md.append("_Provenance below shows which query + clause "
+                      "surfaced each column. If the clause is "
+                      "`JOIN ON other_table.col`, this isn't a gap — it's "
+                      "discover_tables over-attributing a joined column "
+                      "to the wrong table. If it's `SELECT` / `WHERE` / "
+                      "`AGG` with no join trail, it's a true MDM gap._")
+            md.extend(gap_blocks[:30])
+            if len(gap_blocks) > 30:
+                md.append(f"\n_… and {len(gap_blocks) - 30} more_")
 
         md.append("\n_Column legend (per-col counts within MDM):_")
         md.append("- **biz** = has `business_name`")
