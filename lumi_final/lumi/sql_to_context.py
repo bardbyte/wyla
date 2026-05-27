@@ -911,21 +911,75 @@ def discover_tables(
       - capture filters from CTEs scoped to this table as is_structural=True
       - fetch MDM metadata via mdm_client.fetch()
       - load baseline_views_dir/<table>.view.lkml if present
+
+    Column attribution (the historical pain point): instead of scattering
+    every column reference into every table-in-fp's context, we resolve
+    each column to the table that actually owns it via
+    ``_resolve_column_ownership`` — join keys win, then MDM schema lookup,
+    then primary-table fallback. The per-table ``attribution_stats`` dict
+    records how each method contributed so the audit can report what
+    fraction needed fallback.
     """
     baseline_dir = Path(baseline_views_dir)
 
-    # Build query identifiers (Qnn) keyed by fingerprint index for traceability.
+    # Pass A: discover every table the corpus touches (no column accumulation
+    # yet — we need MDM schemas first to resolve ownership correctly).
     contexts: dict[str, dict[str, Any]] = {}
+    for q_index, fp in enumerate(fingerprints, start=1):
+        if fp.parse_error:
+            logger.warning("Q%02d: parse error — %s", q_index, fp.parse_error)
+            continue
+        for table in fp.tables:
+            contexts.setdefault(table, _empty_context(table))
+        for cte in fp.ctes:
+            for src in cte.get("source_tables") or []:
+                contexts.setdefault(src, _empty_context(src))
+        for tt in fp.temp_tables:
+            for src in tt.get("source_tables") or []:
+                contexts.setdefault(src, _empty_context(src))
 
+    # Pass B: fetch MDM up-front so column-ownership resolution can use
+    # the schema-lookup strategy (not just join keys + fallback).
+    mdm_columns_by_table: dict[str, set[str]] = {}
+    mdm_payloads: dict[str, dict[str, Any]] = {}
+    for table_name in contexts:
+        mdm = mdm_client.fetch(table_name)
+        mdm_payloads[table_name] = mdm
+        col_names: set[str] = set()
+        for c in (mdm.get("columns") or []):
+            if not isinstance(c, dict):
+                continue
+            for k in ("name", "attribute_name", "current_col_name"):
+                v = c.get(k)
+                if v:
+                    col_names.add(str(v).lower())
+        mdm_columns_by_table[table_name] = col_names
+
+    # Pass C: accumulate per fp, using resolved column ownership.
     for q_index, fp in enumerate(fingerprints, start=1):
         qid = f"Q{q_index:02d}"
         if fp.parse_error:
-            logger.warning("%s: parse error — %s", qid, fp.parse_error)
             continue
+
+        owner, method = _resolve_column_ownership(fp, mdm_columns_by_table)
+        # Tally attribution methods per table (for the audit's reporting)
+        for col, m in method.items():
+            owning_table = owner.get(col)
+            if not owning_table or owning_table not in contexts:
+                continue
+            stats = contexts[owning_table].setdefault(
+                "attribution_stats", {
+                    "qualified": 0, "join_resolved": 0,
+                    "schema_unique": 0, "schema_multi": 0, "fallback": 0,
+                },
+            )
+            stats[m] = stats.get(m, 0) + 1
 
         for table in fp.tables:
             ctx = contexts.setdefault(table, _empty_context(table))
-            _accumulate_into_context(ctx, fp, qid, this_table=table)
+            _accumulate_into_context(
+                ctx, fp, qid, this_table=table, column_owner=owner,
+            )
 
         # CTE source tables also get TableContexts — they're real tables that
         # need enrichment (the CTE just adds structural filters on top).
@@ -956,9 +1010,9 @@ def discover_tables(
                 if qid not in ctx["queries_using_this"]:
                     ctx["queries_using_this"].append(qid)
 
-    # Now hydrate with MDM + baseline.
+    # Now hydrate with MDM (already fetched in Pass B) + baseline.
     for table_name, raw_ctx in contexts.items():
-        mdm = mdm_client.fetch(table_name)
+        mdm = mdm_payloads.get(table_name) or mdm_client.fetch(table_name)
         raw_ctx["mdm_columns"] = mdm.get("columns") or []
         raw_ctx["mdm_table_description"] = mdm.get("table_description")
         raw_ctx["mdm_coverage_pct"] = float(mdm.get("mdm_coverage_pct") or 0.0)
@@ -1327,6 +1381,13 @@ def _empty_context(table_name: str) -> dict[str, Any]:
         "mdm_coverage_pct": 0.0,
         "existing_view_lkml": None,
         "queries_using_this": [],
+        # Attribution accounting — tracks how columns were assigned to
+        # this table by _resolve_column_ownership (qualified /
+        # join_resolved / schema_unique / schema_multi / fallback).
+        "attribution_stats": {
+            "qualified": 0, "join_resolved": 0,
+            "schema_unique": 0, "schema_multi": 0, "fallback": 0,
+        },
     }
 
 
@@ -1335,35 +1396,162 @@ def _accumulate_into_context(
     fp: SQLFingerprint,
     qid: str,
     this_table: str,
+    column_owner: dict[str, str] | None = None,
 ) -> None:
-    """Merge fp's data into ctx for the given table."""
+    """Merge fp's data into ctx for the given table.
+
+    If ``column_owner`` is provided (the qualifier-aware ownership map
+    from ``_resolve_column_ownership``), only columns this table actually
+    owns are accumulated — fixes the ~13% over-attribution bug where
+    JOINed columns leaked into every joined table's context.
+
+    Without ``column_owner`` (legacy mode), the old scatter behavior
+    is preserved for back-compat with any callers we haven't migrated.
+    """
     if qid not in ctx["queries_using_this"]:
         ctx["queries_using_this"].append(qid)
 
+    def _owned(col: str | None) -> bool:
+        """True if this table owns the given column (per resolver), or
+        legacy-true when no resolver was supplied."""
+        if column_owner is None:
+            return True  # legacy scatter
+        if not col:
+            return False
+        owner = column_owner.get(col.lower())
+        return owner == this_table
+
     for agg in fp.aggregations:
-        if agg not in ctx["aggregations"]:
-            ctx["aggregations"].append(agg)
-            if agg.get("column") and agg["column"] not in ctx["columns_referenced"]:
-                ctx["columns_referenced"].append(agg["column"])
+        if agg in ctx["aggregations"]:
+            continue
+        col = agg.get("column")
+        if col and not _owned(col):
+            continue
+        ctx["aggregations"].append(agg)
+        if col and col not in ctx["columns_referenced"]:
+            ctx["columns_referenced"].append(col)
 
     for cw in fp.case_whens:
-        if cw not in ctx["case_whens"]:
-            ctx["case_whens"].append(cw)
+        if cw in ctx["case_whens"]:
+            continue
+        src = cw.get("source_column")
+        if src and not _owned(src):
+            continue
+        ctx["case_whens"].append(cw)
+        if src and src not in ctx["columns_referenced"]:
+            ctx["columns_referenced"].append(src)
 
     for f in fp.filters:
-        if f not in ctx["filters_on_this"]:
-            ctx["filters_on_this"].append(f)
-            if f.get("column") and f["column"] not in ctx["columns_referenced"]:
-                ctx["columns_referenced"].append(f["column"])
+        if f in ctx["filters_on_this"]:
+            continue
+        col = f.get("column")
+        if col and not _owned(col):
+            continue
+        ctx["filters_on_this"].append(f)
+        if col and col not in ctx["columns_referenced"]:
+            ctx["columns_referenced"].append(col)
 
     for d in fp.date_functions:
-        if d not in ctx["date_functions"]:
-            ctx["date_functions"].append(d)
+        if d in ctx["date_functions"]:
+            continue
+        col = d.get("column")
+        if col and not _owned(col):
+            continue
+        ctx["date_functions"].append(d)
 
-    # Joins: include if this_table is the FROM (left) side OR involves this table.
+    # Joins always attach to BOTH endpoints — they're the proof of
+    # qualifier ownership in the first place, not a candidate for filtering.
     for j in fp.joins:
         if j not in ctx["joins_involving_this"]:
             ctx["joins_involving_this"].append(j)
+
+
+def _resolve_column_ownership(
+    fp: SQLFingerprint,
+    mdm_columns_by_table: dict[str, set[str]] | None = None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Resolve each column reference in fp to the table that actually owns it.
+
+    Returns ``(owner_map, method_map)`` where:
+      owner_map[column_name_lower] = table_name
+      method_map[column_name_lower] = one of:
+        "qualified"      — an explicit qualifier was present in the AST
+                           (not yet captured at fp level; reserved for
+                           future qualifier-extraction work)
+        "join_resolved"  — column appears as a join key in fp.joins,
+                           resolved to the side that owns it
+        "schema_unique"  — column name exists in exactly one of fp.tables'
+                           MDM column lists
+        "schema_multi"   — column name exists in multiple tables' MDM lists;
+                           resolved to primary_table (best-effort)
+        "fallback"       — none of the above; assigned to primary_table
+
+    The mdm_columns_by_table map is optional; without it, only join_resolved
+    + fallback methods fire (which still catches the bulk of misattribution
+    on a JOIN-heavy corpus).
+    """
+    owner: dict[str, str] = {}
+    method: dict[str, str] = {}
+    tables_in_fp = [t for t in (fp.tables or []) if t]
+    primary = fp.primary_table or (tables_in_fp[0] if tables_in_fp else None)
+
+    # 1. join_resolved — every join key has a known side
+    for j in (fp.joins or []):
+        lt = j.get("left_table") or j.get("from_table")
+        rt = j.get("right_table") or j.get("other_table")
+        lk = j.get("left_key")
+        rk = j.get("right_key")
+        if lt and lk and lk.lower() not in owner:
+            owner[lk.lower()] = lt
+            method[lk.lower()] = "join_resolved"
+        if rt and rk and rk.lower() not in owner:
+            owner[rk.lower()] = rt
+            method[rk.lower()] = "join_resolved"
+
+    # Helper: every column the fp references, unioned across extractors
+    def _all_cols() -> set[str]:
+        cols: set[str] = set()
+        for src in (
+            (a.get("column") for a in (fp.aggregations or [])),
+            (c.get("source_column") for c in (fp.case_whens or [])),
+            (f.get("column") for f in (fp.filters or [])),
+            (g.get("column") for g in (fp.group_by or [])),
+            (d.get("column") for d in (fp.date_functions or [])),
+            ((sa.get("column") for sa in (fp.select_aliases or []))),
+        ):
+            for c in src:
+                if c:
+                    cols.add(c.lower())
+        return cols
+
+    # 2/3. schema lookup — for columns not already join-resolved
+    if mdm_columns_by_table:
+        for col in _all_cols():
+            if col in owner:
+                continue
+            owning_tables = [
+                t for t in tables_in_fp
+                if col in (mdm_columns_by_table.get(t, set()))
+            ]
+            if len(owning_tables) == 1:
+                owner[col] = owning_tables[0]
+                method[col] = "schema_unique"
+            elif len(owning_tables) > 1:
+                # Multiple tables claim it — prefer primary_table when present
+                if primary in owning_tables:
+                    owner[col] = primary
+                else:
+                    owner[col] = owning_tables[0]
+                method[col] = "schema_multi"
+
+    # 4. fallback — everything else lands on primary
+    if primary:
+        for col in _all_cols():
+            if col not in owner:
+                owner[col] = primary
+                method[col] = "fallback"
+
+    return owner, method
 
 
 # ─── MDM dataset-level synthesis ────────────────────────────

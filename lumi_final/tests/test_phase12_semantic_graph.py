@@ -113,8 +113,15 @@ def test_projector_covers_every_ontology_event_type_in_use():
     declared = set(OntologyEventType.__args__)  # Literal members
     covered = set(projector.covered_event_types())
     missing = declared - covered
-    # If any are intentionally NOT projected, list them here:
-    intentionally_unprojected: set[str] = set()
+    # If any are intentionally NOT projected, list them here.
+    # The 3 Block-A additions emit to JSONL only; Block C will add
+    # SLICEABLE_BY, ALWAYS_FILTER, and structural/business Filter
+    # projectors. Remove from this set when those land.
+    intentionally_unprojected: set[str] = {
+        "metric_dimension_co_occurrence",
+        "structural_filter_observed",
+        "business_filter_observed",
+    }
     assert missing - intentionally_unprojected == set(), (
         f"Projector missing dispatch for event types: {missing}"
     )
