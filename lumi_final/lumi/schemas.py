@@ -58,6 +58,12 @@ class TableContext(BaseModel):
     # status. Drives the view header comment + escalation routing.
     mdm_ownership: dict = Field(default_factory=dict)
 
+    # Attribution accounting from _resolve_column_ownership — how each
+    # column landed on this table. Keys: qualified / join_resolved /
+    # schema_unique / schema_multi / fallback. The audit derives the
+    # "% fallback" health metric from this.
+    attribution_stats: dict = Field(default_factory=dict)
+
     # From baseline (file read + lkml parse)
     existing_view_lkml: str | None = None
     # Parsed once at discover-time so the planner + enricher can reason
@@ -649,6 +655,17 @@ OntologyEventType = Literal[
     # parse_sqls hook — cohort_scope_signals (named CTE cohorts).
     # Cohort node + applied-to relations.
     "cohort_observed",
+    # parse_sqls hook — Metric ↔ Dimension co-occurrence in same query.
+    # Drives SLICEABLE_BY edges (Metric → Dimension), the highest-value
+    # graph relationship for Radix retrieval.
+    "metric_dimension_co_occurrence",
+    # parse_sqls hook — WHERE filter with is_structural=true (CTE-scoped
+    # or corpus-frequent >50%). Drives ALWAYS_FILTER edges + Looker
+    # always_filter blocks.
+    "structural_filter_observed",
+    # parse_sqls hook — WHERE filter with is_structural=false. Drives
+    # filter_catalog entries with empirical distinct values.
+    "business_filter_observed",
 ]
 
 

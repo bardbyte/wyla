@@ -784,12 +784,29 @@ def record_corpus_facts(
     grains: dict[tuple[str, str, str], int] = {}
     cohorts: dict[str, dict[str, Any]] = {}
 
-    for fp in fingerprints:
+    # A2 — Metric ↔ Dimension co-occurrence. Key is the (metric, dimension)
+    # pair; value tracks count + the qids that produced it.
+    md_cooc: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+
+    # A3 — per-table per-(col,op,value) frequency, used to decide which
+    # structural filters cross the 50% "always_filter candidate" threshold.
+    queries_touching_table: dict[str, int] = {}
+    structural_filter_freq: dict[tuple[str, str, str, str], int] = {}
+    business_filter_distinct_values: dict[tuple[str, str], set[str]] = {}
+
+    for q_index, fp in enumerate(fingerprints, start=1):
         if fp.parse_error:
             continue
         primary = fp.primary_table or (fp.tables[0] if fp.tables else None)
         if not primary:
             continue
+        qid = f"Q{q_index:02d}"
+
+        # Track table-touch frequency for the structural-filter "always_filter
+        # candidate" decision in the emit pass.
+        for t in (fp.tables or []):
+            if t:
+                queries_touching_table[t] = queries_touching_table.get(t, 0) + 1
 
         # 1. metric_observed — aggregations
         for agg in fp.aggregations or []:
@@ -842,6 +859,55 @@ def record_corpus_facts(
                 vals = (str(val).strip().strip("'\""),)
             key = (primary, str(col), op, is_struct, vals)
             filters[key] = filters.get(key, 0) + 1
+
+            # A3 — structural/business split aggregation
+            if is_struct:
+                struct_val = vals[0] if vals else ""
+                sf_key = (primary, str(col), op, str(struct_val))
+                structural_filter_freq[sf_key] = (
+                    structural_filter_freq.get(sf_key, 0) + 1
+                )
+            else:
+                bf_key = (primary, str(col).lower())
+                bucket = business_filter_distinct_values.setdefault(bf_key, set())
+                for v in vals:
+                    if v:
+                        bucket.add(str(v))
+
+        # A2 — metric ↔ dimension co-occurrence (the SLICEABLE_BY raw signal).
+        # Skip single_lookup / distinct_extract intents (no real metric here).
+        intent = getattr(fp, "inferred_intent_class", "") or ""
+        if intent not in {"single_lookup", "distinct_extract"} and (
+            fp.aggregations and fp.group_by
+        ):
+            for agg in fp.aggregations or []:
+                fn = (agg.get("function") or "").upper()
+                col = agg.get("column")
+                m_alias = agg.get("alias") or ""
+                if not (fn and col):
+                    continue
+                metric_expr = f"{fn}({col})"
+                for gb in fp.group_by or []:
+                    dim_col = gb.get("column")
+                    if not dim_col:
+                        continue
+                    key = (
+                        metric_expr.lower(), str(m_alias),
+                        str(dim_col).lower(), primary,
+                    )
+                    entry = md_cooc.setdefault(key, {
+                        "metric_expr": metric_expr,
+                        "metric_alias": m_alias,
+                        "dimension_column": dim_col,
+                        "dimension_table": primary,
+                        "intent_classes": set(),
+                        "member_qids": [],
+                        "count": 0,
+                    })
+                    entry["count"] += 1
+                    entry["intent_classes"].add(intent or "unknown")
+                    if qid not in entry["member_qids"]:
+                        entry["member_qids"].append(qid)
 
         # 4. time_grain_observed — date_functions
         for dfn in fp.date_functions or []:
@@ -911,21 +977,73 @@ def record_corpus_facts(
         ))
 
     for (table, col, op, is_struct, vals), count in filters.items():
+        # A3 — emit the right event type instead of generic filter_observed.
+        if is_struct:
+            sf_key = (table, col, op, str(vals[0]) if vals else "")
+            sf_count = structural_filter_freq.get(sf_key, count)
+            q_touch = queries_touching_table.get(table, 1) or 1
+            corpus_pct = sf_count / q_touch
+            events.append(OntologyEvent(
+                event_type="structural_filter_observed",
+                source="parse_sqls",
+                table_name=table,
+                column_name=col,
+                payload={
+                    "operator": op,
+                    "values": list(vals),
+                    "count": sf_count,
+                    "queries_touching_table": q_touch,
+                    "corpus_frequency_pct": round(corpus_pct, 3),
+                    "is_always_filter_candidate": corpus_pct > 0.5,
+                },
+                confidence=min(0.95, corpus_pct),
+                evidence=(
+                    f"structural WHERE {col} {op} {list(vals) or '?'} in "
+                    f"{sf_count}/{q_touch} table queries "
+                    f"({corpus_pct*100:.0f}%)"
+                ),
+            ))
+        else:
+            bf_key = (table, col.lower())
+            distinct_vals = sorted(business_filter_distinct_values.get(bf_key, set()))
+            events.append(OntologyEvent(
+                event_type="business_filter_observed",
+                source="parse_sqls",
+                table_name=table,
+                column_name=col,
+                payload={
+                    "operator": op,
+                    "values": list(vals),
+                    "count": count,
+                    "distinct_values_observed": distinct_vals[:50],
+                    "distinct_value_count": len(distinct_vals),
+                },
+                confidence=min(0.9, 0.5 + 0.05 * count),
+                evidence=(
+                    f"business WHERE {col} {op} ({len(distinct_vals)} "
+                    f"distinct values seen across corpus)"
+                ),
+            ))
+
+    # A2 — emit metric_dimension_co_occurrence events
+    for (m_lower, m_alias, d_lower, table), entry in md_cooc.items():
         events.append(OntologyEvent(
-            event_type="filter_observed",
+            event_type="metric_dimension_co_occurrence",
             source="parse_sqls",
             table_name=table,
-            column_name=col,
             payload={
-                "operator": op,
-                "is_structural": is_struct,
-                "values": list(vals),
-                "count": count,
+                "metric_expr": entry["metric_expr"],
+                "metric_alias": entry["metric_alias"],
+                "dimension_column": entry["dimension_column"],
+                "dimension_table": entry["dimension_table"],
+                "count": entry["count"],
+                "member_query_ids": entry["member_qids"],
+                "intent_classes": sorted(entry["intent_classes"]),
             },
-            confidence=0.85 if is_struct else min(0.9, 0.5 + 0.05 * count),
+            confidence=min(0.95, 0.3 + 0.1 * entry["count"]),
             evidence=(
-                f"WHERE {col} {op} {list(vals) or '?'} in {count} query(ies)"
-                + (" (structural — CTE-scoped)" if is_struct else "")
+                f"{entry['metric_expr']} sliced by {entry['dimension_column']} "
+                f"in {entry['count']} query(ies)"
             ),
         ))
 

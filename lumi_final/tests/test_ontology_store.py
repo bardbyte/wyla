@@ -480,6 +480,94 @@ def test_corpus_facts_emits_question_pattern_from_clustering(tmp_path: Path):
     assert "question_pattern_observed" in _read_event_types(store)
 
 
+def test_corpus_facts_emits_metric_dimension_co_occurrence(tmp_path: Path):
+    """A2 — SUM(x) GROUP BY seg should emit metric_dimension_co_occurrence."""
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "SELECT bus_seg, SUM(billed_business) "
+        "FROM cornerstone_metrics GROUP BY bus_seg",
+    ])
+    record_corpus_facts(store, fps)
+    assert "metric_dimension_co_occurrence" in _read_event_types(store)
+
+
+def test_md_cooccurrence_skips_single_lookup(tmp_path: Path):
+    """A2 — single_lookup queries should NOT produce co-occurrence events."""
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls(["SELECT * FROM customers WHERE id = 42"])
+    record_corpus_facts(store, fps)
+    assert "metric_dimension_co_occurrence" not in _read_event_types(store)
+
+
+def test_md_cooccurrence_dedups_across_queries(tmp_path: Path):
+    """A2 — same (metric, dimension) pair across multiple queries →
+    one event with count_obs = N and N member_query_ids."""
+    import json
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "SELECT bus_seg, SUM(billed_business) FROM cornerstone_metrics GROUP BY bus_seg",
+        "SELECT bus_seg, SUM(billed_business) FROM cornerstone_metrics WHERE flag=1 GROUP BY bus_seg",
+        "SELECT bus_seg, SUM(billed_business) FROM cornerstone_metrics GROUP BY bus_seg ORDER BY 2 DESC",
+    ])
+    record_corpus_facts(store, fps)
+    found = None
+    for f in store.events_dir.glob("*.jsonl"):
+        for line in f.read_text().splitlines():
+            if not line.strip():
+                continue
+            ev = json.loads(line)
+            if ev["event_type"] == "metric_dimension_co_occurrence":
+                found = ev["payload"]
+                break
+    assert found is not None
+    assert found["count"] == 3
+    assert len(found["member_query_ids"]) == 3
+    assert set(found["member_query_ids"]) == {"Q01", "Q02", "Q03"}
+
+
+def test_filter_split_structural_vs_business(tmp_path: Path):
+    """A3 — filters with is_structural=True emit structural_filter_observed;
+    others emit business_filter_observed. Mutually exclusive."""
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        # Structural: CTE-scoped filter on data_source
+        "WITH x AS (SELECT * FROM t WHERE data_source = 'cornerstone') "
+        "SELECT bus_seg, SUM(amount) FROM x GROUP BY bus_seg",
+        # Business: per-query filter on bus_seg
+        "SELECT amount FROM t WHERE bus_seg = 'Centurion'",
+    ])
+    record_corpus_facts(store, fps)
+    types = _read_event_types(store)
+    # at least one of each should be present
+    assert "business_filter_observed" in types
+    # structural may or may not appear depending on extractor's is_structural;
+    # but no event should be the legacy filter_observed type
+    assert "filter_observed" not in types
+
+
+def test_business_filter_carries_distinct_values(tmp_path: Path):
+    """A3 — business_filter_observed should list distinct values seen in corpus."""
+    import json
+    store = OntologyStore(tmp_path)
+    fps = parse_sqls([
+        "SELECT amount FROM t WHERE bus_seg = 'Centurion'",
+        "SELECT amount FROM t WHERE bus_seg = 'Platinum'",
+        "SELECT amount FROM t WHERE bus_seg = 'Gold'",
+    ])
+    record_corpus_facts(store, fps)
+    for f in store.events_dir.glob("*.jsonl"):
+        for line in f.read_text().splitlines():
+            if not line.strip():
+                continue
+            ev = json.loads(line)
+            if ev["event_type"] == "business_filter_observed":
+                vals = set(ev["payload"]["distinct_values_observed"])
+                # All 3 should accumulate into distinct_values_observed
+                assert vals >= {"Centurion", "Platinum", "Gold"}
+                return
+    assert False, "No business_filter_observed event emitted"
+
+
 def test_corpus_facts_no_events_on_parse_errors(tmp_path: Path):
     """Parse-error fingerprints must not bleed into corpus events."""
     store = OntologyStore(tmp_path)
