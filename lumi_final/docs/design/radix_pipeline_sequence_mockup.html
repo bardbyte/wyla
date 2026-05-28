@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radix Pipeline Sequence — ChatGPT Widget Mockup</title>
+<style>
+  :root {
+    --bg-stage: #f7f7f8;
+    --bg-card: #ffffff;
+    --bg-chip: #f4f4f5;
+    --bg-chip-hover: #e8e8ea;
+    --bg-sub: #fafafa;
+    --border: #e5e5e7;
+    --border-strong: #d4d4d8;
+    --text: #0a0a0a;
+    --text-muted: #6b6b73;
+    --text-faint: #9ca3af;
+    --accent: #006FCF;
+    --success: #15803d;
+    --success-bg: #dcfce7;
+    --warning: #b45309;
+    --warning-bg: #fef3c7;
+    --term-bg: #0d0d0f;
+    --term-text: #d4d4d8;
+    --mono: 'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Inter,sans-serif;
+  }
+  [data-theme="dark"] {
+    --bg-stage:#0a0a0a; --bg-card:#1a1a1c; --bg-chip:#232326; --bg-chip-hover:#2c2c30;
+    --bg-sub:#131314; --border:#2a2a2e; --border-strong:#3a3a3f;
+    --text:#fafafa; --text-muted:#a1a1aa; --text-faint:#71717a;
+    --success:#4ade80; --success-bg:rgba(34,197,94,.15);
+    --warning:#fbbf24; --warning-bg:rgba(251,191,36,.12);
+    --term-bg:#000000; --term-text:#a1a1aa;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;font-family:var(--sans);background:var(--bg-stage);color:var(--text);
+    -webkit-font-smoothing:antialiased;transition:background 200ms ease;}
+  body{min-height:100vh;padding:32px 24px 64px;}
+
+  .top{max-width:1180px;margin:0 auto 24px;display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap;}
+  .top h1{font-size:18px;font-weight:600;margin:0 0 4px;letter-spacing:-.01em;}
+  .top p{font-size:13px;color:var(--text-muted);margin:0;max-width:560px;line-height:1.5;}
+  .controls{display:flex;gap:8px;align-items:center;}
+  .btn{font-family:var(--sans);font-size:13px;font-weight:500;padding:9px 16px;border-radius:8px;cursor:pointer;border:1px solid var(--border);background:var(--bg-card);color:var(--text);transition:all 150ms ease;}
+  .btn:hover{background:var(--bg-chip);}
+  .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .btn.primary:hover{filter:brightness(1.08);}
+  .btn:disabled{opacity:.4;cursor:not-allowed;}
+  .btn.ghost{background:transparent;}
+
+  .layout{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;}
+  @media(max-width:900px){.layout{grid-template-columns:1fr;}}
+
+  .pane-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:10px;display:flex;align-items:center;gap:8px;}
+  .pane-label .dot{width:7px;height:7px;border-radius:50%;background:var(--text-faint);}
+  .pane-label .dot.live{background:#ef4444;animation:pulse 1.2s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+
+  /* ===== Widget pane ===== */
+  .user-msg{align-self:flex-end;background:var(--bg-chip);padding:10px 14px;border-radius:16px 16px 4px 16px;font-size:14px;margin:0 0 14px auto;max-width:78%;width:fit-content;}
+  .attribution{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-bottom:6px;}
+  .app-icon{width:18px;height:18px;border-radius:4px;background:linear-gradient(135deg,var(--accent),#004a8f);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;font-family:var(--mono);}
+
+  .widget{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+
+  /* pipeline checklist */
+  .pipeline{padding:14px 16px;}
+  .pstep{display:flex;align-items:flex-start;gap:10px;padding:7px 0;opacity:.3;transition:opacity 300ms ease;}
+  .pstep.active{opacity:1;}
+  .pstep.done{opacity:1;}
+  .pstep .ico{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--border-strong);flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--text-faint);transition:all 200ms ease;}
+  .pstep.active .ico{border-color:var(--accent);color:var(--accent);}
+  .pstep.active .ico::after{content:'';width:8px;height:8px;border-radius:50%;border:1.5px solid var(--accent);border-top-color:transparent;animation:spin .7s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .pstep.done .ico{border-color:var(--success);background:var(--success);color:#fff;}
+  .pstep.done .ico::after{content:'✓';}
+  .pstep .body{flex:1;min-width:0;}
+  .pstep .label{font-size:13px;font-weight:500;color:var(--text);}
+  .pstep .sub{font-size:11px;color:var(--text-muted);margin-top:2px;line-height:1.5;}
+  .pstep .sub code{font-family:var(--mono);font-size:10.5px;color:var(--text);background:var(--bg-sub);padding:1px 5px;border-radius:4px;}
+  .pchips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}
+  .pchip{font-family:var(--mono);font-size:10px;background:var(--bg-chip);border:1px solid var(--border);padding:3px 7px;border-radius:5px;color:var(--text);}
+  .pchip .k{color:var(--text-muted);}
+
+  /* SQL preview + confirm gate */
+  .sqlbox{margin:8px 16px 0;border:1px solid var(--border);border-radius:8px;overflow:hidden;display:none;}
+  .sqlbox.show{display:block;animation:slidein 300ms ease;}
+  @keyframes slidein{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+  .sqlhead{background:var(--bg-sub);padding:7px 11px;font-size:11px;font-weight:600;color:var(--text-muted);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);}
+  .sqlhead .cost{font-family:var(--mono);font-weight:400;color:var(--warning);}
+  .sqlcode{font-family:var(--mono);font-size:11px;line-height:1.6;padding:11px;color:var(--text);white-space:pre-wrap;}
+  .sqlcode .kw{color:var(--accent);font-weight:600;}
+  .sqlcode .fn{color:var(--success);}
+  [data-theme="dark"] .sqlcode .kw{color:#60a5fa;}
+
+  .confirm{padding:12px 16px;display:none;gap:8px;align-items:center;border-top:1px solid var(--border);background:var(--warning-bg);}
+  .confirm.show{display:flex;animation:slidein 300ms ease;}
+  .confirm .q{flex:1;font-size:12.5px;color:var(--text);font-weight:500;}
+
+  /* result hero */
+  .resultbox{padding:24px 20px 4px;display:none;}
+  .resultbox.show{display:block;animation:slidein 400ms ease;}
+  .rnum{font-size:42px;font-weight:600;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums;}
+  .rlabel{font-size:13px;color:var(--text-muted);margin-top:5px;}
+  .rdelta{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--success);font-weight:500;margin-top:12px;font-variant-numeric:tabular-nums;}
+
+  /* actions + followups */
+  .actions{display:none;padding:14px 16px;border-top:1px solid var(--border);gap:4px;align-items:center;flex-wrap:wrap;}
+  .actions.show{display:flex;}
+  .abtn{display:inline-flex;align-items:center;gap:6px;background:transparent;border:none;color:var(--text-muted);font-family:var(--sans);font-size:12px;padding:7px 9px;border-radius:6px;cursor:pointer;transition:all 150ms;}
+  .abtn:hover{background:var(--bg-chip);color:var(--text);}
+  .abtn.primary{color:var(--accent);font-weight:500;}
+  .abtn svg{width:14px;height:14px;}
+  .adiv{width:1px;height:15px;background:var(--border);margin:0 3px;}
+  .aspacer{flex:1;}
+
+  .followups{display:none;padding:11px 16px 13px;background:var(--bg-sub);border-top:1px solid var(--border);flex-wrap:wrap;gap:6px;align-items:center;}
+  .followups.show{display:flex;animation:slidein 300ms ease;}
+  .fl-label{font-size:10px;font-weight:600;letter-spacing:.04em;color:var(--text-muted);margin-right:4px;}
+  .fchip{background:var(--bg-card);border:1px solid var(--border);font-size:12px;padding:6px 11px;border-radius:999px;cursor:pointer;}
+  .fchip::after{content:'→';color:var(--text-faint);margin-left:5px;font-size:11px;}
+  .fchip:hover{background:var(--bg-chip);}
+
+  .tracefoot{display:none;padding:8px 16px;border-top:1px solid var(--border);justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--text-faint);}
+  .tracefoot.show{display:flex;}
+
+  /* ===== Terminal pane ===== */
+  .terminal{background:var(--term-bg);border:1px solid var(--border-strong);border-radius:12px;overflow:hidden;font-family:var(--mono);}
+  .term-head{padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:8px;}
+  .term-dots{display:flex;gap:6px;}
+  .term-dots span{width:10px;height:10px;border-radius:50%;}
+  .term-dots span:nth-child(1){background:#ff5f56;}
+  .term-dots span:nth-child(2){background:#ffbd2e;}
+  .term-dots span:nth-child(3){background:#27c93f;}
+  .term-title{color:#71717a;font-size:11px;margin-left:6px;}
+  .term-body{padding:14px;height:560px;overflow-y:auto;font-size:11.5px;line-height:1.7;}
+  .term-body::-webkit-scrollbar{width:8px;}
+  .term-body::-webkit-scrollbar-thumb{background:#333;border-radius:4px;}
+  .logline{margin-bottom:2px;animation:typein 200ms ease;color:var(--term-text);}
+  @keyframes typein{from{opacity:0;}to{opacity:1;}}
+  .logline .arrow{color:#52525b;}
+  .logline .ts{color:#52525b;}
+  .logline .ev-out{color:#60a5fa;}   /* api -> widget */
+  .logline .ev-in{color:#f59e0b;}    /* widget -> api */
+  .logline .ev-tool{color:#a78bfa;}  /* callTool privileged */
+  .logline .json{color:#a1a1aa;}
+  .logline .ok{color:#27c93f;}
+  .legend{max-width:1180px;margin:18px auto 0;display:flex;gap:18px;flex-wrap:wrap;font-size:11px;color:var(--text-muted);font-family:var(--mono);}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .legend i{width:9px;height:9px;border-radius:2px;display:inline-block;}
+</style>
+</head>
+<body data-theme="light">
+
+<div class="top">
+  <div>
+    <h1>Radix pipeline → ChatGPT widget · live sequence</h1>
+    <p>Left: what the analyst sees in the widget, built phase-by-phase from SSE events. Right: the actual events on the wire. Hit <strong>Run the sequence</strong> — it pauses at the SQL confirm gate, exactly like production.</p>
+  </div>
+  <div class="controls">
+    <button class="btn ghost" onclick="toggleTheme()">◐ theme</button>
+    <button class="btn" id="resetBtn" onclick="resetSeq()">Reset</button>
+    <button class="btn primary" id="runBtn" onclick="startSeq()">▶ Run the sequence</button>
+  </div>
+</div>
+
+<div class="layout">
+  <!-- WIDGET PANE -->
+  <div>
+    <div class="pane-label"><span class="dot" id="widgetDot"></span> The widget (analyst's view)</div>
+    <div class="user-msg">total billed business for plat card last quarter</div>
+    <div class="attribution"><span class="app-icon">R</span><span>Radix</span></div>
+
+    <div class="widget">
+      <div class="pipeline" id="pipeline">
+        <div class="pstep" data-phase="intent">
+          <div class="ico"></div>
+          <div class="body">
+            <div class="label">Understanding your question</div>
+            <div class="sub" id="sub-intent">Parsing intent &amp; entities</div>
+          </div>
+        </div>
+        <div class="pstep" data-phase="fields">
+          <div class="ico"></div>
+          <div class="body">
+            <div class="label">Finding the right columns</div>
+            <div class="sub" id="sub-fields">Semantic search over field embeddings</div>
+          </div>
+        </div>
+        <div class="pstep" data-phase="explore">
+          <div class="ico"></div>
+          <div class="body">
+            <div class="label">Picking the right table</div>
+            <div class="sub" id="sub-explore">Graph validation + scoring</div>
+          </div>
+        </div>
+        <div class="pstep" data-phase="filters">
+          <div class="ico"></div>
+          <div class="body">
+            <div class="label">Applying your filters</div>
+            <div class="sub" id="sub-filters">Resolving to catalog values</div>
+          </div>
+        </div>
+        <div class="pstep" data-phase="partition">
+          <div class="ico"></div>
+          <div class="body">
+            <div class="label">Limiting the scan to keep it fast</div>
+            <div class="sub" id="sub-partition">Injecting partition filter (cost fence)</div>
+          </div>
+        </div>
+        <div class="pstep" data-phase="sql">
+          <div class="ico"></div>
+          <div class="body">
+            <div class="label">Generating the query</div>
+            <div class="sub" id="sub-sql">Looker builds deterministic SQL</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SQL preview -->
+      <div class="sqlbox" id="sqlbox">
+        <div class="sqlhead"><span>GENERATED SQL · via LookML</span><span class="cost">~1.2 GB scan</span></div>
+        <div class="sqlcode"><span class="kw">SELECT</span> card_product, <span class="fn">SUM</span>(billed_business_usd) <span class="kw">AS</span> total
+<span class="kw">FROM</span> gcs_finance_360
+<span class="kw">WHERE</span> card_prod_id = <span class="fn">'PLAT'</span>
+  <span class="kw">AND</span> trans_dt <span class="kw">BETWEEN</span> '2026-01-01' <span class="kw">AND</span> '2026-03-31'
+  <span class="kw">AND</span> _partition_dt >= <span class="fn">DATE_SUB</span>(CURRENT_DATE, <span class="kw">INTERVAL</span> 90 DAY)
+<span class="kw">GROUP BY</span> card_product</div>
+      </div>
+
+      <!-- Confirm gate -->
+      <div class="confirm" id="confirm">
+        <span class="q">⚠ Ready to run. This will scan ~1.2 GB in BigQuery.</span>
+        <button class="btn ghost" style="font-size:12px;padding:6px 10px;">Edit</button>
+        <button class="btn primary" style="font-size:12px;padding:6px 14px;" onclick="confirmRun()">Run query</button>
+      </div>
+
+      <!-- Result -->
+      <div class="resultbox" id="resultbox">
+        <div class="rnum" id="rnum">—</div>
+        <div class="rlabel">total billed business · last quarter</div>
+        <div class="rdelta">▲ +3.2% vs Q2</div>
+      </div>
+
+      <!-- Actions -->
+      <div class="actions" id="actions">
+        <button class="abtn" title="Helpful"><svg viewBox="0 0 16 16" fill="none"><path d="M3 8h2v6H3z M5 8l2.5-5.5c.3-.5 1-.5 1.3 0L10 5v2h3l-1.5 6.5c-.1.3-.4.5-.7.5H5" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></button>
+        <button class="abtn" title="Not helpful"><svg viewBox="0 0 16 16" fill="none" style="transform:rotate(180deg)"><path d="M3 8h2v6H3z M5 8l2.5-5.5c.3-.5 1-.5 1.3 0L10 5v2h3l-1.5 6.5c-.1.3-.4.5-.7.5H5" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></button>
+        <div class="adiv"></div>
+        <button class="abtn primary" title="Save as golden"><svg viewBox="0 0 16 16" fill="none"><path d="M8 1.5l1.85 4.15L14 6.3l-3.1 3.05.85 4.45L8 11.65l-3.75 2.15.85-4.45L2 6.3l4.15-.65z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>Golden</button>
+        <button class="abtn" title="View SQL"><svg viewBox="0 0 16 16" fill="none"><path d="M6 4L2 8l4 4 M10 4l4 4-4 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>SQL</button>
+        <button class="abtn" title="Expand"><svg viewBox="0 0 16 16" fill="none"><path d="M2 6V2h4 M14 6V2h-4 M2 10v4h4 M14 10v4h-4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>Expand</button>
+        <div class="aspacer"></div>
+        <button class="abtn" title="Share"><svg viewBox="0 0 16 16" fill="none"><circle cx="4" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="4" r="2" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="12" r="2" stroke="currentColor" stroke-width="1.3"/><path d="M6 7l4-2 M6 9l4 2" stroke="currentColor" stroke-width="1.3"/></svg></button>
+      </div>
+
+      <div class="followups" id="followups">
+        <span class="fl-label">TRY NEXT</span>
+        <span class="fchip">Compare to Q2</span>
+        <span class="fchip">Break down by region</span>
+        <span class="fchip">Monthly trend</span>
+      </div>
+
+      <div class="tracefoot" id="tracefoot">
+        <span>trace · tr_8a3f1c</span><span>data freshness · 4h ago</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TERMINAL PANE -->
+  <div>
+    <div class="pane-label"><span class="dot" id="termDot"></span> Events on the wire</div>
+    <div class="terminal">
+      <div class="term-head">
+        <div class="term-dots"><span></span><span></span><span></span></div>
+        <span class="term-title">radix-mcp.aexp.com · SSE + callTool</span>
+      </div>
+      <div class="term-body" id="term"></div>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <span><i style="background:#60a5fa"></i> API → widget (SSE stream)</span>
+  <span><i style="background:#f59e0b"></i> widget → API (log_event)</span>
+  <span><i style="background:#a78bfa"></i> widget → MCP (callTool · privileged)</span>
+</div>
+
+<script>
+  function toggleTheme(){const b=document.body;b.setAttribute('data-theme',b.getAttribute('data-theme')==='light'?'dark':'light');}
+
+  const term = document.getElementById('term');
+  let t0 = 0;
+  function ts(){const e=(performance.now()-t0)/1000;return e.toFixed(2).padStart(5,'0');}
+  function log(cls, txt){
+    const d=document.createElement('div');d.className='logline';
+    d.innerHTML=`<span class="ts">${ts()}s</span> <span class="arrow">│</span> <span class="${cls}">${txt}</span>`;
+    term.appendChild(d);term.scrollTop=term.scrollHeight;
+  }
+
+  const steps = [...document.querySelectorAll('.pstep')];
+  function stepEl(p){return document.querySelector(`.pstep[data-phase="${p}"]`);}
+
+  let timers=[];
+  function later(fn,ms){timers.push(setTimeout(fn,ms));}
+
+  // phase definitions: emit event, activate spinner, then complete + render detail
+  const seq = [
+    {p:'intent', dur:620, sse:'event: intent', json:'{intent:"query", metrics:["billed_business"], confidence:0.92}',
+      done:()=>{document.getElementById('sub-intent').innerHTML='Intent: <code>query</code> · 1 metric, 1 dimension · conf 0.92';}},
+    {p:'fields', dur:430, sse:'event: fields', json:'{matched:[{billed_business_usd,0.86},{card_product,0.83}]}',
+      done:()=>{document.getElementById('sub-fields').innerHTML='Matched via pgvector HNSW (top-k)<div class="pchips"><span class="pchip">billed_business_usd</span><span class="pchip">card_product</span></div>';}},
+    {p:'explore', dur:380, sse:'event: explore', json:'{explore:"gcs_finance_360", score:1.548, confidence:0.92, runner_up:"gcs_billings_360"}',
+      done:()=>{document.getElementById('sub-explore').innerHTML='Chose <code>gcs_finance_360</code> · score 1.548 · conf <span style="color:var(--success);font-weight:600">92%</span>';}},
+    {p:'filters', dur:300, sse:'event: filters', json:'{filters:[{card_prod_id,"PLAT","="},{trans_dt,"last quarter"}]}',
+      done:()=>{document.getElementById('sub-filters').innerHTML='Resolved to catalog values<div class="pchips"><span class="pchip"><span class="k">card_prod_id</span> = PLAT</span><span class="pchip"><span class="k">trans_dt</span> = last quarter</span></div>';}},
+    {p:'partition', dur:240, sse:'event: partition', json:'{field:"_partition_dt", default:"last 90 days"}',
+      done:()=>{document.getElementById('sub-partition').innerHTML='Injected <code>last 90 days</code> — guards against full-table scan';}},
+    {p:'sql', dur:520, sse:'event: sql', json:'{sql:"SELECT card_product, SUM(...)...", est_bytes:1.2e9}',
+      done:()=>{document.getElementById('sub-sql').innerHTML='Looker generated SQL deterministically (no LLM)';
+        document.getElementById('sqlbox').classList.add('show');}},
+  ];
+
+  let running=false;
+
+  function startSeq(){
+    if(running) return;
+    resetSeq(true);
+    running=true;
+    document.getElementById('runBtn').disabled=true;
+    document.getElementById('widgetDot').classList.add('live');
+    document.getElementById('termDot').classList.add('live');
+    t0=performance.now();
+    log('ok','▶ start_query("total billed business for plat card last quarter")');
+    later(()=>log('ev-tool','← callTool: render_pipeline(trace_id=tr_8a3f1c, token=••••)'),250);
+    later(()=>log('ok','✓ widget mounted · EventSource(/stream/tr_8a3f1c) open'),520);
+
+    let acc=750;
+    seq.forEach((s,i)=>{
+      // activate
+      later(()=>{ stepEl(s.p).classList.add('active'); }, acc);
+      acc += s.dur;
+      // complete + emit
+      later(()=>{
+        const el=stepEl(s.p); el.classList.remove('active'); el.classList.add('done');
+        log('ev-out', `${s.sse}  <span class="json">${s.json}</span>`);
+        s.done();
+      }, acc);
+      acc += 120;
+    });
+
+    // confirm gate
+    later(()=>{
+      document.getElementById('confirm').classList.add('show');
+      log('ev-out','event: sql · <span class="json">[CONFIRM GATE — awaiting user]</span>');
+      document.getElementById('widgetDot').classList.remove('live');
+      document.getElementById('termDot').classList.remove('live');
+    }, acc+150);
+  }
+
+  function confirmRun(){
+    document.getElementById('confirm').classList.remove('show');
+    document.getElementById('widgetDot').classList.add('live');
+    document.getElementById('termDot').classList.add('live');
+    log('ev-in','→ log_event: confirm_run {trace_id:tr_8a3f1c}');
+    log('ev-tool','← callTool: execute_query(tr_8a3f1c)  <span class="json">[privileged · bearer token server-side]</span>');
+
+    // executing skeleton
+    document.getElementById('resultbox').classList.add('show');
+    let rn=document.getElementById('rnum'); rn.textContent='⟳';
+    later(()=>log('ev-out','event: executing <span class="json">{est_bytes:1.2e9}</span>'),300);
+
+    // result lands
+    later(()=>{
+      animateNumber();
+      log('ev-out','event: result <span class="json">{row_count:1, hero:"$12.4B", shape:"scalar"}</span>');
+    }, 1400);
+    later(()=>{
+      document.getElementById('actions').classList.add('show');
+      document.getElementById('followups').classList.add('show');
+      document.getElementById('tracefoot').classList.add('show');
+      log('ev-out','event: followups <span class="json">{["Compare to Q2","Break down by region","Monthly trend"]}</span>');
+    }, 1700);
+    later(()=>{
+      log('ev-tool','← update-model-context {result:"$12.4B"} <span class="json">→ model narrates</span>');
+      log('ev-out','event: done {trace_id:tr_8a3f1c}');
+      log('ok','✓ setWidgetState persisted · stream closed');
+      document.getElementById('widgetDot').classList.remove('live');
+      document.getElementById('termDot').classList.remove('live');
+      document.getElementById('runBtn').disabled=false;
+      running=false;
+    }, 2000);
+  }
+
+  function animateNumber(){
+    const rn=document.getElementById('rnum');
+    const target=12.4; let cur=0;
+    const iv=setInterval(()=>{
+      cur+=target/18;
+      if(cur>=target){cur=target;clearInterval(iv);}
+      rn.textContent='$'+cur.toFixed(1)+'B';
+    },28);
+  }
+
+  function resetSeq(silent){
+    timers.forEach(clearTimeout);timers=[];
+    running=false;
+    document.getElementById('runBtn').disabled=false;
+    steps.forEach(s=>s.classList.remove('active','done'));
+    ['sqlbox','confirm','resultbox','actions','followups','tracefoot'].forEach(id=>document.getElementById(id).classList.remove('show'));
+    document.getElementById('rnum').textContent='—';
+    document.getElementById('widgetDot').classList.remove('live');
+    document.getElementById('termDot').classList.remove('live');
+    // reset subs
+    document.getElementById('sub-intent').innerHTML='Parsing intent &amp; entities';
+    document.getElementById('sub-fields').innerHTML='Semantic search over field embeddings';
+    document.getElementById('sub-explore').innerHTML='Graph validation + scoring';
+    document.getElementById('sub-filters').innerHTML='Resolving to catalog values';
+    document.getElementById('sub-partition').innerHTML='Injecting partition filter (cost fence)';
+    document.getElementById('sub-sql').innerHTML='Looker builds deterministic SQL';
+    if(!silent) term.innerHTML='';
+    else term.innerHTML='';
+  }
+</script>
+</body>
+</html>
