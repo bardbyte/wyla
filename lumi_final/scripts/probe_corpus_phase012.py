@@ -856,6 +856,7 @@ def run_phase2(jsonl_total: int) -> Phase2Stats:
 def write_report(
     *, input_dir: Path, p0: Phase0Stats, p1: Phase1Stats, p2: Phase2Stats,
     report_path: Path, stats_path: Path,
+    pre_p0: "PrePhase0Stats | None" = None,
 ) -> None:
     """Emit human + machine reports."""
     stats_path.parent.mkdir(parents=True, exist_ok=True)
@@ -864,6 +865,19 @@ def write_report(
     md = []
     md.append("# Corpus Phase 0 + 1 + 2 probe report\n")
     md.append(f"_input dir:_ `{input_dir}`\n")
+
+    if pre_p0 is not None:
+        md.append("\n## Pre-Phase 0 — Excel → .sql extraction\n")
+        md.append(f"- source: `{pre_p0.excel_path}`")
+        md.append(f"- sheet: `{pre_p0.sheet}`")
+        md.append(f"- SQL column: `{pre_p0.sql_column}`")
+        md.append(f"- ID column: `{pre_p0.id_column}`")
+        md.append(f"- rows scanned: **{pre_p0.rows_scanned}**")
+        md.append(f"- SQLs extracted: **{pre_p0.sqls_extracted}**")
+        md.append(f"- rows skipped (empty): {pre_p0.rows_skipped_empty}")
+        md.append(f"- rows skipped (invalid shape): "
+                  f"{pre_p0.rows_skipped_invalid}")
+        md.append(f"- output dir: `{pre_p0.out_dir}`")
 
     md.append("\n## Phase 0 — extraction\n")
     md.append(f"- queries parsed: **{p0.n_queries}**")
@@ -1204,12 +1218,289 @@ def write_report(
 
 # ─── main ─────────────────────────────────────────────────────
 
+# ─── Pre-Phase 0 — Excel → .sql files ────────────────────────
+
+
+@dataclass
+class PrePhase0Stats:
+    excel_path: str = ""
+    sheet: str = ""
+    sql_column: str = ""
+    id_column: str = ""
+    rows_scanned: int = 0
+    sqls_extracted: int = 0
+    rows_skipped_empty: int = 0
+    rows_skipped_invalid: int = 0
+    files_written: list[str] = field(default_factory=list)
+    out_dir: str = ""
+
+
+def _auto_detect_sql_column(
+    rows: list[dict[str, Any]], sample_size: int = 10,
+) -> str | None:
+    """Pick the column whose non-empty cells parse as SQL the most often.
+
+    Tries `sqlglot.parse_one` against each candidate column on up to
+    `sample_size` non-empty cells; the column with the highest parse rate
+    wins. Returns None if no column scores above 50%."""
+    try:
+        from sqlglot import parse_one
+        from sqlglot.errors import ParseError
+    except ImportError:
+        return None
+
+    if not rows:
+        return None
+    columns = list(rows[0].keys())
+    best_col: str | None = None
+    best_rate = 0.0
+    for col in columns:
+        non_empty = [
+            str(r.get(col, "")).strip() for r in rows
+            if r.get(col) and str(r.get(col)).strip()
+        ]
+        sample = non_empty[:sample_size]
+        if not sample:
+            continue
+        ok = 0
+        for s in sample:
+            # Heuristic: must look SQL-shaped (contains SELECT/WITH at least)
+            head = s.lstrip().upper()
+            if not (head.startswith("SELECT") or head.startswith("WITH")):
+                continue
+            try:
+                parse_one(s, dialect="bigquery")
+                ok += 1
+            except (ParseError, Exception):  # noqa: BLE001
+                continue
+        rate = ok / len(sample)
+        if rate > best_rate:
+            best_rate = rate
+            best_col = col
+    return best_col if best_rate >= 0.5 else None
+
+
+def _detect_named_sql_column(columns: list[str]) -> str | None:
+    """Heuristic by name — return the first column matching common naming."""
+    NAMED = (
+        "sql", "query", "gold_sql", "query_sql", "query_text",
+        "sql_text", "gold sql", "gold query", "sql_query",
+    )
+    lower = {c.lower().strip(): c for c in columns}
+    for needle in NAMED:
+        if needle in lower:
+            return lower[needle]
+    # Fuzzy contains
+    for needle in NAMED:
+        for c_low, c_orig in lower.items():
+            if needle in c_low:
+                return c_orig
+    return None
+
+
+def run_pre_phase0(
+    excel_path: Path, out_dir: Path,
+    *, sheet: str | None = None,
+    sql_column: str | None = None,
+    id_column: str | None = None,
+) -> PrePhase0Stats:
+    """Read an Excel of gold queries and emit one .sql per row.
+
+    Strategy:
+      1. Open workbook; pick the first sheet if `sheet` not given.
+      2. Find SQL column — explicit `sql_column` > named match > auto-detect.
+      3. Find ID column — explicit `id_column` > 'query_id' / 'id' / 'qid'.
+         Falls back to row-index (Q001, Q002, ...).
+      4. For each row with non-empty SQL, write `<id>.sql` to out_dir.
+      5. Idempotent on re-run: same content_hash means same file content.
+    """
+    try:
+        from openpyxl import load_workbook
+    except ImportError as e:
+        raise RuntimeError(
+            f"openpyxl required: {e}. Install with: pip install openpyxl"
+        ) from e
+
+    stats = PrePhase0Stats(
+        excel_path=str(excel_path), out_dir=str(out_dir),
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    wb = load_workbook(excel_path, read_only=True, data_only=True)
+    ws_name = sheet or wb.sheetnames[0]
+    if ws_name not in wb.sheetnames:
+        raise ValueError(
+            f"Sheet '{ws_name}' not found. Available: {wb.sheetnames}"
+        )
+    ws = wb[ws_name]
+    stats.sheet = ws_name
+
+    # Read header + rows
+    rows_iter = ws.iter_rows(values_only=True)
+    try:
+        header_raw = next(rows_iter)
+    except StopIteration:
+        _fail(f"Excel sheet '{ws_name}' is empty")
+        return stats
+    header = [str(h).strip() if h is not None else f"col_{i}"
+              for i, h in enumerate(header_raw)]
+
+    rows: list[dict[str, Any]] = []
+    for r in rows_iter:
+        rows.append({header[i]: r[i] for i in range(min(len(header), len(r)))})
+    stats.rows_scanned = len(rows)
+
+    # Resolve SQL column
+    chosen_sql_col = sql_column
+    if not chosen_sql_col:
+        chosen_sql_col = _detect_named_sql_column(header)
+    if not chosen_sql_col:
+        chosen_sql_col = _auto_detect_sql_column(rows)
+    if not chosen_sql_col:
+        raise ValueError(
+            f"Could not detect SQL column. Available columns: {header}. "
+            "Use --sql-column to specify explicitly."
+        )
+    stats.sql_column = chosen_sql_col
+
+    # Resolve ID column
+    chosen_id_col = id_column
+    if not chosen_id_col:
+        for cand in ("query_id", "id", "qid", "query id", "Query ID"):
+            for c in header:
+                if c.lower().strip() == cand.lower():
+                    chosen_id_col = c
+                    break
+            if chosen_id_col:
+                break
+    stats.id_column = chosen_id_col or "(row-index)"
+
+    # Write one file per row
+    for i, row in enumerate(rows, start=1):
+        sql_val = row.get(chosen_sql_col)
+        if sql_val is None or not str(sql_val).strip():
+            stats.rows_skipped_empty += 1
+            continue
+        sql_text = str(sql_val).strip()
+        # Must look SQL-shaped to be worth keeping
+        head = sql_text.lstrip().upper()
+        if not (head.startswith("SELECT") or head.startswith("WITH")
+                or head.startswith("CREATE") or head.startswith("(")):
+            stats.rows_skipped_invalid += 1
+            continue
+
+        if chosen_id_col and row.get(chosen_id_col):
+            raw_id = str(row[chosen_id_col]).strip()
+            # Normalize: replace path-unsafe chars, ensure no .sql collision
+            qid = "".join(
+                c if (c.isalnum() or c in "_-") else "_" for c in raw_id
+            )
+            if not qid:
+                qid = f"Q{i:03d}"
+        else:
+            qid = f"Q{i:03d}"
+
+        out_path = out_dir / f"{qid}.sql"
+        # Idempotency: only rewrite if content changed
+        new_content = sql_text + ("\n" if not sql_text.endswith("\n") else "")
+        if out_path.exists():
+            if out_path.read_text(encoding="utf-8") == new_content:
+                stats.sqls_extracted += 1
+                stats.files_written.append(out_path.name)
+                continue
+        out_path.write_text(new_content, encoding="utf-8")
+        stats.sqls_extracted += 1
+        stats.files_written.append(out_path.name)
+
+    return stats
+
+
+@dataclass
+class MDMRefreshStats:
+    cache_dir: str = ""
+    tables_discovered: int = 0
+    fetched: int = 0
+    skipped_cached: int = 0
+    failed: list[tuple[str, str]] = field(default_factory=list)
+
+
+def refresh_mdm_cache(
+    sql_dir: Path, cache_dir: Path, *, force: bool = False,
+) -> MDMRefreshStats:
+    """Discover tables in sql_dir, fetch fresh MDM digests, write per-table
+    JSON cache files. Idempotent unless force=True."""
+    # Import the probe_mdm helpers — they live in the same scripts/ dir.
+    scripts_dir = REPO_ROOT / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import probe_mdm  # type: ignore[import-not-found]
+
+    stats = MDMRefreshStats(cache_dir=str(cache_dir))
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    tables = probe_mdm.discover_tables_from_sqls(sql_dir)
+    stats.tables_discovered = len(tables)
+
+    for tbl in tables:
+        out_path = cache_dir / f"{tbl}.json"
+        if out_path.exists() and not force:
+            stats.skipped_cached += 1
+            continue
+        try:
+            raw = probe_mdm.fetch_mdm(tbl)
+            digest_dict = probe_mdm.digest(raw)
+            out_path.write_text(
+                json.dumps(digest_dict, indent=2, default=str),
+                encoding="utf-8",
+            )
+            stats.fetched += 1
+        except Exception as e:
+            stats.failed.append((tbl, f"{type(e).__name__}: {e}"))
+    return stats
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--from-excel", type=Path,
+        help="Pre-Phase 0: read gold queries from an .xlsx file and "
+             "extract each row's SQL to --input/<id>.sql before Phase 0. "
+             "Auto-detects the SQL column (or use --sql-column).",
+    )
+    parser.add_argument(
+        "--excel-sheet", type=str,
+        help="Sheet name (default: first sheet).",
+    )
+    parser.add_argument(
+        "--sql-column", type=str,
+        help="Excel column header that holds the SQL (default: auto-detect).",
+    )
+    parser.add_argument(
+        "--id-column", type=str,
+        help="Excel column header that holds the query ID for file naming "
+             "(default: row-index as Q001, Q002, ...).",
+    )
+    parser.add_argument(
         "--input", type=Path,
         default=REPO_ROOT / "data" / "gold_queries",
-        help="Directory of .sql files to probe (default: data/gold_queries/).",
+        help="Directory of .sql files to probe (default: data/gold_queries/). "
+             "Also the Pre-Phase 0 output dir when --from-excel is used.",
+    )
+    parser.add_argument(
+        "--refresh-mdm", action="store_true",
+        help="After Pre-Phase 0, hit the live MDM API for every table the "
+             "extracted SQLs reference and save digests to data/mdm_cache/. "
+             "Requires VPN. Idempotent — only refetches missing/stale tables "
+             "unless --refresh-mdm-force is set.",
+    )
+    parser.add_argument(
+        "--refresh-mdm-force", action="store_true",
+        help="With --refresh-mdm, refetch ALL tables (don't skip cached).",
+    )
+    parser.add_argument(
+        "--mdm-cache-dir", type=Path,
+        default=REPO_ROOT / "data" / "mdm_cache",
+        help="MDM cache directory (default: data/mdm_cache/).",
     )
     parser.add_argument(
         "--no-mdm", action="store_true",
@@ -1233,15 +1524,66 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if not args.input.exists():
-        _fail(f"Input dir not found: {args.input}")
-        return 1
-
     if args.fresh:
         events_dir = REPO_ROOT / "data" / "ontology" / "events"
         if events_dir.exists():
             _warn(f"--fresh: wiping {events_dir}")
             shutil.rmtree(events_dir)
+
+    pre_p0: PrePhase0Stats | None = None
+    if args.from_excel:
+        if not args.from_excel.exists():
+            _fail(f"--from-excel file not found: {args.from_excel}")
+            return 1
+        _hdr("Pre-Phase 0 — Excel → .sql extraction")
+        _info(f"reading {args.from_excel.name}")
+        try:
+            pre_p0 = run_pre_phase0(
+                args.from_excel, args.input,
+                sheet=args.excel_sheet,
+                sql_column=args.sql_column,
+                id_column=args.id_column,
+            )
+        except Exception as e:
+            _fail(f"Pre-Phase 0 failed: {type(e).__name__}: {e}")
+            return 1
+        _pass(
+            f"extracted {pre_p0.sqls_extracted} SQLs from "
+            f"{pre_p0.rows_scanned} rows "
+            f"(skipped {pre_p0.rows_skipped_empty} empty, "
+            f"{pre_p0.rows_skipped_invalid} invalid)"
+        )
+        _info(f"sheet={pre_p0.sheet}, sql_column={pre_p0.sql_column!r}, "
+              f"id_column={pre_p0.id_column!r}")
+        _info(f"wrote to {pre_p0.out_dir}")
+
+    if not args.input.exists():
+        _fail(f"Input dir not found: {args.input}")
+        return 1
+
+    mdm_refresh: MDMRefreshStats | None = None
+    if args.refresh_mdm:
+        _hdr("Pre-Phase 0b — MDM cache refresh")
+        _info(f"discovering tables in {args.input}")
+        try:
+            mdm_refresh = refresh_mdm_cache(
+                args.input, args.mdm_cache_dir,
+                force=args.refresh_mdm_force,
+            )
+        except Exception as e:
+            _fail(f"MDM refresh failed: {type(e).__name__}: {e}")
+            _info("(continuing with existing cache — tables may be missing)")
+        if mdm_refresh:
+            _pass(
+                f"{mdm_refresh.tables_discovered} tables, "
+                f"{mdm_refresh.fetched} fetched, "
+                f"{mdm_refresh.skipped_cached} cached, "
+                f"{len(mdm_refresh.failed)} failed"
+            )
+            for tbl, err in mdm_refresh.failed[:5]:
+                _warn(f"  {tbl}: {err}")
+            if len(mdm_refresh.failed) > 5:
+                _info(f"  …and {len(mdm_refresh.failed) - 5} more")
 
     _hdr("Phase 0 — extraction audit")
     fps, p0 = run_phase0(args.input)
@@ -1273,6 +1615,7 @@ def main() -> int:
     write_report(
         input_dir=args.input, p0=p0, p1=p1, p2=p2,
         report_path=args.report_path, stats_path=args.stats_path,
+        pre_p0=pre_p0,
     )
     _pass(f"human report → {args.report_path}")
     _pass(f"stats JSON  → {args.stats_path}")
