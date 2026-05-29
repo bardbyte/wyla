@@ -1,1 +1,0 @@
-../design-doc-for-lookml-enrichment-pipeline.md

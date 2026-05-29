@@ -1295,7 +1295,7 @@ def _find_baseline_view(baseline_dir: Path, table_name: str) -> str | None:
         f"{table_name}.view",                  # extension variant
     ]
     # Prefix variants: only check these if the bare name didn't match.
-    # Common prefixes seen in real Looker repos at AmEx-style data warehouses.
+    # Common prefixes seen in enterprise Looker repos.
     prefix_variants = ("bq_", "dw_", "edw_", "fact_", "dim_")
 
     # 1. Quick path: file at root.

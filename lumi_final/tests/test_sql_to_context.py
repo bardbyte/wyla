@@ -184,8 +184,8 @@ def test_create_temp_table_alias_excluded_from_tables():
     """
     sql = """CREATE OR REPLACE TEMP TABLE renewal_fees AS
     SELECT a.cm_id, b.amt
-    FROM `axp-lumi.dw.custins_customer_insights_cardmember` a
-    LEFT JOIN `axp-lumi.dw.pmdl_fin_match` b ON a.cm_id = b.cm_id
+    FROM `my-project.dw.custins_customer_insights_cardmember` a
+    LEFT JOIN `my-project.dw.pmdl_fin_match` b ON a.cm_id = b.cm_id
     """
     fps = parse_sqls([sql])
     fp = fps[0]
@@ -211,8 +211,8 @@ def test_temp_table_captures_structure():
     """
     sql = """CREATE OR REPLACE TEMP TABLE renewal_fees AS
     SELECT a.cm_id, b.amt
-    FROM `axp-lumi.dw.custins_customer_insights_cardmember` a
-    LEFT JOIN `axp-lumi.dw.pmdl_fin_match` b ON a.cm_id = b.cm_id
+    FROM `my-project.dw.custins_customer_insights_cardmember` a
+    LEFT JOIN `my-project.dw.pmdl_fin_match` b ON a.cm_id = b.cm_id
     WHERE a.rpt_dt = '2024-06-01'
     """
     fps = parse_sqls([sql])
@@ -237,7 +237,7 @@ def test_temp_table_attributed_to_source_table_context(mock_mdm, empty_baseline_
     """
     sql = """CREATE OR REPLACE TEMP TABLE renewal_fees AS
     SELECT cm_id, amt
-    FROM `axp-lumi.dw.cornerstone_metrics`
+    FROM `my-project.dw.cornerstone_metrics`
     WHERE data_source = 'cornerstone'
     """
     contexts = prepare_enrichment_context([sql], mock_mdm, str(empty_baseline_dir))
@@ -315,7 +315,7 @@ def test_discover_loads_baseline_when_present(q1_sql, mock_mdm, tmp_path):
     baseline_dir.mkdir()
     baseline_file = baseline_dir / "cornerstone_metrics.view.lkml"
     baseline_file.write_text(
-        "view: cornerstone_metrics {\n  sql_table_name: `axp-lumi.dw.cornerstone_metrics` ;;\n}",
+        "view: cornerstone_metrics {\n  sql_table_name: `my-project.dw.cornerstone_metrics` ;;\n}",
         encoding="utf-8",
     )
 

@@ -194,4 +194,4 @@ SCHEMA_VERSION: str = "v1.0"
 
 
 def default_tenant_id() -> str:
-    return os.environ.get("LUMI_TENANT_ID", "amex_us_consumer")
+    return os.environ.get("LUMI_TENANT_ID", "default_tenant")

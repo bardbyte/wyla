@@ -1,4 +1,4 @@
-"""Stage 5: Enrich one table via Gemini 3.1 Pro (Vertex direct, no SafeChain).
+"""Stage 5: Enrich one table via Gemini 3.1 Pro (Vertex direct).
 
 One :class:`google.adk.agents.LlmAgent` per APPROVED table. Each call:
 

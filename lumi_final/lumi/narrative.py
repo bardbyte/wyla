@@ -500,7 +500,7 @@ def _cluster_for_column(
     if cl.endswith(("_id", "_xref_id", "_uuid", "_key")):
         return "Identifiers"
     # Financial — substring match for common money-token suffixes/parts,
-    # plus AmEx-domain words ("billed", "business" volume).
+    # plus card-domain words ("billed", "business" volume).
     financial_substrings = (
         "amt", "amount", "balance", "revenue", "spend",
         "fee", "cost", "price", "charge", "billed",

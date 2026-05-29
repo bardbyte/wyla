@@ -82,8 +82,13 @@ class HttpMDMClient:
     to bypass the cache (e.g., scheduled refresh job).
     """
 
-    DEFAULT_ENDPOINT = (
-        "https://lumimdmapi-guse4.aexp.com/api/v1/ngbd/mdm-api/datasets/schemas"
+    # Set via env: LUMI_MDM_ENDPOINT. The placeholder default is
+    # intentionally invalid so an unset env fails loudly rather than
+    # silently calling someone else's domain.
+    import os as _os
+    DEFAULT_ENDPOINT = _os.environ.get(
+        "LUMI_MDM_ENDPOINT",
+        "https://example.invalid/mdm-api/datasets/schemas",
     )
     DEFAULT_TIMEOUT_SECS = 30
 
@@ -325,8 +330,8 @@ def _digest(payload: list | dict) -> dict[str, Any]:
             "pii_role_id": _clean_role_id(sens.get("pii_role_id")),
             "oncop_role_id": _clean_role_id(sens.get("oncop_role_id")),
             "publish_code": sens.get("publish_code"),
-            # External references (placeholder on AmEx tables today;
-            # future-proof for tables where MDM declares joins).
+            # External references — present on tables where MDM declares
+            # cross-table FKs; empty otherwise. Forward-compat.
             "external_references": col.get("external_reference_details") or [],
             # Catch-alls so undocumented MDM keys don't get lost.
             "attribute_details_extra": attr_extra,

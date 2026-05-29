@@ -61,7 +61,7 @@ def test_view_level_description_extracted(tmp_path: Path) -> None:
     baseline = """\
 view: cornerstone_metrics {
   description: "Daily aggregated business metrics from the Cornerstone source system, broken down by business segment and reporting date."
-  sql_table_name: `axp-lumi.dw.cornerstone_metrics` ;;
+  sql_table_name: `my-project.dw.cornerstone_metrics` ;;
   dimension: bus_seg { type: string sql: ${TABLE}.bus_seg ;; }
 }
 """
@@ -74,7 +74,7 @@ def test_view_level_label_extracted(tmp_path: Path) -> None:
     baseline = """\
 view: cornerstone_metrics {
   label: "Cornerstone Daily Metrics"
-  sql_table_name: `axp-lumi.dw.cornerstone_metrics` ;;
+  sql_table_name: `my-project.dw.cornerstone_metrics` ;;
 }
 """
     ctx = _ctx(tmp_path, baseline)
@@ -85,11 +85,11 @@ def test_sql_table_name_extracted(tmp_path: Path) -> None:
     """sql_table_name is the authoritative BQ FQN; preserve it exactly."""
     baseline = """\
 view: cornerstone_metrics {
-  sql_table_name: `axp-lumi.dw.cornerstone_metrics` ;;
+  sql_table_name: `my-project.dw.cornerstone_metrics` ;;
 }
 """
     ctx = _ctx(tmp_path, baseline)
-    assert ctx.baseline_sql_table_name == "`axp-lumi.dw.cornerstone_metrics`"
+    assert ctx.baseline_sql_table_name == "`my-project.dw.cornerstone_metrics`"
 
 
 # ─── Primary key + extends ───────────────────────────────────
@@ -119,7 +119,7 @@ def test_extends_chain_extracted(tmp_path: Path) -> None:
     baseline = """\
 view: cornerstone_metrics {
   extends: [base_metrics_view]
-  sql_table_name: `axp-lumi.dw.cornerstone_metrics` ;;
+  sql_table_name: `my-project.dw.cornerstone_metrics` ;;
 }
 """
     ctx = _ctx(tmp_path, baseline)

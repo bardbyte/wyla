@@ -3,7 +3,7 @@
 
 We currently extract ~5 fields per column out of ~22 + ~3 fields per
 table out of ~15. Before expanding the digest we need to see the
-ACTUAL keys MDM returns for AmEx tables.
+ACTUAL keys MDM returns for enterprise tables.
 
 This probe walks the payload tree and infers a deduplicated schema:
   - lists of dicts (e.g. 193 columns) collapse into ONE schema entry
@@ -80,8 +80,9 @@ except ImportError:
     _TRUSTSTORE_LOADED = False
 # ---------------------------------------------------------------------------
 
-DEFAULT_ENDPOINT = (
-    "https://lumimdmapi-guse4.aexp.com/api/v1/ngbd/mdm-api/datasets/schemas"
+DEFAULT_ENDPOINT = os.environ.get(
+    "LUMI_MDM_ENDPOINT",
+    "https://example.invalid/mdm-api/datasets/schemas",
 )
 DEFAULT_TIMEOUT_SECS = 30
 SAMPLE_VALUE_MAXLEN = 100  # truncate long string values when displaying

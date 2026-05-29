@@ -1,8 +1,11 @@
 """LUMI configuration.
 
-Uses Vertex AI direct (NOT SafeChain). See CLAUDE.md for rationale.
+Uses Vertex AI direct. All enterprise-specific endpoints (GitHub, MDM,
+BQ project) are read from env vars at runtime; the in-code defaults
+are placeholders only.
 """
 
+import os
 from dataclasses import dataclass
 
 
@@ -10,9 +13,9 @@ from dataclasses import dataclass
 class LumiConfig:
     """Pipeline configuration. Override via lumi_config.yaml or env vars."""
 
-    # Model — Vertex AI direct (no SafeChain)
+    # Model — Vertex AI direct
     model_name: str = "gemini-3.1-pro-preview"
-    vertex_project: str = "prj-d-ea-poc"
+    vertex_project: str = os.environ.get("LUMI_VERTEX_PROJECT", "your-vertex-project")
     vertex_location: str = "global"
     temperature: float = 0.0
 
@@ -35,14 +38,19 @@ class LumiConfig:
     # NL question generation
     nl_questions_per_sql: int = 8
 
-    # GitHub Enterprise
-    github_api_base: str = "https://github.aexp.com/api/v3"
-    github_repo: str = "amex-eng/prj-d-lumi-gpt-semantic"
+    # GitHub (Enterprise or .com — set via env)
+    github_api_base: str = os.environ.get(
+        "LUMI_GITHUB_API_BASE", "https://api.github.com",
+    )
+    github_repo: str = os.environ.get("LUMI_GITHUB_REPO", "owner/repo")
     github_branch_prefix: str = "lumi/enriched"
     github_create_pr: bool = True
 
-    # MDM API
-    mdm_api_base: str = "https://lumimdmapi-guse4.aexp.com/api/v1/ngbd/mdm-api/datasets/schemas"
+    # MDM API endpoint (set via env)
+    mdm_api_base: str = os.environ.get(
+        "LUMI_MDM_API_BASE",
+        "https://example.invalid/mdm-api/datasets/schemas",
+    )
 
     # Paths
     # baseline_views_dir is now the full Looker mirror by default — same
@@ -55,5 +63,5 @@ class LumiConfig:
     learnings_path: str = "data/learnings.md"
 
     # BigQuery project (for sql_table_name in LookML)
-    bq_project: str = "axp-lumi"
+    bq_project: str = os.environ.get("LUMI_BQ_PROJECT", "your-bq-project")
     bq_dataset: str = "dw"

@@ -46,7 +46,7 @@ class _NoopMDM:
 
 _AUTOGEN_BASELINE = """\
 view: cornerstone_metrics {
-  sql_table_name: `axp-lumi.dw.cornerstone_metrics` ;;
+  sql_table_name: `my-project.dw.cornerstone_metrics` ;;
   dimension: bus_seg {
     type: string
     sql: ${TABLE}.bus_seg ;;
@@ -70,7 +70,7 @@ view: cornerstone_metrics {
 
 _HUMAN_CURATED_BASELINE = """\
 view: cornerstone_metrics {
-  sql_table_name: `axp-lumi.dw.cornerstone_metrics` ;;
+  sql_table_name: `my-project.dw.cornerstone_metrics` ;;
   dimension: bus_seg {
     type: string
     sql: ${TABLE}.bus_seg ;;
@@ -329,7 +329,7 @@ def test_baseline_lookup_view_name_fallback(tmp_path: Path) -> None:
     # Filename is unrelated; view declaration inside matches.
     (baseline_dir / "weird_legacy_filename.view.lkml").write_text(
         'view: cornerstone_metrics {\n'
-        '  sql_table_name: `axp-lumi.dw.cornerstone_metrics` ;;\n'
+        '  sql_table_name: `my-project.dw.cornerstone_metrics` ;;\n'
         '}\n',
         encoding="utf-8",
     )
@@ -338,7 +338,7 @@ def test_baseline_lookup_view_name_fallback(tmp_path: Path) -> None:
     contexts = prepare_enrichment_context(sqls, _NoopMDM(), str(baseline_dir))
     ctx = contexts["cornerstone_metrics"]
     assert ctx.existing_view_lkml is not None
-    assert "axp-lumi.dw.cornerstone_metrics" in ctx.existing_view_lkml
+    assert "my-project.dw.cornerstone_metrics" in ctx.existing_view_lkml
 
 
 def test_end_to_end_baseline_aware_pipeline(tmp_path: Path) -> None:

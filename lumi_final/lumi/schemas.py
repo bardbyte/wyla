@@ -86,7 +86,7 @@ class TableContext(BaseModel):
     baseline_view_description: str | None = None
     baseline_view_label: str | None = None
     # Authoritative BQ FQN if baseline declares one (overrides LumiConfig
-    # default). Pattern: `axp-lumi.dw.<table>` or `${BQ_PROJECT}.dw.<table>`.
+    # default). Pattern: `my-project.dw.<table>` or `${BQ_PROJECT}.dw.<table>`.
     baseline_sql_table_name: str | None = None
     # If the baseline IS a derived_table, its SQL — tells us the team's
     # modeling preference so enrichment doesn't propose a different shape.

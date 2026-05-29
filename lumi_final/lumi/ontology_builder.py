@@ -355,7 +355,7 @@ def _default_entity_description(entity_name: str) -> str:
         "customer": "Customer entity, often equivalent to cardmember in this domain.",
         "account": "Cardmember account — financial account identifier.",
         "transaction": "Card transaction event.",
-        "merchant": "Merchant accepting Amex transactions.",
+        "merchant": "Merchant accepting card transactions.",
         "product": "Card product or add-on service.",
         "risk": "Risk metric or scorable attribute.",
     }
@@ -371,7 +371,7 @@ def _infer_relationships(
     rels: list[OntologyRelationship] = []
     entity_names = {e.name for e in entities}
 
-    # Common AmEx-domain relationships.
+    # Common cardmember-domain relationships.
     if "cardmember" in entity_names and "account" in entity_names:
         rels.append(OntologyRelationship(
             from_entity="cardmember",

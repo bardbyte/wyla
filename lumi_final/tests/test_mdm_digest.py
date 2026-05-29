@@ -1,7 +1,7 @@
 """MDM digest tests — locks in the comprehensive field capture.
 
 Synthetic payloads mirror the real shape we observed via
-scripts/explore_mdm_payload.py against AmEx tables. Specifically:
+scripts/explore_mdm_payload.py against enterprise tables. Specifically:
   - dataset_details with 17 fields (incl. data_type='ODL', table_type='DERIVED',
     feed_type='LumiFirst', retention_period, is_sor_certified, etc.)
   - per-column sensitivity_details with is_primary, is_dedupe_key,
@@ -52,7 +52,7 @@ def _payload(**overrides) -> list:
             **(overrides.get("dataset_details_extra") or {}),
         },
         "dataset_source_details": {
-            "project_id": "axp-lumi",
+            "project_id": "my-project",
             "dataset_name": "dw",
             "table_name": "test_table",
             "country": "UNITED STATES",
@@ -68,12 +68,12 @@ def _payload(**overrides) -> list:
             "imr_queue": "FUEL_Marketing_Data_Support",
             "app_team_SN_workgroup": "Finance_Analytics_DEV",
             "business_contacts": [
-                {"email": "owner@aexp.com", "type": "business_owner_p"},
+                {"email": "owner@example.com", "type": "business_owner_p"},
                 {"type": "di_business_owner"},  # missing email
             ],
             "tech_contacts": [
-                {"email": "tech1@aexp.com", "type": "tech_owner"},
-                {"email": "tech2@aexp.com", "type": "di_tech_owner"},
+                {"email": "tech1@example.com", "type": "tech_owner"},
+                {"email": "tech2@example.com", "type": "di_tech_owner"},
             ],
             "application_team_contacts": [],
             "status": "ACTIVE",
@@ -197,7 +197,7 @@ def test_digest_captures_all_dataset_details():
 
 def test_digest_captures_dataset_source_details():
     d = _digest(_payload())
-    assert d["bq_project"] == "axp-lumi"
+    assert d["bq_project"] == "my-project"
     assert d["bq_dataset"] == "dw"
     assert d["bq_table"] == "test_table"
     assert d["country"] == "UNITED STATES"
@@ -233,7 +233,7 @@ def test_digest_captures_ownership_with_contacts():
     assert own["app_team_sn_workgroup"] == "Finance_Analytics_DEV"
     assert own["status"] == "ACTIVE"
     assert len(own["business_contacts"]) == 2
-    assert own["business_contacts"][0]["email"] == "owner@aexp.com"
+    assert own["business_contacts"][0]["email"] == "owner@example.com"
     assert own["business_contacts"][0]["type"] == "business_owner_p"
     # Contact missing email — kept, just no email key
     assert "email" not in own["business_contacts"][1]

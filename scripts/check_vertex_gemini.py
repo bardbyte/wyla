@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Preflight: hit Gemini 3.1 Pro on Vertex AI directly using a service-account
-key (independent path from SafeChain — proves whether your GCP-certified
+key (independent of any intermediate framework — proves whether your GCP-certified
 project can reach the model).
 
 Standalone usage:
@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any
 
 # --- Corporate-network TLS handling -------------------------------------- #
-# On corporate networks (Amex), all HTTPS is MITM'd by a proxy that re-signs
+# On corporate networks, all HTTPS is MITM'd by a proxy that re-signs
 # certificates with the company's root CA. Python's bundled CA list (certifi)
 # doesn't include that root, so we get 'certificate verify failed:
 # self-signed certificate in certificate chain (_ssl.c:1016)'.

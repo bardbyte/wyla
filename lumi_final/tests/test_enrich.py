@@ -147,7 +147,7 @@ def cornerstone_context() -> TableContext:
         mdm_coverage_pct=0.83,
         existing_view_lkml=(
             "view: cornerstone_metrics {\n"
-            "  sql_table_name: `axp-lumi.dw.cornerstone_metrics` ;;\n"
+            "  sql_table_name: `my-project.dw.cornerstone_metrics` ;;\n"
             "  dimension: bus_seg { type: string sql: ${TABLE}.bus_seg ;; }\n"
             "}\n"
         ),
@@ -343,7 +343,7 @@ def test_enrich_simple_table(
     assert len(views) == 1
     view = views[0]
     assert view["name"] == "cornerstone_metrics"
-    assert view.get("sql_table_name") == "`axp-lumi.dw.cornerstone_metrics`"
+    assert view.get("sql_table_name") == "`my-project.dw.cornerstone_metrics`"
 
     # Exactly one primary_key dimension.
     pks = [d for d in view["dimensions"] if d.get("primary_key") == "yes"]
@@ -466,7 +466,7 @@ def test_prompt_interpolates_table_specific_fields(
 
     # Real values land in the right places.
     assert "cornerstone_metrics" in prompt
-    assert "axp-lumi" in prompt
+    assert "my-project" in prompt
     cfg = LumiConfig()
     assert cfg.bq_dataset in prompt
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Preflight: verify a Personal Access Token can access a private GitHub
-Enterprise repo (default host: github.aexp.com).
+Enterprise GitHub repo (default host: github.com).
 
 Standalone usage (no pip install needed — uses only stdlib):
 
-    export GITHUB_AEXP_TOKEN='ghp_xxx...'
+    export GITHUB_ENTERPRISE_TOKEN='ghp_xxx...'
     python scripts/check_github_access.py owner/repo
     python scripts/check_github_access.py owner/repo --path views
     python scripts/check_github_access.py owner/repo --path views/foo.view.lkml
@@ -35,9 +35,9 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-DEFAULT_BASE_URL = "https://github.aexp.com/api/v3"
+DEFAULT_BASE_URL = "https://api.github.com"
 DEFAULT_TIMEOUT_SECS = 15
-DEFAULT_TOKEN_ENV = "GITHUB_AEXP_TOKEN"
+DEFAULT_TOKEN_ENV = "GITHUB_ENTERPRISE_TOKEN"
 
 
 def normalize_repo(repo_arg: str) -> tuple[str, str | None]:
@@ -45,11 +45,11 @@ def normalize_repo(repo_arg: str) -> tuple[str, str | None]:
 
     Accepted inputs:
       - owner/name
-      - https://github.aexp.com/owner/name
-      - https://github.aexp.com/owner/name.git
-      - https://github.aexp.com/owner/name/tree/branch/some/path
-      - git@github.aexp.com:owner/name.git
-      - github.aexp.com/owner/name
+      - https://github.com/owner/name
+      - https://github.com/owner/name.git
+      - https://github.com/owner/name/tree/branch/some/path
+      - git@github.com:owner/name.git
+      - github.com/owner/name
 
     Returns:
         (owner_name, derived_api_base_url_or_None)
@@ -102,11 +102,11 @@ def check_github_access(
     """Verify a PAT can access a private GitHub Enterprise repo.
 
     Args:
-        repo: "owner/name", e.g. "amex-eng/looker-project".
+        repo: "owner/name", e.g. "your-org/your-repo".
         token: Personal Access Token. For private repos, classic PATs need
                the `repo` scope; fine-grained PATs need Contents:Read on the
                target repo.
-        base_url: GHE API root. Default https://github.aexp.com/api/v3.
+        base_url: GHE API root. Default https://api.github.com.
         path: Optional path within the repo to list/fetch as a probe.
               If a directory: returns the listing.
               If a file: returns size + (decoded) content if small.
@@ -448,7 +448,7 @@ def _diagnose_repo_404(
         parts.append(f"     Authorize this token here:\n     {sso_authorization_url}")
         parts.append(
             "     After authorizing, re-run this script. (This is the most "
-            "common cause at large enterprises like Amex.)"
+            "common cause at large enterprises.)"
         )
         parts.append("")
 
@@ -459,9 +459,9 @@ def _diagnose_repo_404(
     if not sso_authorization_url:
         parts.append(
             f"  1. SAML SSO not authorized for '{owner}' — open "
-            f"https://{_host_from_url(sso_authorization_url) or 'github.aexp.com'}"
+            f"https://{_host_from_url(sso_authorization_url) or 'github.com'}"
             f"/settings/tokens, find your token, click 'Configure SSO', "
-            "authorize the org. (No SSO header was returned, but Amex GHE "
+            "authorize the org. (No SSO header was returned, but enterprise GHE "
             "sometimes hides it on hard 404s.)"
         )
     parts.append(f"  2. Wrong owner/name — we queried '{repo}'. Check spelling/case.")
@@ -601,7 +601,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="check_github_access",
         description="Verify PAT access to a private GitHub Enterprise repo.",
     )
-    parser.add_argument("repo", help="owner/name, e.g. amex-eng/looker-project")
+    parser.add_argument("repo", help="owner/name, e.g. your-org/your-repo")
     parser.add_argument(
         "--path",
         help="Optional path inside the repo to probe (file or directory).",

@@ -19,7 +19,7 @@ Why we need more than .view.lkml:
 
 Usage (on Saheb's work laptop, on VPN):
 
-    export GHE_TOKEN='ghp_…'           # SSO-authorized for amex-eng
+    export GHE_TOKEN='ghp_…'           # SSO-authorized for your org
 
     python scripts/fetch_lookml_master.py                     # default: everything
     python scripts/fetch_lookml_master.py --types view,model  # just views + models
@@ -29,7 +29,7 @@ Usage (on Saheb's work laptop, on VPN):
     python scripts/fetch_lookml_master.py --list              # dry-run, list paths only
     python scripts/fetch_lookml_master.py --out data/baseline_views/  # different dir
 
-Per parent CLAUDE.md sharp-edge #7: PAT must be SSO-authorized for amex-eng.
+Per parent CLAUDE.md sharp-edge #7: PAT must be SSO-authorized for your org.
 """
 
 from __future__ import annotations
@@ -47,8 +47,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-DEFAULT_API_BASE = "https://github.aexp.com/api/v3"
-DEFAULT_REPO = "amex-eng/prj-d-lumi-gpt-semantic"
+DEFAULT_API_BASE = "https://api.github.com"
+DEFAULT_REPO = "your-org/your-repo"
 DEFAULT_BRANCH = "auto"  # special — auto-detect from /repos/{repo}.default_branch
 DEFAULT_OUT_DIR = "data/looker_master"
 DEFAULT_TIMEOUT_SECS = 30
@@ -297,7 +297,7 @@ def main() -> int:
     if not token:
         print(
             f"ERROR: no token in ${args.token_env} or $GITHUB_TOKEN. "
-            "PAT must be SSO-authorized against the amex-eng org.",
+            "PAT must be SSO-authorized against your enterprise org.",
             file=sys.stderr,
         )
         return 2

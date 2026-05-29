@@ -17,7 +17,7 @@ Usage (on Saheb's work laptop, on VPN):
     export GOOGLE_APPLICATION_CREDENTIALS=~/Downloads/key.json
 
     # Default probe — pulls schema + samples DISTINCT on a known-good table
-    # (--billing-project defaults to prj-d-lumi-gpt, --data-project to axp-lumi)
+    # (--billing-project defaults to prj-d-lumi-gpt, --data-project to my-project)
     python scripts/check_bq_access.py \\
         --table custins_customer_insights_cardmember
 
@@ -186,11 +186,11 @@ def _disable_ssl_verification() -> None:
 #   - data project     : where the tables physically live; SA needs
 #                        roles/bigquery.dataViewer on the target dataset
 # These are usually different. Our SA is grant'd jobUser on prj-d-lumi-gpt
-# but the data lives under axp-lumi.dw.<table>. Don't conflate them.
+# but the data lives under my-project.dw.<table>. Don't conflate them.
 DEFAULT_BILLING_PROJECT = "prj-d-lumi-gpt"
-DEFAULT_DATA_PROJECT = "axp-lumi"
+DEFAULT_DATA_PROJECT = "my-project"
 DEFAULT_DATASET = "dw"
-# Amex routes BigQuery through Private Service Connect (PSC) — the public
+# Enterprise BigQuery may use Private Service Connect (PSC) — the public
 # bigquery.googleapis.com endpoint isn't reachable from the corp network,
 # but bigquery-dev.p.googleapis.com is. google-cloud-bigquery defaults to
 # the public endpoint and gets 404; we have to override via client_options.
@@ -573,7 +573,7 @@ def main() -> int:
         default=os.environ.get("LUMI_BQ_API_ENDPOINT", DEFAULT_API_ENDPOINT),
         help=(
             "BQ API URL. Default: $LUMI_BQ_API_ENDPOINT or "
-            f"'{DEFAULT_API_ENDPOINT}' (Amex PSC endpoint). Pass empty "
+            f"'{DEFAULT_API_ENDPOINT}' (configured endpoint). Pass empty "
             "string to use Google's public default."
         ),
     )

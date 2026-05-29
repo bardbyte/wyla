@@ -35,7 +35,7 @@ def _load_fixture(table_name: str) -> EnrichedOutput:
 def _baseline_view(table_name: str, sql: str = "old_sql_expr") -> str:
     """Build a tiny baseline view used to prove the merge preserves baseline SQL."""
     return f"""view: {table_name} {{
-  sql_table_name: `axp-lumi.dw.{table_name}` ;;
+  sql_table_name: `my-project.dw.{table_name}` ;;
 
   dimension: business_segment {{
     type: string
