@@ -50,7 +50,7 @@ class FakeFP:
 
 _VIEW_Q1_FULL = """
 view: cornerstone_metrics {
-  sql_table_name: `axp-lumi.dw.cornerstone_metrics` ;;
+  sql_table_name: `my-project.dw.cornerstone_metrics` ;;
 
   dimension: rpt_dt_pk {
     primary_key: yes
@@ -125,7 +125,7 @@ def _q1_enriched() -> dict[str, EnrichedOutput]:
 
 _VIEW_RPAH_BASE = """
 view: risk_pers_acct_history {
-  sql_table_name: `axp-lumi.dw.risk_pers_acct_history` ;;
+  sql_table_name: `my-project.dw.risk_pers_acct_history` ;;
 
   dimension: acct_cust_xref_id {
     primary_key: yes
@@ -168,7 +168,7 @@ view: rpah {
   derived_table: {
     sql:
       SELECT acct_cust_xref_id, acct_bill_bal_mth01_amt, acct_bus_unit_cd, acct_as_of_dt
-      FROM `axp-lumi`.dw.risk_pers_acct_history
+      FROM `my-project`.dw.risk_pers_acct_history
       WHERE acct_as_of_dt = DATE('2025-05-01')
         AND acct_srce_sys_cd = 'TRIUMPH'
         AND acct_bus_unit_cd IN (1, 2)

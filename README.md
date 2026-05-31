@@ -1,56 +1,56 @@
-# LUMI
+# lookml-enrichment-pipeline
 
-LookML Understanding & Metric Intelligence — a multi-agent pipeline that enriches LookML views from gold NL→SQL queries, MDM business metadata, and LLM reasoning, so a downstream NL2SQL agent can answer **any** question about those views.
+Multi-agent pipeline that enriches LookML views from analytical SQL queries +
+MDM business metadata + LLM reasoning, projects the resulting signals into a
+queryable semantic graph (Apache AGE on Postgres), and renders production-grade
+LookML as the first downstream consumer.
 
-> Status: rebuild in progress. Previous full implementation lives under [`archive/`](./archive) for reference and parts salvage.
+## Layout
 
----
+```
+lumi_final/               the active codebase
+├── lumi/                 pipeline modules (parse, enrich, validate, publish)
+│   ├── sql_to_context.py sqlglot-based extraction (Layer 1-4 signals)
+│   ├── mdm.py            MDM client (cached + http)
+│   ├── ontology_store.py event store + hook emitters
+│   └── semantic_graph/   Apache AGE projection (schema, projector, replay)
+├── apps/                 ADK apps (curator, vertex_smoke)
+├── scripts/              probes (mdm, bq, age, corpus phase 0/1/2)
+└── tests/                pytest suite
+```
 
-## What this will do
+## Setup
 
-Take three inputs:
+```bash
+pip install -e lumi_final
+pip install "psycopg[binary]" truststore openpyxl sqlglot google-cloud-bigquery
+```
 
-1. **137 gold queries** (Excel) — `user_prompt` + `expected_sql`
-2. **30 LookML view files** (internal Git repo)
-3. **30 MDM entity records** (internal API) — canonical names, definitions, synonyms
+Set the following env vars (see `lumi_final/lumi/config.py` for the full list):
 
-Produce one output:
+```bash
+export LUMI_VERTEX_PROJECT=your-vertex-project
+export LUMI_BQ_PROJECT=your-bq-project
+export LUMI_MDM_API_BASE=https://your-mdm-endpoint/...
+export LUMI_GITHUB_API_BASE=https://api.github.com  # or your GHE
+export LUMI_GITHUB_REPO=owner/repo
+export GOOGLE_APPLICATION_CREDENTIALS=~/path/to/sa-key.json
+```
 
-- **Enriched LookML** where every field of every view has rich descriptions, MDM-backed labels, user-vocabulary tags, generated measures/dimensions for SQL patterns the existing LookML doesn't cover, and a deterministic coverage report proving each gold query is resolvable.
+## Run the pipeline
 
----
+```bash
+cd lumi_final
 
-## Plan
+# Full pipeline: Excel of gold queries → SQLs → MDM refresh → events → AGE graph
+LUMI_AGE_ENABLED=1 python scripts/probe_corpus_phase012.py \
+    --from-excel ~/path/to/gold_queries.xlsx \
+    --refresh-mdm \
+    --fresh
+```
 
-Build it back step by step, this time with each session a small, commit-sized increment:
+## Tests
 
-1. Project skeleton + `CLAUDE.md` + `pyproject.toml`
-2. Pydantic schemas (config, query, view, report) + tests
-3. `parse_excel_to_json` (sqlglot) + `parse_lookml_file` (lkml) + tests
-4. `clone_and_parse_views` + `query_mdm_api` (cache + fallback) + tests
-5. `group_queries_by_view` + `extract_join_graphs` + `validate_coverage` + tests
-6. SafeChain → ADK adapter (`SafeChainLlm`)
-7. `DataLoader` CustomAgent
-8. `ViewEnricher` LlmAgent + prompt
-9. `ExploreBuilder` + `VocabChecker` + `Aggregator` + `Validator`
-10. Root `agent.py` composition + `python -m lumi` entry point
-11. Preflight scripts + `BOOTSTRAP.md` + first real run
-
-Each step: write, test, commit, push.
-
----
-
-## Reference
-
-- **`archive/`** — the previous end-to-end build (40 tests green, mypy strict clean). Read it for the design decisions; copy from it deliberately when rebuilding.
-- **`archive/design-doc-for-lookml-enrichment-pipeline.md`** — original architecture spec.
-- **`archive/docs/README.md`** — SafeChain LLM access patterns (Amex-internal).
-- **`archive/docs/ADK_INTEGRATION.md`** — wrapping SafeChain inside Google ADK.
-
----
-
-## Stack
-
-Python 3.11+ · Google ADK 1.31 · SafeChain (Gemini 2.5 Pro + Flash) · `lkml` · `sqlglot` · `pydantic` · `openpyxl`
-
-LLM access goes through SafeChain only — no direct `openai`/`google.generativeai`/`vertexai` imports anywhere.
+```bash
+pytest lumi_final/tests/ -v
+```

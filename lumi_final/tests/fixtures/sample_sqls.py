@@ -8,7 +8,7 @@ Used in tests as inputs to the pipeline stages.
 
 Q1_SQL = """
 SELECT SUM(billed_business)
-FROM `axp-lumi`.dw.cornerstone_metrics
+FROM `my-project`.dw.cornerstone_metrics
 WHERE bus_seg = 'Consumer'
   AND data_source = 'cornerstone'
   AND rpt_dt = DATE('2025-01-01')
@@ -16,14 +16,14 @@ WHERE bus_seg = 'Consumer'
 
 Q2_SQL = """
 SELECT SUM(new_accounts_acquired)
-FROM `axp-lumi`.dw.cornerstone_metrics
+FROM `my-project`.dw.cornerstone_metrics
 WHERE EXTRACT(YEAR FROM rpt_dt) = 2024
   AND data_source = 'cornerstone'
 """
 
 Q3_SQL = """
 SELECT generation, AVG(billed_business) AS avg_bb
-FROM `axp-lumi`.dw.cornerstone_metrics
+FROM `my-project`.dw.cornerstone_metrics
 WHERE data_source = 'cornerstone'
   AND rpt_dt = DATE('2025-01-01')
 GROUP BY generation
@@ -32,7 +32,7 @@ GROUP BY generation
 Q4_SQL = """
 SELECT sub_product_group,
        ROUND(SUM(billed_business) / 1e9, 2) AS bb_billions
-FROM `axp-lumi`.dw.cornerstone_metrics
+FROM `my-project`.dw.cornerstone_metrics
 WHERE bus_seg = 'Consumer'
   AND data_source = 'cornerstone'
   AND EXTRACT(YEAR FROM rpt_dt) = 2024
@@ -43,7 +43,7 @@ GROUP BY sub_product_group
 
 Q5_SQL = """
 SELECT fico_band, SUM(accounts_in_force) AS total_aif
-FROM `axp-lumi`.dw.cornerstone_metrics
+FROM `my-project`.dw.cornerstone_metrics
 WHERE data_source = 'cornerstone'
   AND accounts_in_force > 0
   AND rpt_dt = DATE('2025-01-01')
@@ -54,7 +54,7 @@ ORDER BY total_aif DESC
 Q6_SQL = """
 SELECT EXTRACT(MONTH FROM rpt_dt) AS rpt_month,
        SUM(bluebox_discount_revenue) AS total_bbdr
-FROM `axp-lumi`.dw.cornerstone_metrics
+FROM `my-project`.dw.cornerstone_metrics
 WHERE data_source = 'cornerstone'
   AND EXTRACT(YEAR FROM rpt_dt) = 2024
 GROUP BY rpt_month
@@ -62,7 +62,7 @@ GROUP BY rpt_month
 
 Q7_SQL = """
 SELECT data_source, SUM(billed_business) AS total_bb
-FROM `axp-lumi`.dw.cornerstone_metrics
+FROM `my-project`.dw.cornerstone_metrics
 WHERE rpt_dt = DATE('2025-01-01')
   AND data_source IN ('cornerstone', 'oracle')
 GROUP BY data_source
@@ -70,7 +70,7 @@ GROUP BY data_source
 
 Q8_SQL = """
 SELECT COUNT(DISTINCT cm11)
-FROM `axp-lumi`.dw.acquisitions
+FROM `my-project`.dw.acquisitions
 WHERE sub_prod_ds = 'gold'
   AND prod_class = 'charge'
   AND glbl_sub_chan = 'digital'
@@ -89,14 +89,14 @@ WITH rpah AS (
   SELECT acct_cust_xref_id, acct_bal_age_mth01_cd,
          acct_bill_bal_mth01_amt, acct_wrt_off_am,
          acct_rcvr_mo_01_am, acct_bus_unit_cd, acct_as_of_dt
-  FROM `axp-lumi`.dw.risk_pers_acct_history
+  FROM `my-project`.dw.risk_pers_acct_history
   WHERE acct_as_of_dt = DATE('2025-05-01')
     AND acct_srce_sys_cd = 'TRIUMPH'
     AND acct_bus_unit_cd IN (1, 2)
 ),
 rich AS (
   SELECT cust_xref_id, fico_score, as_of_dt
-  FROM `axp-lumi`.dw.risk_indv_cust_hist
+  FROM `my-project`.dw.risk_indv_cust_hist
   WHERE as_of_dt = DATE('2025-05-01')
 )
 SELECT rpah.*,
@@ -131,7 +131,7 @@ GROUP BY 1, 2, 3, 4, 5, 6, 7
 Q10_SQL = """
 WITH drm_prod AS (
   SELECT prod_cd, mbr_nm, prod_card_portfo AS business_unit
-  FROM `axp-lumi`.dw.drm_product_member
+  FROM `my-project`.dw.drm_product_member
   WHERE LOWER(prod_geo) = 'us'
     AND LOWER(prod_card_portfo) = 'business'
     AND LOWER(enbl_flag) = 'y'
@@ -139,11 +139,11 @@ WITH drm_prod AS (
 ),
 drm_hier AS (
   SELECT parnt_nm, hier_level, hier_path
-  FROM `axp-lumi`.dw.drm_product_hier
+  FROM `my-project`.dw.drm_product_hier
 )
 SELECT drm_hier.hier_path,
        SUM(rpah.acct_spend_mth01_amt) AS total_spend
-FROM `axp-lumi`.dw.risk_pers_acct_history rpah
+FROM `my-project`.dw.risk_pers_acct_history rpah
 JOIN drm_prod
   ON rpah.acct_ia_pct_cd = drm_prod.prod_cd
 JOIN drm_hier

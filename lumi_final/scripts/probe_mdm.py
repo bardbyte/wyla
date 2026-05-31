@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import urllib.error
 import urllib.parse
@@ -30,9 +31,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-# From parent CLAUDE.md (verified via earlier probe runs):
-DEFAULT_ENDPOINT = (
-    "https://lumimdmapi-guse4.aexp.com/api/v1/ngbd/mdm-api/datasets/schemas"
+# Set via env: LUMI_MDM_ENDPOINT. Placeholder default fails fast so an
+# unset env doesn't silently hit someone else's domain.
+DEFAULT_ENDPOINT = os.environ.get(
+    "LUMI_MDM_ENDPOINT",
+    "https://example.invalid/mdm-api/datasets/schemas",
 )
 DEFAULT_GOLD_QUERIES_DIR = "data/gold_queries"
 DEFAULT_TIMEOUT_SECS = 30

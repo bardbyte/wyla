@@ -12,14 +12,14 @@ Standalone usage (zero pip-install — stdlib urllib only):
 
     # full URL form (easiest)
     python scripts/check_mdm_access.py \\
-        'https://lumimdmapi-guse4.aexp.com/api/v1/ngbd/mdm-api/datasets/schemas?tableName=custins_customer_insights_cardmember'
+        'https://example.invalid/api/v1/ngbd/mdm-api/datasets/schemas?tableName=custins_customer_insights_cardmember'
 
     # base + --table form
     python scripts/check_mdm_access.py \\
-        --base 'https://lumimdmapi-guse4.aexp.com/api/v1/ngbd/mdm-api/datasets/schemas' \\
+        --base 'https://example.invalid/api/v1/ngbd/mdm-api/datasets/schemas' \\
         --table custins_customer_insights_cardmember
 
-    # with auth (when Amex requires it)
+    # with auth (when auth required)
     export MDM_TOKEN='Bearer eyJ...'   # full header value, or just the token
     python scripts/check_mdm_access.py URL --auth-env MDM_TOKEN
 

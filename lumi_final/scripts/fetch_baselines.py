@@ -7,7 +7,7 @@ works for the 10 fixtures or 129 production queries.
 
 Usage (on Saheb's work laptop, on VPN):
 
-    export GHE_TOKEN='ghp_xxxxx...'        # SSO-authorized for amex-eng org
+    export GHE_TOKEN='ghp_xxxxx...'        # SSO-authorized for your org org
 
     python scripts/fetch_baselines.py                              # all tables in data/gold_queries/
     python scripts/fetch_baselines.py --from-sqls data/extra_sqls/ # different dir
@@ -18,7 +18,7 @@ Saves files into data/baseline_views/<table_name>.view.lkml.
 
 Pure-stdlib urllib for HTTP. Uses lumi.sql_to_context.parse_sqls for table
 discovery (one source of truth — same parser the pipeline uses).
-Per parent CLAUDE.md: PAT must be SSO-authorized against amex-eng org.
+Per parent CLAUDE.md: PAT must be SSO-authorized against your org org.
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-DEFAULT_API_BASE = "https://github.aexp.com/api/v3"
-DEFAULT_REPO = "amex-eng/prj-d-lumi-gpt-semantic"
+DEFAULT_API_BASE = "https://api.github.com"
+DEFAULT_REPO = "your-org/your-repo"
 DEFAULT_GOLD_QUERIES_DIR = "data/gold_queries"
 DEFAULT_TIMEOUT_SECS = 30
 
@@ -194,7 +194,7 @@ def main() -> int:
     if not token:
         print(
             f"ERROR: no token in ${args.token_env} or $GITHUB_TOKEN. "
-            "PAT must be SSO-authorized against the amex-eng org.",
+            "PAT must be SSO-authorized against your enterprise org.",
             file=sys.stderr,
         )
         return 2

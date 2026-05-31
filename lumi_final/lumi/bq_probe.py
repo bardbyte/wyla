@@ -149,7 +149,7 @@ def _build_client(project: str | None = None) -> Any:
     bq_project = (
         project
         or os.environ.get("LUMI_BQ_BILLING_PROJECT")
-        or "axp-lumi"
+        or "my-project"
     )
     try:
         return bigquery.Client(project=bq_project)

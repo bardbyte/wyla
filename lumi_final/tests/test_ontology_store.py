@@ -317,7 +317,7 @@ def test_mdm_emits_table_metadata(tmp_path: Path):
         mdm_dataset_details={
             "table_type": "DIM", "feed_type": "DAILY",
             "data_category": "Cardmember",
-            "bq_project": "axp-lumi", "bq_dataset": "dw",
+            "bq_project": "my-project", "bq_dataset": "dw",
             "bq_table": "cm_dim",
         },
     )

@@ -30,7 +30,7 @@ from lumi.pipeline import (
 
 _BASELINE_VIEW = """\
 view: cornerstone_metrics {
-  sql_table_name: `axp-lumi.dw.cornerstone_metrics` ;;
+  sql_table_name: `my-project.dw.cornerstone_metrics` ;;
   dimension: bus_seg {
     type: string
     sql: ${TABLE}.bus_seg ;;
@@ -68,13 +68,13 @@ def fixture_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     qdir = tmp_path / "data" / "gold_queries"
     qdir.mkdir(parents=True)
     (qdir / "Q01.sql").write_text(
-        "SELECT SUM(billed_business) FROM `axp-lumi.dw.cornerstone_metrics` "
+        "SELECT SUM(billed_business) FROM `my-project.dw.cornerstone_metrics` "
         "WHERE bus_seg = 'Consumer' AND rpt_dt = DATE('2025-01-01')",
         encoding="utf-8",
     )
     (qdir / "Q02.sql").write_text(
         "SELECT bus_seg, SUM(billed_business) "
-        "FROM `axp-lumi.dw.cornerstone_metrics` "
+        "FROM `my-project.dw.cornerstone_metrics` "
         "WHERE rpt_dt = DATE('2025-02-01') GROUP BY bus_seg",
         encoding="utf-8",
     )

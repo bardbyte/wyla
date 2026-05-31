@@ -7,7 +7,7 @@ The Gemini prompt for ``enrich_table`` was previously fed:
   - SKILL.md sections 1-7
 
 That's adequate for tables Gemini "knows" by training-data resemblance.
-It fails for AmEx-internal columns like ``cm11`` whose name is opaque
+It fails for enterprise-internal columns like ``cm11`` whose name is opaque
 and which have NO description in any source — Gemini guesses, often
 wrong.
 
