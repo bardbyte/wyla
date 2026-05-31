@@ -235,12 +235,199 @@ def _build_client() -> bigquery.Client:
 
 # ─── Phase A — metadata (FREE) ───────────────────────────────
 
+# ─── Tier-1 additions: nested fields + constraints + partition skew ──
+
+
+def _fetch_field_paths(
+    bq: bigquery.Client, project: str, dataset: str, table: str,
+) -> list[dict[str, Any]]:
+    """COLUMN_FIELD_PATHS — resolves STRUCT/ARRAY nesting.
+
+    MDM only models top-level columns. Without this, every nested field
+    (`address.street`, `policy.coverage.amount`) is a graph blind spot
+    and the corpus's references to them get mis-attributed."""
+    sql = f"""
+    SELECT
+      column_name        AS root_column,
+      field_path,
+      data_type,
+      description
+    FROM `{project}.{dataset}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS`
+    WHERE table_name = '{table}'
+      AND field_path != column_name
+    """
+    try:
+        return [
+            {
+                "root_column": r["root_column"],
+                "field_path": r["field_path"],
+                "data_type": r["data_type"],
+                "description_bq": r.get("description"),
+            }
+            for r in bq.query(sql).result()
+        ]
+    except gcp_exceptions.GoogleAPICallError as e:
+        logger.warning("COLUMN_FIELD_PATHS unavailable for %s: %s", table, e)
+        return []
+
+
+def _fetch_constraints(
+    bq: bigquery.Client, project: str, dataset: str, table: str,
+) -> dict[str, list[dict[str, Any]]]:
+    """TABLE_CONSTRAINTS + KEY_COLUMN_USAGE + CONSTRAINT_COLUMN_USAGE.
+
+    BQ added informational PK/FK constraints recently. They're not
+    enforced but they ARE declared by the data engineer — independent
+    evidence from MDM's data-owner declarations. Multi-source agreement
+    promotes the corresponding graph edge to `grounded`."""
+    sql = f"""
+    SELECT
+      tc.constraint_name,
+      tc.constraint_type,
+      kcu.column_name        AS from_column,
+      ccu.table_name         AS to_table,
+      ccu.column_name        AS to_column
+    FROM `{project}.{dataset}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS` tc
+    LEFT JOIN `{project}.{dataset}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE` kcu
+      ON tc.constraint_name = kcu.constraint_name
+    LEFT JOIN `{project}.{dataset}.INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE` ccu
+      ON tc.constraint_name = ccu.constraint_name
+    WHERE tc.table_name = '{table}'
+      AND tc.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')
+    """
+    pks: list[dict[str, Any]] = []
+    fks: list[dict[str, Any]] = []
+    try:
+        for r in bq.query(sql).result():
+            entry = {
+                "constraint_name": r["constraint_name"],
+                "from_column": r["from_column"],
+                "to_table": r.get("to_table"),
+                "to_column": r.get("to_column"),
+            }
+            if r["constraint_type"] == "PRIMARY KEY":
+                pks.append(entry)
+            else:
+                fks.append(entry)
+    except gcp_exceptions.GoogleAPICallError as e:
+        # TABLE_CONSTRAINTS is a newer feature — older projects don't have it.
+        logger.warning("TABLE_CONSTRAINTS unavailable for %s: %s", table, e)
+    return {"primary_keys": pks, "foreign_keys": fks}
+
+
+def _fetch_partition_skew(
+    bq: bigquery.Client, project: str, dataset: str, table: str,
+    top_n: int = 10,
+) -> dict[str, Any]:
+    """PARTITIONS — per-partition row counts + last_modified.
+
+    Adds DATA-level partition signal on top of MDM's schema-level
+    declaration. Reveals where the rows actually are (hot vs dormant)
+    and informs always_filter design empirically rather than by guess."""
+    sql = f"""
+    SELECT
+      partition_id,
+      total_rows,
+      total_logical_bytes,
+      last_modified_time
+    FROM `{project}.{dataset}.INFORMATION_SCHEMA.PARTITIONS`
+    WHERE table_name = '{table}'
+      AND partition_id IS NOT NULL
+      AND partition_id NOT IN ('__NULL__', '__UNPARTITIONED__')
+    ORDER BY last_modified_time DESC NULLS LAST
+    """
+    try:
+        rows = list(bq.query(sql).result())
+    except gcp_exceptions.GoogleAPICallError as e:
+        logger.warning("PARTITIONS unavailable for %s: %s", table, e)
+        return {}
+    if not rows:
+        return {}
+    total_partitions = len(rows)
+    total_rows = sum(int(r.get("total_rows") or 0) for r in rows)
+    # Hot tail — % of rows in the most recent N partitions
+    recent_rows = sum(int(r.get("total_rows") or 0) for r in rows[:top_n])
+    hot_pct = (recent_rows / total_rows) if total_rows else 0.0
+    dormant_threshold_days = 365
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
+    dormant = sum(
+        1 for r in rows
+        if r.get("last_modified_time")
+        and (now - r["last_modified_time"]).days > dormant_threshold_days
+    )
+    return {
+        "total_partitions": total_partitions,
+        "total_rows_estimate": total_rows,
+        f"top_{top_n}_partition_rows_pct": round(hot_pct, 4),
+        "dormant_partitions_over_365d": dormant,
+        "recent_partition_ids": [r["partition_id"] for r in rows[:top_n]],
+        "oldest_partition_id": rows[-1]["partition_id"] if rows else None,
+        "most_recent_modified": _iso(rows[0].get("last_modified_time")) if rows else None,
+    }
+
+
+def _fetch_catalog_policy_tags(
+    project: str, dataset: str, table: str,
+) -> dict[str, Any]:
+    """Data Catalog policy tags — authoritative PII / governance hierarchy.
+
+    AmEx's PII classification almost certainly lives here, not in MDM's
+    is_pii bool. Resolves the `PII=0 across all tables` anomaly.
+    Optional — only fires if google-cloud-datacatalog is installed AND
+    the SA has datacatalog.viewer."""
+    try:
+        from google.cloud import datacatalog_v1  # type: ignore[import-not-found]
+    except ImportError:
+        return {
+            "available": False,
+            "reason": "google-cloud-datacatalog not installed",
+        }
+    try:
+        client = datacatalog_v1.DataCatalogClient()
+        resource_name = (
+            f"//bigquery.googleapis.com/projects/{project}/"
+            f"datasets/{dataset}/tables/{table}"
+        )
+        entry = client.lookup_entry(request={"linked_resource": resource_name})
+        # Walk the column schema for policy_tags
+        tags_by_column: dict[str, list[str]] = {}
+        for col in getattr(entry.schema, "columns", []) or []:
+            pt = getattr(col, "policy_tags", None)
+            if pt and getattr(pt, "names", None):
+                tags_by_column[col.column] = list(pt.names)
+        # List user-applied tags on the table itself
+        table_tags = []
+        try:
+            for tag in client.list_tags(parent=entry.name):
+                table_tags.append({
+                    "template": tag.template,
+                    "fields": {k: str(v.string_value or v.bool_value or v.double_value)
+                               for k, v in (tag.fields or {}).items()},
+                })
+        except Exception:
+            pass
+        return {
+            "available": True,
+            "entry_name": entry.name,
+            "linked_resource": resource_name,
+            "column_policy_tags": tags_by_column,
+            "table_tags": table_tags,
+        }
+    except Exception as e:  # noqa: BLE001
+        # Common failures: no Catalog entry, missing IAM, wrong project
+        return {"available": False, "reason": f"{type(e).__name__}: {e}"}
+
+
 def phase_a_metadata(
     bq: bigquery.Client, project: str, dataset: str, table: str,
+    *,
+    include_catalog: bool = True,
 ) -> dict[str, Any]:
-    """Pull INFORMATION_SCHEMA + TABLE_OPTIONS + TABLE_STORAGE in 2 queries.
+    """Pull INFORMATION_SCHEMA + TABLE_OPTIONS + TABLE_STORAGE + Tier-1
+    extensions (nested fields, constraints, partition skew, Catalog tags).
 
-    Zero scan cost — INFORMATION_SCHEMA is metadata."""
+    Zero scan cost — INFORMATION_SCHEMA + Catalog API are metadata only."""
     fqn = f"`{project}.{dataset}.{table}`"
 
     # 1. Column metadata (+ BQ-native description, often fresher than MDM)
@@ -375,6 +562,18 @@ def phase_a_metadata(
     )
     clustering_fields = [c["column_name"] for c in cluster_cols]
 
+    # ── Tier-1 extensions (all free) ──
+    field_paths = _fetch_field_paths(bq, project, dataset, table)
+    constraints = _fetch_constraints(bq, project, dataset, table)
+    partition_skew = (
+        _fetch_partition_skew(bq, project, dataset, table)
+        if partition_field else {}
+    )
+    catalog = (
+        _fetch_catalog_policy_tags(project, dataset, table)
+        if include_catalog else {"available": False, "reason": "disabled by flag"}
+    )
+
     return {
         "columns": [
             {
@@ -412,6 +611,11 @@ def phase_a_metadata(
             "refresh_interval_minutes": (mview_info or {}).get("refresh_interval_minutes"),
             "enable_refresh": (mview_info or {}).get("enable_refresh"),
         } if mview_info else None),
+        # Tier-1 NEW signal — no MDM analog (or strictly richer than MDM)
+        "nested_field_paths": field_paths,              # MDM has zero on nested fields
+        "constraints": constraints,                     # engineer-declared PK/FK
+        "partition_skew": partition_skew,               # data-level vs MDM's schema-level
+        "catalog": catalog,                             # Catalog policy tag hierarchy
     }
 
 
@@ -594,15 +798,24 @@ def probe_one_table(
     phase_cutoff: str = "C",
     max_bytes_per_table: int = DEFAULT_MAX_BYTES_PER_TABLE,
     dry_run: bool = False,
+    include_catalog: bool = True,
 ) -> TableProbeResult:
     fqn = f"{project}.{dataset}.{table}"
     result = TableProbeResult(table=table, bq_fqn=fqn)
 
     # ── Phase A ──
     try:
-        result.phase_a = phase_a_metadata(bq, project, dataset, table)
-        _pass(f"{table}: Phase A — {len(result.phase_a['columns'])} cols, "
-              f"{result.phase_a.get('row_count') or '?'} rows")
+        result.phase_a = phase_a_metadata(
+            bq, project, dataset, table, include_catalog=include_catalog,
+        )
+        n_nested = len(result.phase_a.get("nested_field_paths") or [])
+        n_pk = len(result.phase_a.get("constraints", {}).get("primary_keys") or [])
+        n_fk = len(result.phase_a.get("constraints", {}).get("foreign_keys") or [])
+        _pass(
+            f"{table}: Phase A — {len(result.phase_a['columns'])} cols "
+            f"(+{n_nested} nested), {n_pk} PK / {n_fk} FK, "
+            f"{result.phase_a.get('row_count') or '?'} rows"
+        )
     except Exception as e:
         result.error = f"Phase A: {type(e).__name__}: {e}"
         _fail(f"{table}: {result.error}")
@@ -751,6 +964,12 @@ def main() -> int:
                         help="Estimate bytes without paid queries")
     parser.add_argument("--refresh", action="store_true",
                         help="Re-probe even if cache exists")
+    parser.add_argument(
+        "--no-catalog", action="store_true",
+        help="Skip Data Catalog policy-tag lookup. By default we try the "
+             "Catalog API (free, no scan) — disable if google-cloud-datacatalog "
+             "isn't installed or the SA lacks datacatalog.viewer.",
+    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -798,6 +1017,7 @@ def main() -> int:
             phase_cutoff=args.phase_cutoff,
             max_bytes_per_table=int(args.max_bytes_per_table),
             dry_run=args.dry_run,
+            include_catalog=not args.no_catalog,
         )
         results.append(result)
         total_bytes += result.total_scanned_bytes
