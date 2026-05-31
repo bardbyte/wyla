@@ -243,7 +243,7 @@ def phase_a_metadata(
     Zero scan cost — INFORMATION_SCHEMA is metadata."""
     fqn = f"`{project}.{dataset}.{table}`"
 
-    # 1. Column metadata + table info in a single query via INFORMATION_SCHEMA
+    # 1. Column metadata (+ BQ-native description, often fresher than MDM)
     cols_sql = f"""
     SELECT
       column_name,
@@ -252,7 +252,8 @@ def phase_a_metadata(
       is_partitioning_column = 'YES'     AS is_partitioning_column,
       clustering_ordinal_position,
       ordinal_position,
-      column_default
+      column_default,
+      description                         AS column_description
     FROM `{project}.{dataset}.INFORMATION_SCHEMA.COLUMNS`
     WHERE table_name = '{table}'
     ORDER BY ordinal_position
@@ -264,6 +265,33 @@ def phase_a_metadata(
       creation_time,
       ddl
     FROM `{project}.{dataset}.INFORMATION_SCHEMA.TABLES`
+    WHERE table_name = '{table}'
+    """
+
+    # 2. TABLE_OPTIONS — labels, description, friendly_name. Each option is a
+    #    separate row (option_name, option_value). We pivot into a dict.
+    options_sql = f"""
+    SELECT option_name, option_type, option_value
+    FROM `{project}.{dataset}.INFORMATION_SCHEMA.TABLE_OPTIONS`
+    WHERE table_name = '{table}'
+    """
+
+    # 3. If the "table" is actually a VIEW, pull the view_definition —
+    #    the SQL itself is graph signal (joins it makes, filters it carries).
+    views_sql = f"""
+    SELECT view_definition, check_option, use_standard_sql
+    FROM `{project}.{dataset}.INFORMATION_SCHEMA.VIEWS`
+    WHERE table_name = '{table}'
+    """
+
+    # 4. Materialized views — definition + last_refresh + refresh_interval
+    mviews_sql = f"""
+    SELECT
+      last_refresh_time,
+      refresh_interval_minutes,
+      allow_non_incremental_definition,
+      enable_refresh
+    FROM `{project}.{dataset}.INFORMATION_SCHEMA.MATERIALIZED_VIEWS`
     WHERE table_name = '{table}'
     """
 
@@ -283,6 +311,50 @@ def phase_a_metadata(
 
     tbl_rows = list(bq.query(tbl_sql).result())
     tbl_info = dict(tbl_rows[0]) if tbl_rows else {}
+
+    # Table options (labels, friendly_name, description) — degrade gracefully
+    try:
+        opt_rows = [dict(r) for r in bq.query(options_sql).result()]
+    except gcp_exceptions.GoogleAPICallError as e:
+        logger.warning("TABLE_OPTIONS unavailable for %s: %s", table, e)
+        opt_rows = []
+    table_options: dict[str, Any] = {}
+    table_labels: dict[str, str] = {}
+    table_description_bq: str | None = None
+    table_friendly_name: str | None = None
+    for r in opt_rows:
+        name = r.get("option_name")
+        value = r.get("option_value")
+        if not name:
+            continue
+        # option_value is a STRING; for labels it's a struct literal
+        if name == "labels" and value:
+            # Format: [STRUCT("k1","v1"),STRUCT("k2","v2")]
+            # Best-effort parse; if it fails we just keep the raw string.
+            import re as _re
+            for k, v in _re.findall(r'STRUCT\("([^"]+)",\s*"([^"]*)"\)', value or ""):
+                table_labels[k] = v
+            table_options[name] = value
+        elif name == "description":
+            table_description_bq = (value or "").strip('"') if value else None
+        elif name == "friendly_name":
+            table_friendly_name = (value or "").strip('"') if value else None
+        else:
+            table_options[name] = value
+
+    # VIEW definition (if applicable)
+    try:
+        view_rows = [dict(r) for r in bq.query(views_sql).result()]
+    except gcp_exceptions.GoogleAPICallError:
+        view_rows = []
+    view_info = view_rows[0] if view_rows else None
+
+    # MATERIALIZED VIEW (if applicable)
+    try:
+        mview_rows = [dict(r) for r in bq.query(mviews_sql).result()]
+    except gcp_exceptions.GoogleAPICallError:
+        mview_rows = []
+    mview_info = mview_rows[0] if mview_rows else None
 
     try:
         storage_rows = list(bq.query(storage_sql).result())
@@ -313,18 +385,33 @@ def phase_a_metadata(
                 "clustering_ordinal": c.get("clustering_ordinal_position"),
                 "ordinal_position": c.get("ordinal_position"),
                 "default": c.get("column_default"),
+                "description_bq": c.get("column_description"),
             }
             for c in columns
         ],
         "table_type": tbl_info.get("table_type"),
         "creation_time": _iso(tbl_info.get("creation_time")),
-        "ddl_present": bool(tbl_info.get("ddl")),
+        "ddl": tbl_info.get("ddl"),  # full CREATE TABLE — source of truth
         "row_count": _to_int(storage.get("total_rows")),
         "logical_bytes": _to_int(storage.get("total_logical_bytes")),
         "physical_bytes": _to_int(storage.get("total_physical_bytes")),
         "storage_last_modified_time": _iso(storage.get("storage_last_modified_time")),
         "partition_field": partition_field,
         "clustering_fields": clustering_fields,
+        # NEW — table-level governance + naming
+        "table_description_bq": table_description_bq,
+        "table_friendly_name": table_friendly_name,
+        "table_labels": table_labels,
+        "table_options_raw": table_options,
+        # NEW — view + materialized view definitions
+        "view_definition": (view_info or {}).get("view_definition") if view_info else None,
+        "view_use_standard_sql": (view_info or {}).get("use_standard_sql") if view_info else None,
+        "is_view": bool(view_info),
+        "materialized_view": ({
+            "last_refresh_time": _iso((mview_info or {}).get("last_refresh_time")),
+            "refresh_interval_minutes": (mview_info or {}).get("refresh_interval_minutes"),
+            "enable_refresh": (mview_info or {}).get("enable_refresh"),
+        } if mview_info else None),
     }
 
 
