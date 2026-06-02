@@ -1,0 +1,11 @@
+table_name,IS IN DMP,company_domain,data_domain
+custins_customer_insights_cardmember,Yes,Finance,CP&A
+custins_customer_insights_product,Yes,Finance,CP&A
+fin_consumer_business_card_member_status,Yes,Finance,FODL
+pmdl_fin_business_volume_transaction_detail,Yes,Finance,FODL
+acqdw_acquisition_us,Yes,Acquisitions Tracking,Acquisitions
+risk_indv_cust_hist,Yes,Risk,Scoring
+risk_pers_acct,No,Risk,Not Found
+loyalty_rc_redemption,Yes,Loyalty,Loyalty
+gms_transaction,Yes,Merchant,MERCHANT
+crt_currency,No,Not Found,Not Found

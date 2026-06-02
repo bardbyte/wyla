@@ -1,0 +1,11 @@
+Symbol,Definition,BusinessUnit,Region,EntryType
+CM,Cardmember,Finance,US,Acronym
+CM,Communication Module,Marketing,US,Acronym
+CMID,Cardmember ID,Finance,US,Acronym
+AA,Account Adjustment,Finance,US,Acronym
+AA,Account Acquisition,Marketing,EU,Acronym
+AA,Adverse Action,Risk,US,Acronym
+TBB,Total Billed Business,Finance,Global,Acronym
+FICO,Fair Isaac Corporation Score,Risk,US,Acronym
+PLAT,Platinum Card Product,Loyalty,Global,Code
+BUS,Business Segment,Finance,Global,Acronym
