@@ -37,8 +37,14 @@ class LLMResult:
 
 
 def _have_credentials() -> bool:
-    p = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    return bool(p) and os.path.exists(p)
+    # Checks the resolved Vertex key path (LUMI_VERTEX_SA_KEY first,
+    # then GOOGLE_APPLICATION_CREDENTIALS fallback).
+    try:
+        from synapse.utils.auth import resolve_vertex_key_path
+    except ImportError:
+        p = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        return bool(p) and os.path.exists(p)
+    return resolve_vertex_key_path() is not None
 
 
 def call_gemini(
@@ -60,29 +66,27 @@ def call_gemini(
             dry_run=True,
             error=(
                 "" if dry_run
-                else "GOOGLE_APPLICATION_CREDENTIALS not set — dry-run forced"
+                else "no Vertex SA key resolvable "
+                     "(LUMI_VERTEX_SA_KEY or GOOGLE_APPLICATION_CREDENTIALS)"
             ),
         )
 
     try:
-        # Prefer the new google.genai SDK (Vertex-aware).
-        from google import genai  # type: ignore[import-not-found]
         from google.genai import types as genai_types  # type: ignore[import-not-found]
+        from synapse.utils.auth import build_vertex_genai_client
     except ImportError as e:
         return LLMResult(
             response_text="",
             model=model,
             dry_run=False,
-            error=f"google-genai not installed: {e}. "
+            error=f"google-genai or synapse.utils.auth not available: {e}. "
                   f"Install with: pip install google-genai",
         )
 
     try:
-        client = genai.Client(
-            vertexai=True,
-            project=project,
-            location=location,
-        )
+        # Use the shared auth helper so corporate-TLS + LUMI_VERTEX_SA_KEY
+        # get the same treatment as everywhere else.
+        client = build_vertex_genai_client(project=project, location=location)
         cfg = genai_types.GenerateContentConfig(
             temperature=temperature,
         )
