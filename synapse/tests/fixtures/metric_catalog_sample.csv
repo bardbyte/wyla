@@ -1,0 +1,5 @@
+technical_name,business_name,business_definition,calculation_logic,primary_data_product,associated_domain,metric_grain,business_synonyms,technical_references
+total_billed_business,Total Billed Business,Aggregate dollars billed to cardmembers in a period,SUM(billed_business),cornerstone_metrics,Finance,aggregated,TBB;Total BB;Billed Business,Q01.sql;Q07.sql
+active_cardmembers,Active Cardmembers,Distinct count of cardmembers with at least one transaction in period,COUNT(DISTINCT cm11),custins_customer_insights_cardmember,Cardmember,aggregated,Active CMs;Engaged Cardmembers,Q03.sql
+fico_band,Credit Score Band,Categorizes customers into credit score ranges based on FICO scores,CASE WHEN fico >= 740 THEN 'Prime' WHEN fico >= 670 THEN 'Near-Prime' ELSE 'Sub' END,risk_indv_cust_hist,Risk,row-level,FICO Tier;Credit Tier,Q12.sql
+new_accounts_acquired,New Accounts Acquired,Count of newly acquired accounts within the reporting period,COUNT(acct_id) WHERE acct_open_dt = rpt_dt,acqdw_acquisition_us,Acquisitions,aggregated,NAA;New Acct Acq,Q18.sql

@@ -1,0 +1,67 @@
+proposed_entities:
+  - canonical_name: Cardmember
+    description: An individual who holds an American Express card account; the central entity in customer-insights and transaction tables.
+    source_evidence:
+      tables:
+        - custins_customer_insights_cardmember
+        - fin_consumer_business_card_member_status
+      columns:
+        - cm11
+      metrics:
+        - active_cardmembers
+        - total_billed_business
+      acronyms:
+        - CM
+        - CMID
+      data_categories:
+        - CP&A
+        - FODL
+    properties:
+      id_columns: [cm11]
+      common_attributes: [fico_band, bus_seg]
+    parent_entity: null
+    relationships:
+      - type: has_many
+        target_entity: Account
+        via_column: cm11
+        cardinality_evidence: "Multiple JOINs in corpus and MDM external_references"
+    llm_confidence: 0.95
+    human_review_notes: |
+      Strong signal across 5+ tables, central to all aggregated metrics.
+      Note that CM also means "Communication Module" in Marketing per glossary.
+
+  - canonical_name: CardProduct
+    description: A specific Amex card type (Platinum, Gold, Centurion); coded by card_product_id.
+    source_evidence:
+      tables:
+        - custins_customer_insights_product
+      columns:
+        - card_product_id
+      metrics: []
+      acronyms:
+        - PLAT
+      data_categories:
+        - CP&A
+    properties:
+      id_columns: [card_product_id]
+      coded_values:
+        - "005 = Platinum"
+        - "006 = Gold"
+    parent_entity: null
+    relationships:
+      - type: has_many
+        target_entity: Cardmember
+        via_column: card_product_id
+        cardinality_evidence: "Many cardmembers per product"
+    llm_confidence: 0.82
+    human_review_notes: |
+      Code resolution surfaced from corpus CASE WHEN; recommend validating
+      against a dim_card_product lookup table if available.
+
+ambiguities_flagged:
+  - "CM acronym means both 'Cardmember' (Finance) and 'Communication Module' (Marketing); modeled as Cardmember entity, with Communication Module out of scope until evidence emerges."
+  - "Account vs CardAccount vs LoyaltyAccount may need separate entities — only one is proposed here pending further evidence."
+
+scope_observations:
+  - "Loyalty domain has 1 table in fixture; likely under-represented in full corpus."
+  - "Merchant entity is implied by gms_transaction but no metric/glossary entry corroborates yet."
