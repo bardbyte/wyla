@@ -38,6 +38,17 @@ from pathlib import Path
 # Repo paths
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SYNAPSE_ROOT = REPO_ROOT / "synapse"
+
+# Make `import synapse...` work when running this script directly.
+if str(SYNAPSE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SYNAPSE_ROOT))
+
+# Load .env BEFORE anything reads os.environ.
+try:
+    from synapse.utils.dotenv import load_dotenv_chain  # noqa: E402
+    _DOTENV_APPLIED = load_dotenv_chain()
+except ImportError:
+    _DOTENV_APPLIED = {}
 LUMI_FINAL = REPO_ROOT / "lumi_final"
 
 # ── Pretty print ──────────────────────────────────────────────
@@ -182,6 +193,7 @@ def section_python_deps() -> tuple[int, int]:
 
 _ENV_VARS = [
     # name, required, description, default
+    # Vertex
     ("LUMI_VERTEX_PROJECT", True,
      "GCP project that owns the Gemini grant", "your-vertex-project"),
     ("LUMI_VERTEX_LOCATION", False,
@@ -189,13 +201,37 @@ _ENV_VARS = [
     ("LUMI_VERTEX_SA_KEY", False,
      "explicit Vertex SA key (else falls back to GOOGLE_APPLICATION_CREDENTIALS)",
      "(unset)"),
-    ("LUMI_BQ_PROJECT", True,
-     "GCP project that owns the BQ datasets we'll read", "your-bq-project"),
+    # BigQuery — required: project + dataset
+    ("BQ_PROJECT_ID", True,
+     "BQ execution project (preferred name; fallback: LUMI_BQ_PROJECT)",
+     "your-bq-project"),
     ("LUMI_BQ_DATASET", True,
      "default BQ dataset for unqualified tables", "dw"),
     ("LUMI_BQ_SA_KEY", False,
      "explicit BQ SA key (else falls back to GOOGLE_APPLICATION_CREDENTIALS)",
      "(unset)"),
+    # BigQuery — optional enterprise plumbing
+    ("BIGQUERY_API_BASE_URL", False,
+     "REST endpoint override (e.g. https://bigquery-prod.p.googleapis.com)",
+     "(default: public endpoint)"),
+    ("BIGQUERY_URL", False,
+     "fallback endpoint override if BIGQUERY_API_BASE_URL is unset",
+     "(default: public endpoint)"),
+    ("BQ_LOCATION", False,
+     "BQ region for jobReference.location", "US"),
+    ("BQ_FORCE_PROXY", False,
+     "1 = keep proxy; skip NO_PROXY injection", "0"),
+    ("BQ_DISABLE_PROXY", False,
+     "1 = ignore proxy env for auth token refresh (use when 407 hits)", "0"),
+    ("NO_PROXY", False,
+     "comma-separated bypass list; synapse merges Google hosts in",
+     "(unset; will be created)"),
+    ("REQUESTS_CA_BUNDLE", False,
+     "custom CA bundle for corporate TLS interception", "(unset)"),
+    ("SSL_CERT_FILE", False,
+     "CA bundle fallback; mirrored into REQUESTS_CA_BUNDLE when set",
+     "(unset)"),
+    # Legacy
     ("GOOGLE_APPLICATION_CREDENTIALS", False,
      "legacy single-key fallback for both services", "(unset)"),
 ]
@@ -204,6 +240,12 @@ _ENV_VARS = [
 def section_env_vars() -> tuple[int, int]:
     _sec("3. Environment variables")
     f = w = 0
+
+    # Aliases the requirement can be satisfied by EITHER var
+    _aliases = {
+        "BQ_PROJECT_ID": "LUMI_BQ_PROJECT",
+    }
+
     for name, required, why, default in _ENV_VARS:
         v = os.environ.get(name)
         marker = "REQUIRED" if required else "optional"
@@ -211,13 +253,21 @@ def section_env_vars() -> tuple[int, int]:
             disp = v if len(v) <= 60 else v[:30] + "..." + v[-15:]
             _pass(f"{name}={disp}  ({marker})")
         else:
+            alias = _aliases.get(name)
+            if alias and os.environ.get(alias):
+                _pass(f"{name} satisfied via {alias}={os.environ[alias]}  "
+                      f"({marker})")
+                continue
             if required:
                 _fail(f"{name} NOT SET  ({marker})")
                 _info(f"meaning: {why}")
                 _fixhint(f"export {name}={default}")
+                if alias:
+                    _info(f"or satisfy via alias: export {alias}=...")
                 f += 1
             else:
                 _info(f"{name} (optional): {why}")
+
     # Special: at least one of {vertex_sa, bq_sa, GAC} must be set
     if not any(os.environ.get(k) for k in (
         "LUMI_VERTEX_SA_KEY", "LUMI_BQ_SA_KEY", "GOOGLE_APPLICATION_CREDENTIALS",
@@ -226,6 +276,65 @@ def section_env_vars() -> tuple[int, int]:
               "set at least one of LUMI_VERTEX_SA_KEY / LUMI_BQ_SA_KEY / "
               "GOOGLE_APPLICATION_CREDENTIALS")
         f += 1
+
+    # Surface what .env contributed (helps when "I set it but preflight
+    # says unset" — turns out the wrong file got loaded).
+    if _DOTENV_APPLIED:
+        _info(f".env applied {len(_DOTENV_APPLIED)} value(s): "
+              f"{sorted(_DOTENV_APPLIED.keys())[:8]}"
+              f"{' …' if len(_DOTENV_APPLIED) > 8 else ''}")
+
+    return f, w
+
+
+def section_bq_network() -> tuple[int, int]:
+    """Resolved BQ network config — endpoint, location, proxy, CA."""
+    _sec("4b. BigQuery network resolution")
+    f = w = 0
+    try:
+        from synapse.utils.auth import (
+            DEFAULT_BQ_ENDPOINT,
+            resolve_bq_endpoint,
+            resolve_bq_location,
+            resolve_bq_project,
+            setup_bq_network_env,
+        )
+    except ImportError as e:
+        _fail(f"synapse.utils.auth import failed: {e}")
+        return 1, 0
+
+    state = setup_bq_network_env()
+    _pass(f"endpoint: {state['endpoint']}"
+          + ("  (custom override)"
+             if state["endpoint"] != DEFAULT_BQ_ENDPOINT else "  (default public)"))
+    _pass(f"location: {state['location']}")
+    _pass(f"project:  {state['project'] or '(unset — will fail BQ calls)'}")
+
+    if state["force_proxy"]:
+        _info("BQ_FORCE_PROXY=1 — NO_PROXY injection SKIPPED")
+    else:
+        if state["no_proxy_hosts"]:
+            _pass(f"NO_PROXY merged: {len(state['no_proxy_hosts'])} hosts "
+                  f"(incl. {state['endpoint_host']})")
+        else:
+            _info("NO_PROXY: no hosts injected (BQ_FORCE_PROXY active or no need)")
+
+    if state["disable_proxy_for_auth"]:
+        _info("BQ_DISABLE_PROXY=1 — auth Session will set trust_env=False")
+
+    if state["ca_bundle"]:
+        if Path(state["ca_bundle"]).exists():
+            _pass(f"CA bundle: {state['ca_bundle']}")
+        else:
+            _fail(f"CA bundle path does not exist: {state['ca_bundle']}")
+            f += 1
+    else:
+        _info("no custom CA bundle (system default trust will be used)")
+
+    if not resolve_bq_project():
+        _warn("BQ project unresolved — set BQ_PROJECT_ID or LUMI_BQ_PROJECT")
+        w += 1
+
     return f, w
 
 
@@ -554,6 +663,13 @@ def main() -> int:
     results.append(("4. SA key files", f, w))
     total_f += f
     total_w += w
+
+    # 4b — BQ network resolution (only meaningful when SA + bq libs present)
+    if not args.vertex_only:
+        f, w = section_bq_network()
+        results.append(("4b. BQ network", f, w))
+        total_f += f
+        total_w += w
 
     # 5
     f, w = section_network()

@@ -1,27 +1,44 @@
-"""Service-account auth helpers.
+"""Service-account auth helpers (Vertex + BigQuery, enterprise-network safe).
 
-The enterprise pattern: two separate SA keys, one per service
-(Vertex / BQ). Loaded explicitly per use instead of the global
-``GOOGLE_APPLICATION_CREDENTIALS`` env var — that way one process
-can hit both with different identities.
+Two-SA-key pattern — Vertex and BQ keys are loaded explicitly per use
+rather than via the global GOOGLE_APPLICATION_CREDENTIALS env var, so
+one process can hit both with different identities.
 
-Env vars (read in this order; first hit wins per service):
+ENTERPRISE NETWORK HANDLING (matches the production BQ probe pattern):
 
-    Vertex:
-        LUMI_VERTEX_SA_KEY            explicit Vertex SA key path
-        GOOGLE_APPLICATION_CREDENTIALS  legacy single-key fallback
+    Endpoint:
+        BIGQUERY_API_BASE_URL    primary REST endpoint override
+        BIGQUERY_URL             fallback REST endpoint override
+        (default: bigquery.googleapis.com — public)
 
-    BQ:
-        LUMI_BQ_SA_KEY                explicit BQ SA key path
-        GOOGLE_APPLICATION_CREDENTIALS  legacy single-key fallback
+    Region:
+        BQ_LOCATION              region for jobReference (default "US")
 
-Both helpers return either a usable ``service_account.Credentials`` or
-``None`` (caller decides whether None is fatal). They never raise on
-missing creds — the caller renders the diagnostic.
+    Project:
+        BQ_PROJECT_ID            primary BQ execution project
+        LUMI_BQ_PROJECT          fallback synapse-convention name
+        GOOGLE_CLOUD_PROJECT     standard GCP env var (last)
 
-TLS: every consumer is expected to call ``inject_truststore()`` at
-process start, BEFORE any ``google.*`` import. The function is a
-no-op on machines without the corporate root CA in the keychain.
+    Proxy:
+        BQ_FORCE_PROXY=1         keep using whatever proxy env vars say
+                                 (skips NO_PROXY injection)
+        BQ_DISABLE_PROXY=1       set trust_env=False on token-refresh
+                                 session (use when proxy returns 407)
+        NO_PROXY / no_proxy      we MERGE Google hosts in unless
+                                 BQ_FORCE_PROXY says otherwise
+
+    TLS:
+        REQUESTS_CA_BUNDLE       custom CA bundle (preferred)
+        SSL_CERT_FILE            CA bundle fallback
+        + call inject_truststore() at process start for corporate MITM
+
+OAuth scopes:
+        Vertex:  default scope chain (genai SDK handles it)
+        BQ:      explicit "https://www.googleapis.com/auth/bigquery"
+                 attached to the SA credentials
+
+Both Vertex + BQ key resolvers return a usable Path / None; never raise
+on missing creds — the caller decides whether None is fatal.
 """
 
 from __future__ import annotations
@@ -30,8 +47,29 @@ import logging
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 logger = logging.getLogger("synapse.utils.auth")
+
+
+# ─── Constants ───────────────────────────────────────────────
+
+
+DEFAULT_BQ_ENDPOINT = "https://bigquery.googleapis.com"
+DEFAULT_BQ_LOCATION = "US"
+BQ_SCOPE = "https://www.googleapis.com/auth/bigquery"
+
+# Google hosts that should bypass enterprise proxies for auth + API calls
+_BYPASS_HOSTS = (
+    "oauth2.googleapis.com",
+    "oauth2-dev.p.googleapis.com",
+    "oauth2-prod.p.googleapis.com",
+    "bigquery.googleapis.com",
+    "bigquery-dev.p.googleapis.com",
+    "bigquery-prod.p.googleapis.com",
+    "aiplatform.googleapis.com",
+    "generativelanguage.googleapis.com",
+)
 
 
 # ─── TLS ─────────────────────────────────────────────────────
@@ -88,7 +126,12 @@ def load_vertex_credentials() -> Any | None:
 
 
 def load_bq_credentials() -> Any | None:
-    """Load service-account credentials for BigQuery. None if missing."""
+    """Load BQ service-account credentials scoped to BigQuery.
+
+    Explicit scope = `https://www.googleapis.com/auth/bigquery`. The
+    bigquery client library would scope when needed via the default
+    chain, but pinning here makes the token's intent unambiguous and
+    safer against credential reuse."""
     p = resolve_bq_key_path()
     if p is None:
         return None
@@ -97,17 +140,119 @@ def load_bq_credentials() -> Any | None:
     except ImportError as e:
         logger.warning("google-auth not installed: %s", e)
         return None
-    return service_account.Credentials.from_service_account_file(str(p))
+    return service_account.Credentials.from_service_account_file(
+        str(p), scopes=[BQ_SCOPE],
+    )
+
+
+# ─── BQ network / endpoint resolution (enterprise) ──────────
+
+
+def _truthy(v: str | None) -> bool:
+    return bool(v) and v.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def resolve_bq_project() -> str | None:
+    """BQ_PROJECT_ID → LUMI_BQ_PROJECT → GOOGLE_CLOUD_PROJECT, first hit."""
+    for env in ("BQ_PROJECT_ID", "LUMI_BQ_PROJECT", "GOOGLE_CLOUD_PROJECT"):
+        v = os.environ.get(env)
+        if v:
+            return v.strip()
+    return None
+
+
+def resolve_bq_endpoint() -> str:
+    """BIGQUERY_API_BASE_URL → BIGQUERY_URL → public default.
+
+    Strips trailing slashes so callers can string-concat paths."""
+    for env in ("BIGQUERY_API_BASE_URL", "BIGQUERY_URL"):
+        v = os.environ.get(env)
+        if v:
+            return v.strip().rstrip("/")
+    return DEFAULT_BQ_ENDPOINT
+
+
+def resolve_bq_location() -> str:
+    return (os.environ.get("BQ_LOCATION") or DEFAULT_BQ_LOCATION).strip()
+
+
+def setup_bq_network_env(*, verbose: bool = False) -> dict[str, Any]:
+    """Apply enterprise BQ network conventions to os.environ.
+
+    Mutations performed:
+      - NO_PROXY / no_proxy get the Google host list MERGED in
+        (skipped if BQ_FORCE_PROXY=1)
+      - If BQ_DISABLE_PROXY=1: signals to downstream code (returned in
+        the dict). The actual `requests.Session.trust_env = False` is
+        applied by callers that build a Session.
+      - If REQUESTS_CA_BUNDLE is unset but SSL_CERT_FILE is set, copy
+        SSL_CERT_FILE → REQUESTS_CA_BUNDLE so `requests`-based
+        libraries see the bundle.
+
+    Returns a state dict the preflight uses to show resolved config.
+    """
+    force_proxy = _truthy(os.environ.get("BQ_FORCE_PROXY"))
+    disable_proxy = _truthy(os.environ.get("BQ_DISABLE_PROXY"))
+
+    endpoint = resolve_bq_endpoint()
+    endpoint_host = urlparse(endpoint).hostname
+
+    bypass_hosts = list(_BYPASS_HOSTS)
+    if endpoint_host and endpoint_host not in bypass_hosts:
+        bypass_hosts.append(endpoint_host)
+
+    no_proxy_applied: list[str] = []
+    if not force_proxy:
+        existing = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or ""
+        existing_set = {h.strip() for h in existing.split(",") if h.strip()}
+        merged = sorted(existing_set | set(bypass_hosts))
+        merged_str = ",".join(merged)
+        os.environ["NO_PROXY"] = merged_str
+        os.environ["no_proxy"] = merged_str
+        no_proxy_applied = merged
+
+    # CA bundle: REQUESTS_CA_BUNDLE wins; if only SSL_CERT_FILE set,
+    # mirror it so `requests` library sees it.
+    ca_bundle = os.environ.get("REQUESTS_CA_BUNDLE")
+    if not ca_bundle:
+        ssl_cert = os.environ.get("SSL_CERT_FILE")
+        if ssl_cert and Path(ssl_cert).exists():
+            os.environ["REQUESTS_CA_BUNDLE"] = ssl_cert
+            ca_bundle = ssl_cert
+
+    state = {
+        "endpoint": endpoint,
+        "endpoint_host": endpoint_host,
+        "location": resolve_bq_location(),
+        "project": resolve_bq_project(),
+        "force_proxy": force_proxy,
+        "disable_proxy_for_auth": disable_proxy,
+        "ca_bundle": ca_bundle,
+        "no_proxy_hosts": no_proxy_applied,
+    }
+    if verbose:
+        logger.info("BQ network state: %s", state)
+    return state
 
 
 # ─── Client factories ────────────────────────────────────────
 
 
-def build_bq_client(project: str | None = None) -> Any:
-    """Build a `google.cloud.bigquery.Client` with the BQ SA key.
+def build_bq_client(
+    project: str | None = None,
+    *,
+    apply_network_env: bool = True,
+) -> Any:
+    """Build a scoped `google.cloud.bigquery.Client`.
 
-    Falls back to ADC if no key path is set. Raises if the bigquery
-    package isn't installed."""
+    - Applies enterprise NO_PROXY + CA bundle env defaults via
+      `setup_bq_network_env()` (set apply_network_env=False to skip).
+    - Routes to custom REST endpoint when BIGQUERY_API_BASE_URL is set.
+    - Pins `location` from BQ_LOCATION (or "US" default).
+    - Project precedence: explicit arg > BQ_PROJECT_ID > LUMI_BQ_PROJECT
+      > GOOGLE_CLOUD_PROJECT.
+    - Credentials carry the explicit BigQuery OAuth scope.
+    """
     try:
         from google.cloud import bigquery  # type: ignore[import-not-found]
     except ImportError as e:
@@ -116,11 +261,33 @@ def build_bq_client(project: str | None = None) -> Any:
             "Install with: pip install google-cloud-bigquery"
         ) from e
 
+    if apply_network_env:
+        setup_bq_network_env()
+
+    proj = project or resolve_bq_project()
+    location = resolve_bq_location()
+    endpoint = resolve_bq_endpoint()
     creds = load_bq_credentials()
-    proj = project or os.environ.get("LUMI_BQ_PROJECT")
+
+    kwargs: dict[str, Any] = {"project": proj, "location": location}
     if creds is not None:
-        return bigquery.Client(project=proj, credentials=creds)
-    return bigquery.Client(project=proj)
+        kwargs["credentials"] = creds
+
+    # Honor custom endpoint only when overridden — default routes via
+    # the standard public host.
+    if endpoint and endpoint != DEFAULT_BQ_ENDPOINT:
+        try:
+            from google.api_core.client_options import (  # type: ignore[import-not-found]
+                ClientOptions,
+            )
+            kwargs["client_options"] = ClientOptions(api_endpoint=endpoint)
+        except ImportError:
+            logger.warning(
+                "google.api_core.client_options unavailable — "
+                "BIGQUERY_API_BASE_URL ignored",
+            )
+
+    return bigquery.Client(**kwargs)
 
 
 def build_vertex_genai_client(
