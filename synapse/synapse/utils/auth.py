@@ -55,9 +55,18 @@ logger = logging.getLogger("synapse.utils.auth")
 # ─── Constants ───────────────────────────────────────────────
 
 
-DEFAULT_BQ_ENDPOINT = "https://bigquery.googleapis.com"
+# Enterprise-PSC endpoint — what works inside corporate networks.
+# Public Google endpoint (bigquery.googleapis.com) is unreachable from
+# many enterprise gateways. Override via BIGQUERY_API_BASE_URL when you
+# need the public path (e.g. running from a public-internet machine).
+DEFAULT_BQ_ENDPOINT = "https://bigquery-prod.p.googleapis.com"
 DEFAULT_BQ_LOCATION = "US"
 BQ_SCOPE = "https://www.googleapis.com/auth/bigquery"
+
+# Vertex default — overridable via VERTEX_API_BASE_URL. The google-genai
+# SDK uses aiplatform.googleapis.com by default; PSC users override.
+DEFAULT_VERTEX_ENDPOINT = "https://aiplatform.googleapis.com"
+DEFAULT_OAUTH_ENDPOINT = "https://oauth2.googleapis.com"
 
 # Google hosts that should bypass enterprise proxies for auth + API calls
 _BYPASS_HOSTS = (
@@ -162,14 +171,24 @@ def resolve_bq_project() -> str | None:
 
 
 def resolve_bq_endpoint() -> str:
-    """BIGQUERY_API_BASE_URL → BIGQUERY_URL → public default.
+    """BIGQUERY_API_BASE_URL → BIGQUERY_URL → DEFAULT_BQ_ENDPOINT.
 
-    Strips trailing slashes so callers can string-concat paths."""
+    Trailing slashes stripped so callers can string-concat paths.
+    Default is enterprise PSC (bigquery-prod.p.googleapis.com); set
+    BIGQUERY_API_BASE_URL=https://bigquery.googleapis.com to use public."""
     for env in ("BIGQUERY_API_BASE_URL", "BIGQUERY_URL"):
         v = os.environ.get(env)
         if v:
             return v.strip().rstrip("/")
     return DEFAULT_BQ_ENDPOINT
+
+
+def resolve_vertex_endpoint() -> str:
+    """VERTEX_API_BASE_URL → DEFAULT_VERTEX_ENDPOINT."""
+    v = os.environ.get("VERTEX_API_BASE_URL")
+    if v:
+        return v.strip().rstrip("/")
+    return DEFAULT_VERTEX_ENDPOINT
 
 
 def resolve_bq_location() -> str:
