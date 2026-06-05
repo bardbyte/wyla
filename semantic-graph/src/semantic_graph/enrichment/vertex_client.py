@@ -56,10 +56,13 @@ class VertexEnrichmentClient:
 
         prompt = _build_prompt(self.skill_md, table_name, batch_context)
 
-        # Gemini 3.1 Pro with strict JSON response shape via response_schema
-        # (avoids the markdown-fenced JSON parsing dance).
-        response_schema_json = EnrichmentBundle.model_json_schema()
-
+        # NOTE on response_schema: Vertex Gemini's structured-output parser
+        # only accepts a SUBSET of OpenAPI 3.0 — it rejects JSON Schema with
+        # $ref / $defs / discriminators / nested anyOf, all of which Pydantic
+        # emits via model_json_schema(). Passing the full schema causes a
+        # 400 "invalid response_schema" error that the SDK can mask. We use
+        # response_mime_type='application/json' to coerce JSON output, and
+        # rely on the prompt + manual parse for shape enforcement.
         try:
             response = client.models.generate_content(
                 model=self.model,
@@ -67,16 +70,24 @@ class VertexEnrichmentClient:
                 config={
                     "temperature": 0.0,
                     "response_mime_type": "application/json",
-                    "response_schema": response_schema_json,
                     "max_output_tokens": 8192,
                 },
             )
         except Exception as e:  # noqa: BLE001
-            # Network / quota / auth failures fall back to a stub so the
-            # demo doesn't die — but we tag it loudly.
+            # Network / quota / auth failures fall back to a stub.
+            # Surface loudly so users see WHY enrichment came back empty.
+            print(f"\n[vertex-enrichment ERROR] {table_name}: {e}\n", flush=True)
             return _error_bundle(table_name, batch_context, error=str(e))
 
-        raw_text = response.text or ""
+        raw_text = (getattr(response, "text", "") or "").strip()
+        if not raw_text:
+            print(
+                f"\n[vertex-enrichment WARN] {table_name}: Gemini returned an "
+                f"empty response. Check Vertex quota / model availability.\n",
+                flush=True,
+            )
+            return _error_bundle(table_name, batch_context, error="empty Gemini response")
+
         return _parse_or_repair(raw_text, table_name, batch_context)
 
 
@@ -97,9 +108,24 @@ def _build_prompt(skill_md: str, table_name: str, batch_context: dict[str, Any])
 def _parse_or_repair(
     raw: str, table_name: str, batch_context: dict[str, Any],
 ) -> EnrichmentBundle:
-    """Validate the response or recover."""
+    """Validate the response or recover. Lenient on markdown fences + prose
+    bracketing the JSON, because Gemini sometimes ignores 'no prose'."""
+    # Strip ```json ... ``` fences if present
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[1] if text.count("```") >= 2 else text[3:]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip().rstrip("`").strip()
+    # Locate the outermost JSON object if there's surrounding prose
+    if not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end > start:
+            text = text[start : end + 1]
+
     try:
-        data = json.loads(raw)
+        data = json.loads(text)
         # The model may have emitted ONLY the column_observations for the
         # batch — pad table_name and self_assessment if missing.
         data.setdefault("table_name", table_name)
@@ -109,6 +135,14 @@ def _parse_or_repair(
         ).model_dump())
         return EnrichmentBundle.model_validate(data)
     except Exception as e:  # noqa: BLE001
+        # Print the first 400 chars of what came back so the user can see
+        # what Gemini actually said (vs. silently nulling out).
+        preview = raw[:400].replace("\n", " ")
+        print(
+            f"\n[vertex-enrichment PARSE FAIL] {table_name}: {e}\n"
+            f"  raw preview: {preview!r}\n",
+            flush=True,
+        )
         # Recovery: emit an empty bundle with the parse error captured
         return EnrichmentBundle(
             table_name=table_name,
