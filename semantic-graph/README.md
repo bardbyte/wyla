@@ -159,7 +159,7 @@ You paste the SQL into BQ console as your normal user (RLS depends on your ONCOP
 ### 5. (Optional) Debug
 
 ```bash
-python scripts/inspect.py | jq .
+python scripts/dump_graph.py | jq .
 ```
 
 Dumps the full inspector dict for the table — what the agent's tool returns.
