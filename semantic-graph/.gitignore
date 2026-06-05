@@ -1,0 +1,19 @@
+# Secrets — never commit
+.env
+*.json
+!.env.example
+!apps/**/*.json
+
+# Cached graph + enrichment artifacts (rebuild from sources)
+data/cache/
+data/real/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+.venv/

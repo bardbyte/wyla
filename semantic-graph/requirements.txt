@@ -1,0 +1,18 @@
+# Core
+pydantic>=2.0
+python-dotenv>=1.0
+
+# Vertex AI / Gemini via Google ADK (truststore for corp TLS)
+google-adk>=0.4.0
+google-cloud-aiplatform>=1.50.0
+truststore>=0.9
+
+# SQL parsing (for the corpus extractor)
+sqlglot>=23.0
+
+# Graph viz in the UI / debug scripts
+pyvis>=0.3.2
+networkx>=3.0
+
+# Quality of life
+rich>=13.0
