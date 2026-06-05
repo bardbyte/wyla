@@ -26,10 +26,13 @@ class Config(BaseModel):
     bq_project: str
     bq_dataset: str
 
-    # ── Sources ──
-    bq_extraction_dir: Path
-    mdm_json_path: Path
-    sql_queries_dir: Path
+    # ── Sources (one of two modes) ──
+    # Mode A — lumi-fused single file (preferred, simpler)
+    lumi_output_path: Path | None = None
+    # Mode B — three separate raw sources (BQ extraction + MDM API + SQL folder)
+    bq_extraction_dir: Path | None = None
+    mdm_json_path: Path | None = None
+    sql_queries_dir: Path | None = None
 
     # ── Outputs ──
     graph_cache_dir: Path
@@ -83,6 +86,25 @@ def load_config(*, env_path: Path | None = None, override: dict[str, Any] | None
     def _opt(key: str, default: str) -> str:
         return os.getenv(key, default)
 
+    # Sources are additive — every configured loader fires; the graph
+    # builder fuses them via per-fact Provenance. Require at least one.
+    lumi_path = os.getenv("LUMI_OUTPUT_PATH", "").strip()
+    bq_dir    = os.getenv("BQ_EXTRACTION_DIR", "").strip()
+    mdm_path  = os.getenv("MDM_JSON_PATH", "").strip()
+    sql_dir   = os.getenv("SQL_QUERIES_DIR", "").strip()
+    if not any([lumi_path, bq_dir, mdm_path, sql_dir]):
+        raise RuntimeError(
+            "No source configured. Set at least one of "
+            "LUMI_OUTPUT_PATH, BQ_EXTRACTION_DIR, MDM_JSON_PATH, SQL_QUERIES_DIR "
+            f"in {env_file}."
+        )
+    source_paths = {
+        "lumi_output_path":  Path(lumi_path) if lumi_path else None,
+        "bq_extraction_dir": Path(bq_dir)    if bq_dir    else None,
+        "mdm_json_path":     Path(mdm_path)  if mdm_path  else None,
+        "sql_queries_dir":   Path(sql_dir)   if sql_dir   else None,
+    }
+
     raw: dict[str, Any] = {
         "google_credentials_path": Path(_req("GOOGLE_APPLICATION_CREDENTIALS")),
         "google_project":          _req("GOOGLE_CLOUD_PROJECT"),
@@ -91,9 +113,7 @@ def load_config(*, env_path: Path | None = None, override: dict[str, Any] | None
         "table_name":              _req("TABLE_NAME"),
         "bq_project":              _req("BQ_PROJECT"),
         "bq_dataset":              _req("BQ_DATASET"),
-        "bq_extraction_dir":       Path(_req("BQ_EXTRACTION_DIR")),
-        "mdm_json_path":           Path(_req("MDM_JSON_PATH")),
-        "sql_queries_dir":         Path(_req("SQL_QUERIES_DIR")),
+        **source_paths,
         "graph_cache_dir":         Path(_opt("GRAPH_CACHE_DIR", "./data/cache")),
         "enrichment_memory_path":  Path(_opt("ENRICHMENT_MEMORY_PATH", "./data/cache/enrichment_memory.json")),
         "entity_proposals_path":   Path(_opt("ENTITY_PROPOSALS_PATH", "./data/cache/entity_proposals.json")),

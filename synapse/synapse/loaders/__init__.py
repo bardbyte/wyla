@@ -24,7 +24,13 @@ Same shape regardless of source. Trivially wrappable as an ADK FunctionTool.
 """
 
 from synapse.loaders.bq_loader import load_bq_for_table
+from synapse.loaders.lumi_loader import load_lumi_for_table
 from synapse.loaders.mdm_loader import load_mdm_for_table
 from synapse.loaders.types import LoadResult
 
-__all__ = ["load_bq_for_table", "load_mdm_for_table", "LoadResult"]
+__all__ = [
+    "load_bq_for_table",
+    "load_lumi_for_table",
+    "load_mdm_for_table",
+    "LoadResult",
+]
