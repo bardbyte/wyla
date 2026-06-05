@@ -31,7 +31,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import socket
 import sys
 from pathlib import Path
 
@@ -306,7 +305,8 @@ def section_bq_network() -> tuple[int, int]:
     state = setup_bq_network_env()
     _pass(f"endpoint: {state['endpoint']}"
           + ("  (custom override)"
-             if state["endpoint"] != DEFAULT_BQ_ENDPOINT else "  (default public)"))
+             if state["endpoint"] != DEFAULT_BQ_ENDPOINT
+             else "  (default — enterprise PSC)"))
     _pass(f"location: {state['location']}")
     _pass(f"project:  {state['project'] or '(unset — will fail BQ calls)'}")
 
@@ -417,25 +417,130 @@ def section_sa_keys() -> tuple[int, int]:
 # ── Section 5: Network connectivity ──────────────────────────
 
 
-_ENDPOINTS = [
-    ("google.com", 443),
-    ("aiplatform.googleapis.com", 443),
-    ("bigquery.googleapis.com", 443),
-    ("oauth2.googleapis.com", 443),
-]
+def _https_probe(
+    label: str, url: str, *, timeout: float = 10.0,
+) -> tuple[int, int]:
+    """HTTPS handshake probe — validates DNS + TCP + TLS + endpoint reach.
+
+    Returns (fails, warns).
+
+    Status interpretation:
+        2xx                — fully open (rare; root endpoints usually 4xx)
+        401 / 403 / 404 / 405 — reachable + TLS works (auth/path just missing)
+        URLError(SSLError)    — TLS chain broken; need truststore / CA bundle
+        URLError(407)         — proxy auth issue
+        URLError(gaierror)    — DNS failure (VPN off? typo?)
+        URLError(ConnectionRefused / timeout) — endpoint unreachable
+    """
+    import ssl
+    import time
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "synapse-preflight/0.1"},
+    )
+    t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            ms = (time.monotonic() - t0) * 1000
+            _pass(f"{label}: {url} → HTTP {resp.status} ({ms:.0f}ms)")
+            return 0, 0
+    except urllib.error.HTTPError as e:
+        ms = (time.monotonic() - t0) * 1000
+        # 4xx without auth means the endpoint IS reachable + TLS works
+        if e.code in (400, 401, 403, 404, 405):
+            _pass(
+                f"{label}: {url} → HTTP {e.code} "
+                f"(reachable; auth/path expected to fail unauthenticated) "
+                f"({ms:.0f}ms)",
+            )
+            return 0, 0
+        _warn(f"{label}: {url} → HTTP {e.code} ({ms:.0f}ms)")
+        _info(f"reason: {e.reason}")
+        return 0, 1
+    except urllib.error.URLError as e:
+        reason_obj = e.reason
+        reason = str(reason_obj)
+        _fail(f"{label}: {url} unreachable — {reason}")
+        # Specific diagnostic hints
+        if isinstance(reason_obj, ssl.SSLError):
+            _fixhint(
+                "TLS verify failed. Either:\n"
+                "        pip install truststore       (then re-run)\n"
+                "      OR set REQUESTS_CA_BUNDLE=/path/to/corp-ca-bundle.pem",
+            )
+        elif "407" in reason or "proxy" in reason.lower():
+            _fixhint(
+                "proxy auth (407). Try: BQ_DISABLE_PROXY=1 in .env, "
+                "or pre-populate NO_PROXY with your bypass list "
+                "(synapse merges Google hosts in automatically).",
+            )
+        elif "name or service not known" in reason.lower() \
+                or "name resolution" in reason.lower() \
+                or "gaierror" in reason.lower():
+            _fixhint(
+                "DNS failed. VPN connected? Corporate DNS reachable? "
+                f"Endpoint URL typo? Tested: {url}",
+            )
+        elif "refused" in reason.lower():
+            _fixhint(
+                "connection refused. This endpoint is not reachable from your "
+                "network. If you're on corporate, you likely need the PSC "
+                "endpoint (BIGQUERY_API_BASE_URL=https://bigquery-prod.p.googleapis.com).",
+            )
+        elif "timed out" in reason.lower() or "timeout" in reason.lower():
+            _fixhint("TCP timeout — firewall blocking? VPN routing issue?")
+        else:
+            _fixhint(f"try: curl -v {url}  (to confirm from outside Python)")
+        return 1, 0
+    except Exception as e:  # noqa: BLE001
+        _fail(f"{label}: {url} — {type(e).__name__}: {e}")
+        return 1, 0
 
 
 def section_network() -> tuple[int, int]:
-    _sec("5. Network connectivity")
+    """HTTPS probes against the RESOLVED endpoints (env-aware).
+
+    Replaces the old plain-TCP socket probe — TCP can succeed against
+    bigquery.googleapis.com:443 while the actual API path is blocked
+    by the corporate firewall. HTTPS handshake catches DNS, TCP, AND
+    TLS in one shot."""
+    _sec("5. Network connectivity (HTTPS handshake against resolved endpoints)")
     f = w = 0
-    for host, port in _ENDPOINTS:
-        try:
-            with socket.create_connection((host, port), timeout=5):
-                _pass(f"TCP reach {host}:{port}")
-        except (socket.gaierror, socket.timeout, OSError) as e:
-            _fail(f"{host}:{port} — {type(e).__name__}: {e}")
-            _info("VPN? Corporate firewall? Check your network.")
-            f += 1
+
+    try:
+        from synapse.utils.auth import (
+            DEFAULT_BQ_ENDPOINT,
+            DEFAULT_OAUTH_ENDPOINT,
+            DEFAULT_VERTEX_ENDPOINT,
+            resolve_bq_endpoint,
+            resolve_vertex_endpoint,
+        )
+    except ImportError as e:
+        _fail(f"synapse.utils.auth import failed: {e}")
+        return 1, 0
+
+    bq_endpoint = resolve_bq_endpoint()
+    vertex_endpoint = resolve_vertex_endpoint()
+    oauth_endpoint = DEFAULT_OAUTH_ENDPOINT
+
+    targets = [
+        ("BigQuery REST", bq_endpoint,
+         "(custom override)" if bq_endpoint != DEFAULT_BQ_ENDPOINT
+         else "(default — enterprise PSC)"),
+        ("Vertex AI", vertex_endpoint,
+         "(custom override)" if vertex_endpoint != DEFAULT_VERTEX_ENDPOINT
+         else "(default)"),
+        ("OAuth2 token endpoint", oauth_endpoint, "(default)"),
+    ]
+
+    for label, url, note in targets:
+        _info(f"target: {label}  {url}  {note}")
+        f_, w_ = _https_probe(label, url)
+        f += f_
+        w += w_
+
     return f, w
 
 
