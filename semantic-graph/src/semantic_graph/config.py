@@ -72,7 +72,10 @@ def load_config(*, env_path: Path | None = None, override: dict[str, Any] | None
 
     env_file = env_path or _ENV_PATH
     if env_file.exists():
-        load_dotenv(env_file, override=True)
+        # override=False: existing process env (set by shell export OR by
+        # pytest monkeypatch.setenv) wins over the .env file. This keeps
+        # tests hermetic and lets users override per-shell.
+        load_dotenv(env_file, override=False)
 
     def _req(key: str) -> str:
         v = os.getenv(key)
