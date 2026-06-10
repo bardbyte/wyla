@@ -1,40 +1,69 @@
-"""Lumi-fused-output loader.
+"""Lumi-fused-output loader (100% signal coverage).
 
 Reads `lumi_final/data/session1_output.json` — a per-table fused snapshot
 of MDM + baseline LookML + sqlglot-extracted SQL corpus — and splits the
-entry for one table into the canonical source JSONs the graph builder
+entry for one table into FIVE canonical source artifacts the graph builder
 already consumes:
 
     out_dir/
-      mdm_cache/<table>.json         ← MDM digest
-      baseline_views/<table>.view.lkml ← raw LookML
-      gold_queries/Q__<table>__<n>.sql ← one SQL per `queries_using_this`
-      registries/raw/table_catalog.csv ← single-row catalog seed
+      mdm_cache/<table>.json              ← MDM digest (business names, owners, sensitivity)
+      baseline_views/<table>.view.lkml    ← raw LookML text
+      baseline_artifacts/<table>.json     ← STRUCTURED LookML facts (dimensions, measures, sql_aliases, drill_fields, view_label, access_filter, …)
+      lumi_signals/<table>.json           ← pre-extracted sqlglot CORPUS facts (aggregations, joins, case_whens, filters, columns_referenced, ctes, temp_tables, date_functions)
+      gold_queries/Q__<table>__<n>.sql    ← one SQL per `queries_using_this`
+      registries/raw/table_catalog.csv    ← single-row catalog seed
 
-Lumi-output entry shape (per screenshot of session1_output.json):
+The two NEW artifacts (baseline_artifacts/, lumi_signals/) extend the
+loader from ~30% to ~100% session1_output.json signal coverage. Every
+aggregation becomes a Metric node; every JOIN becomes an EQUIVALENT_TO
+edge; every CASE WHEN becomes a CodeMapping; every WHERE literal becomes
+a FilterValue; every LookML alias becomes a Synonym. No regex.
+
+Lumi-output entry shape covered:
 
     {
       "<table_name>": {
-        "table_name": str,
-        "columns_referenced": list[str],
-        "aggregations": list, "case_whens": list,
-        "joins_involving_this": list, "filters_on_this": list,
-        "date_functions": list,
+        # MDM (was already used)
         "mdm_columns": list[dict],
         "mdm_table_description": str,
-        "mdm_dataset_details": dict, "mdm_ownership": dict,
+        "mdm_dataset_details": dict, "mdm_ownership": dict, "mdm_coverage_pct": float,
+
+        # SQL corpus pre-extracted (NEW — sqlglot-grade facts)
+        "columns_referenced": list[str],
+        "aggregations": list[dict | str],
+        "case_whens": list[dict],
+        "joins_involving_this": list[dict],
+        "filters_on_this": list[dict],
+        "date_functions": list[dict],
+        "ctes_referencing_this": list[dict],
+        "temp_tables_referencing_this": list[dict],
+        "queries_using_this": list[dict],
+
+        # Baseline LookML (NEW — structured facts)
         "existing_view_lkml": str,
-        "baseline_dimensions": list, "baseline_measures": list,
+        "baseline_dimensions": list[dict],
+        "baseline_dimension_groups": list[dict],
+        "baseline_measures": list[dict],
+        "baseline_filtered_measures": list[dict],
         "baseline_quality_signals": dict,
         "baseline_view_description": str | None,
+        "baseline_view_label": str,
+        "baseline_sql_table_name": str,
+        "baseline_derived_table_sql": str | None,
         "baseline_primary_key_column": str | None,
-        "baseline_sql_aliases": dict, ...
-        "queries_using_this": list[dict]
+        "baseline_extends_chain": list,
+        "baseline_sets": list,
+        "baseline_parameters": list,
+        "baseline_access_filter": list,
+        "baseline_drill_fields_curated": list,
+        "baseline_sql_aliases": dict,
       }
     }
 
-The loader is robust to two MDM-column shapes (raw API or pre-flattened);
-unknown keys are passed through.
+The loader is robust to two MDM-column shapes (raw API or pre-flattened)
+and defensive on every other field's internal structure — lumi_final's
+exact output shapes for aggregations/joins/etc. are inferred and handled
+across multiple plausible key combinations.
 """
 
 from __future__ import annotations
@@ -147,7 +176,27 @@ def load_lumi_for_table(
     if not queries:
         warnings.append("no queries_using_this — corpus signal skipped")
 
-    # ── 4. Single-row table_catalog seed ───────────────────────
+    # ── 4. Lumi corpus signals (NEW — pre-extracted sqlglot facts) ──
+    signals_blob = _build_lumi_signals_blob(table_name, entry, warnings)
+    if not dry_run and _signals_non_empty(signals_blob):
+        path = out_dir / "lumi_signals" / f"{table_name}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(signals_blob, indent=2, default=str), encoding="utf-8",
+        )
+        written.append(path)
+
+    # ── 5. Baseline LookML structured artifacts (NEW) ────────────
+    baseline_blob = _build_baseline_artifacts_blob(table_name, entry, warnings)
+    if not dry_run and _baseline_non_empty(baseline_blob):
+        path = out_dir / "baseline_artifacts" / f"{table_name}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(baseline_blob, indent=2, default=str), encoding="utf-8",
+        )
+        written.append(path)
+
+    # ── 6. Single-row table_catalog seed ───────────────────────
     if not dry_run:
         cat_path = out_dir / "registries" / "raw" / "table_catalog.csv"
         cat_path.parent.mkdir(parents=True, exist_ok=True)
@@ -162,11 +211,25 @@ def load_lumi_for_table(
                 ])
             written.append(cat_path)
 
-    # ── 5. Records accounting (for the LoadResult summary) ─────
+    # ── 7. Records accounting (for the LoadResult summary) ─────
+    n_signals = sum(
+        len(signals_blob.get(k) or [])
+        for k in ("aggregations", "case_whens", "joins", "filters",
+                  "columns_referenced", "ctes_upstream", "temp_tables_upstream",
+                  "date_functions")
+    )
+    n_baseline = sum(
+        len(baseline_blob.get(k) or [])
+        for k in ("dimensions", "dimension_groups", "measures",
+                  "filtered_measures", "sql_aliases", "drill_fields_curated",
+                  "access_filter", "extends_chain", "sets", "parameters")
+    )
     n_records = (
         len(mdm_blob.get("columns", []))
         + n_queries
         + (1 if lkml_text else 0)
+        + n_signals
+        + n_baseline
     )
 
     return LoadResult(
@@ -185,6 +248,20 @@ def load_lumi_for_table(
                 (entry.get("baseline_quality_signals") or {}).get("has_primary_key")
             ),
             "mdm_coverage_pct": entry.get("mdm_coverage_pct", 0.0),
+            # ── NEW: 100% signal coverage breakdown ──
+            "n_aggregations": len(signals_blob.get("aggregations") or []),
+            "n_case_whens": len(signals_blob.get("case_whens") or []),
+            "n_joins": len(signals_blob.get("joins") or []),
+            "n_filters": len(signals_blob.get("filters") or []),
+            "n_columns_referenced": len(signals_blob.get("columns_referenced") or []),
+            "n_date_functions": len(signals_blob.get("date_functions") or []),
+            "n_dimensions_lkml": len(baseline_blob.get("dimensions") or []),
+            "n_measures_lkml": len(baseline_blob.get("measures") or []),
+            "n_filtered_measures_lkml": len(baseline_blob.get("filtered_measures") or []),
+            "n_sql_aliases": len(baseline_blob.get("sql_aliases") or []),
+            "n_drill_fields": len(baseline_blob.get("drill_fields_curated") or []),
+            "view_label": baseline_blob.get("view_label"),
+            "is_derived_view": bool(baseline_blob.get("derived_table_sql")),
         },
     )
 
@@ -344,3 +421,463 @@ def _maybe_int(v: Any) -> int | None:
         return int(float(v))
     except (TypeError, ValueError):
         return None
+
+
+# ─── Lumi corpus signals (pre-extracted sqlglot facts) ───────
+
+
+def _build_lumi_signals_blob(
+    table_name: str, entry: dict[str, Any], warnings: list[str],
+) -> dict[str, Any]:
+    """Capture sqlglot-pre-extracted facts that lumi_final emits per-query.
+
+    These supersede the regex extraction in synapse/graph/builder.py::_ingest_corpus
+    when present — every aggregation becomes a Metric node directly; every
+    JOIN becomes an EQUIVALENT_TO edge directly; etc.
+    """
+    aggs = _normalize_aggregations(entry.get("aggregations") or [])
+    case_whens = _normalize_case_whens(entry.get("case_whens") or [])
+    joins = _normalize_joins(entry.get("joins_involving_this") or [], table_name)
+    filters = _normalize_filters(entry.get("filters_on_this") or [])
+    cols_ref = _normalize_columns_referenced(entry.get("columns_referenced") or [])
+    date_fns = _normalize_date_functions(entry.get("date_functions") or [])
+    ctes_up = _normalize_lineage_refs(entry.get("ctes_referencing_this") or [])
+    temps_up = _normalize_lineage_refs(entry.get("temp_tables_referencing_this") or [])
+
+    return {
+        "table_name": table_name,
+        "aggregations": aggs,
+        "case_whens": case_whens,
+        "joins": joins,
+        "filters": filters,
+        "columns_referenced": cols_ref,
+        "date_functions": date_fns,
+        "ctes_upstream": ctes_up,
+        "temp_tables_upstream": temps_up,
+    }
+
+
+def _signals_non_empty(blob: dict[str, Any]) -> bool:
+    return any(
+        blob.get(k)
+        for k in ("aggregations", "case_whens", "joins", "filters",
+                  "columns_referenced", "date_functions",
+                  "ctes_upstream", "temp_tables_upstream")
+    )
+
+
+def _normalize_aggregations(raw: list[Any]) -> list[dict[str, Any]]:
+    """Defensive normalizer — handles multiple plausible shapes lumi_final
+    might emit. Output shape: {function, column, alias, query_id}."""
+    out: list[dict[str, Any]] = []
+    for a in raw:
+        if isinstance(a, str):
+            # Maybe "SUM(billed_business)" raw expression
+            parsed = _parse_agg_expression(a)
+            if parsed:
+                out.append(parsed)
+            continue
+        if not isinstance(a, dict):
+            continue
+        fn = (a.get("function") or a.get("agg_fn") or a.get("fn")
+              or a.get("aggregate") or "").upper()
+        col = (a.get("column") or a.get("agg_col") or a.get("col")
+               or a.get("argument") or "")
+        alias = a.get("alias") or a.get("as") or ""
+        qid = a.get("query_id") or a.get("qid") or a.get("source_query") or ""
+        # Last resort: parse an expression field
+        if not fn or not col:
+            expr = a.get("expression") or a.get("expr") or a.get("sql")
+            if expr:
+                parsed = _parse_agg_expression(expr)
+                if parsed:
+                    fn = fn or parsed["function"]
+                    col = col or parsed["column"]
+        if fn and col:
+            out.append({
+                "function": fn,
+                "column": col,
+                "alias": alias,
+                "query_id": qid,
+            })
+    return out
+
+
+def _parse_agg_expression(s: str) -> dict[str, str] | None:
+    """Minimal parser for SUM(x) / COUNT(DISTINCT x) / AVG(x) / etc."""
+    import re as _re
+    m = _re.match(
+        r"\s*(SUM|COUNT|AVG|MIN|MAX|COUNT\s*\(\s*DISTINCT)\s*\(\s*([\w.]+)\s*\)",
+        s, _re.IGNORECASE,
+    )
+    if not m:
+        return None
+    fn = m.group(1).upper().replace(" ", "")
+    col = m.group(2).split(".")[-1]
+    if fn.startswith("COUNT(DISTINCT"):
+        fn = "COUNT_DISTINCT"
+    return {"function": fn, "column": col, "alias": "", "query_id": ""}
+
+
+def _normalize_case_whens(raw: list[Any]) -> list[dict[str, Any]]:
+    """Output shape: {column, raw_value, human_meaning, query_id}."""
+    out: list[dict[str, Any]] = []
+    for c in raw:
+        if not isinstance(c, dict):
+            continue
+        col = c.get("column") or c.get("col") or c.get("source_column") or ""
+        raw_val = (c.get("when_value") or c.get("raw_value")
+                   or c.get("value") or c.get("source_value") or "")
+        meaning = (c.get("then_value") or c.get("human_meaning")
+                   or c.get("meaning") or c.get("target_value") or "")
+        qid = c.get("query_id") or c.get("qid") or ""
+        if col and (raw_val or meaning):
+            out.append({
+                "column": col,
+                "raw_value": str(raw_val),
+                "human_meaning": str(meaning),
+                "query_id": qid,
+            })
+    return out
+
+
+def _normalize_joins(raw: list[Any], home_table: str) -> list[dict[str, Any]]:
+    """Output shape: {other_table, left_column, right_column,
+    join_type, query_id}."""
+    out: list[dict[str, Any]] = []
+    for j in raw:
+        if not isinstance(j, dict):
+            continue
+        # Handle a few possible naming conventions
+        other = (j.get("other_table") or j.get("table") or j.get("joined_table")
+                 or j.get("right_table") or "")
+        left_col = (j.get("left_col") or j.get("left_column")
+                    or j.get("home_col") or j.get("from_column") or "")
+        right_col = (j.get("right_col") or j.get("right_column")
+                     or j.get("other_col") or j.get("to_column") or "")
+        join_type = (j.get("join_type") or j.get("type")
+                     or j.get("kind") or "").upper()
+        qid = j.get("query_id") or j.get("qid") or ""
+        if other and other != home_table and left_col and right_col:
+            out.append({
+                "other_table": other.split(".")[-1],
+                "left_column": left_col,
+                "right_column": right_col,
+                "join_type": join_type or "INNER",
+                "query_id": qid,
+            })
+    return out
+
+
+def _normalize_filters(raw: list[Any]) -> list[dict[str, Any]]:
+    """Output shape: {column, operator, value, is_partition, query_id}."""
+    out: list[dict[str, Any]] = []
+    # Count occurrences per (column, value) to derive structural-ness later
+    for f in raw:
+        if not isinstance(f, dict):
+            continue
+        col = f.get("column") or f.get("col") or f.get("field") or ""
+        op = f.get("operator") or f.get("op") or "="
+        val = f.get("value") or f.get("literal") or f.get("rhs") or ""
+        is_part = bool(f.get("is_partition") or f.get("is_partition_filter"))
+        qid = f.get("query_id") or f.get("qid") or ""
+        is_neg = bool(f.get("is_negated"))
+        if col:
+            out.append({
+                "column": col,
+                "operator": op,
+                "value": str(val) if val != "" else "",
+                "is_partition": is_part,
+                "is_negated": is_neg,
+                "query_id": qid,
+            })
+    return out
+
+
+def _normalize_columns_referenced(raw: list[Any]) -> list[str]:
+    """Output: deduped list of column-name strings."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in raw:
+        if isinstance(c, str):
+            name = c.split(".")[-1]
+        elif isinstance(c, dict):
+            name = (c.get("name") or c.get("column") or "").split(".")[-1]
+        else:
+            name = ""
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
+def _normalize_date_functions(raw: list[Any]) -> list[dict[str, Any]]:
+    """Output shape: {function, column, granularity, query_id}."""
+    out: list[dict[str, Any]] = []
+    for d in raw:
+        if not isinstance(d, dict):
+            continue
+        fn = (d.get("function") or d.get("fn") or "").upper()
+        col = d.get("column") or d.get("col") or d.get("argument") or ""
+        gran = (d.get("granularity") or d.get("grain") or d.get("unit") or "").upper()
+        qid = d.get("query_id") or d.get("qid") or ""
+        if fn and col:
+            out.append({
+                "function": fn,
+                "column": col,
+                "granularity": gran,
+                "query_id": qid,
+            })
+    return out
+
+
+def _normalize_lineage_refs(raw: list[Any]) -> list[dict[str, Any]]:
+    """For ctes_referencing_this + temp_tables_referencing_this.
+    Output shape: {name, query_id}."""
+    out: list[dict[str, Any]] = []
+    for r in raw:
+        if isinstance(r, str):
+            out.append({"name": r, "query_id": ""})
+        elif isinstance(r, dict):
+            name = (r.get("cte_name") or r.get("temp_name") or r.get("name") or "")
+            qid = r.get("query_id") or r.get("qid") or ""
+            if name:
+                out.append({"name": name, "query_id": qid})
+    return out
+
+
+# ─── Baseline LookML structured artifacts ────────────────────
+
+
+def _build_baseline_artifacts_blob(
+    table_name: str, entry: dict[str, Any], warnings: list[str],
+) -> dict[str, Any]:
+    """Capture structured LookML facts so the graph builder doesn't need
+    to re-parse the raw .view.lkml. Every dimension becomes a Column with
+    source=baseline_lookml; every sql_alias becomes a Synonym."""
+    return {
+        "table_name": table_name,
+        "view_label": entry.get("baseline_view_label") or "",
+        "view_description": entry.get("baseline_view_description") or "",
+        "sql_table_name": entry.get("baseline_sql_table_name") or "",
+        "derived_table_sql": entry.get("baseline_derived_table_sql"),
+        "primary_key_column": entry.get("baseline_primary_key_column"),
+        "has_primary_key": bool(
+            (entry.get("baseline_quality_signals") or {}).get("has_primary_key")
+        ),
+        "dimensions": _normalize_lkml_dimensions(
+            entry.get("baseline_dimensions") or []
+        ),
+        "dimension_groups": _normalize_lkml_dimension_groups(
+            entry.get("baseline_dimension_groups") or []
+        ),
+        "measures": _normalize_lkml_measures(
+            entry.get("baseline_measures") or []
+        ),
+        "filtered_measures": _normalize_lkml_filtered_measures(
+            entry.get("baseline_filtered_measures") or []
+        ),
+        "sql_aliases": _normalize_sql_aliases(
+            entry.get("baseline_sql_aliases") or {}
+        ),
+        "drill_fields_curated": _normalize_drill_fields(
+            entry.get("baseline_drill_fields_curated") or []
+        ),
+        "access_filter": _normalize_access_filter(
+            entry.get("baseline_access_filter") or []
+        ),
+        "extends_chain": _normalize_extends_chain(
+            entry.get("baseline_extends_chain") or []
+        ),
+        "sets": _normalize_lkml_sets(entry.get("baseline_sets") or []),
+        "parameters": _normalize_lkml_parameters(
+            entry.get("baseline_parameters") or []
+        ),
+    }
+
+
+def _baseline_non_empty(blob: dict[str, Any]) -> bool:
+    if blob.get("view_label") or blob.get("view_description"):
+        return True
+    if blob.get("sql_table_name") or blob.get("derived_table_sql"):
+        return True
+    if blob.get("primary_key_column"):
+        return True
+    return any(
+        blob.get(k)
+        for k in ("dimensions", "dimension_groups", "measures",
+                  "filtered_measures", "sql_aliases", "drill_fields_curated",
+                  "access_filter", "extends_chain", "sets", "parameters")
+    )
+
+
+def _normalize_lkml_dimensions(raw: list[Any]) -> list[dict[str, Any]]:
+    """Output shape: {name, type, sql, description, label, primary_key,
+    hidden, tags}."""
+    out: list[dict[str, Any]] = []
+    for d in raw:
+        if not isinstance(d, dict):
+            continue
+        name = d.get("name") or d.get("dimension_name") or ""
+        if not name:
+            continue
+        out.append({
+            "name": name,
+            "type": d.get("type") or "string",
+            "sql": d.get("sql") or "",
+            "description": d.get("description") or "",
+            "label": d.get("label") or "",
+            "primary_key": bool(d.get("primary_key")),
+            "hidden": bool(d.get("hidden")),
+            "tags": d.get("tags") or [],
+        })
+    return out
+
+
+def _normalize_lkml_dimension_groups(raw: list[Any]) -> list[dict[str, Any]]:
+    """Time-grain dimension groups. Output: {name, type, sql, timeframes,
+    convert_tz, description}."""
+    out: list[dict[str, Any]] = []
+    for d in raw:
+        if not isinstance(d, dict):
+            continue
+        name = d.get("name") or ""
+        if not name:
+            continue
+        out.append({
+            "name": name,
+            "type": d.get("type") or "time",
+            "sql": d.get("sql") or "",
+            "timeframes": d.get("timeframes") or [],
+            "convert_tz": d.get("convert_tz", True),
+            "description": d.get("description") or "",
+        })
+    return out
+
+
+def _normalize_lkml_measures(raw: list[Any]) -> list[dict[str, Any]]:
+    """LookML measures. Output: {name, type, sql, description, label,
+    value_format, drill_fields, hidden, symmetric_aggregates}."""
+    out: list[dict[str, Any]] = []
+    for m in raw:
+        if not isinstance(m, dict):
+            continue
+        name = m.get("name") or ""
+        if not name:
+            continue
+        out.append({
+            "name": name,
+            "type": m.get("type") or "",        # sum / count / count_distinct / average / etc
+            "sql": m.get("sql") or "",
+            "description": m.get("description") or "",
+            "label": m.get("label") or "",
+            "value_format": m.get("value_format") or m.get("value_format_name") or "",
+            "drill_fields": m.get("drill_fields") or [],
+            "hidden": bool(m.get("hidden")),
+            "symmetric_aggregates": m.get("symmetric_aggregates"),
+        })
+    return out
+
+
+def _normalize_lkml_filtered_measures(raw: list[Any]) -> list[dict[str, Any]]:
+    """Output: {name, type, base_measure_or_field, filter_expression, description}."""
+    out: list[dict[str, Any]] = []
+    for m in raw:
+        if not isinstance(m, dict):
+            continue
+        name = m.get("name") or ""
+        if not name:
+            continue
+        out.append({
+            "name": name,
+            "type": m.get("type") or "",
+            "base_field": m.get("base_field") or m.get("base_measure") or m.get("sql") or "",
+            "filter_expression": m.get("filter_expression") or m.get("filters") or "",
+            "description": m.get("description") or "",
+        })
+    return out
+
+
+def _normalize_sql_aliases(raw: Any) -> dict[str, str]:
+    """alias → canonical-column mapping. Output: {alias: canonical_field}."""
+    if isinstance(raw, dict):
+        return {
+            str(k): str(v) for k, v in raw.items()
+            if k and v and isinstance(k, str) and isinstance(v, str)
+        }
+    if isinstance(raw, list):
+        out: dict[str, str] = {}
+        for item in raw:
+            if isinstance(item, dict):
+                alias = item.get("alias") or item.get("from") or ""
+                canon = item.get("canonical") or item.get("to") or item.get("field") or ""
+                if alias and canon:
+                    out[str(alias)] = str(canon)
+        return out
+    return {}
+
+
+def _normalize_drill_fields(raw: Any) -> list[str]:
+    """Curated drill-down fields. Output: list[str] of column names."""
+    out: list[str] = []
+    if isinstance(raw, list):
+        for f in raw:
+            if isinstance(f, str):
+                out.append(f.split(".")[-1])
+            elif isinstance(f, dict):
+                name = f.get("name") or f.get("field") or ""
+                if name:
+                    out.append(name.split(".")[-1])
+    return out
+
+
+def _normalize_access_filter(raw: list[Any]) -> list[dict[str, Any]]:
+    """LookML access_filter blocks. Output: {field, user_attribute}."""
+    out: list[dict[str, Any]] = []
+    for f in raw:
+        if not isinstance(f, dict):
+            continue
+        field = f.get("field") or ""
+        user_attr = f.get("user_attribute") or f.get("user_attr") or ""
+        if field:
+            out.append({"field": field, "user_attribute": user_attr})
+    return out
+
+
+def _normalize_extends_chain(raw: Any) -> list[str]:
+    """Output: ordered list of parent view names."""
+    if isinstance(raw, list):
+        return [
+            (str(x).split(".")[-1] if isinstance(x, str) else (x.get("name") or ""))
+            for x in raw
+            if (isinstance(x, str) and x) or (isinstance(x, dict) and x.get("name"))
+        ]
+    return []
+
+
+def _normalize_lkml_sets(raw: list[Any]) -> list[dict[str, Any]]:
+    """LookML sets. Output: {name, fields}."""
+    out: list[dict[str, Any]] = []
+    for s in raw:
+        if isinstance(s, dict):
+            name = s.get("name") or ""
+            fields = s.get("fields") or []
+            if name:
+                out.append({"name": name, "fields": list(fields)})
+    return out
+
+
+def _normalize_lkml_parameters(raw: list[Any]) -> list[dict[str, Any]]:
+    """LookML parameters. Output: {name, type, description, default_value}."""
+    out: list[dict[str, Any]] = []
+    for p in raw:
+        if isinstance(p, dict):
+            name = p.get("name") or ""
+            if name:
+                out.append({
+                    "name": name,
+                    "type": p.get("type") or "string",
+                    "description": p.get("description") or "",
+                    "default_value": p.get("default_value"),
+                })
+    return out

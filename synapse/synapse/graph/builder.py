@@ -65,6 +65,9 @@ def build_graph_from_sources(sources_dir: Path) -> GraphStore:
     _ingest_lineage_from_mdm(store, sources_dir / "mdm_cache")
     # BQ-derived empirical lineage (real-loader outputs only; no-op on synthetic)
     _ingest_lineage_from_bq(store, sources_dir / "lineage")
+    # Lumi 100% signal coverage (no-op when the loader didn't produce these)
+    _ingest_lumi_signals(store, sources_dir / "lumi_signals")
+    _ingest_baseline_artifacts(store, sources_dir / "baseline_artifacts")
 
     # Code-resolution pass — runs after corpus to mine CASE WHENs
     _resolve_codes_from_lookup_tables(store)
@@ -693,6 +696,388 @@ def _ingest_lineage_from_bq(store: GraphStore, lineage_dir: Path) -> None:
                 properties={"observed_in": "bq_jobs_history"},
                 source="bq",
             )
+
+
+# ─── Lumi pre-extracted corpus signals (sqlglot-grade) ───────
+
+
+def _ingest_lumi_signals(store: GraphStore, signals_dir: Path) -> None:
+    """Consume lumi_signals/<table>.json — sqlglot-pre-extracted facts that
+    supersede the regex extraction in _ingest_corpus.
+
+    Mints:
+      * Metric nodes from each aggregation (+ COMPUTED_FROM edge to source column)
+      * EQUIVALENT_TO edges from each join_involving_this entry
+      * CodeMapping nodes from each case_when entry
+      * FilterValue nodes from each filter (is_structural derived from occurrence frequency)
+      * Reinforces Column nodes from columns_referenced
+    """
+    if not signals_dir.exists():
+        return
+    for path in sorted(signals_dir.glob("*.json")):
+        try:
+            blob = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(blob, dict):
+            continue
+        table = blob.get("table_name") or path.stem
+        t_uri = canonical_uri("table", table)
+
+        # 1. Aggregations → Metric + COMPUTED_FROM
+        for a in (blob.get("aggregations") or []):
+            fn = (a.get("function") or "").upper()
+            col = a.get("column") or ""
+            if not (fn and col):
+                continue
+            qid = a.get("query_id") or ""
+            metric_id = f"{fn.lower()}_{col}"
+            m_uri = canonical_uri("metric", table, metric_id)
+            formula = f"{fn}({col})"
+            store.upsert_node(
+                "Metric", m_uri,
+                properties={
+                    "business_name": a.get("alias") or formula,
+                    "formula": formula,
+                    "grain": "aggregated",
+                    "sourced_from_table": table,
+                    "synonyms": [a.get("alias")] if a.get("alias") else [],
+                },
+                source="corpus", evidence_event_id=qid or None,
+            )
+            c_uri = canonical_uri("column", table, col)
+            store.upsert_node(
+                "Column", c_uri,
+                properties={"table_name": table, "is_aggregated": True},
+                source="corpus", evidence_event_id=qid or None,
+            )
+            store.upsert_edge(
+                "COMPUTED_FROM", m_uri, c_uri,
+                properties={"aggregation": fn, "alias": a.get("alias") or ""},
+                source="corpus", evidence_event_id=qid or None,
+            )
+
+        # 2. Joins → EQUIVALENT_TO between the two columns
+        for j in (blob.get("joins") or []):
+            other = j.get("other_table") or ""
+            lcol = j.get("left_column") or ""
+            rcol = j.get("right_column") or ""
+            if not (other and lcol and rcol):
+                continue
+            qid = j.get("query_id") or ""
+            l_uri = canonical_uri("column", table, lcol)
+            r_uri = canonical_uri("column", other, rcol)
+            store.upsert_node(
+                "Column", l_uri,
+                properties={"table_name": table, "is_join_key": True},
+                source="corpus", evidence_event_id=qid or None,
+            )
+            store.upsert_node(
+                "Column", r_uri,
+                properties={"table_name": other, "is_join_key": True},
+                source="corpus", evidence_event_id=qid or None,
+            )
+            store.upsert_edge(
+                "EQUIVALENT_TO", l_uri, r_uri,
+                properties={
+                    "join_type": j.get("join_type") or "INNER",
+                    "observed_in_query": qid,
+                },
+                source="corpus", evidence_event_id=qid or None,
+            )
+
+        # 3. CASE WHEN → CodeMapping
+        for cw in (blob.get("case_whens") or []):
+            col = cw.get("column") or ""
+            raw_val = cw.get("raw_value") or ""
+            meaning = cw.get("human_meaning") or ""
+            qid = cw.get("query_id") or ""
+            if not (col and raw_val):
+                continue
+            cm_uri = canonical_uri("codemapping", col, raw_val)
+            store.upsert_node(
+                "CodeMapping", cm_uri,
+                properties={
+                    "column": col,
+                    "raw_value": raw_val,
+                    "human_meaning": meaning,
+                    "source": "case_when",
+                },
+                source="corpus", evidence_event_id=qid or None,
+            )
+
+        # 4. Filters → FilterValue (derive is_structural from frequency)
+        filters = blob.get("filters") or []
+        filter_counts: dict[tuple[str, str], int] = {}
+        for f in filters:
+            key = (f.get("column") or "", f.get("value") or "")
+            filter_counts[key] = filter_counts.get(key, 0) + 1
+        total_queries = max(
+            len({f.get("query_id") for f in filters if f.get("query_id")}),
+            1,
+        )
+        for f in filters:
+            col = f.get("column") or ""
+            val = f.get("value") or ""
+            if not col:
+                continue
+            qid = f.get("query_id") or ""
+            occ = filter_counts.get((col, val), 1)
+            # Structural if it appears in ≥80% of distinct queries
+            is_structural = bool(
+                (occ / total_queries) >= 0.8 or f.get("is_partition")
+            )
+            fv_uri = canonical_uri("filtervalue", table, col, val or "<empty>")
+            store.upsert_node(
+                "FilterValue", fv_uri,
+                properties={
+                    "table_name": table,
+                    "column_name": col,
+                    "value": val,
+                    "operator": f.get("operator") or "=",
+                    "is_structural": is_structural,
+                    "is_partition": bool(f.get("is_partition")),
+                    "is_negated": bool(f.get("is_negated")),
+                    "count_obs": occ,
+                },
+                source="corpus", evidence_event_id=qid or None,
+            )
+            # Column reinforcement
+            c_uri = canonical_uri("column", table, col)
+            store.upsert_node(
+                "Column", c_uri,
+                properties={
+                    "table_name": table, "is_filter": True,
+                },
+                source="corpus", evidence_event_id=qid or None,
+            )
+
+        # 5. columns_referenced — reinforce Column nodes (corpus-side evidence)
+        for col in (blob.get("columns_referenced") or []):
+            if not isinstance(col, str) or not col:
+                continue
+            c_uri = canonical_uri("column", table, col)
+            store.upsert_node(
+                "Column", c_uri,
+                properties={"table_name": table, "referenced_in_corpus": True},
+                source="corpus",
+            )
+
+        # 6. Date functions — annotate columns with observed grain
+        for d in (blob.get("date_functions") or []):
+            col = d.get("column") or ""
+            gran = d.get("granularity") or ""
+            if not col:
+                continue
+            c_uri = canonical_uri("column", table, col)
+            store.upsert_node(
+                "Column", c_uri,
+                properties={
+                    "table_name": table,
+                    "observed_time_grain": gran or "DATE",
+                    "is_time_dimension": True,
+                },
+                source="corpus",
+            )
+
+
+# ─── Baseline LookML structured artifacts ────────────────────
+
+
+def _ingest_baseline_artifacts(store: GraphStore, baseline_dir: Path) -> None:
+    """Consume baseline_artifacts/<table>.json — structured LookML facts.
+
+    Mints:
+      * Table.business_name from view_label, description from view_description
+      * Column nodes from baseline_dimensions (source=baseline_lookml)
+      * Time-dimension Column nodes from baseline_dimension_groups
+      * Metric nodes from baseline_measures + baseline_filtered_measures
+      * Synonym nodes from baseline_sql_aliases (alias → canonical)
+      * Sets Column.is_drill_field from baseline_drill_fields_curated
+      * Table.has_access_filter + access_filter_fields from access_filter
+    """
+    if not baseline_dir.exists():
+        return
+    for path in sorted(baseline_dir.glob("*.json")):
+        try:
+            blob = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(blob, dict):
+            continue
+        table = blob.get("table_name") or path.stem
+        t_uri = canonical_uri("table", table)
+
+        # 1. Table-level baseline facts
+        table_props: dict[str, Any] = {"table_name": table}
+        if blob.get("view_label"):
+            table_props["business_name_lkml"] = blob["view_label"]
+        if blob.get("view_description"):
+            table_props["description_lkml"] = blob["view_description"]
+        if blob.get("sql_table_name"):
+            table_props["bq_sql_table_name"] = blob["sql_table_name"]
+        if blob.get("derived_table_sql"):
+            table_props["asset_kind"] = "View"
+            table_props["derived_table_sql"] = blob["derived_table_sql"]
+        if blob.get("has_primary_key"):
+            table_props["lkml_has_primary_key"] = True
+        if blob.get("access_filter"):
+            table_props["has_access_filter"] = True
+            table_props["access_filter_fields"] = [
+                f["field"] for f in blob["access_filter"] if f.get("field")
+            ]
+        if blob.get("extends_chain"):
+            table_props["extends_chain"] = blob["extends_chain"]
+        store.upsert_node(
+            "Table", t_uri, properties=table_props, source="baseline_lookml",
+        )
+
+        # 2. Primary-key column promotion
+        pk_col = blob.get("primary_key_column")
+        if pk_col:
+            pk_uri = canonical_uri("column", table, pk_col)
+            store.upsert_node(
+                "Column", pk_uri,
+                properties={"table_name": table, "is_primary": True},
+                source="baseline_lookml",
+            )
+            store.upsert_edge(
+                "CONTAINS", t_uri, pk_uri, properties={}, source="baseline_lookml",
+            )
+
+        # 3. Dimensions → Column nodes (baseline-sourced)
+        for d in (blob.get("dimensions") or []):
+            name = d.get("name") or ""
+            if not name:
+                continue
+            c_uri = canonical_uri("column", table, name)
+            store.upsert_node(
+                "Column", c_uri,
+                properties={
+                    "table_name": table,
+                    "description_lkml": d.get("description") or "",
+                    "label_lkml": d.get("label") or "",
+                    "lkml_type": d.get("type") or "string",
+                    "lkml_sql_expr": d.get("sql") or "",
+                    "is_primary": bool(d.get("primary_key")),
+                    "is_hidden_lkml": bool(d.get("hidden")),
+                    "lkml_tags": d.get("tags") or [],
+                },
+                source="baseline_lookml",
+            )
+            store.upsert_edge(
+                "CONTAINS", t_uri, c_uri, properties={}, source="baseline_lookml",
+            )
+
+        # 4. Dimension groups → time-dimension Column nodes
+        for dg in (blob.get("dimension_groups") or []):
+            name = dg.get("name") or ""
+            if not name:
+                continue
+            c_uri = canonical_uri("column", table, name)
+            store.upsert_node(
+                "Column", c_uri,
+                properties={
+                    "table_name": table,
+                    "is_time_dimension": True,
+                    "lkml_timeframes": dg.get("timeframes") or [],
+                    "lkml_sql_expr": dg.get("sql") or "",
+                    "convert_tz": dg.get("convert_tz", True),
+                    "description_lkml": dg.get("description") or "",
+                },
+                source="baseline_lookml",
+            )
+            store.upsert_edge(
+                "CONTAINS", t_uri, c_uri, properties={}, source="baseline_lookml",
+            )
+
+        # 5. Measures → Metric nodes
+        for m in (blob.get("measures") or []):
+            name = m.get("name") or ""
+            if not name:
+                continue
+            m_uri = canonical_uri("metric", table, name)
+            store.upsert_node(
+                "Metric", m_uri,
+                properties={
+                    "business_name": m.get("label") or name,
+                    "formula": m.get("sql") or f"{m.get('type','sum').upper()}",
+                    "lkml_type": m.get("type") or "",
+                    "grain": "aggregated",
+                    "sourced_from_table": table,
+                    "value_format": m.get("value_format") or "",
+                    "drill_fields": m.get("drill_fields") or [],
+                    "symmetric_aggregates_required": bool(m.get("symmetric_aggregates")),
+                    "description": m.get("description") or "",
+                },
+                source="baseline_lookml",
+            )
+            store.upsert_edge(
+                "COMPUTED_FROM", m_uri, t_uri,
+                properties={"formula": m.get("sql") or ""},
+                source="baseline_lookml",
+            )
+
+        # 6. Filtered measures → Metric with filter context
+        for fm in (blob.get("filtered_measures") or []):
+            name = fm.get("name") or ""
+            if not name:
+                continue
+            fm_uri = canonical_uri("metric", table, name)
+            store.upsert_node(
+                "Metric", fm_uri,
+                properties={
+                    "business_name": name,
+                    "formula": fm.get("base_field") or "",
+                    "lkml_type": fm.get("type") or "filtered_count",
+                    "grain": "aggregated",
+                    "sourced_from_table": table,
+                    "filter_expression": fm.get("filter_expression") or "",
+                    "description": fm.get("description") or "",
+                    "is_filtered_measure": True,
+                },
+                source="baseline_lookml",
+            )
+
+        # 7. sql_aliases → Synonym nodes (CRITICAL for NL grounding)
+        for alias, canonical in (blob.get("sql_aliases") or {}).items():
+            if not (alias and canonical):
+                continue
+            # business_unit/region unknown at LookML layer — use "lookml" as scope
+            s_uri = canonical_uri("synonym", alias, "lookml", "global")
+            store.upsert_node(
+                "Synonym", s_uri,
+                properties={
+                    "surface_form": alias,
+                    "canonical_entity": canonical,
+                    "business_unit": "lookml",
+                    "region": "global",
+                    "entry_type": "Alias",
+                },
+                source="baseline_lookml",
+            )
+            # Link synonym → canonical (Column OR Metric — try both)
+            for candidate_uri in (
+                canonical_uri("column", table, canonical),
+                canonical_uri("metric", table, canonical),
+            ):
+                if candidate_uri in store.nodes:
+                    store.upsert_edge(
+                        "HAS_SYNONYM", candidate_uri, s_uri,
+                        properties={"alias_kind": "lkml_sql_alias"},
+                        source="baseline_lookml",
+                    )
+                    break
+
+        # 8. Drill fields → Column annotation
+        for df in (blob.get("drill_fields_curated") or []):
+            c_uri = canonical_uri("column", table, df)
+            if c_uri in store.nodes:
+                store.upsert_node(
+                    "Column", c_uri,
+                    properties={"table_name": table, "is_drill_field": True},
+                    source="baseline_lookml",
+                )
 
 
 # ─── Code resolution from lookup tables ──────────────────────
