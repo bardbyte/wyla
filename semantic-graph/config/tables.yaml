@@ -1,0 +1,58 @@
+# Tables to extract via the BQ batch extractor.
+#
+# Drop in the 53 table names you have. The extractor reads this file,
+# runs the 12 known-good probes against each, and writes outputs to
+# `output_dir/<table_name>/...` in the layout `synapse/loaders/bq_loader.py`
+# already consumes.
+#
+# Override any default at the per-table level by adding fields to that
+# entry (e.g., to use a different `bq_dataset` for a specific table).
+
+version: 1
+
+defaults:
+  # Where the data physically lives — the project + dataset of the source tables
+  bq_project: axp-lumi
+  bq_dataset: dw
+
+  # Where queries are billed — typically the SA's own project
+  billing_project: prj-p-lumi-gpt
+
+  # Where JOBS_BY_PROJECT lives (must match the data region)
+  region: us
+
+  # How many tables to process in parallel. 8 keeps us safely under any
+  # quota; you can push to 12-15 if extraction feels slow.
+  concurrency: 8
+
+  # Profile only columns whose cardinality looks low (<= this threshold).
+  # APPROX_TOP_COUNT on high-card columns is wasted work.
+  low_card_threshold: 1000
+
+  # TABLESAMPLE percentage for profiling. 1% gives HyperLogLog++ statistical
+  # quality within ~1% relative error at $0.003-$0.30 per table depending
+  # on table size. Crank to 100 only for tables where you need exact stats.
+  profile_sample_pct: 1
+
+  # Where extraction outputs land. One folder per table is created here.
+  output_dir: ./data/real_extractions
+
+  # If a table folder already exists with all expected files, skip the run.
+  # Set to true to force re-extraction. (Easy "delete output_dir" alternative.)
+  force_refresh: false
+
+# The 53 tables. Replace this list with your real one — same structure.
+# Each entry can be just a `name: <table_name>` or include per-table
+# overrides for any default above.
+tables:
+  - name: custins_customer_insights_cardmember
+    # Tier-1 cardmember P&L view — already proven via the capabilities probe.
+    # No overrides needed; uses all defaults.
+
+  # ── Paste your remaining 52 table names here, one per entry. Example: ──
+  # - name: drm_product_hier
+  # - name: pmdl_fin_business_volume_transaction_detail
+  # - name: fin_consumer_business_card_member_status
+  # - name: risk_indv_cust_hist
+  # - name: custins_customer_insights_product
+  # ... etc
