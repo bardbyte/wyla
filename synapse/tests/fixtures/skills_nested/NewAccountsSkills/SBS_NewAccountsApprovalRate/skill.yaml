@@ -1,0 +1,7 @@
+id: SBS_NewAccountsApprovalRate
+description: Approval rate KPIs for new accounts.
+tables: [sbs_new_accounts]
+guardrails:
+  - rule: "Approval metrics must use COUNT(DISTINCT na_pcn_no) — never count rows."
+    category: sql_generation
+    machine_checkable: true

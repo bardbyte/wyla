@@ -84,13 +84,24 @@ def load_skills_library(
             error=f"skills dir not found: {skills_dir}",
         )
 
-    packages = sorted(
-        p.parent for p in skills_dir.glob("*/skill.yaml")
-    ) or sorted(p.parent for p in skills_dir.glob("*/skill.yml"))
+    # Find skill.yaml at ANY depth — real libraries group packages under a
+    # domain folder (skills/<DomainGroup>/<SkillName>/skill.yaml), while the
+    # test fixtures are flat (skills/<SkillName>/skill.yaml). Both work.
+    manifests = sorted({
+        p for pat in ("**/skill.yaml", "**/skill.yml")
+        for p in skills_dir.glob(pat)
+    })
+    packages: list[Path] = []
+    seen: set[Path] = set()
+    for manifest_path in manifests:
+        pkg = manifest_path.parent
+        if pkg not in seen:
+            seen.add(pkg)
+            packages.append(pkg)
     if not packages:
         return LoadResult(
             status="skipped", source="skills", table_id=str(skills_dir),
-            warnings=[f"no */skill.yaml packages under {skills_dir}"],
+            warnings=[f"no skill.yaml found at any depth under {skills_dir}"],
         )
 
     written: list[Path] = []
@@ -99,8 +110,11 @@ def load_skills_library(
     target_dir = Path(out_dir) / "skills"
 
     for pkg in packages:
+        # the folder BETWEEN skills_dir and the package is the domain group
+        # (NewAccountsSkills / PortfolioAnalyticsSkills); "" when flat
+        domain_group = pkg.parent.name if pkg.parent != skills_dir else ""
         try:
-            blob = _parse_skill_package(pkg)
+            blob = _parse_skill_package(pkg, domain_group=domain_group)
         except Exception as exc:  # tolerate one bad package, keep loading
             outcomes[pkg.name] = f"error: {exc}"
             warnings.append(f"{pkg.name}: {exc}")
@@ -129,8 +143,12 @@ def load_skills_library(
     )
 
 
-def _parse_skill_package(pkg_dir: Path) -> dict[str, Any]:
-    """One package directory → one canonical skill blob."""
+def _parse_skill_package(pkg_dir: Path, domain_group: str = "") -> dict[str, Any]:
+    """One package directory → one canonical skill blob.
+
+    ``domain_group`` is the enclosing folder name (e.g. NewAccountsSkills)
+    — the authoritative domain when skill.yaml doesn't declare one.
+    """
     manifest_path = next(
         p for p in (pkg_dir / "skill.yaml", pkg_dir / "skill.yml") if p.exists()
     )
@@ -141,7 +159,11 @@ def _parse_skill_package(pkg_dir: Path) -> dict[str, Any]:
     skill_id = str(
         manifest.get("id") or manifest.get("skill_id") or pkg_dir.name
     ).strip()
-    domain = str(manifest.get("domain") or _infer_domain(skill_id)).strip()
+    domain = str(
+        manifest.get("domain")
+        or _domain_from_group(domain_group)
+        or _infer_domain(skill_id)
+    ).strip()
 
     knowledge_path = pkg_dir / "knowledge.md"
     knowledge_text = (
@@ -188,6 +210,21 @@ def _read_yaml(path: Path) -> Any:
     if yaml is None:
         raise RuntimeError("pyyaml is required for the skills loader")
     return yaml.safe_load(path.read_text(encoding="utf-8", errors="replace"))
+
+
+def _domain_from_group(group_name: str) -> str:
+    """Map a domain-group folder (NewAccountsSkills / PortfolioAnalyticsSkills)
+    to a clean domain slug. Empty when there's no group or no match."""
+    slug = group_name.lower().replace("skills", "").replace("_", "").strip()
+    if not slug:
+        return ""
+    if "newaccount" in slug:
+        return "new_accounts"
+    if "portfolio" in slug:
+        return "portfolio_analytics"
+    if "acquisition" in slug:
+        return "new_accounts"
+    return slug  # unknown group → use it verbatim (better than a guess)
 
 
 def _infer_domain(skill_id: str) -> str:

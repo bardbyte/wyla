@@ -90,3 +90,34 @@ def test_empty_dir_is_skipped(tmp_path: Path):
     empty.mkdir()
     result = load_skills_library(empty, out_dir=tmp_path)
     assert result.status == "skipped"
+
+
+# ─── nested library layout (real structure, screenshot 2026-07-06) ──
+
+
+def test_loads_nested_domain_group_layout(tmp_path):
+    """Real library nests skills/<DomainGroup>/<SkillName>/skill.yaml —
+    the loader must recurse and derive domain from the group folder."""
+    from synapse.loaders.skills_loader import load_skills_library
+
+    nested = Path(__file__).parent / "fixtures" / "skills_nested"
+    result = load_skills_library(nested, out_dir=tmp_path)
+    assert result.status == "ok", result.warnings
+    assert result.records_count == 2                 # found at depth 2
+
+    approval = json.loads(
+        (tmp_path / "skills" / "SBS_NewAccountsApprovalRate.json").read_text())
+    # domain inferred from the NewAccountsSkills group folder, not the prefix
+    assert approval["domain"] == "new_accounts"
+    contrib = json.loads(
+        (tmp_path / "skills" / "CPS_ContributionAnalysis.json").read_text())
+    assert contrib["domain"] == "portfolio_analytics"
+
+
+def test_flat_fixture_still_works_after_recursion(tmp_path):
+    """The DEMO_* fixtures are flat (depth 1) — must still load."""
+    from synapse.loaders.skills_loader import load_skills_library
+
+    result = load_skills_library(FIXTURE_LIBRARY, out_dir=tmp_path)
+    assert result.status == "ok"
+    assert result.records_count == 2
