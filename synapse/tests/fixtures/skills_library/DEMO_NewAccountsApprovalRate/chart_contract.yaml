@@ -1,0 +1,5 @@
+charts:
+  approval_rate_by_month:
+    kind: line
+    format: percent
+    max_series: 4

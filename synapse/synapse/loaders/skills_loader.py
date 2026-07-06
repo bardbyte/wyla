@@ -189,6 +189,8 @@ def _parse_skill_package(pkg_dir: Path, domain_group: str = "") -> dict[str, Any
 
     metrics = _parse_metric_contracts(pkg_dir / "metric_contracts.yaml")
     qa_checks = _parse_qa_checks(pkg_dir / "qa_checks.yaml")
+    data_specs = _parse_data_specs(pkg_dir / "data_specs.md", tables)
+    chart_contracts = _parse_chart_contract(pkg_dir / "chart_contract.yaml")
 
     return {
         "skill_id": skill_id,
@@ -200,7 +202,15 @@ def _parse_skill_package(pkg_dir: Path, domain_group: str = "") -> dict[str, Any
         "metrics": metrics,
         "guardrails": guardrails,
         "qa_checks": qa_checks,
+        # data_specs.md — valid values + segmentation bands → the graph's
+        # highest-trust FilterValue / CodeMapping facts
+        "valid_values": data_specs["valid_values"],
+        "bands": data_specs["bands"],
+        "data_specs_text": data_specs["text"],
+        # chart_contract.yaml — per-KPI visualization rules for the viz layer
+        "chart_contracts": chart_contracts,
         "knowledge_excerpt": knowledge_text[:_KNOWLEDGE_EXCERPT_CHARS],
+        "knowledge_full": knowledge_text,
         "files": sorted(p.name for p in pkg_dir.iterdir() if p.is_file()),
         "package_dir": str(pkg_dir),
     }
@@ -210,6 +220,114 @@ def _read_yaml(path: Path) -> Any:
     if yaml is None:
         raise RuntimeError("pyyaml is required for the skills loader")
     return yaml.safe_load(path.read_text(encoding="utf-8", errors="replace"))
+
+
+# ─── data_specs.md — valid values + segmentation bands ───────
+
+
+def _parse_markdown_tables(text: str) -> list[dict[str, Any]]:
+    """Every GitHub-flavored markdown table → {headers, rows[]}."""
+    tables: list[dict[str, Any]] = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.count("|") >= 2 and i + 1 < len(lines) \
+                and set(lines[i + 1].replace("|", "").strip()) <= set("-: "):
+            headers = [c.strip() for c in line.strip().strip("|").split("|")]
+            rows = []
+            j = i + 2
+            while j < len(lines) and lines[j].count("|") >= 2:
+                cells = [c.strip() for c in lines[j].strip().strip("|").split("|")]
+                if len(cells) == len(headers):
+                    rows.append(dict(zip(headers, cells)))
+                j += 1
+            tables.append({"headers": headers, "rows": rows})
+            i = j
+        else:
+            i += 1
+    return tables
+
+
+def _split_values(cell: str) -> list[str]:
+    """A cell like `A, D, P` or `'A' | 'D'` → discrete values."""
+    parts = re.split(r"[;,/|]", cell)
+    out = []
+    for p in parts:
+        v = p.strip().strip("`'\"").strip()
+        if v and v.lower() not in ("", "n/a", "null", "…", "..."):
+            out.append(v)
+    return out
+
+
+def _parse_data_specs(path: Path, tables: list[str]) -> dict[str, Any]:
+    """Extract valid-value sets and segmentation bands from data_specs.md.
+
+    Format-tolerant: reads every markdown table and classifies columns by
+    header keywords. Nothing forced — a table that doesn't match a known
+    shape is skipped, but the full text is always preserved so no signal
+    is lost.
+
+        valid_values: [{column, values[], table?}]
+        bands:        [{column, raw, label, table?}]   (code-mapping shaped)
+    """
+    if not path.exists():
+        return {"valid_values": [], "bands": [], "text": ""}
+    text = path.read_text(encoding="utf-8", errors="replace")
+    default_table = tables[0] if tables else ""
+    valid_values: list[dict[str, Any]] = []
+    bands: list[dict[str, Any]] = []
+
+    for table in _parse_markdown_tables(text):
+        headers = table["headers"]
+        headers_lc = [h.lower() for h in headers]
+
+        def pick(keys: tuple[str, ...], exclude: set[str]) -> str | None:
+            for idx, h in enumerate(headers_lc):
+                if headers[idx] in exclude:
+                    continue
+                if any(k in h for k in keys):
+                    return headers[idx]
+            return None
+
+        # roles assigned by priority with mutual exclusion, so a header is
+        # never claimed twice (label vs raw vs column-name)
+        values_key = pick(("valid value", "allowed value", "values",
+                           "domain", "enum"), set())
+        label_key = pick(("label", "meaning", "description", "name"),
+                         {values_key} if values_key else set())
+        raw_key = pick(("range", "raw", "code", "value", "definition",
+                       "condition"), {label_key, values_key})
+        col_key = pick(("column", "field", "attribute"),
+                       {label_key, raw_key, values_key})
+        if not col_key:  # band/segment header names the column when unlabeled
+            col_key = pick(("band", "segment", "bucket", "tier", "dimension"),
+                           {label_key, raw_key, values_key})
+
+        for row in table["rows"]:
+            column = ((row.get(col_key) if col_key else "") or "").strip().strip("`")
+            if values_key and row.get(values_key) and column:
+                vals = _split_values(row[values_key])
+                if vals:
+                    valid_values.append({
+                        "column": column, "values": vals,
+                        "table": default_table})
+            if label_key and raw_key and column:
+                label = (row.get(label_key) or "").strip()
+                raw = (row.get(raw_key) or "").strip()
+                if label and raw:
+                    bands.append({
+                        "column": column, "raw": raw, "label": label,
+                        "table": default_table})
+    return {"valid_values": valid_values, "bands": bands, "text": text}
+
+
+def _parse_chart_contract(path: Path) -> dict[str, Any]:
+    """chart_contract.yaml → per-KPI viz rules (kept as-is for the viz layer)."""
+    if not path.exists():
+        return {}
+    blob = _read_yaml(path) or {}
+    return blob if isinstance(blob, dict) else {"raw": blob}
 
 
 def _domain_from_group(group_name: str) -> str:

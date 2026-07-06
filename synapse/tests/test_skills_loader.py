@@ -121,3 +121,47 @@ def test_flat_fixture_still_works_after_recursion(tmp_path):
     result = load_skills_library(FIXTURE_LIBRARY, out_dir=tmp_path)
     assert result.status == "ok"
     assert result.records_count == 2
+
+
+# ─── full package utilization: data_specs.md + chart_contract.yaml ──
+
+
+def test_data_specs_valid_values_and_bands_extracted(tmp_path):
+    from synapse.loaders.skills_loader import load_skills_library
+
+    load_skills_library(FIXTURE_LIBRARY, out_dir=tmp_path)
+    blob = json.loads(
+        (tmp_path / "skills" / "DEMO_NewAccountsApprovalRate.json").read_text())
+    vv = {v["column"]: v["values"] for v in blob["valid_values"]}
+    assert vv["decision_cd"] == ["A", "D", "P"]
+    assert vv["fraud_decline_in"] == ["Y", "N"]
+    # bands: column / raw / label roles assigned correctly (not swapped)
+    bands = {b["raw"]: b["label"] for b in blob["bands"]}
+    assert bands["800+"] == "Exceptional"
+    assert all(b["column"] == "fico_band" for b in blob["bands"])
+    # chart_contract + full knowledge captured, nothing discarded
+    assert "approval_rate_by_month" in blob["chart_contracts"].get("charts", {})
+    assert len(blob["knowledge_full"]) >= len(blob["knowledge_excerpt"])
+
+
+def test_data_specs_become_graph_facts(tmp_path):
+    from synapse.graph.builder import build_graph_from_sources
+    from synapse.mcp.service import GraphService
+
+    load_skills_library(FIXTURE_LIBRARY, out_dir=tmp_path)
+    svc = GraphService(build_graph_from_sources(tmp_path))
+
+    # valid values → curated FilterValue nodes (highest-trust source)
+    fv = svc.get_filter_values("sbs_new_accounts", "decision_cd")
+    assert {v["raw_value"] for v in fv["data"]["values"]} == {"A", "D", "P"}
+    assert fv["data"]["values"][0]["sources"] == ["skills"]
+
+    # bands → CodeMapping resolvable BOTH directions
+    assert svc.resolve_code("fico_band", "Exceptional"
+                            )["data"]["resolved"]["raw_value"] == "800+"
+    assert svc.resolve_code("fico_band", "800+"
+                            )["data"]["resolved"]["human_meaning"] == "Exceptional"
+
+    # chart contract rides on the Skill for the viz layer
+    skill = svc.get_skill("approval rate")
+    assert skill["data"]["skill"]["chart_contracts"]["charts"]
