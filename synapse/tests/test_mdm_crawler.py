@@ -39,7 +39,9 @@ def test_offline_crawl_replays_all_steps_from_cache(tmp_path):
     )
     assert result.status == "ok", result.warnings
     report = result.metadata["fetch_report"]
-    assert set(report.values()) == {"cached"}          # every step from cache
+    steps = {k: v for k, v in report.items() if k != "schema_variant"}
+    assert set(steps.values()) == {"cached"}           # every step from cache
+    assert report["schema_variant"] in ("filter", "plain")
 
     blob = json.loads(
         (tmp_path / "mdm_cache" / "roll_rate_calc.json").read_text())
@@ -154,3 +156,42 @@ def test_crawled_facts_land_and_fuse_with_skills(tmp_path):
         "SELECT cm11_encrypted FROM common.roll_rate_calc")
     assert any("cm11_encrypted" in v["reason"]
                for v in check["data"]["violations"])
+
+
+# ─── real-deployment fallbacks (probe paste-back, 2026-07-06) ─────
+
+
+def test_appflow_fallback_route_reaches_pipeline(tmp_path):
+    """cdm-storage 500s on the real MDM; /datasets/{dpid}/appflow works.
+    The crawler must still reach the pipeline + business_unit."""
+    result = crawl_mdm_for_table(
+        "fallback_case", out_dir=tmp_path,
+        base_url="", cache_dir=MDM_FIXTURES,
+    )
+    assert result.status == "partial"     # lineage/lifecycle degraded
+    report = result.metadata["fetch_report"]
+    assert report["appflow_by_parent"] == "cached"
+    assert report["pipeline"] == "cached"
+    assert report["schema_variant"] in ("filter", "plain")
+    blob = json.loads(
+        (tmp_path / "mdm_cache" / "fallback_case.json").read_text())
+    assert blob["pipeline"]["pipeline_name"] == "fallback_load"
+    assert blob["business_unit"] == "Fraud"     # via pipeline governance
+
+
+def test_ownership_business_unit_found_when_nested():
+    from synapse.loaders.mdm_digest import merge_ownership
+    blob = {"ownership": {}, "business_unit": ""}
+    merge_ownership(blob, {
+        "aim_id": "AIM-9",
+        "ownership_details_extra": {"business_unit": "Marketing"},
+    })
+    assert blob["business_unit"] == "Marketing"
+
+
+def test_bare_string_appflow_ids_are_tolerated():
+    from synapse.loaders.mdm_crawler import _appflow_parent_from
+    assert _appflow_parent_from(["af-123", "af-456"]) == "af-123"
+    assert _appflow_parent_from([{"parent_app_flow_id": "af-9"}]) == "af-9"
+    assert _appflow_parent_from([]) is None
+    assert _appflow_parent_from(None) is None

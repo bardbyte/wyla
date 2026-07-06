@@ -1,0 +1,15 @@
+[{
+  "dataset_id": "ds-F2",
+  "dataset_parent_id": "dsp-F1",
+  "dataset_details": {
+    "business_name": "Fallback Case",
+    "data_desc": "Mirrors the real-deployment probe: cdm-storage 500s, by-parent works",
+    "data_category": "Fraud Detection",
+    "table_type": "TABLE"
+  },
+  "dataset_source_details": {"project_id": "{{project_id}}", "dataset_name": "dw", "table_name": "fallback_case"},
+  "ownership_details": {"business_contacts": [{"email": "x@example.com"}]},
+  "schema": {"schema_attributes": [
+    {"attribute_name": "id", "attribute_details": {"attribute_type": "STRING", "attribute_desc": "key"}}
+  ]}
+}]

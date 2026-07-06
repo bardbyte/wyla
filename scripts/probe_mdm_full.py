@@ -231,11 +231,20 @@ def main() -> int:
                         save_as="appflow.json")
     afp = find_key(peel(appflow), "parent_app_flow_id", "app_flow_parent_id",
                    "appflow_parent_id", "parentAppFlowId", "appFlowParentId")
-    extracted["appflow_parent_id"] = afp
     if dpid:
-        probe.get("appflow_by_parent",
-                  f"/datasets/{urllib.parse.quote(str(dpid))}/appflow",
-                  save_as="appflow_by_parent.json", optional=True)
+        by_parent = probe.get(
+            "appflow_by_parent",
+            f"/datasets/{urllib.parse.quote(str(dpid))}/appflow",
+            save_as="appflow_by_parent.json", optional=True)
+        if not afp:  # cdm-storage 500s on the real deployment — fall back
+            first = peel(by_parent)
+            afp = (find_key(first, "parent_app_flow_id", "app_flow_parent_id",
+                            "appflow_parent_id", "parentAppFlowId",
+                            "appFlowParentId", "app_flow_id", "appFlowId")
+                   or (first.strip() if isinstance(first, str) else None))
+            if afp:
+                extracted["appflow_route"] = "by_parent (cdm-storage failed)"
+    extracted["appflow_parent_id"] = afp
 
     # ── 5. pipeline (needs appflow parent) ───────────────────
     if afp:
@@ -297,9 +306,12 @@ def main() -> int:
             f"/lifecycle/{urllib.parse.quote(str(extracted['pipeline_id']))}"
             f"/latest?tableName={quoted}",
             save_as="lifecycle_latest.json", optional=True)
-    # what the current crawler wrongly calls — prove/disprove in one line:
+    # the deployment-validated URL (spec brief said it doesn't exist; the
+    # real MDM 200s it) — if by-table failed, THIS becomes the cache file
+    # the crawler replays:
     probe.get("lifecycle_LEGACY_probe",
-              f"/lifecycle/latest?tableName={quoted}", optional=True)
+              f"/lifecycle/latest?tableName={quoted}",
+              save_as=None if lrows else "lifecycle.json", optional=True)
 
     # ── 9. high-value extras (refactor candidates, report-only) ──
     if extracted.get("dataset_id"):

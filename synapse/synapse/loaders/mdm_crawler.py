@@ -54,7 +54,8 @@ from synapse.loaders.types import LoadResult
 _DENY = re.compile(r"api-polling-info|/keys\b|key-schema-mappings", re.I)
 _ALLOWED_PREFIXES = (
     "/datasets/", "/app-flows/", "/portal-v2/",
-    "/table-lineages", "/attribute-lineage", "/lifecycle",
+    "/table-lineages", "/table-attribute-lineages",
+    "/attribute-lineage", "/lifecycle",
 )
 
 _DEFAULT_ENDPOINT_HINT = (
@@ -146,8 +147,20 @@ class MdmCrawler:
         self._get(f"/datasets/table-name/exists?tableName={quoted}",
                   table=table, step="exists", report=report)
 
-        schema_raw = self._get(f"/datasets/schemas?tableName={quoted}",
-                               table=table, step="schema", report=report)
+        # Schema — spec anchor first (probe-confirmed live), plain variant
+        # (the original lumi_final endpoint, also confirmed) as fallback.
+        # Both attempts share step name "schema" → one cache file.
+        schema_raw = self._get(
+            f"/datasets/schemas/filter?tableName={quoted}"
+            "&storageType=BigQuery",
+            table=table, step="schema", report=report)
+        if schema_raw is None:
+            schema_raw = self._get(
+                f"/datasets/schemas?tableName={quoted}",
+                table=table, step="schema", report=report)
+            report["schema_variant"] = "plain"
+        else:
+            report["schema_variant"] = "filter"
         schema_raw = _peel(schema_raw)
         blob = digest_schema_response(
             schema_raw if isinstance(schema_raw, dict) else {}, table)
@@ -161,12 +174,19 @@ class MdmCrawler:
         else:
             report["ownership"] = "skipped: no dataset_parent_id in schema"
 
+        # AppFlow — cdm-storage 500s on the real deployment (probe-
+        # confirmed); the dataset-parent route works. Try both.
         appflow = _peel(self._get(
             f"/app-flows/cdm-storage?tableName={quoted}",
             table=table, step="appflow", report=report))
         appflow_parent = _first_key(
             appflow, "parent_app_flow_id", "app_flow_parent_id",
-            "appflow_parent_id", "parentAppFlowId")
+            "appflow_parent_id", "parentAppFlowId", "appFlowParentId")
+        if not appflow_parent and parent_id:
+            by_parent = self._get(
+                f"/datasets/{urllib.parse.quote(str(parent_id))}/appflow",
+                table=table, step="appflow_by_parent", report=report)
+            appflow_parent = _appflow_parent_from(by_parent)
         if appflow_parent:
             pipeline = self._get(
                 "/portal-v2/pipeline/appflow-parent-id/"
@@ -188,14 +208,29 @@ class MdmCrawler:
         blob["lineage_downstream"] = _lineage_names(
             downstream_rows, side="target", exclude=table)
 
+        # Attribute lineage — by-table 500s on the real deployment; the
+        # pipeline-scoped variant is the fallback once a pipeline id exists.
         attr_rows = self._get(
             f"/attribute-lineage?tableName={quoted}",
             table=table, step="attr_lineage", report=report)
+        pipeline_id = (blob.get("pipeline") or {}).get("pipeline_id")
+        if attr_rows is None and pipeline_id:
+            attr_rows = self._get(
+                "/table-attribute-lineages/pipeline/"
+                f"{urllib.parse.quote(str(pipeline_id))}",
+                table=table, step="attr_lineage_by_pipeline", report=report)
         attribute_lineage = _attribute_lineage(attr_rows)
 
+        # Lifecycle — probe verdict INVERTED the spec brief: on the real
+        # deployment /lifecycle/latest?tableName= returns 200 and
+        # /lifecycle?tableName= 404s. Keep legacy primary, spec fallback.
         lifecycle = self._get(
             f"/lifecycle/latest?tableName={quoted}",
             table=table, step="lifecycle", report=report)
+        if lifecycle is None:
+            lifecycle = self._get(
+                f"/lifecycle?tableName={quoted}",
+                table=table, step="lifecycle", report=report)
         merge_lifecycle(blob, _peel(lifecycle))
 
         return {
@@ -221,6 +256,23 @@ def _first_key(obj: Any, *keys: str) -> Any:
     for key in keys:
         if obj.get(key) not in (None, ""):
             return obj[key]
+    return None
+
+
+def _appflow_parent_from(payload: Any) -> Any:
+    """/datasets/{dpid}/appflow returns either a list of appflow-id
+    strings or a list of dicts — extract a parent id tolerantly."""
+    if isinstance(payload, dict):
+        payload = payload.get("content") or payload.get("data") or [payload]
+    if not isinstance(payload, list) or not payload:
+        return None
+    first = payload[0]
+    if isinstance(first, dict):
+        return _first_key(first, "parent_app_flow_id", "app_flow_parent_id",
+                          "appflow_parent_id", "parentAppFlowId",
+                          "appFlowParentId", "app_flow_id", "appFlowId")
+    if isinstance(first, str) and first.strip():
+        return first.strip()  # bare id — portal-v2 accepts it as the parent
     return None
 
 
@@ -314,7 +366,8 @@ def crawl_mdm_for_table(
             written.append(attr_path)
 
     degraded = [s for s, v in report.items()
-                if v not in ("ok", "cached") and s != "schema"]
+                if v not in ("ok", "cached")
+                and s not in ("schema", "schema_variant")]
     return LoadResult(
         status="ok" if not degraded else "partial",
         source="mdm",
