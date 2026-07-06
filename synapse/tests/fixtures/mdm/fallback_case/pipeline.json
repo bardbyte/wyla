@@ -1,0 +1,7 @@
+[{
+  "id": "pl-F7",
+  "pipeline_name": "fallback_load",
+  "pipeline_type": "batch",
+  "business_unit": "Fraud",
+  "governance": {"is_pii": false, "source_system": "GEMINI"}
+}]

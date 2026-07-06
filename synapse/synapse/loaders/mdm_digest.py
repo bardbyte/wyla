@@ -175,6 +175,14 @@ def merge_ownership(blob: dict[str, Any], ownership_raw: Any) -> None:
         contacts = ownership_raw.get(key)
         if contacts:
             own[key] = contacts
+    # business_unit is sometimes nested one level down (probe showed the
+    # top level null on the real deployment) — scan child dicts before
+    # giving up; the pipeline governance block remains the other source.
+    if not own.get("business_unit"):
+        for value in ownership_raw.values():
+            if isinstance(value, dict) and value.get("business_unit"):
+                own["business_unit"] = value["business_unit"]
+                break
     if own.get("business_unit"):
         blob["business_unit"] = own["business_unit"]
 
