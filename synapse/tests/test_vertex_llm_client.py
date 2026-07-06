@@ -158,6 +158,44 @@ def test_serialize_context_truncation_is_explicit():
     assert len(big) == 100 + len(_TRUNCATION_MARKER)
 
 
+# ─── corporate-proxy TLS handling ────────────────────────────
+
+
+def test_tls_mode_decision_from_env(monkeypatch):
+    from synapse.enrichment.vertex_client import _tls_mode
+    for var in ("GEMINI_CA_BUNDLE", "GEMINI_TLS_INSECURE"):
+        monkeypatch.delenv(var, raising=False)
+    assert _tls_mode() == "default"
+    monkeypatch.setenv("GEMINI_TLS_INSECURE", "1")
+    assert _tls_mode() == "insecure"
+    monkeypatch.setenv("GEMINI_CA_BUNDLE", "/corp/root.pem")
+    assert _tls_mode() == "ca-bundle"          # bundle wins over insecure
+
+
+def test_client_applies_tls_before_building_transport(monkeypatch):
+    import synapse.enrichment.vertex_client as vc
+    monkeypatch.setenv("GEMINI_TLS_INSECURE", "true")
+    applied: list[str] = []
+    monkeypatch.setattr(vc, "_apply_tls", applied.append)
+    client, _ = _client(monkeypatch, [VALID_BUNDLE])
+    assert client.tls_mode == "insecure"
+    assert applied == ["insecure"]
+
+
+def test_ca_bundle_mode_sets_standard_env_vars(monkeypatch, tmp_path):
+    from synapse.enrichment.vertex_client import _apply_tls
+    pem = tmp_path / "corp.pem"
+    pem.write_text("dummy", encoding="utf-8")
+    monkeypatch.setenv("GEMINI_CA_BUNDLE", str(pem))
+    for var in ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE", "CURL_CA_BUNDLE",
+                "GRPC_DEFAULT_SSL_ROOTS_FILE_PATH"):
+        monkeypatch.delenv(var, raising=False)
+    _apply_tls("ca-bundle")
+    import os
+    assert os.environ["REQUESTS_CA_BUNDLE"] == str(pem.resolve())
+    assert os.environ["SSL_CERT_FILE"] == str(pem.resolve())
+
+
 # ─── tiered routing: pro for reasoning, flash for breadth ────
 
 

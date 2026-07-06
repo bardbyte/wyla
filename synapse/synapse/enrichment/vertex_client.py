@@ -37,9 +37,101 @@ from __future__ import annotations
 import json
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 from synapse.enrichment.schemas import EnrichmentBundle, SelfAssessment
+
+
+def _tls_mode() -> str:
+    """TLS handling for the corporate-proxy path, decided from env.
+
+    Corporate networks MITM all HTTPS; Python's bundled CAs don't trust
+    the corp root, so Vertex calls die with 'certificate verify failed'
+    (probe_vertex_readiness.py tells you if you're affected).
+
+      GEMINI_CA_BUNDLE=<pem>   verify against the corporate root CA (safe)
+      GEMINI_TLS_INSECURE=1    disable verification — trusted intranet
+                               only; same bypass as the probe's --insecure
+      (default)                system trust, plus `truststore` (the OS
+                               keychain, where corp roots live) if installed
+    """
+    if os.environ.get("GEMINI_CA_BUNDLE"):
+        return "ca-bundle"
+    if (os.environ.get("GEMINI_TLS_INSECURE") or "").lower() in (
+            "1", "true", "yes"):
+        return "insecure"
+    return "default"
+
+
+def _apply_tls(mode: str) -> None:
+    """Apply the chosen TLS mode process-wide (idempotent).
+
+    The insecure patch set is lifted from the proven
+    scripts/check_vertex_gemini.py: stdlib ssl + httpx (google-genai's
+    transport) + google-auth's token-exchange session."""
+    if mode == "ca-bundle":
+        bundle = str(
+            Path(os.environ["GEMINI_CA_BUNDLE"]).expanduser().resolve())
+        for var in ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE",
+                    "CURL_CA_BUNDLE", "GRPC_DEFAULT_SSL_ROOTS_FILE_PATH"):
+            os.environ[var] = bundle
+        return
+    if mode != "insecure":
+        try:  # best effort — makes the OS keychain the trust source
+            import truststore
+            truststore.inject_into_ssl()
+        except ImportError:
+            pass
+        return
+
+    import ssl
+    import warnings
+    ssl._create_default_https_context = ssl._create_unverified_context  # type: ignore[assignment]
+    os.environ["PYTHONHTTPSVERIFY"] = "0"
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except ImportError:
+        pass
+    try:
+        import httpx
+        if not getattr(httpx.Client, "_synapse_no_verify", False):
+            orig_client, orig_async = httpx.Client, httpx.AsyncClient
+
+            def _client_no_verify(*args: Any, **kwargs: Any) -> Any:
+                kwargs.setdefault("verify", False)
+                return orig_client(*args, **kwargs)
+
+            def _async_no_verify(*args: Any, **kwargs: Any) -> Any:
+                kwargs.setdefault("verify", False)
+                return orig_async(*args, **kwargs)
+
+            _client_no_verify._synapse_no_verify = True  # type: ignore[attr-defined]
+            _async_no_verify._synapse_no_verify = True  # type: ignore[attr-defined]
+            httpx.Client = _client_no_verify  # type: ignore[misc]
+            httpx.AsyncClient = _async_no_verify  # type: ignore[misc]
+    except ImportError:
+        pass
+    try:
+        import google.auth.transport.requests as gat
+        if not getattr(gat.AuthorizedSession, "_synapse_no_verify", False):
+            _orig_session = gat.AuthorizedSession
+
+            class _NoVerifyAuthorizedSession(_orig_session):  # type: ignore[misc, valid-type]
+                _synapse_no_verify = True
+
+                def __init__(self, *args: Any, **kwargs: Any) -> None:
+                    super().__init__(*args, **kwargs)
+                    self.verify = False
+
+            gat.AuthorizedSession = _NoVerifyAuthorizedSession  # type: ignore[misc]
+    except ImportError:
+        pass
+    warnings.warn(
+        "GEMINI_TLS_INSECURE=1 — TLS verification disabled for Vertex "
+        "calls; only safe behind a trusted corporate proxy.",
+        stacklevel=2)
 
 _PROMPT_TEMPLATE = """{skill_md}
 
@@ -149,6 +241,8 @@ class VertexLLMClient:
                 "the GOOGLE_CLOUD_* env vars)"
             ) from exc
         self._types = types
+        self.tls_mode = _tls_mode()
+        _apply_tls(self.tls_mode)     # BEFORE the client builds its httpx
         self._client = genai.Client()
         self.model = model or os.environ.get(
             "GEMINI_MODEL", "gemini-3.1-pro-preview")
@@ -270,6 +364,7 @@ class TieredLLMClient:
         self._flash = (VertexLLMClient(model=self.flash_model,
                                        temperature=temperature)
                        if self.flash_model else self._pro)
+        self.tls_mode = self._pro.tls_mode
 
     @property
     def stats(self) -> dict[str, int]:

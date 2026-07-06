@@ -245,6 +245,9 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             else:
                 client = VertexLLMClient()
                 _note(f"strategy: pro-only · model={client.model}")
+            if getattr(client, "tls_mode", "default") != "default":
+                _note(f"tls: {client.tls_mode} "
+                      "(via GEMINI_CA_BUNDLE / GEMINI_TLS_INSECURE)")
         except RuntimeError as exc:
             _note(f"⚠ enrichment skipped: {exc}")
             run_report["enrichment"] = {"status": "skipped",
