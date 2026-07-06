@@ -12,7 +12,24 @@ Design notes carried over from the proven semantic-graph client:
     `requires_steward_attention` — the run continues; failures are
     in-band data, never exceptions.
 
-Env: the four standard GOOGLE_* vars + GEMINI_MODEL.
+Gemini 3.1 Pro capabilities actually used (not left on the table):
+  * THINKING — `thinking_config` enabled by default (dynamic budget);
+    enrichment is a reasoning task (calibrated confidence, evidence
+    citation), not extraction. `GEMINI_THINKING_BUDGET=0` disables;
+    endpoints that reject thinking degrade gracefully (one retry
+    without, then thinking stays off for the run).
+  * LONG CONTEXT — evidence window defaults to 400K chars (~100K
+    tokens) instead of starving a 1M-token model; truncation, when it
+    happens, is EXPLICIT (an in-prompt marker tells the model evidence
+    was cut so it abstains instead of guessing).
+    `GEMINI_MAX_CONTEXT_CHARS` overrides.
+  * CORRECTIVE RETRY — skill.md promises "you'll be re-prompted with
+    the validation error"; this client honors it: exactly one
+    re-prompt carrying the parse/validation failure, then the original
+    in-band failure stands.
+
+Env: the four standard GOOGLE_* vars + GEMINI_MODEL,
+GEMINI_THINKING_BUDGET, GEMINI_MAX_CONTEXT_CHARS.
 """
 
 from __future__ import annotations
@@ -37,6 +54,41 @@ CONTEXT (the ONLY evidence you may use):
 Emit ONE JSON object matching the EnrichmentBundle schema described in
 the skill. JSON only — no prose, no markdown fences.
 """
+
+
+_DEFAULT_MAX_CONTEXT_CHARS = 400_000   # ~100K tokens; Gemini 3.1 Pro takes 1M
+_TRUNCATION_MARKER = (
+    "\n...[EVIDENCE TRUNCATED HERE — anything not shown above is ABSENT, "
+    "not implied; abstain rather than guess about unseen columns]"
+)
+
+# notes parse_bundle_text attaches on failure — the corrective-retry trigger
+_FAILURE_PREFIXES = (
+    "llm returned no JSON object",
+    "llm JSON unparseable",
+    "llm JSON was not an object",
+    "bundle failed validation",
+)
+
+
+def _serialize_context(context: dict[str, Any], max_chars: int) -> str:
+    """Context → JSON for the prompt. Truncation is explicit, never silent."""
+    text = json.dumps(context, indent=1, default=str)
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + _TRUNCATION_MARKER
+
+
+def _failure_note(bundle: EnrichmentBundle) -> str | None:
+    """The parse/validation error carried by an empty bundle, if any."""
+    if (bundle.column_observations or bundle.candidate_synonyms
+            or bundle.candidate_code_resolutions
+            or bundle.table_description_proposal):
+        return None
+    for note in bundle.self_assessment.requires_steward_attention:
+        if note.startswith(_FAILURE_PREFIXES):
+            return note
+    return None
 
 
 def _empty_bundle(table_name: str, note: str) -> EnrichmentBundle:
@@ -101,6 +153,41 @@ class VertexLLMClient:
         self.model = model or os.environ.get(
             "GEMINI_MODEL", "gemini-3.1-pro-preview")
         self.temperature = temperature
+        # -1 = dynamic (model decides how hard to think); 0 = off
+        self.thinking_budget = int(
+            os.environ.get("GEMINI_THINKING_BUDGET", "-1"))
+        self.max_context_chars = int(os.environ.get(
+            "GEMINI_MAX_CONTEXT_CHARS", str(_DEFAULT_MAX_CONTEXT_CHARS)))
+        self.stats = {"calls": 0, "corrective_retries": 0,
+                      "thinking_fallbacks": 0}
+
+    def _generate(self, prompt: str) -> str:
+        """One model call. Thinking on by default; endpoints that reject
+        it get one retry without, and thinking stays off for the run."""
+        config_kwargs: dict[str, Any] = {
+            "temperature": self.temperature,
+            "response_mime_type": "application/json",
+        }
+        if self.thinking_budget != 0:
+            config_kwargs["thinking_config"] = self._types.ThinkingConfig(
+                thinking_budget=self.thinking_budget)
+        try:
+            response = self._client.models.generate_content(
+                model=self.model, contents=prompt,
+                config=self._types.GenerateContentConfig(**config_kwargs),
+            )
+        except Exception as exc:
+            if "thinking" in str(exc).lower() and "thinking_config" in config_kwargs:
+                self.stats["thinking_fallbacks"] += 1
+                self.thinking_budget = 0        # don't re-fail every call
+                config_kwargs.pop("thinking_config")
+                response = self._client.models.generate_content(
+                    model=self.model, contents=prompt,
+                    config=self._types.GenerateContentConfig(**config_kwargs),
+                )
+            else:
+                raise
+        return response.text or ""
 
     def enrich(self, *, skill_md: str, context: dict[str, Any],
                table_name: str) -> EnrichmentBundle:
@@ -111,19 +198,38 @@ class VertexLLMClient:
             chunk=batch.get("chunk", 1),
             of=batch.get("of", 1),
             n_cols=batch.get("columns_in_chunk", "all"),
-            context_json=json.dumps(context, indent=1, default=str)[:60_000],
+            context_json=_serialize_context(context, self.max_context_chars),
         )
+        self.stats["calls"] += 1
         try:
-            response = self._client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=self._types.GenerateContentConfig(
-                    temperature=self.temperature,
-                    response_mime_type="application/json",
-                ),
-            )
-            text = response.text or ""
+            text = self._generate(prompt)
         except Exception as exc:  # network/model error → in-band failure
             return _empty_bundle(
                 table_name, f"vertex call failed: {str(exc)[:200]}")
-        return parse_bundle_text(text, table_name)
+        bundle = parse_bundle_text(text, table_name)
+
+        # skill.md's promise, honored: ONE corrective re-prompt carrying
+        # the exact parse/validation error. Recovers total losses; a
+        # second failure keeps the original in-band note.
+        note = _failure_note(bundle)
+        if note is None:
+            return bundle
+        self.stats["corrective_retries"] += 1
+        self.stats["calls"] += 1
+        retry_prompt = (
+            f"{prompt}\n\nYOUR PREVIOUS RESPONSE FAILED VALIDATION: {note}\n"
+            "Return ONLY the corrected JSON object matching the "
+            "EnrichmentBundle schema. No prose, no fences."
+        )
+        try:
+            retry_text = self._generate(retry_prompt)
+        except Exception as exc:
+            bundle.self_assessment.requires_steward_attention.append(
+                f"corrective retry also failed: {str(exc)[:160]}")
+            return bundle
+        retry_bundle = parse_bundle_text(retry_text, table_name)
+        if _failure_note(retry_bundle) is None:
+            retry_bundle.self_assessment.requires_steward_attention.append(
+                f"recovered after corrective retry ({note})")
+            return retry_bundle
+        return bundle

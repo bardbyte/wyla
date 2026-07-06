@@ -54,6 +54,7 @@ def enrich_graph(
     column_batch_size: int = 40,
     max_calls: int | None = None,
     grounding_reports: dict[str, dict] | None = None,
+    evidence_dir: Path | None = None,
 ) -> dict[str, EnrichmentBundle]:
     """Run the LLM enrichment pass over every Table in the store — BATCHED.
 
@@ -72,6 +73,9 @@ def enrich_graph(
             table regardless of width — legacy behavior).
         max_calls: hard budget across the whole run; tables that don't fit
             are skipped and reported (never silently).
+        evidence_dir: staged per-table signal files (the session split's
+            ``mdm_cache/<table>.json``) — real SQL snippets from
+            ``queries_using_this`` are fed to the LLM as primary evidence.
 
     Returns:
         dict mapping table_name → merged EnrichmentBundle (also written
@@ -87,6 +91,10 @@ def enrich_graph(
         n for n in store.nodes_by_type("Table")
         if n.properties.get("table_name")
     ]
+    # cross-table awareness: every call sees the names+columns of ALL
+    # in-graph tables (not just the enrich scope) so relates_to proposals
+    # can target real siblings instead of hallucinated table names
+    scope_digest = _scope_digest(store, table_nodes)
     if only_tables:
         wanted = {t.lower() for t in only_tables}
         table_nodes = [
@@ -96,7 +104,9 @@ def enrich_graph(
 
     for node in table_nodes:
         table_name = node.properties["table_name"]
-        context = _build_context_for_table(store, table_name)
+        context = _build_context_for_table(
+            store, table_name,
+            evidence_dir=evidence_dir, scope_digest=scope_digest)
         all_columns = (context.get("inspection") or {}).get("columns") or []
         if column_batch_size and len(all_columns) > column_batch_size:
             chunks = [
@@ -276,26 +286,117 @@ def propose_entities(
 # ─── Internals ───────────────────────────────────────────────
 
 
-def _build_context_for_table(store: GraphStore, table_name: str) -> dict[str, Any]:
+def _build_context_for_table(
+    store: GraphStore,
+    table_name: str,
+    *,
+    evidence_dir: Path | None = None,
+    scope_digest: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """The JSON payload handed to the LLM per table.
 
-    Includes the full inspector dict + corpus snippets + any steward
-    glossary entries that mention this table. The LLM consumes ONLY this
-    payload — it does not see the raw graph."""
+    Gemini's accuracy is bounded by the evidence it sees, so this packs
+    ALL primary sources — the fused inspector view, the real SQL that
+    analysts ran against this table (session signals), the credit-risk
+    skill knowledge that governs it, and a digest of every sibling table
+    in the graph (the only legal relates_to targets). The LLM consumes
+    ONLY this payload — it does not see the raw graph."""
     inspection = inspect_table(store, table_name)
     return {
         "inspection": inspection,
-        # Corpus snippets — pull from gold_queries dir if we had access here;
-        # for now the inspector already surfaces JOIN observations + metrics.
         "corpus_evidence": {
             "related_tables": inspection.get("related_tables", []),
             "metrics": inspection.get("metrics", []),
             "code_resolutions": inspection.get("code_resolutions", []),
         },
+        # real analyst SQL — the strongest grounding signal we own
+        "corpus_sql_evidence": _corpus_sql_evidence(evidence_dir, table_name),
+        # curated skill knowledge that APPLIES_TO this table
+        "skills_evidence": _skills_evidence(store, table_name),
+        # sibling tables: names + columns; relates_to may ONLY target these
+        "tables_in_scope": scope_digest or [],
         # Steward glossary entries — the loader will populate this once
         # we ingest the steward glossary.md. For v1, empty.
         "steward_glossary": [],
     }
+
+
+def _corpus_sql_evidence(
+    evidence_dir: Path | None, table_name: str,
+    *, max_queries: int = 15, max_chars: int = 1500,
+) -> dict[str, Any]:
+    """Real SQL snippets from the staged session signals for this table.
+
+    Tolerates both entry shapes (dict with sql/query/text keys, or a bare
+    string) and trims hard — evidence, not a transcript dump."""
+    if evidence_dir is None:
+        return {}
+    path = Path(evidence_dir) / f"{table_name}.json"
+    if not path.exists():
+        return {}
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    queries: list[str] = []
+    for entry in (blob.get("queries_using_this") or [])[:max_queries]:
+        if isinstance(entry, dict):
+            text = str(entry.get("sql") or entry.get("query")
+                       or entry.get("query_text") or entry.get("text") or "")
+        else:
+            text = str(entry)
+        text = text.strip()
+        if text:
+            queries.append(text[:max_chars])
+    return {
+        "queries": queries,
+        "aggregations": (blob.get("aggregations") or [])[:30],
+        "n_queries_total": len(blob.get("queries_using_this") or []),
+    }
+
+
+def _skills_evidence(
+    store: GraphStore, table_name: str, *, max_excerpt: int = 2000,
+) -> list[dict[str, Any]]:
+    """Curated skill packages that APPLIES_TO this table — steward-grade
+    domain knowledge the LLM should treat as high-authority evidence."""
+    t_uri = canonical_uri("table", table_name)
+    out: list[dict[str, Any]] = []
+    for edge in store.incoming(t_uri, "APPLIES_TO"):
+        skill = store.get(edge.from_uri)
+        if skill is None or skill.node_type != "Skill":
+            continue
+        props = skill.properties
+        out.append({
+            "skill_id": props.get("skill_id"),
+            "domain": props.get("domain"),
+            "description": props.get("description"),
+            "knowledge_excerpt": str(
+                props.get("knowledge_excerpt") or "")[:max_excerpt],
+            "metrics_defined": props.get("metrics_defined") or [],
+        })
+    return out
+
+
+def _scope_digest(
+    store: GraphStore, table_nodes: list, *, max_tables: int = 40,
+    max_columns: int = 80,
+) -> list[dict[str, Any]]:
+    """Compact per-table digest of the whole graph scope — lets Gemini
+    ground cross-table relates_to proposals in real sibling schemas."""
+    digest: list[dict[str, Any]] = []
+    for node in table_nodes[:max_tables]:
+        cols = sorted(
+            e.to_uri.rsplit("/", 1)[-1]
+            for e in store.outgoing(node.canonical_uri, "CONTAINS")
+        )
+        digest.append({
+            "table": node.properties.get("table_name"),
+            "description": str(node.properties.get("description") or "")[:200],
+            "columns": cols[:max_columns],
+            "n_columns": len(cols),
+        })
+    return digest
 
 
 def _grounding_index(store: GraphStore) -> set[str]:
@@ -334,6 +435,10 @@ def _apply_bundle(
       * synonyms whose canonical_form matches nothing the graph knows
         (any column/metric/table/entity name or business name) → dropped
       * code resolutions for columns that don't exist → dropped
+      * relates_to targets that don't exist as real columns → dropped;
+        relations the graph already witnessed (corpus joins) → skipped —
+        the LLM only echoes corpus evidence, it is not an independent
+        witness, so re-asserting would inflate confidence
 
     Every drop/hold is counted in the returned grounding report so the
     run is auditable — accuracy is enforced, not assumed. Tag every
@@ -346,6 +451,9 @@ def _apply_bundle(
         "dropped_imagined_columns": 0,
         "dropped_ungrounded_synonyms": 0,
         "dropped_ungrounded_code_resolutions": 0,
+        "applied_relations": 0,
+        "skipped_existing_relations": 0,
+        "dropped_ungrounded_relations": 0,
         "ambiguity_flags": 0,
     }
     known = _grounding_index(store)
@@ -395,6 +503,31 @@ def _apply_bundle(
         store.upsert_node(
             "Column", c_uri, properties=update, source="llm_generated",
         )
+
+        # relates_to → EQUIVALENT_TO edges, gap-fill only. The target
+        # must exist as a real column, and an edge the corpus already
+        # observed is skipped — the LLM read that corpus, so re-asserting
+        # the same join is not independent corroboration.
+        for rel in obs.relates_to:
+            target_uri = canonical_uri(
+                "column", rel.target_table, rel.target_column)
+            if target_uri == c_uri or target_uri not in store.nodes:
+                report["dropped_ungrounded_relations"] += 1
+                continue
+            fwd = f"{c_uri}::EQUIVALENT_TO::{target_uri}"
+            rev = f"{target_uri}::EQUIVALENT_TO::{c_uri}"
+            if fwd in store.edges or rev in store.edges:
+                report["skipped_existing_relations"] += 1
+                continue
+            store.upsert_edge(
+                "EQUIVALENT_TO", c_uri, target_uri,
+                properties={
+                    "verb": rel.verb,
+                    "llm_evidence_count": rel.evidence_count,
+                },
+                source="llm_generated",
+            )
+            report["applied_relations"] += 1
 
     # Candidate synonyms — ONLY when the canonical form grounds to
     # something the graph actually knows (anti-pattern 3 enforced)

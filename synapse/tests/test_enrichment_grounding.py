@@ -9,12 +9,14 @@ counted in the per-table grounding report.
 
 from __future__ import annotations
 
+import json
+
 from synapse.enrichment.enricher import (
     MockLLMClient, _apply_bundle, _grounding_index, enrich_graph,
 )
 from synapse.enrichment.schemas import (
     CandidateSynonym, CodeResolution, ColumnObservation,
-    EnrichmentBundle, SelfAssessment,
+    EnrichmentBundle, RelationProposal, SelfAssessment,
 )
 from synapse.graph.store import GraphStore, canonical_uri
 
@@ -197,6 +199,165 @@ def test_code_resolution_on_real_column_is_kept():
     assert len(mappings) == 1
     assert mappings[0].properties["human_meaning"] == "Active"
     assert mappings[0].properties["source"] == "llm_inferred"
+
+
+# ─── relates_to → cross-table edges, gap-fill only ───────────
+
+
+def _two_table_store() -> GraphStore:
+    store = _store()
+    t2 = canonical_uri("table", "customers")
+    store.upsert_node("Table", t2, {"table_name": "customers"}, source="mdm")
+    c2 = canonical_uri("column", "customers", "cust_id")
+    store.upsert_node("Column", c2, {"table_name": "customers"}, source="mdm")
+    store.upsert_edge("CONTAINS", t2, c2, {}, source="mdm")
+    return store
+
+
+def _rel(**overrides) -> RelationProposal:
+    base = dict(target_table="customers", target_column="cust_id",
+                verb="joins to", evidence_count=3)
+    base.update(overrides)
+    return RelationProposal(**base)
+
+
+def test_grounded_relation_becomes_equivalent_to_edge():
+    store = _two_table_store()
+    report = _apply_bundle(store, EnrichmentBundle(
+        table_name="accounts",
+        column_observations=[_obs(relates_to=[_rel()])],
+        self_assessment=_sa()))
+    assert report["applied_relations"] == 1
+    edge_uri = (f"{canonical_uri('column', 'accounts', 'acct_id')}"
+                f"::EQUIVALENT_TO::"
+                f"{canonical_uri('column', 'customers', 'cust_id')}")
+    edge = store.edges[edge_uri]
+    assert edge.properties["verb"] == "joins to"
+    assert "llm_generated" in edge.provenance.sources
+
+
+def test_relation_to_ghost_target_is_dropped():
+    store = _two_table_store()
+    n_edges = len(store.edges)
+    report = _apply_bundle(store, EnrichmentBundle(
+        table_name="accounts",
+        column_observations=[
+            _obs(relates_to=[_rel(target_table="ghost_table")])],
+        self_assessment=_sa()))
+    assert report["dropped_ungrounded_relations"] == 1
+    assert report["applied_relations"] == 0
+    assert len(store.edges) == n_edges
+
+
+def test_corpus_witnessed_relation_is_skipped_not_double_counted():
+    store = _two_table_store()
+    a_uri = canonical_uri("column", "accounts", "acct_id")
+    c_uri = canonical_uri("column", "customers", "cust_id")
+    store.upsert_edge("EQUIVALENT_TO", a_uri, c_uri,
+                      {"join_type": "INNER"}, source="corpus")
+    report = _apply_bundle(store, EnrichmentBundle(
+        table_name="accounts",
+        column_observations=[_obs(relates_to=[_rel()])],
+        self_assessment=_sa()))
+    assert report["skipped_existing_relations"] == 1
+    assert report["applied_relations"] == 0
+    # the LLM echoing the corpus back must NOT count as a second witness
+    edge = store.edges[f"{a_uri}::EQUIVALENT_TO::{c_uri}"]
+    assert "llm_generated" not in edge.provenance.sources
+
+
+def test_reverse_direction_existing_edge_also_skips():
+    store = _two_table_store()
+    a_uri = canonical_uri("column", "accounts", "acct_id")
+    c_uri = canonical_uri("column", "customers", "cust_id")
+    store.upsert_edge("EQUIVALENT_TO", c_uri, a_uri, {}, source="corpus")
+    report = _apply_bundle(store, EnrichmentBundle(
+        table_name="accounts",
+        column_observations=[_obs(relates_to=[_rel()])],
+        self_assessment=_sa()))
+    assert report["skipped_existing_relations"] == 1
+    assert report["applied_relations"] == 0
+
+
+def test_self_relation_is_dropped():
+    store = _two_table_store()
+    report = _apply_bundle(store, EnrichmentBundle(
+        table_name="accounts",
+        column_observations=[_obs(relates_to=[
+            _rel(target_table="accounts", target_column="acct_id")])],
+        self_assessment=_sa()))
+    assert report["dropped_ungrounded_relations"] == 1
+
+
+# ─── evidence-rich context: SQL, skills, scope digest ────────
+
+
+def test_context_carries_session_sql_and_scope_digest(tmp_path):
+    store = _two_table_store()
+    (tmp_path / "accounts.json").write_text(json.dumps({
+        "queries_using_this": [
+            {"sql": "SELECT a.acct_id FROM accounts a "
+                    "JOIN customers c ON a.acct_id = c.cust_id"},
+            "SELECT COUNT(*) FROM accounts",     # bare-string entry tolerated
+        ],
+        "aggregations": [{"function": "COUNT", "column": "acct_id"}],
+    }), encoding="utf-8")
+
+    captured: dict[str, dict] = {}
+
+    def respond(table_name: str, context: dict) -> EnrichmentBundle:
+        captured[table_name] = context
+        return EnrichmentBundle(table_name=table_name, self_assessment=_sa())
+
+    enrich_graph(store, MockLLMClient(respond),
+                 only_tables=["accounts"], evidence_dir=tmp_path)
+
+    ctx = captured["accounts"]
+    sql = ctx["corpus_sql_evidence"]
+    assert "JOIN customers" in sql["queries"][0]
+    assert sql["queries"][1] == "SELECT COUNT(*) FROM accounts"
+    assert sql["n_queries_total"] == 2
+    # scope digest lists ALL graph tables (even outside the enrich scope)
+    scope = {t["table"]: t for t in ctx["tables_in_scope"]}
+    assert {"accounts", "customers"} <= set(scope)
+    assert "cust_id" in scope["customers"]["columns"]
+
+
+def test_context_carries_skill_knowledge_for_applied_tables():
+    store = _store()
+    s_uri = canonical_uri("skill", "roll_rate_analysis")
+    store.upsert_node("Skill", s_uri, {
+        "skill_id": "roll_rate_analysis", "domain": "portfolio_analytics",
+        "description": "Roll rate methodology",
+        "knowledge_excerpt": "Never apply LAG() to pre-lagged tables.",
+        "metrics_defined": ["roll_rate"],
+    }, source="skills")
+    store.upsert_edge("APPLIES_TO", s_uri,
+                      canonical_uri("table", "accounts"), {}, source="skills")
+
+    captured: dict[str, dict] = {}
+
+    def respond(table_name: str, context: dict) -> EnrichmentBundle:
+        captured[table_name] = context
+        return EnrichmentBundle(table_name=table_name, self_assessment=_sa())
+
+    enrich_graph(store, MockLLMClient(respond))
+    skills = captured["accounts"]["skills_evidence"]
+    assert len(skills) == 1
+    assert skills[0]["skill_id"] == "roll_rate_analysis"
+    assert "pre-lagged" in skills[0]["knowledge_excerpt"]
+
+
+def test_missing_evidence_dir_yields_empty_sql_evidence():
+    store = _store()
+    captured: dict[str, dict] = {}
+
+    def respond(table_name: str, context: dict) -> EnrichmentBundle:
+        captured[table_name] = context
+        return EnrichmentBundle(table_name=table_name, self_assessment=_sa())
+
+    enrich_graph(store, MockLLMClient(respond))    # no evidence_dir at all
+    assert captured["accounts"]["corpus_sql_evidence"] == {}
 
 
 # ─── end to end through enrich_graph ─────────────────────────

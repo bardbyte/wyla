@@ -256,6 +256,9 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                 max_calls=args.enrich_max_calls,
                 memory_out=out_root / "enrichment_memory.json",
                 grounding_reports=grounding,
+                # real analyst SQL staged by the session split — Gemini's
+                # strongest grounding evidence
+                evidence_dir=sources_dir / "mdm_cache",
             )
             n_obs = sum(len(b.column_observations) for b in bundles.values())
             n_syn = sum(len(b.candidate_synonyms) for b in bundles.values())
@@ -277,6 +280,19 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                   f"{totals.get('dropped_ungrounded_code_resolutions', 0)} "
                   "ungrounded code resolutions · "
                   f"{totals.get('ambiguity_flags', 0)} ambiguity flags")
+            _note(f"relations: {totals.get('applied_relations', 0)} new "
+                  "cross-table edge(s) applied · "
+                  f"{totals.get('skipped_existing_relations', 0)} already "
+                  "corpus-witnessed (skipped) · "
+                  f"{totals.get('dropped_ungrounded_relations', 0)} "
+                  "ungrounded (dropped)")
+            if getattr(client, "stats", None):
+                _note(f"gemini: {client.stats.get('calls', 0)} call(s) · "
+                      f"{client.stats.get('corrective_retries', 0)} "
+                      "corrective retr(ies) · "
+                      f"{client.stats.get('thinking_fallbacks', 0)} "
+                      "thinking fallback(s)")
+                run_report["enrichment_client_stats"] = dict(client.stats)
             run_report["enrichment_grounding"] = {
                 "totals": totals, "per_table": grounding}
             proposals = propose_entities(bundles)
