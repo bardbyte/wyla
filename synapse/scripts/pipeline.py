@@ -67,6 +67,10 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         result = load_skills_library(Path(skills_dir), out_dir=sources_dir)
         run_report["skills"] = result.model_dump(mode="json")
         _note(f"{result.status}: {result.records_count} skill package(s)")
+        for skill_id, outcome in sorted(
+                (result.metadata.get("skills") or {}).items()):
+            _note(f"  {'✓' if outcome == 'ok' else '✗'} {skill_id}"
+                  + ("" if outcome == "ok" else f" — {outcome}"))
         for warning in result.warnings:
             _note(f"⚠ {warning}")
 
@@ -93,8 +97,9 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                       if d.is_dir() and not d.name.startswith("_")]
         outcomes = []
         for tdir in table_dirs:
+            # loader contract: source_dir is the PARENT containing <table>/
             result = load_bq_for_table(
-                tdir.name, source_dir=tdir, out_dir=sources_dir)
+                tdir.name, source_dir=bq_root, out_dir=sources_dir)
             outcomes.append({"table": tdir.name, "status": result.status})
         run_report["bq"] = {"tables": outcomes}
         _note(f"{len(outcomes)} table extraction folder(s) staged")
@@ -131,29 +136,50 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     #        pipeline governance, lineage both ways, attribute lineage,
     #        lifecycle). Live on VPN via --mdm-base / SYNAPSE_MDM_BASE;
     #        fully offline from a --mdm-raw-dir per-endpoint cache. ──
-    if args.mdm_crawl:
+    if args.mdm_crawl or args.mdm_manifest:
         _stage("MDM crawler → metadata spine")
         from synapse.loaders.mdm_crawler import crawl_mdm_for_table
-        tables = [t.strip() for t in args.mdm_crawl.split(",") if t.strip()]
+        tables = [t.strip() for t in (args.mdm_crawl or "").split(",")
+                  if t.strip()]
+        if args.mdm_manifest:
+            from synapse.utils.manifest import read_tables_manifest
+            manifest_tables = read_tables_manifest(args.mdm_manifest)
+            _note(f"manifest: {len(manifest_tables)} table(s) from "
+                  f"{args.mdm_manifest}")
+            tables += [t["name"] for t in manifest_tables
+                       if t["name"] not in tables]
         raw_dir = (Path(args.mdm_raw_dir).expanduser()
                    if args.mdm_raw_dir
                    else sources_dir / "mdm_raw")
         outcomes = []
+        # sparse-tolerant spine matrix: MDM data is genuinely absent for
+        # some tables (probe-verified) — show exactly what each one gave us
+        _note(f"{'table':34} {'cols':>5} {'BU':10} {'pipe':4} "
+              f"{'lin↑':>4} {'lin↓':>4} {'life':4}")
         for table in tables:
             result = crawl_mdm_for_table(
                 table, out_dir=sources_dir,
                 base_url=args.mdm_base or None,
                 cache_dir=raw_dir, refresh=args.mdm_refresh)
+            meta = result.metadata
+            fetch = meta.get("fetch_report") or {}
+            ok = ("ok", "cached")
+            _note(f"{table[:34]:34} {result.records_count:>5} "
+                  f"{(meta.get('business_unit') or '–')[:10]:10} "
+                  f"{'✓' if fetch.get('pipeline') in ok else '–':4} "
+                  f"{meta.get('n_upstream', 0):>4} "
+                  f"{meta.get('n_downstream', 0):>4} "
+                  f"{'✓' if fetch.get('lifecycle') in ok else '–':4}"
+                  + ("   ✗ " + (result.error or "")[:40]
+                     if result.status == "error" else ""))
             outcomes.append({
                 "table": table, "status": result.status,
-                "business_unit": result.metadata.get("business_unit"),
-                "fetch_report": result.metadata.get("fetch_report"),
+                "business_unit": meta.get("business_unit"),
+                "fetch_report": fetch,
             })
-            _note(f"{table}: {result.status}"
-                  + (f" · BU={result.metadata.get('business_unit')}"
-                     if result.metadata.get("business_unit") else ""))
-            for warning in result.warnings[:4]:
-                _note(f"  ⚠ {warning}")
+        n_err = sum(1 for o in outcomes if o["status"] == "error")
+        _note(f"{len(outcomes)} table(s) crawled · {n_err} schema failure(s)"
+              " · '–' = MDM has no record (sparse, not an error)")
         run_report["mdm_crawl"] = {"tables": outcomes}
 
     # ── 6. Compile ───────────────────────────────────────────
@@ -202,6 +228,9 @@ def main() -> None:
                         help="comma-separated tables for the FULL MDM "
                              "read-side crawl (spine, ownership, pipeline, "
                              "lineage, lifecycle)")
+    parser.add_argument("--mdm-manifest", default="",
+                        help="tables.yaml path — crawl EVERY table in the "
+                             "extraction manifest (combines with --mdm-crawl)")
     parser.add_argument("--mdm-base", default="",
                         help="MDM API base url (or SYNAPSE_MDM_BASE)")
     parser.add_argument("--mdm-raw-dir", default="",
@@ -218,7 +247,7 @@ def main() -> None:
     args = parser.parse_args()
     if not any([args.demo, args.skills_dir, args.gold_sql_dir,
                 args.bq_extract_dir, args.lumi_session, args.mdm_cache_dir,
-                args.mdm_crawl]):
+                args.mdm_crawl, args.mdm_manifest]):
         parser.error("nothing to load — pass --demo or at least one source")
     run_pipeline(args)
 
