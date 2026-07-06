@@ -63,6 +63,8 @@ def build_graph_from_sources(sources_dir: Path) -> GraphStore:
     _ingest_dq_rules(store, sources_dir / "dq_rules")
     _ingest_ai_descriptions(store, sources_dir / "ai_descriptions")
     _ingest_lineage_from_mdm(store, sources_dir / "mdm_cache")
+    # MDM attribute-level lineage (crawler output; no-op when absent)
+    _ingest_attribute_lineage(store, sources_dir / "attribute_lineage")
     # BQ-derived empirical lineage (real-loader outputs only; no-op on synthetic)
     _ingest_lineage_from_bq(store, sources_dir / "lineage")
     # Lumi 100% signal coverage (no-op when the loader didn't produce these)
@@ -124,13 +126,13 @@ def _ingest_mdm(store: GraphStore, cache_dir: Path) -> None:
                 "business_name": blob.get("table_business_name") or "",
                 "description": blob.get("table_description") or "",
                 # MDM taxonomy → domain axes. data_category is the data
-                # subject area ("Customer", "Acquisition"). company_domain is
-                # PROVISIONAL from data_sub_category until the ownership/
-                # pipeline crawl supplies the authoritative business_unit
-                # (Risk / Fraud / Marketing) — that later pass will supersede
-                # this value on the same node.
+                # subject area ("Customer", "Acquisition"). company_domain
+                # prefers the AUTHORITATIVE business_unit (Risk / Fraud /
+                # Marketing) from the ownership/pipeline crawl, falling back
+                # to data_sub_category when the crawl didn't run.
                 "data_domain": blob.get("data_category") or "",
-                "company_domain": blob.get("data_sub_category") or "",
+                "company_domain": blob.get("business_unit")
+                or blob.get("data_sub_category") or "",
                 "fqn": ".".join(filter(None, [
                     blob.get("bq_project"), blob.get("bq_dataset"),
                     blob.get("bq_table"),
@@ -146,6 +148,18 @@ def _ingest_mdm(store: GraphStore, cache_dir: Path) -> None:
                 "asset_kind": blob.get("asset_kind") or "Table",
                 "tags": blob.get("tags") or [],
                 "lineage_upstream": blob.get("lineage_upstream") or [],
+                # ── crawler-era spine facts (empty-skip on legacy blobs) ──
+                "dataset_parent_id": blob.get("dataset_parent_id") or "",
+                "business_unit": blob.get("business_unit") or "",
+                "feed_type": blob.get("feed_type") or "",
+                "table_type": blob.get("table_type") or "",
+                "is_decommissioned": blob.get("is_decommissioned") or False,
+                "lifecycle_status": (blob.get("lifecycle") or {}).get(
+                    "status") or "",
+                "pipeline_name": (blob.get("pipeline") or {}).get(
+                    "pipeline_name") or "",
+                "pipeline_governance": (blob.get("pipeline") or {}).get(
+                    "governance") or {},
             },
             source="mdm",
         )
@@ -658,6 +672,56 @@ def _ingest_lineage_from_mdm(store: GraphStore, mdm_dir: Path) -> None:
             store.upsert_edge(
                 "UPSTREAM_OF", u_uri, t_uri,
                 properties={"observed_in": "mdm_lineage"},
+                source="mdm",
+            )
+        # Crawler-era addition: declared downstream consumers
+        for downstream in (blob.get("lineage_downstream") or []):
+            d_uri = canonical_uri("table", downstream)
+            if d_uri not in store.nodes:
+                store.upsert_node(
+                    "Table", d_uri,
+                    properties={"table_name": downstream},
+                    source="mdm",
+                )
+            store.upsert_edge(
+                "UPSTREAM_OF", t_uri, d_uri,
+                properties={"observed_in": "mdm_lineage"},
+                source="mdm",
+            )
+
+
+def _ingest_attribute_lineage(store: GraphStore, attr_dir: Path) -> None:
+    """attribute_lineage/<table>.json → Column DERIVES_FROM Column edges
+    carrying the derivation logic — MDM's column-level data flow."""
+    if not attr_dir.exists():
+        return
+    for path in sorted(attr_dir.glob("*.json")):
+        try:
+            blob = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for m in (blob.get("mappings") or []):
+            if not isinstance(m, dict):
+                continue
+            src_t, src_c = m.get("src_table"), m.get("src_column")
+            dst_t, dst_c = m.get("dst_table"), m.get("dst_column")
+            if not (src_t and src_c and dst_t and dst_c):
+                continue
+            src_uri = canonical_uri("column", src_t, src_c)
+            dst_uri = canonical_uri("column", dst_t, dst_c)
+            for uri, table, column in ((src_uri, src_t, src_c),
+                                       (dst_uri, dst_t, dst_c)):
+                if uri not in store.nodes:
+                    store.upsert_node(
+                        "Column", uri,
+                        properties={"table_name": table}, source="mdm",
+                    )
+            store.upsert_edge(
+                "DERIVES_FROM", dst_uri, src_uri,
+                properties={
+                    "derivation_logic": m.get("derivation_logic") or "",
+                    "pipeline_id": m.get("pipeline_id") or "",
+                },
                 source="mdm",
             )
 

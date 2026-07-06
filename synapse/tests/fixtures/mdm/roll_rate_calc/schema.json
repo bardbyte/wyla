@@ -1,0 +1,40 @@
+[{
+  "dataset_id": "ds-9002",
+  "dataset_parent_id": "dsp-9001",
+  "dataset_details": {
+    "business_name": "Roll Rate Calculation",
+    "data_desc": "Account-month delinquency roll-rate base with pre-materialized lags",
+    "data_category": "Portfolio Risk",
+    "data_sub_category": "Delinquency",
+    "table_type": "VIEW",
+    "feed_type": "Hydration",
+    "row_count": "88000000"
+  },
+  "dataset_source_details": {
+    "project_id": "{{project_id}}",
+    "dataset_name": "common",
+    "table_name": "roll_rate_calc"
+  },
+  "ownership_details": {
+    "imr_queue": "RISK-DQ",
+    "aim_id": "AIM-1234",
+    "business_contacts": [{"email": "risk-owner@example.com", "type": "business_owner"}]
+  },
+  "sensitivity_details": [
+    {"attribute_name": "dpd_bucket", "is_critical_data_element": "Y"}
+  ],
+  "schema": {
+    "schema_id": "sch-100",
+    "schema_attributes": [
+      {"attribute_name": "rpt_month",
+       "attribute_details": {"attribute_type": "DATE", "attribute_desc": "Reporting month", "is_partitioned": "Y"}},
+      {"attribute_name": "bal_lag1",
+       "attribute_details": {"attribute_type": "NUMERIC", "attribute_desc": "Balance at t-1, pre-materialized upstream"}},
+      {"attribute_name": "dpd_bucket",
+       "attribute_details": {"attribute_type": "STRING", "attribute_desc": "Delinquency bucket code"}},
+      {"attribute_name": "cm11_encrypted",
+       "attribute_details": {"attribute_type": "STRING", "attribute_desc": "Encrypted account key"},
+       "sensitivity_details": {"is_pii": "Y", "pii_role_id": "Restricted", "is_gdpr": "Y"}}
+    ]
+  }
+}]

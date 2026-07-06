@@ -275,10 +275,19 @@ class BigQueryClient:
 
     def __init__(self, project: str | None = None,
                  location: str | None = None) -> None:
+        import os
+
         from google.cloud import bigquery  # deferred — laptop dependency
 
         self._bq = bigquery
-        self._client = bigquery.Client(project=project, location=location)
+        # Enterprise networks route BigQuery through a PSC endpoint (the
+        # extraction scripts already use it). The SDK defaults to the
+        # public endpoint, which may be blocked — honor the same override.
+        api_endpoint = os.environ.get("BQ_API_ENDPOINT", "").strip()
+        client_options = {"api_endpoint": api_endpoint} if api_endpoint else None
+        self._client = bigquery.Client(
+            project=project, location=location,
+            client_options=client_options)
 
     def dry_run(self, sql: str) -> dict[str, Any]:
         config = self._bq.QueryJobConfig(dry_run=True, use_query_cache=False)

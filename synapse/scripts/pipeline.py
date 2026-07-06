@@ -113,7 +113,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         run_report["lumi"] = {"tables": outcomes}
         _note(f"{len(outcomes)} table(s) split from session output")
 
-    # ── 5. MDM cache (declared-metadata witness) ─────────────
+    # ── 5. MDM cache (declared-metadata witness, legacy single-blob) ──
     if args.mdm_cache_dir:
         _stage("MDM cache → canonical artifacts")
         from synapse.loaders.mdm_loader import load_mdm_for_table
@@ -126,6 +126,35 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             outcomes.append({"table": cached.stem, "status": result.status})
         run_report["mdm"] = {"tables": outcomes}
         _note(f"{len(outcomes)} MDM digest(s) staged")
+
+    # ── 5b. MDM crawler (full read-side pull: spine, ownership,
+    #        pipeline governance, lineage both ways, attribute lineage,
+    #        lifecycle). Live on VPN via --mdm-base / SYNAPSE_MDM_BASE;
+    #        fully offline from a --mdm-raw-dir per-endpoint cache. ──
+    if args.mdm_crawl:
+        _stage("MDM crawler → metadata spine")
+        from synapse.loaders.mdm_crawler import crawl_mdm_for_table
+        tables = [t.strip() for t in args.mdm_crawl.split(",") if t.strip()]
+        raw_dir = (Path(args.mdm_raw_dir).expanduser()
+                   if args.mdm_raw_dir
+                   else sources_dir / "mdm_raw")
+        outcomes = []
+        for table in tables:
+            result = crawl_mdm_for_table(
+                table, out_dir=sources_dir,
+                base_url=args.mdm_base or None,
+                cache_dir=raw_dir, refresh=args.mdm_refresh)
+            outcomes.append({
+                "table": table, "status": result.status,
+                "business_unit": result.metadata.get("business_unit"),
+                "fetch_report": result.metadata.get("fetch_report"),
+            })
+            _note(f"{table}: {result.status}"
+                  + (f" · BU={result.metadata.get('business_unit')}"
+                     if result.metadata.get("business_unit") else ""))
+            for warning in result.warnings[:4]:
+                _note(f"  ⚠ {warning}")
+        run_report["mdm_crawl"] = {"tables": outcomes}
 
     # ── 6. Compile ───────────────────────────────────────────
     _stage("Compile: assertions → typed graph")
@@ -167,7 +196,19 @@ def main() -> None:
     parser.add_argument("--lumi-session", default="",
                         help="lumi_final session1_output.json")
     parser.add_argument("--mdm-cache-dir", default="",
-                        help="directory of cached raw MDM JSON")
+                        help="directory of cached raw MDM JSON (legacy "
+                             "single-blob path)")
+    parser.add_argument("--mdm-crawl", default="",
+                        help="comma-separated tables for the FULL MDM "
+                             "read-side crawl (spine, ownership, pipeline, "
+                             "lineage, lifecycle)")
+    parser.add_argument("--mdm-base", default="",
+                        help="MDM API base url (or SYNAPSE_MDM_BASE)")
+    parser.add_argument("--mdm-raw-dir", default="",
+                        help="per-endpoint raw cache for the crawler "
+                             "(offline replay / resumable laptop runs)")
+    parser.add_argument("--mdm-refresh", action="store_true",
+                        help="refetch even when a raw cache entry exists")
     parser.add_argument("--sources-dir",
                         default=str(SYNAPSE_ROOT / "data" / "cache" / "sources"),
                         help="staging dir for canonical artifacts")
@@ -176,7 +217,8 @@ def main() -> None:
                                     / "graph_snapshot.json"))
     args = parser.parse_args()
     if not any([args.demo, args.skills_dir, args.gold_sql_dir,
-                args.bq_extract_dir, args.lumi_session, args.mdm_cache_dir]):
+                args.bq_extract_dir, args.lumi_session, args.mdm_cache_dir,
+                args.mdm_crawl]):
         parser.error("nothing to load — pass --demo or at least one source")
     run_pipeline(args)
 

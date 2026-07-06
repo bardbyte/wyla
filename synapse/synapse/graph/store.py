@@ -332,6 +332,8 @@ class Edge(BaseModel):
         "APPLIES_TO",      # Skill → Table|Metric; where the skill is authoritative
         "CONSTRAINS",      # Guardrail → Table|Column|Metric; must-respect rule
         "DEFINED_BY",      # Metric → Skill; contract that defines the metric
+        # MDM attribute lineage:
+        "DERIVES_FROM",    # Column → Column; value derivation with logic
     ]
     properties: dict[str, Any] = Field(default_factory=dict)
     provenance: Provenance = Field(default_factory=Provenance)
@@ -478,7 +480,33 @@ class GraphStore(BaseModel):
         return cls.model_validate_json(_Path(path).read_text(encoding="utf-8"))
 
 
+def normalize_table_name(name: str) -> str:
+    """One table, one identity — across every witness.
+
+    Skills say ``common.roll_rate_calc``, gold SQL says
+    ``axp-lumi.dw.roll_rate_calc``, MDM says ``roll_rate_calc``; without
+    normalization each mints its own node and the witnesses never fuse.
+    Canonical identity = the bare table name (last dot segment,
+    lowercased, backticks stripped). Qualified forms live on in node
+    PROPERTIES (`fqn`, `bq_dataset`) — only the URI collapses.
+
+    Known tradeoff (documented, acceptable for the PoC): two tables with
+    the same bare name in different datasets would collide; none exist
+    in the current scope.
+    """
+    cleaned = name.strip().strip("`").lower().replace(" ", "_")
+    return cleaned.rsplit(".", 1)[-1] if "." in cleaned else cleaned
+
+
 def canonical_uri(node_type: str, *parts: str) -> str:
-    """Stable URI scheme. Lowercases identifiers, joins with /."""
-    body = "/".join(str(p).lower().replace(" ", "_") for p in parts if p)
-    return f"synapse://{node_type.lower()}/{body}"
+    """Stable URI scheme. Lowercases identifiers, joins with /.
+
+    For Table and Column URIs the table part is normalized (see
+    normalize_table_name) so all witnesses land on the same node.
+    """
+    kind = node_type.lower()
+    items = [str(p) for p in parts if p]
+    if items and kind in ("table", "column"):
+        items[0] = normalize_table_name(items[0])
+    body = "/".join(p.lower().replace(" ", "_") for p in items)
+    return f"synapse://{kind}/{body}"
