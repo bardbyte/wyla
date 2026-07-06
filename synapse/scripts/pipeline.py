@@ -58,6 +58,18 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     sources_dir.mkdir(parents=True, exist_ok=True)
     run_report: dict[str, dict] = {}
 
+    # One manifest scopes every stage that can be scoped: the lumi session
+    # split, the MDM crawl, and (by default) enrichment.
+    manifest_path = args.manifest or args.mdm_manifest
+    manifest_names: set[str] = set()
+    if manifest_path:
+        from synapse.graph.store import normalize_table_name
+        from synapse.utils.manifest import read_tables_manifest
+        manifest_names = {
+            normalize_table_name(t["name"])
+            for t in read_tables_manifest(manifest_path)
+        }
+
     # ── 1. Skills library (semantic witness) ─────────────────
     skills_dir = args.skills_dir
     if args.demo and not skills_dir:
@@ -119,11 +131,22 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     # ── 4. Lumi fused output (governance + corpus witness) ───
     if args.lumi_session:
         _stage("Lumi session output → canonical artifacts")
+        from synapse.graph.store import normalize_table_name
         from synapse.loaders.lumi_loader import load_lumi_for_table
         session_path = Path(args.lumi_session).expanduser()
         blob = json.loads(session_path.read_text(encoding="utf-8"))
+        session_tables = sorted(blob)
+        if manifest_names:  # scope to the manifest — not the whole session
+            in_scope = [t for t in session_tables
+                        if normalize_table_name(t) in manifest_names]
+            skipped = len(session_tables) - len(in_scope)
+            if skipped:
+                _note(f"manifest scope: {len(in_scope)} of "
+                      f"{len(session_tables)} session table(s) selected "
+                      f"({skipped} outside tables.yaml skipped)")
+            session_tables = in_scope
         outcomes = []
-        for table_name in sorted(blob):
+        for table_name in session_tables:
             result = load_lumi_for_table(
                 table_name, lumi_path=session_path, out_dir=sources_dir)
             outcomes.append({"table": table_name, "status": result.status})
@@ -153,11 +176,11 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         from synapse.loaders.mdm_crawler import crawl_mdm_for_table
         tables = [t.strip() for t in (args.mdm_crawl or "").split(",")
                   if t.strip()]
-        if args.mdm_manifest:
+        if manifest_path:
             from synapse.utils.manifest import read_tables_manifest
-            manifest_tables = read_tables_manifest(args.mdm_manifest)
+            manifest_tables = read_tables_manifest(manifest_path)
             _note(f"manifest: {len(manifest_tables)} table(s) from "
-                  f"{args.mdm_manifest}")
+                  f"{manifest_path}")
             tables += [t["name"] for t in manifest_tables
                        if t["name"] not in tables]
         raw_dir = (Path(args.mdm_raw_dir).expanduser()
@@ -201,6 +224,54 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     _note(f"nodes: {stats['n_nodes']}  edges: {stats['n_edges']}")
     _note(f"by type: {stats['nodes_by_type']}")
     _note(f"by tier: {stats['nodes_by_confidence_tier']}")
+
+    # ── 6b. LLM enrichment (witness #5) — batched, opt-in, budgeted ──
+    #        One Gemini call per ≤batch-size columns; wide tables get
+    #        multiple calls, merged into one bundle per table. Facts land
+    #        as `llm_generated` (tier-capped at inferred until other
+    #        witnesses corroborate). Runs on the BUILT graph so the LLM
+    #        sees the fused multi-witness context, then re-stats.
+    if args.enrich:
+        _stage("LLM enrichment → llm_generated facts (batched)")
+        try:
+            from synapse.enrichment.enricher import (
+                enrich_graph, propose_entities)
+            from synapse.enrichment.vertex_client import VertexLLMClient
+            client = VertexLLMClient()
+        except RuntimeError as exc:
+            _note(f"⚠ enrichment skipped: {exc}")
+            run_report["enrichment"] = {"status": "skipped",
+                                        "reason": str(exc)}
+        else:
+            only = ([t.strip() for t in args.enrich_tables.split(",")
+                     if t.strip()]
+                    if args.enrich_tables
+                    else (sorted(manifest_names) if manifest_names else None))
+            out_root = Path(args.out).expanduser().parent
+            bundles = enrich_graph(
+                store, client,
+                only_tables=only,
+                column_batch_size=args.enrich_batch_size,
+                max_calls=args.enrich_max_calls,
+                memory_out=out_root / "enrichment_memory.json",
+            )
+            n_obs = sum(len(b.column_observations) for b in bundles.values())
+            n_syn = sum(len(b.candidate_synonyms) for b in bundles.values())
+            _note(f"{len(bundles)} table(s) enriched · {n_obs} column "
+                  f"observations · {n_syn} synonym candidates")
+            proposals = propose_entities(bundles)
+            (out_root / "entity_proposals.json").write_text(
+                json.dumps([p.model_dump() for p in proposals], indent=2),
+                encoding="utf-8")
+            _note(f"{len(proposals)} entity proposal(s) → "
+                  f"{out_root / 'entity_proposals.json'} (steward review)")
+            run_report["enrichment"] = {
+                "tables": sorted(bundles), "column_observations": n_obs,
+                "entity_proposals": len(proposals),
+            }
+            stats = store.stats()
+            _note(f"post-enrichment tiers: "
+                  f"{stats['nodes_by_confidence_tier']}")
 
     # ── 7. Snapshot + run manifest ───────────────────────────
     snapshot_path = Path(args.out).expanduser()
@@ -250,6 +321,23 @@ def main() -> None:
                              "(offline replay / resumable laptop runs)")
     parser.add_argument("--mdm-refresh", action="store_true",
                         help="refetch even when a raw cache entry exists")
+    parser.add_argument("--manifest", default="",
+                        help="tables.yaml scope for EVERY scopeable stage "
+                             "(lumi session split, MDM crawl, enrichment). "
+                             "--mdm-manifest remains an alias.")
+    parser.add_argument("--enrich", action="store_true",
+                        help="run the batched LLM enrichment pass "
+                             "(witness #5; needs Vertex creds; costs money)")
+    parser.add_argument("--enrich-batch-size", type=int, default=40,
+                        help="columns per LLM call (wide tables → many "
+                             "calls, merged per table)")
+    parser.add_argument("--enrich-max-calls", type=int, default=80,
+                        help="hard LLM-call budget for the whole run; "
+                             "tables that don't fit are reported, not "
+                             "silently dropped")
+    parser.add_argument("--enrich-tables", default="",
+                        help="comma list to enrich (default: manifest "
+                             "tables, else every table in the graph)")
     parser.add_argument("--sources-dir",
                         default=str(SYNAPSE_ROOT / "data" / "cache" / "sources"),
                         help="staging dir for canonical artifacts")

@@ -50,42 +50,92 @@ def enrich_graph(
     *,
     only_tables: list[str] | None = None,
     memory_out: Path | None = None,
+    column_batch_size: int = 40,
+    max_calls: int | None = None,
 ) -> dict[str, EnrichmentBundle]:
-    """Run the LLM enrichment pass over every Table in the store.
+    """Run the LLM enrichment pass over every Table in the store — BATCHED.
+
+    Wide tables (the warehouse has 1,400-column tables) cannot ship their
+    whole inspection in one prompt, so columns are chunked: one LLM call
+    per ≤column_batch_size columns, table-level context repeated per
+    chunk, partial bundles merged before a single apply per table.
 
     Args:
         store: the built GraphStore (mutated in place).
-        llm_client: implementor of LLMClient — call .enrich() per table.
-        only_tables: if provided, restrict enrichment to these table names
-            (useful for dev — start with one table).
-        memory_out: if provided, the raw EnrichmentBundle list is dumped
-            to this path as JSON for steward audit + entity-proposal input.
+        llm_client: implementor of LLMClient — called once per column batch.
+        only_tables: restrict enrichment to these table names.
+        memory_out: dump the merged EnrichmentBundles as JSON for steward
+            audit + entity-proposal input.
+        column_batch_size: columns per LLM call (0/None → one call per
+            table regardless of width — legacy behavior).
+        max_calls: hard budget across the whole run; tables that don't fit
+            are skipped and reported (never silently).
 
     Returns:
-        dict mapping table_name → EnrichmentBundle (also written into the
-        graph as `llm_generated` provenance).
+        dict mapping table_name → merged EnrichmentBundle (also written
+        into the graph as `llm_generated` provenance). Skipped tables are
+        listed in each bundle's self_assessment when the budget ran out.
     """
     skill_md = _SKILL_MD_PATH.read_text(encoding="utf-8")
     bundles: dict[str, EnrichmentBundle] = {}
+    calls_made = 0
+    skipped_for_budget: list[str] = []
 
     table_nodes = [
         n for n in store.nodes_by_type("Table")
         if n.properties.get("table_name")
     ]
     if only_tables:
+        wanted = {t.lower() for t in only_tables}
         table_nodes = [
             n for n in table_nodes
-            if n.properties.get("table_name") in only_tables
+            if str(n.properties.get("table_name", "")).lower() in wanted
         ]
 
     for node in table_nodes:
         table_name = node.properties["table_name"]
         context = _build_context_for_table(store, table_name)
-        bundle = llm_client.enrich(
-            skill_md=skill_md, context=context, table_name=table_name,
-        )
+        all_columns = (context.get("inspection") or {}).get("columns") or []
+        if column_batch_size and len(all_columns) > column_batch_size:
+            chunks = [
+                all_columns[i:i + column_batch_size]
+                for i in range(0, len(all_columns), column_batch_size)
+            ]
+        else:
+            chunks = [all_columns]
+
+        if max_calls is not None and calls_made + len(chunks) > max_calls:
+            skipped_for_budget.append(table_name)
+            continue
+
+        parts: list[EnrichmentBundle] = []
+        for chunk_no, chunk in enumerate(chunks):
+            chunk_context = dict(context)
+            inspection = dict(context.get("inspection") or {})
+            inspection["columns"] = chunk
+            chunk_context["inspection"] = inspection
+            chunk_context["batch"] = {
+                "chunk": chunk_no + 1, "of": len(chunks),
+                "columns_in_chunk": len(chunk),
+                "total_columns": len(all_columns),
+            }
+            parts.append(llm_client.enrich(
+                skill_md=skill_md, context=chunk_context,
+                table_name=table_name,
+            ))
+            calls_made += 1
+
+        bundle = parts[0] if len(parts) == 1 else _merge_bundles(
+            table_name, parts)
         _apply_bundle(store, bundle)
         bundles[table_name] = bundle
+
+    if skipped_for_budget and bundles:
+        # surface the budget skip in-band, never silently
+        first = next(iter(bundles.values()))
+        first.self_assessment.tables_skipped_for_lack_of_signal.extend(
+            f"{t} (enrichment budget exhausted)" for t in skipped_for_budget
+        )
 
     if memory_out is not None:
         memory_out.parent.mkdir(parents=True, exist_ok=True)
@@ -97,6 +147,55 @@ def enrich_graph(
             encoding="utf-8",
         )
     return bundles
+
+
+def _merge_bundles(
+    table_name: str, parts: list[EnrichmentBundle],
+) -> EnrichmentBundle:
+    """Column-batch partials → one table bundle (dedupe by natural keys)."""
+    from synapse.enrichment.schemas import SelfAssessment
+
+    description = next(
+        (p.table_description_proposal for p in parts
+         if p.table_description_proposal), None)
+    observations, seen_cols = [], set()
+    for p in parts:
+        for obs in p.column_observations:
+            if obs.column_name not in seen_cols:
+                seen_cols.add(obs.column_name)
+                observations.append(obs)
+    synonyms, seen_syn = [], set()
+    for p in parts:
+        for syn in p.candidate_synonyms:
+            key = (syn.surface_form.lower(), syn.canonical_form.lower())
+            if key not in seen_syn:
+                seen_syn.add(key)
+                synonyms.append(syn)
+    resolutions, seen_res = [], set()
+    for p in parts:
+        for cr in p.candidate_code_resolutions:
+            key = (cr.column.lower(), cr.raw_value)
+            if key not in seen_res:
+                seen_res.add(key)
+                resolutions.append(cr)
+    filters = [f for p in parts for f in p.candidate_filter_rationale]
+    attention = [a for p in parts
+                 for a in p.self_assessment.requires_steward_attention]
+    return EnrichmentBundle(
+        table_name=table_name,
+        table_description_proposal=description,
+        column_observations=observations,
+        candidate_synonyms=synonyms,
+        candidate_code_resolutions=resolutions,
+        candidate_filter_rationale=filters,
+        self_assessment=SelfAssessment(
+            tables_skipped_for_lack_of_signal=[],
+            columns_marked_ambiguous=sum(
+                1 for o in observations if o.ambiguity_flag),
+            proposed_entities_with_low_evidence=[],
+            requires_steward_attention=attention,
+        ),
+    )
 
 
 def propose_entities(
