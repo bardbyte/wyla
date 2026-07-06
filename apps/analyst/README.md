@@ -24,6 +24,21 @@ SYNAPSE_GRAPH_PATH=synapse/data/cache/graph_snapshot.json \
 Point at real extractions instead with `pipeline.py --skills-dir/--gold-sql-dir/
 --bq-extract-dir/--lumi-session/--mdm-cache-dir`.
 
+## Toolbelt (grouped by trust level)
+
+| Group | Tools | Trust boundary |
+|---|---|---|
+| Graph (read snapshot) | 15 GraphService tools | read-only, provenance on every fact |
+| Warehouse (gated) | `dry_run_sql`, `execute_sql` | fixed gate chain: shape → guardrails → live dry-run → byte budget → row-capped read; every attempt on the audit ledger (`data/artifacts/audit/warehouse_ledger.jsonl`) |
+| Presentation | `render_chart`, `render_dashboard` | validated specs → themed self-contained HTML artifacts |
+| Craft skills | `list_agent_skills`, `load_agent_skill` | progressive disclosure: response-design · visualization · executive-communication |
+| Computation | `run_python_analysis` | scrubbed-env sandbox |
+
+Response flow for a data question: resolve → skill → SQL →
+`validate_sql_plan` → `dry_run_sql` (cost shown) → `execute_sql` →
+sandbox math if needed → load `response-design` → render the right form
+for the audience → answer with citations + provenance footer.
+
 ## What the agent will and won't do
 
 - Answers with the fixed contract: **Answer / How I got there / Citations /
