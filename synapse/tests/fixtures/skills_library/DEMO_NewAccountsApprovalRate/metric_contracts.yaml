@@ -1,0 +1,15 @@
+metrics:
+  - name: gross_approval_rate
+    business_name: Gross Approval Rate
+    numerator: COUNT(DISTINCT CASE WHEN decision_cd = 'A' THEN na_pcn_no END)
+    denominator: COUNT(DISTINCT CASE WHEN decision_cd IN ('A','D') THEN na_pcn_no END)
+    grain: decision_month
+    table: sbs_new_accounts
+    synonyms: [approval rate, gross approval]
+  - name: credit_approval_rate
+    business_name: Credit Approval Rate
+    numerator: COUNT(DISTINCT CASE WHEN decision_cd = 'A' THEN na_pcn_no END)
+    denominator: COUNT(DISTINCT CASE WHEN decision_cd IN ('A','D') AND fraud_decline_in = 'N' THEN na_pcn_no END)
+    grain: decision_month
+    table: sbs_new_accounts
+    synonyms: [credit approval]

@@ -68,6 +68,8 @@ def build_graph_from_sources(sources_dir: Path) -> GraphStore:
     # Lumi 100% signal coverage (no-op when the loader didn't produce these)
     _ingest_lumi_signals(store, sources_dir / "lumi_signals")
     _ingest_baseline_artifacts(store, sources_dir / "baseline_artifacts")
+    # Skills library — curated skill packages (no-op when absent)
+    _ingest_skills(store, sources_dir / "skills")
 
     # Code-resolution pass — runs after corpus to mine CASE WHENs
     _resolve_codes_from_lookup_tables(store)
@@ -723,6 +725,12 @@ def _ingest_lumi_signals(store: GraphStore, signals_dir: Path) -> None:
             continue
         table = blob.get("table_name") or path.stem
         t_uri = canonical_uri("table", table)
+        # Seed the Table node itself — corpus evidence that the table exists
+        # (standalone gold-SQL extractions have no catalog pass to rely on).
+        store.upsert_node(
+            "Table", t_uri,
+            properties={"table_name": table}, source="corpus",
+        )
 
         # 1. Aggregations → Metric + COMPUTED_FROM
         for a in (blob.get("aggregations") or []):
@@ -1081,6 +1089,176 @@ def _ingest_baseline_artifacts(store: GraphStore, baseline_dir: Path) -> None:
 
 
 # ─── Code resolution from lookup tables ──────────────────────
+
+
+def _ingest_skills(store: GraphStore, skills_dir: Path) -> None:
+    """Skill packages → Skill/Guardrail/Metric/DataQualityRule nodes.
+
+    Reads the canonical ``skills/<skill_id>.json`` artifacts the skills
+    loader writes. Guardrails become first-class nodes with CONSTRAINS
+    edges so an agent can ask "what must I respect before touching X"
+    instead of re-reading prose.
+    """
+    if not skills_dir.exists():
+        return
+    for path in sorted(skills_dir.glob("*.json")):
+        try:
+            blob = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(blob, dict) or not blob.get("skill_id"):
+            continue
+        skill_id = str(blob["skill_id"])
+        s_uri = canonical_uri("skill", skill_id)
+        store.upsert_node(
+            "Skill", s_uri,
+            properties={
+                "skill_id": skill_id,
+                "domain": blob.get("domain") or "",
+                "description": blob.get("description") or "",
+                "tables_used": blob.get("tables_used") or [],
+                "metrics_defined": [
+                    m.get("name") for m in (blob.get("metrics") or [])
+                    if isinstance(m, dict) and m.get("name")
+                ],
+                "parameters": blob.get("parameters") or [],
+                "knowledge_excerpt": blob.get("knowledge_excerpt") or "",
+                "files": blob.get("files") or [],
+            },
+            source="skills",
+        )
+
+        table_uris: dict[str, str] = {}
+        for table in blob.get("tables_used") or []:
+            t_uri = canonical_uri("table", table)
+            table_uris[str(table).lower()] = t_uri
+            store.upsert_node(
+                "Table", t_uri,
+                properties={"table_name": table}, source="skills",
+            )
+            store.upsert_edge(
+                "APPLIES_TO", s_uri, t_uri,
+                properties={"skill_id": skill_id}, source="skills",
+            )
+
+        metric_uris: dict[str, str] = {}
+        for metric in blob.get("metrics") or []:
+            if not isinstance(metric, dict) or not metric.get("name"):
+                continue
+            name = str(metric["name"])
+            table = str(metric.get("table") or "")
+            m_uri = canonical_uri("metric", table or skill_id, name)
+            metric_uris[name.lower()] = m_uri
+            store.upsert_node(
+                "Metric", m_uri,
+                properties={
+                    "business_name": metric.get("business_name") or name,
+                    "formula": metric.get("formula") or "",
+                    "grain": metric.get("grain") or "",
+                    "domain": blob.get("domain") or "",
+                    "sourced_from_table": table,
+                    "synonyms": metric.get("synonyms") or [],
+                },
+                source="skills",
+            )
+            store.upsert_edge(
+                "DEFINED_BY", m_uri, s_uri,
+                properties={"contract": "metric_contracts.yaml"},
+                source="skills",
+            )
+            if table:
+                store.upsert_edge(
+                    "COMPUTED_FROM", m_uri, canonical_uri("table", table),
+                    properties={"formula": metric.get("formula") or ""},
+                    source="skills",
+                )
+
+        for idx, guardrail in enumerate(blob.get("guardrails") or []):
+            if not isinstance(guardrail, dict) or not guardrail.get("rule"):
+                continue
+            g_uri = canonical_uri("guardrail", skill_id, str(idx))
+            store.upsert_node(
+                "Guardrail", g_uri,
+                properties={
+                    "rule": guardrail["rule"],
+                    "category": guardrail.get("category") or "other",
+                    "applies_to": guardrail.get("applies_to") or [],
+                    "severity": guardrail.get("severity") or "error",
+                    "machine_checkable": bool(guardrail.get("machine_checkable")),
+                    "skill_id": skill_id,
+                    "mined_from_knowledge": bool(
+                        guardrail.get("mined_from_knowledge")
+                    ),
+                },
+                source="skills",
+            )
+            targets = guardrail.get("applies_to") or []
+            for target in targets:
+                target_uri = _resolve_guardrail_target(
+                    str(target), table_uris, metric_uris,
+                )
+                store.upsert_edge(
+                    "CONSTRAINS", g_uri, target_uri,
+                    properties={"severity": guardrail.get("severity") or "error"},
+                    source="skills",
+                )
+            if not targets:
+                # No explicit target — constrain every table the skill covers
+                for t_uri in table_uris.values():
+                    store.upsert_edge(
+                        "CONSTRAINS", g_uri, t_uri,
+                        properties={
+                            "severity": guardrail.get("severity") or "error",
+                        },
+                        source="skills",
+                    )
+
+        for idx, check in enumerate(blob.get("qa_checks") or []):
+            if not isinstance(check, dict):
+                continue
+            first_table = next(iter(blob.get("tables_used") or [""]), "")
+            r_uri = canonical_uri("dataqualityrule", skill_id, f"qa_{idx}")
+            store.upsert_node(
+                "DataQualityRule", r_uri,
+                properties={
+                    "target_table": first_table,
+                    "target_column": check.get("target_column"),
+                    "rule_kind": check.get("rule_kind") or "custom_sql",
+                    "threshold": check.get("threshold") or "",
+                    "severity": check.get("severity") or "warning",
+                    "auto_suggested": False,
+                },
+                source="skills",
+            )
+            if first_table:
+                store.upsert_edge(
+                    "VALIDATED_BY", canonical_uri("table", first_table), r_uri,
+                    properties={"origin": skill_id}, source="skills",
+                )
+
+
+def _resolve_guardrail_target(
+    target: str,
+    table_uris: dict[str, str],
+    metric_uris: dict[str, str],
+) -> str:
+    """Map an applies_to string to the most specific node URI.
+
+    ``table.column`` → Column, known metric name → Metric,
+    known table → Table, else a Table URI by that name (forward ref).
+    """
+    lowered = target.lower()
+    if lowered in metric_uris:
+        return metric_uris[lowered]
+    if lowered in table_uris:
+        return table_uris[lowered]
+    if "." in target:
+        head, _, column = target.rpartition(".")
+        if head.lower() in table_uris:
+            return canonical_uri("column", head, column)
+        # dataset-qualified table (e.g. common.roll_rate_calc) w/ column:
+        # fall through to table URI when the head itself is the table
+    return canonical_uri("table", target)
 
 
 def _resolve_codes_from_lookup_tables(store: GraphStore) -> None:

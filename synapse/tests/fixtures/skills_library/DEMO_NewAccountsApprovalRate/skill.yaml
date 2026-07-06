@@ -1,0 +1,42 @@
+id: DEMO_NewAccountsApprovalRate
+domain: new_accounts
+description: >
+  Compute gross and credit approval rates for new card applications,
+  sliced by decision month, product, and acquisition channel.
+tables:
+  - sbs_new_accounts
+parameters:
+  - name: start_month
+    type: date
+    required: true
+  - name: end_month
+    type: date
+    required: true
+  - name: segment_by
+    type: string
+    required: false
+    allowed: [product, channel, fico_band]
+outputs:
+  - name: approval_rate_by_month
+    grain: decision_month x segment
+guardrails:
+  - rule: "Approval metrics must use COUNT(DISTINCT na_pcn_no) — never count rows."
+    category: sql_generation
+    applies_to: [sbs_new_accounts]
+    severity: error
+    machine_checkable: true
+  - rule: "Rates must be recomputed from numerator/denominator — never average sub-rates."
+    category: metric_math
+    applies_to: [gross_approval_rate, credit_approval_rate]
+    severity: error
+  - rule: "cm11_encrypted must never be selected, exposed, or joined on in output."
+    category: privacy
+    applies_to: [sbs_new_accounts.cm11_encrypted]
+    severity: error
+    machine_checkable: true
+load:
+  - knowledge.md
+  - data_specs.md
+  - sample_codes.sql
+  - metric_contracts.yaml
+  - qa_checks.yaml

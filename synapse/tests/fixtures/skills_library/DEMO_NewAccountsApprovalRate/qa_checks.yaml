@@ -1,0 +1,11 @@
+checks:
+  - kind: enum
+    column: decision_cd
+    rule: "decision_cd values must be within ('A','D','P')"
+    severity: error
+  - kind: range
+    rule: "gross_approval_rate between 0 and 1"
+    severity: error
+  - kind: custom_sql
+    rule: "numerator <= denominator for every month"
+    severity: error
