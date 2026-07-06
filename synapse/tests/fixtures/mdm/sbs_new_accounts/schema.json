@@ -1,0 +1,16 @@
+[{
+  "dataset_details": {
+    "business_name": "SBS New Accounts",
+    "data_desc": "One row per application; application key na_pcn_no",
+    "data_category": "Acquisition",
+    "data_sub_category": "New Accounts",
+    "table_type": "TABLE",
+    "row_count": "42000000"
+  },
+  "dataset_source_details": {"project_id": "{{project_id}}", "dataset_name": "dw", "table_name": "sbs_new_accounts"},
+  "ownership_details": {"business_contacts": [{"email": "acq-owner@example.com", "type": "business_owner"}]},
+  "schema": {"schema_attributes": [
+    {"attribute_name": "na_pcn_no", "attribute_details": {"attribute_type": "STRING", "attribute_desc": "Application key", "is_primary_key": true}},
+    {"attribute_name": "decision_cd", "attribute_details": {"attribute_type": "STRING", "attribute_desc": "A approve, D decline, P pend"}}
+  ]}
+}]

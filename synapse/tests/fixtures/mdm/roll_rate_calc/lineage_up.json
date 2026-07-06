@@ -1,0 +1,4 @@
+[
+  {"source_table_name": "raw_acct_balances", "target_table_name": "roll_rate_calc", "relationship": "LOADS"},
+  {"source_table_name": "acct_status_daily", "target_table_name": "roll_rate_calc", "relationship": "LOADS"}
+]

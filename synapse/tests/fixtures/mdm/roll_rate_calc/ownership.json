@@ -1,0 +1,10 @@
+[{
+  "ownership_id": "own-501",
+  "business_unit": "Risk",
+  "imr_queue": "RISK-DQ",
+  "aim_id": "AIM-1234",
+  "workgroup": "credit-risk-analytics",
+  "recertification_date": "2026-03-01",
+  "business_contacts": [{"email": "risk-owner@example.com", "type": "business_owner"}],
+  "tech_contacts": [{"email": "risk-de@example.com", "type": "tech_owner"}]
+}]

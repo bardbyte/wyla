@@ -1,0 +1,13 @@
+[{
+  "id": "pl-4455",
+  "pipeline_name": "rollrate_monthly_load",
+  "pipeline_type": "batch",
+  "feed_type": "Hydration",
+  "business_unit": "Risk",
+  "governance": {
+    "markets": ["US"],
+    "source_system": "TRIUMPH",
+    "business_owner": "risk-owner@example.com",
+    "is_pii": true
+  }
+}]

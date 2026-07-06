@@ -51,6 +51,7 @@ from lumi.mdm import CachedMDMClient
 from lumi.ontology_store import (
     OntologyStore,
     record_cardinalities_from_fingerprints,
+    record_corpus_facts,
     record_curated_synonyms_from_baseline,
     record_entity_hints_from_mdm,
     record_equivalences_from_fingerprints,

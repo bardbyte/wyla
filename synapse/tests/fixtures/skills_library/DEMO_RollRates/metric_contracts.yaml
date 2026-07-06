@@ -1,0 +1,15 @@
+metrics:
+  - name: c30_dollar_rate
+    business_name: C-30 Dollar Roll Rate
+    numerator: SUM(CASE WHEN dpd_bucket = '30+' THEN bal_lag1 END)
+    denominator: SUM(CASE WHEN dpd_bucket_lag1 = 'C' THEN bal_lag1 END)
+    grain: month
+    table: common.roll_rate_calc
+    synonyms: [c30, current to 30]
+  - name: c60_dollar_rate
+    business_name: C-60 Dollar Roll Rate
+    numerator: SUM(CASE WHEN dpd_bucket = '60+' THEN bal_lag2 END)
+    denominator: SUM(CASE WHEN dpd_bucket_lag2 = 'C' THEN bal_lag2 END)
+    grain: month
+    table: common.roll_rate_calc
+    synonyms: [c60, current to 60]

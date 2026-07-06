@@ -1,0 +1,37 @@
+id: DEMO_RollRates
+domain: portfolio_analytics
+description: >
+  Compute delinquency roll rates (C-30, C-60, 30-60, 60-WO) in dollar and
+  event terms from the pre-aggregated account-level roll-rate table.
+tables:
+  - common.roll_rate_calc
+parameters:
+  - name: as_of_month
+    type: date
+    required: true
+  - name: rate_basis
+    type: string
+    required: false
+    allowed: [dollar, event]
+outputs:
+  - name: roll_rates_by_month
+    grain: month x segment
+guardrails:
+  - rule: "common.roll_rate_calc lags are pre-materialized — do not apply SQL LAG() on it."
+    category: grain
+    applies_to: [common.roll_rate_calc]
+    severity: error
+    machine_checkable: true
+  - rule: "Transition KPIs (C-60) require the lagged t-2 segment profile, not the current-month segment."
+    category: grain
+    applies_to: [c60_dollar_rate]
+    severity: error
+  - rule: "cm11_encrypted must never be selected, exposed, or joined on in output."
+    category: privacy
+    applies_to: [common.roll_rate_calc.cm11_encrypted]
+    severity: error
+    machine_checkable: true
+load:
+  - knowledge.md
+  - sample_codes.sql
+  - metric_contracts.yaml

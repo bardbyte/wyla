@@ -1,0 +1,6 @@
+[{
+  "source_table_name": "raw_acct_balances", "source_column_name": "bal",
+  "target_table_name": "roll_rate_calc", "target_column_name": "bal_lag1",
+  "derivation_logic": "LAG(bal) OVER (PARTITION BY acct PARTITION month) materialized in ETL",
+  "pipeline_id": "pl-4455"
+}]
