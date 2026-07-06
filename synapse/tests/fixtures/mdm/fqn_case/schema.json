@@ -1,0 +1,6 @@
+[{
+  "dataset_parent_id": "dsp-Q1",
+  "dataset_details": {"business_name": "FQN Case", "data_category": "Test", "table_type": "TABLE"},
+  "dataset_source_details": {"project_id": "p", "dataset_name": "dw", "table_name": "fqn_case"},
+  "schema": {"schema_attributes": [{"attribute_name": "id", "attribute_details": {"attribute_type": "STRING"}}]}
+}]

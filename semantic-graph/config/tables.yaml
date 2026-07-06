@@ -49,10 +49,19 @@ tables:
     # Tier-1 cardmember P&L view — already proven via the capabilities probe.
     # No overrides needed; uses all defaults.
 
-  # ── Paste your remaining 52 table names here, one per entry. Example: ──
+  # ── The three skills-library tables (semantic witness anchors) ──
+  - name: sbs_new_accounts            # VERIFY dataset on laptop (assumed dw)
+  - name: us_daily_rr_smry_data       # VERIFY dataset on laptop (assumed dw)
+  - name: roll_rate_calc
+    bq_dataset: common                # per skill FQN common.roll_rate_calc — VERIFY
+
+  # ── Probe-proven risk tables (MDM chain verified 2026-07-06) ──
+  - name: risk_pers_acct_history
+  - name: risk_indv_cust_hist
+
+  # ── Paste your remaining table names here, one per entry. Example: ──
   # - name: drm_product_hier
   # - name: pmdl_fin_business_volume_transaction_detail
   # - name: fin_consumer_business_card_member_status
-  # - name: risk_indv_cust_hist
   # - name: custins_customer_insights_product
   # ... etc

@@ -207,6 +207,23 @@ class MdmCrawler:
             upstream_rows, side="source", exclude=table)
         blob["lineage_downstream"] = _lineage_names(
             downstream_rows, side="target", exclude=table)
+        # Lineage rows may be keyed on the dataset-qualified name even when
+        # schema lookups accept the bare name (real-deployment 200-but-empty
+        # observation). One cheap retry with `{dataset}.{table}` each way.
+        dataset = str(blob.get("bq_dataset") or "")
+        if dataset and not blob["lineage_upstream"] \
+                and not blob["lineage_downstream"]:
+            fqn = urllib.parse.quote(f"{dataset}.{table}")
+            up_fqn = self._get(
+                f"/table-lineages/?tableName={fqn}&isSourceTableName=false",
+                table=table, step="lineage_up_fqn", report=report)
+            down_fqn = self._get(
+                f"/table-lineages/?tableName={fqn}&isSourceTableName=true",
+                table=table, step="lineage_down_fqn", report=report)
+            blob["lineage_upstream"] = _lineage_names(
+                up_fqn, side="source", exclude=f"{dataset}.{table}")
+            blob["lineage_downstream"] = _lineage_names(
+                down_fqn, side="target", exclude=f"{dataset}.{table}")
 
         # Attribute lineage — by-table 500s on the real deployment; the
         # pipeline-scoped variant is the fallback once a pipeline id exists.

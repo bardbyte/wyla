@@ -1,0 +1,1 @@
+[{"source_table_name": "dw.raw_events", "target_table_name": "dw.fqn_case"}]
