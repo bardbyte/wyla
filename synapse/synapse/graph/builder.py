@@ -123,6 +123,14 @@ def _ingest_mdm(store: GraphStore, cache_dir: Path) -> None:
                 "table_name": name,
                 "business_name": blob.get("table_business_name") or "",
                 "description": blob.get("table_description") or "",
+                # MDM taxonomy → domain axes. data_category is the data
+                # subject area ("Customer", "Acquisition"). company_domain is
+                # PROVISIONAL from data_sub_category until the ownership/
+                # pipeline crawl supplies the authoritative business_unit
+                # (Risk / Fraud / Marketing) — that later pass will supersede
+                # this value on the same node.
+                "data_domain": blob.get("data_category") or "",
+                "company_domain": blob.get("data_sub_category") or "",
                 "fqn": ".".join(filter(None, [
                     blob.get("bq_project"), blob.get("bq_dataset"),
                     blob.get("bq_table"),
