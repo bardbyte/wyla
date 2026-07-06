@@ -1,5 +1,24 @@
+# generated data — never commit real extractions, snapshots, or LLM output
 data/demo/
+data/real/
+data/cache/
+data/traces/
+data/proposals/*
+!data/proposals/.gitkeep
+data/registries/raw/*
+!data/registries/raw/.gitkeep
+review_queue/
+
+# secrets / env
+.env
+.env.*
+*.key
+*.pem
+service_account*.json
+
+# python
 __pycache__/
 *.pyc
 *.egg-info/
 .pytest_cache/
+.ruff_cache/

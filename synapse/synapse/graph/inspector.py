@@ -113,6 +113,12 @@ def inspect_table(store: GraphStore, table_name: str) -> dict[str, Any]:
             for c in pii_cols
         ],
         "owner_team": props.get("owner_team", ""),
+        # crawler-era spine facts (empty on legacy blobs)
+        "business_unit": props.get("business_unit", ""),
+        "dataset_parent_id": props.get("dataset_parent_id", ""),
+        "lifecycle_status": props.get("lifecycle_status", ""),
+        "pipeline_name": props.get("pipeline_name", ""),
+        "is_decommissioned": props.get("is_decommissioned", False),
     }
 
     # ── data quality (derived from profiling + DQ rules) ──

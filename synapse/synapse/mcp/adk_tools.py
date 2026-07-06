@@ -1,0 +1,108 @@
+"""Google-ADK adapter — the same GraphService as ADK FunctionTools.
+
+ADK introspects plain functions (name, signature, docstring) into the
+schema Gemini sees, so this module just manufactures named closures over
+one GraphService instance. The in-house analyst agent and any MCP host
+therefore call the exact same implementation.
+
+Usage:
+    from synapse.graph.store import GraphStore
+    from synapse.mcp.adk_tools import build_adk_tools
+    from synapse.mcp.service import GraphService
+
+    service = GraphService(GraphStore.load_json(snapshot_path))
+    agent = Agent(model=..., tools=build_adk_tools(service), ...)
+"""
+
+from __future__ import annotations
+
+from typing import Any, Callable
+
+from synapse.mcp.service import GraphService
+
+
+def build_adk_tools(service: GraphService) -> list[Callable[..., dict[str, Any]]]:
+    """Named, docstring-carrying closures for every graph tool."""
+
+    def search_entities(query: str, top_k: int = 10) -> dict:
+        """Resolve a business term to graph objects (tables, columns,
+        metrics, synonyms, skills). Call FIRST for any term whose schema
+        binding isn't obvious. Returns hits with confidence_tier + sources."""
+        return service.search_entities(query, top_k)
+
+    def list_tables_for_domain(data_domain: str = "",
+                               company_domain: str = "") -> dict:
+        """Browse tables by governance domain. For "what tables exist for
+        X?" — not free-text search."""
+        return service.list_tables_for_domain(data_domain, company_domain)
+
+    def inspect_table(table: str, column_limit: int = 50) -> dict:
+        """Everything known about one table (identity, columns, governance,
+        guardrails). The heavy call — resolve the name first."""
+        return service.inspect_table(table, None, column_limit)
+
+    def find_columns_for_concept(concept: str, table_hint: str = "") -> dict:
+        """Physical columns materializing a business concept, with roles
+        (identifier/dimension/measure/filter) and provenance."""
+        return service.find_columns_for_concept(concept, table_hint)
+
+    def get_filter_values(table: str, column: str, limit: int = 20) -> dict:
+        """Observed values for a column with frequencies. Call BEFORE
+        emitting any WHERE col='X' literal."""
+        return service.get_filter_values(table, column, limit)
+
+    def resolve_code(column: str, raw_value: str) -> dict:
+        """Decode coded values both directions ('005' ↔ 'Platinum')."""
+        return service.resolve_code(column, raw_value)
+
+    def get_join_path(from_table: str, to_table: str, max_hops: int = 3) -> dict:
+        """Ranked join paths from OBSERVED joins with real ON columns.
+        Empty result means: tell the user — never invent a join."""
+        return service.get_join_path(from_table, to_table, max_hops)
+
+    def get_lineage(table: str, direction: str = "both") -> dict:
+        """Declared upstream/downstream lineage for impact analysis."""
+        return service.get_lineage(table, direction)
+
+    def get_metric(name_or_synonym: str) -> dict:
+        """Canonical metric contract (formula, grain, source table,
+        defining skill). Use for ANY named aggregate; never invent
+        formulas."""
+        return service.get_metric(name_or_synonym)
+
+    def get_skill(topic: str) -> dict:
+        """The curated skill package (expert playbook + guardrails) for a
+        topic. Check for one before improvising an approach."""
+        return service.get_skill(topic)
+
+    def get_guardrails(target: str) -> dict:
+        """All guardrails constraining a table/column/metric. Treat
+        severity=error as hard constraints on any SQL you write."""
+        return service.get_guardrails(target)
+
+    def get_dq_status(table: str, min_severity: str = "warning") -> dict:
+        """Data-quality rules + summary; disclose failures with answers."""
+        return service.get_dq_status(table, min_severity)
+
+    def explain_confidence(name_or_uri: str) -> dict:
+        """Why a fact has its tier (sources, evidence, conflicts, and what
+        would raise it). For justifying or escalating shaky facts."""
+        return service.explain_confidence(name_or_uri)
+
+    def disambiguate_term(term: str, context_query: str = "") -> dict:
+        """Choose between competing meanings using question context. On
+        non-null ambiguity_reason: stop and ask the user."""
+        return service.disambiguate_term(term, context_query)
+
+    def validate_sql_plan(sql: str, dialect: str = "bigquery") -> dict:
+        """Static pre-flight of drafted SQL against machine-checkable
+        guardrails. Run before showing SQL; fix violations and re-validate."""
+        return service.validate_sql_plan(sql, dialect)
+
+    return [
+        search_entities, list_tables_for_domain, inspect_table,
+        find_columns_for_concept, get_filter_values, resolve_code,
+        get_join_path, get_lineage, get_metric, get_skill, get_guardrails,
+        get_dq_status, explain_confidence, disambiguate_term,
+        validate_sql_plan,
+    ]

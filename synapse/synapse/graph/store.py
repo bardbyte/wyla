@@ -29,6 +29,10 @@ SourceName = Literal[
     #   llm_generated → AI-suggested descriptions (Knowledge Catalog parallel)
     #   dq_engine     → rule-based data-quality checks (Auto DQ parallel)
     "llm_generated", "dq_engine",
+    # Skills library — human-curated analytics skill packages (skill.yaml +
+    # knowledge.md + metric_contracts.yaml). Expert testimony: narrow
+    # coverage, highest per-fact trust short of an explicit human approval.
+    "skills",
 ]
 
 ConfidenceTier = Literal[
@@ -41,6 +45,7 @@ ConfidenceTier = Literal[
 
 SOURCE_WEIGHTS: dict[SourceName, int] = {
     "human_approval":  10,
+    "skills":           7,  # human-curated skill packages — expert testimony
     "metric_catalog":   5,
     "glossary":         5,
     "bq":               4,
@@ -238,6 +243,38 @@ class FilterValueProperties(BaseModel):
     is_structural: bool = False
 
 
+class SkillProperties(BaseModel):
+    """A curated analytics skill package (skill.yaml + knowledge.md + SQL).
+
+    Skills are the L3 semantic witness: they carry business definitions,
+    metric contracts, and guardrails a generated query must respect.
+    """
+
+    skill_id: str = ""
+    domain: str = ""            # e.g. "new_accounts" | "portfolio_analytics"
+    description: str = ""
+    tables_used: list[str] = Field(default_factory=list)
+    metrics_defined: list[str] = Field(default_factory=list)
+    parameters: list[dict[str, Any]] = Field(default_factory=list)
+    knowledge_excerpt: str = ""  # first ~2k chars of knowledge.md
+    files: list[str] = Field(default_factory=list)
+
+
+class GuardrailProperties(BaseModel):
+    """A first-class 'never do this' rule mined from a skill package.
+
+    Guardrails are graph nodes (not doc strings) so an agent can query
+    'what constraints apply before I emit SQL touching X'.
+    """
+
+    rule: str = ""               # imperative sentence, e.g. "never expose cm11_encrypted"
+    category: str = "other"      # sql_generation | privacy | metric_math | grain | other
+    applies_to: list[str] = Field(default_factory=list)  # table/column/metric names
+    skill_id: str = ""
+    severity: str = "error"      # error | warning
+    machine_checkable: bool = False  # can validate_sql_plan enforce it statically?
+
+
 class DataQualityRuleProperties(BaseModel):
     """Dataplex Auto-DQ-style rule attached to a column or table."""
 
@@ -257,6 +294,7 @@ NodeProperties = (
     TableProperties | ColumnProperties | EntityProperties | MetricProperties
     | SynonymProperties | UserProperties | CodeMappingProperties
     | FilterValueProperties | DataQualityRuleProperties
+    | SkillProperties | GuardrailProperties
 )
 
 
@@ -265,6 +303,7 @@ class Node(BaseModel):
     node_type: Literal[
         "Table", "Column", "Entity", "Metric", "Synonym", "User",
         "CodeMapping", "FilterValue", "DataQualityRule",
+        "Skill", "Guardrail",
     ]
     properties: dict[str, Any] = Field(default_factory=dict)
     provenance: Provenance = Field(default_factory=Provenance)
@@ -289,6 +328,12 @@ class Edge(BaseModel):
         # Dataplex-style additions:
         "UPSTREAM_OF",     # Table → Table; data lineage
         "VALIDATED_BY",    # Column|Table → DataQualityRule
+        # Skills-library additions:
+        "APPLIES_TO",      # Skill → Table|Metric; where the skill is authoritative
+        "CONSTRAINS",      # Guardrail → Table|Column|Metric; must-respect rule
+        "DEFINED_BY",      # Metric → Skill; contract that defines the metric
+        # MDM attribute lineage:
+        "DERIVES_FROM",    # Column → Column; value derivation with logic
     ]
     properties: dict[str, Any] = Field(default_factory=dict)
     provenance: Provenance = Field(default_factory=Provenance)
@@ -302,6 +347,9 @@ class GraphStore(BaseModel):
 
     nodes: dict[str, Node] = Field(default_factory=dict)
     edges: dict[str, Edge] = Field(default_factory=dict)
+    # Stamped at save time — every MCP/tool response echoes this so a
+    # consumer can tell which compiled snapshot answered it.
+    snapshot_version: str = "unversioned"
 
     # Adjacency caches — rebuilt on access
     model_config = {"arbitrary_types_allowed": True}
@@ -406,8 +454,59 @@ class GraphStore(BaseModel):
             "nodes_by_confidence_tier": by_tier,
         }
 
+    def save_json(self, path: "Path | str") -> "Path":
+        """Persist the compiled snapshot; stamps `snapshot_version`.
+
+        The version is content-addressed (sha256 of the serialized graph,
+        first 12 hex chars) so identical builds share a version and any
+        change — however small — produces a new one.
+        """
+        import hashlib
+        from pathlib import Path as _Path
+
+        p = _Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        body = self.model_dump_json(exclude={"snapshot_version"})
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+        ts = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%d")
+        self.snapshot_version = f"{ts}-{digest}"
+        p.write_text(self.model_dump_json(), encoding="utf-8")
+        return p
+
+    @classmethod
+    def load_json(cls, path: "Path | str") -> "GraphStore":
+        from pathlib import Path as _Path
+
+        return cls.model_validate_json(_Path(path).read_text(encoding="utf-8"))
+
+
+def normalize_table_name(name: str) -> str:
+    """One table, one identity — across every witness.
+
+    Skills say ``common.roll_rate_calc``, gold SQL says
+    ``axp-lumi.dw.roll_rate_calc``, MDM says ``roll_rate_calc``; without
+    normalization each mints its own node and the witnesses never fuse.
+    Canonical identity = the bare table name (last dot segment,
+    lowercased, backticks stripped). Qualified forms live on in node
+    PROPERTIES (`fqn`, `bq_dataset`) — only the URI collapses.
+
+    Known tradeoff (documented, acceptable for the PoC): two tables with
+    the same bare name in different datasets would collide; none exist
+    in the current scope.
+    """
+    cleaned = name.strip().strip("`").lower().replace(" ", "_")
+    return cleaned.rsplit(".", 1)[-1] if "." in cleaned else cleaned
+
 
 def canonical_uri(node_type: str, *parts: str) -> str:
-    """Stable URI scheme. Lowercases identifiers, joins with /."""
-    body = "/".join(str(p).lower().replace(" ", "_") for p in parts if p)
-    return f"synapse://{node_type.lower()}/{body}"
+    """Stable URI scheme. Lowercases identifiers, joins with /.
+
+    For Table and Column URIs the table part is normalized (see
+    normalize_table_name) so all witnesses land on the same node.
+    """
+    kind = node_type.lower()
+    items = [str(p) for p in parts if p]
+    if items and kind in ("table", "column"):
+        items[0] = normalize_table_name(items[0])
+    body = "/".join(p.lower().replace(" ", "_") for p in items)
+    return f"synapse://{kind}/{body}"

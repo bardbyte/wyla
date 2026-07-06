@@ -15,6 +15,7 @@ This loader is pure-function. ADK FunctionTool-wrappable.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,12 @@ import urllib.error
 from synapse.loaders.types import LoadResult
 
 
-_MDM_ENDPOINT = "https://lumimdmapi-guse4.aexp.com/api/v1/ngbd/mdm-api/datasets/schemas"
+# Endpoint comes from the environment — internal hostnames don't belong in
+# source. SECURITY_AUDIT.md P1 tracks scrubbing the historical references.
+_MDM_ENDPOINT = os.environ.get(
+    "SYNAPSE_MDM_ENDPOINT",
+    "https://lumimdmapi-guse4.aexp.com/api/v1/ngbd/mdm-api/datasets/schemas",
+)
 
 
 def load_mdm_for_table(
