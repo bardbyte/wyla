@@ -124,9 +124,21 @@ def enrich_graph(
         else:
             chunks = [all_columns]
 
-        if max_calls is not None and calls_made + len(chunks) > max_calls:
-            skipped_for_budget.append(table_name)
-            continue
+        # Budget: a wide table that doesn't fully fit gets its FIRST
+        # remaining chunks enriched (partial coverage beats none — a
+        # 4,400-column table must not be skippable forever); only a
+        # fully-spent budget skips a table outright.
+        partial_note = None
+        if max_calls is not None:
+            remaining = max_calls - calls_made
+            if remaining <= 0:
+                skipped_for_budget.append(table_name)
+                continue
+            if len(chunks) > remaining:
+                partial_note = (
+                    f"partial enrichment: first {remaining} of "
+                    f"{len(chunks)} column chunks (call budget)")
+                chunks = chunks[:remaining]
 
         parts: list[EnrichmentBundle] = []
         for chunk_no, chunk in enumerate(chunks):
@@ -147,6 +159,9 @@ def enrich_graph(
 
         bundle = parts[0] if len(parts) == 1 else _merge_bundles(
             table_name, parts)
+        if partial_note:
+            bundle.self_assessment.requires_steward_attention.append(
+                partial_note)
         table_report = _apply_bundle(store, bundle)
         # demo packs are payloads, not counters — pull them out so
         # grounding_reports stays int-only for the pipeline's totals
@@ -660,6 +675,34 @@ def _apply_bundle(
             report["applied_demo_questions"] += 1
             report["demo_pack"].append(entry)
     return report
+
+
+def collect_enrichment_failures(
+    bundles: dict[str, EnrichmentBundle],
+) -> dict[str, Any]:
+    """Post-run diagnosis: which bundles came back empty, and why.
+
+    Failures are in-band by design (a bad chunk never kills the run) —
+    but in-band must not mean invisible. The pipeline prints this digest
+    so '79 calls, 0 observations' always arrives WITH its reasons."""
+    from collections import Counter
+
+    empty = 0
+    notes: Counter[str] = Counter()
+    for bundle in bundles.values():
+        has_content = bool(
+            bundle.column_observations or bundle.candidate_synonyms
+            or bundle.candidate_code_resolutions
+            or bundle.table_description_proposal)
+        if not has_content:
+            empty += 1
+        for note in bundle.self_assessment.requires_steward_attention:
+            notes[note[:160]] += 1
+    return {
+        "empty_bundles": empty,
+        "n_bundles": len(bundles),
+        "notes": notes.most_common(8),
+    }
 
 
 _AUDIENCE_ORDER = [

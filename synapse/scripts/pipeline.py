@@ -235,7 +235,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         _stage("LLM enrichment → llm_generated facts (batched)")
         try:
             from synapse.enrichment.enricher import (
-                enrich_graph, propose_entities)
+                collect_enrichment_failures, enrich_graph, propose_entities)
             from synapse.enrichment.vertex_client import (
                 TieredLLMClient, VertexLLMClient)
             if args.enrich_strategy == "tiered":
@@ -246,8 +246,14 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                 client = VertexLLMClient()
                 _note(f"strategy: pro-only · model={client.model}")
             if getattr(client, "tls_mode", "default") != "default":
-                _note(f"tls: {client.tls_mode} "
-                      "(via GEMINI_CA_BUNDLE / GEMINI_TLS_INSECURE)")
+                detail = getattr(client, "tls_detail", None) or {}
+                _note(f"tls: {client.tls_mode} · "
+                      f"truststore={'yes' if detail.get('truststore') else 'no'}"
+                      " · sdk-verify="
+                      + ("direct (HttpOptions.client_args)"
+                         if getattr(client, "tls_sdk_direct", False)
+                         else "patched only (old SDK — upgrade "
+                              "google-genai if TLS errors persist)"))
         except RuntimeError as exc:
             _note(f"⚠ enrichment skipped: {exc}")
             run_report["enrichment"] = {"status": "skipped",
@@ -308,9 +314,28 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                 _note(f"gemini: {client.stats.get('calls', 0)} call(s) · "
                       f"{client.stats.get('corrective_retries', 0)} "
                       "corrective retr(ies) · "
+                      f"{client.stats.get('call_retries', 0)} call "
+                      "retr(ies) · "
                       f"{client.stats.get('thinking_fallbacks', 0)} "
-                      "thinking fallback(s)")
+                      "thinking fallback(s) · "
+                      f"{client.stats.get('context_truncations', 0)} "
+                      "context truncation(s)")
                 run_report["enrichment_client_stats"] = dict(client.stats)
+            # in-band failures must never be invisible: when bundles came
+            # back empty, say so AND say why, right here in the console
+            failures = collect_enrichment_failures(bundles)
+            if failures["empty_bundles"]:
+                _note(f"⚠ {failures['empty_bundles']}/"
+                      f"{failures['n_bundles']} bundle(s) came back EMPTY"
+                      " — reasons:")
+                for note_text, count in failures["notes"][:5]:
+                    _note(f"    {count}× {note_text}")
+                if not failures["notes"]:
+                    _note("    (no error notes: the model returned "
+                          "schema-valid but EMPTY bundles — evidence "
+                          "may not be reaching it, or it over-abstained;"
+                          " inspect enrichment_memory.json)")
+            run_report["enrichment_failures"] = failures
             run_report["enrichment_grounding"] = {
                 "totals": totals, "per_table": grounding}
             proposals = propose_entities(bundles)
@@ -326,6 +351,34 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             stats = store.stats()
             _note(f"post-enrichment tiers: "
                   f"{stats['nodes_by_confidence_tier']}")
+
+    # ── 6c. Context-readiness scorecard ──────────────────────
+    #        Node counts don't measure retrieval quality. Per manifest
+    #        table: can the graph actually answer questions about it?
+    #        Watch these numbers run over run — THIS is "rich enough".
+    scorecard_tables = (sorted(manifest_names) if manifest_names else [
+        str(n.properties.get("table_name"))
+        for n in store.nodes_by_type("Table")
+        if n.properties.get("table_name")
+    ][:20])
+    if scorecard_tables:
+        from synapse.graph.inspector import context_readiness
+        _stage("Context readiness — the graph as a context machine")
+        _note(f"{'table':34} {'cols':>5} {'mean%':>5} {'rel':>4} "
+              f"{'met':>4} {'code':>4} {'gov':>3} {'lin':>3} tier")
+        readiness = context_readiness(store, scorecard_tables)
+        for row in readiness:
+            if not row.get("in_graph"):
+                _note(f"{row['table'][:34]:34} NOT IN GRAPH")
+                continue
+            _note(f"{row['table'][:34]:34} {row['n_columns']:>5} "
+                  f"{row['pct_columns_with_meaning']:>4}% "
+                  f"{row['n_related_tables']:>4} {row['n_metrics']:>4} "
+                  f"{row['n_code_resolutions']:>4} "
+                  f"{'✓' if row['has_governance'] else '–':>3} "
+                  f"{'✓' if row['has_lineage'] else '–':>3} "
+                  f"{row['confidence_tier']}")
+        run_report["context_readiness"] = readiness
 
     # ── 7. Snapshot + run manifest ───────────────────────────
     snapshot_path = Path(args.out).expanduser()

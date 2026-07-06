@@ -41,7 +41,10 @@ def _install_fake_genai(monkeypatch, responses: list):
             return pytypes.SimpleNamespace(text=outcome)
 
     class FakeClient:
+        inits: list[dict] = []          # shared: records constructor kwargs
+
         def __init__(self, *args, **kwargs):
+            FakeClient.inits.append(kwargs)
             self.models = FakeModels()
 
     class ThinkingConfig:
@@ -52,9 +55,14 @@ def _install_fake_genai(monkeypatch, responses: list):
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
+    class HttpOptions:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
     fake_types = pytypes.ModuleType("google.genai.types")
     fake_types.ThinkingConfig = ThinkingConfig
     fake_types.GenerateContentConfig = GenerateContentConfig
+    fake_types.HttpOptions = HttpOptions
     fake_genai = pytypes.ModuleType("google.genai")
     fake_genai.Client = FakeClient
     fake_genai.types = fake_types
@@ -68,6 +76,7 @@ def _install_fake_genai(monkeypatch, responses: list):
 
 def _client(monkeypatch, responses: list):
     calls = _install_fake_genai(monkeypatch, responses)
+    monkeypatch.setenv("GEMINI_RETRY_BACKOFF_S", "0")   # no sleeps in tests
     from synapse.enrichment.vertex_client import VertexLLMClient
     return VertexLLMClient(), calls
 
@@ -81,7 +90,8 @@ def test_thinking_enabled_by_default_with_dynamic_budget(monkeypatch):
     assert cfg["thinking_config"].thinking_budget == -1   # dynamic
     assert cfg["response_mime_type"] == "application/json"
     assert client.stats == {"calls": 1, "corrective_retries": 0,
-                            "thinking_fallbacks": 0}
+                            "thinking_fallbacks": 0, "call_retries": 0,
+                            "context_truncations": 0}
 
 
 def test_thinking_budget_zero_disables_thinking(monkeypatch):
@@ -132,11 +142,41 @@ def test_second_failure_keeps_original_in_band_note(monkeypatch):
                for n in bundle.self_assessment.requires_steward_attention)
 
 
-def test_network_error_is_in_band_not_raised(monkeypatch):
-    client, _ = _client(monkeypatch, [RuntimeError("503 unavailable")])
+def test_transient_call_failure_is_retried_and_recovers(monkeypatch):
+    client, calls = _client(monkeypatch, [
+        RuntimeError("503 unavailable"),          # transient blip
+        VALID_BUNDLE,                             # retry succeeds
+    ])
     bundle = client.enrich(skill_md="s", context={}, table_name="t")
-    assert any("vertex call failed" in n
-               for n in bundle.self_assessment.requires_steward_attention)
+    assert bundle.column_observations[0].column_name == "c1"
+    assert client.stats["call_retries"] == 1
+    assert len(calls) == 2
+
+
+def test_persistent_call_failure_is_in_band_with_type(monkeypatch):
+    client, _ = _client(monkeypatch, [
+        RuntimeError("503 unavailable"), RuntimeError("503 unavailable"),
+    ])
+    bundle = client.enrich(skill_md="s", context={}, table_name="t")
+    notes = bundle.self_assessment.requires_steward_attention
+    assert any("vertex call failed" in n and "503" in n for n in notes)
+    assert client.stats["call_retries"] == 1      # exactly one retry
+
+
+def test_empty_model_response_carries_finish_reason(monkeypatch):
+    client, _ = _client(monkeypatch, ["", ""])    # empty text both tries
+    bundle = client.enrich(skill_md="s", context={}, table_name="t")
+    notes = bundle.self_assessment.requires_steward_attention
+    assert any("empty model response" in n and "finish_reason" in n
+               for n in notes)
+
+
+def test_context_truncation_is_counted(monkeypatch):
+    monkeypatch.setenv("GEMINI_MAX_CONTEXT_CHARS", "200")
+    client, _ = _client(monkeypatch, [VALID_BUNDLE])
+    client.enrich(skill_md="s", context={"blob": "x" * 2000},
+                  table_name="t")
+    assert client.stats["context_truncations"] == 1
 
 
 def test_context_cap_default_and_env_override(monkeypatch):
@@ -176,10 +216,69 @@ def test_client_applies_tls_before_building_transport(monkeypatch):
     import synapse.enrichment.vertex_client as vc
     monkeypatch.setenv("GEMINI_TLS_INSECURE", "true")
     applied: list[str] = []
-    monkeypatch.setattr(vc, "_apply_tls", applied.append)
+    monkeypatch.setattr(
+        vc, "_apply_tls", lambda mode: (applied.append(mode), {})[1])
     client, _ = _client(monkeypatch, [VALID_BUNDLE])
     assert client.tls_mode == "insecure"
     assert applied == ["insecure"]
+
+
+def test_insecure_verify_is_handed_to_sdk_directly(monkeypatch):
+    """The field lesson: monkey-patching httpx was defeated by import
+    order. verify MUST reach genai.Client via HttpOptions.client_args."""
+    import sys as _sys
+
+    import synapse.enrichment.vertex_client as vc
+    monkeypatch.setenv("GEMINI_TLS_INSECURE", "1")
+    monkeypatch.setattr(vc, "_apply_tls", lambda mode: {"truststore": False})
+    client, _ = _client(monkeypatch, [VALID_BUNDLE])
+    assert client.tls_sdk_direct is True
+    inits = _sys.modules["google.genai"].Client.inits
+    http_options = inits[-1]["http_options"]
+    assert http_options.kwargs["client_args"] == {"verify": False}
+    assert http_options.kwargs["async_client_args"] == {"verify": False}
+
+
+def test_ca_bundle_verify_path_reaches_sdk(monkeypatch, tmp_path):
+    import sys as _sys
+
+    import synapse.enrichment.vertex_client as vc
+    pem = tmp_path / "corp.pem"
+    pem.write_text("dummy", encoding="utf-8")
+    monkeypatch.setenv("GEMINI_CA_BUNDLE", str(pem))
+    monkeypatch.setattr(vc, "_apply_tls", lambda mode: {"truststore": False})
+    client, _ = _client(monkeypatch, [VALID_BUNDLE])
+    inits = _sys.modules["google.genai"].Client.inits
+    verify = inits[-1]["http_options"].kwargs["client_args"]["verify"]
+    assert verify == str(pem.resolve())
+
+
+def test_default_mode_passes_no_http_options(monkeypatch):
+    import sys as _sys
+    for var in ("GEMINI_TLS_INSECURE", "GEMINI_CA_BUNDLE"):
+        monkeypatch.delenv(var, raising=False)
+    client, _ = _client(monkeypatch, [VALID_BUNDLE])
+    assert client.tls_sdk_direct is False
+    assert "http_options" not in _sys.modules["google.genai"].Client.inits[-1]
+
+
+def test_old_sdk_without_client_args_degrades_to_patches(monkeypatch):
+    import synapse.enrichment.vertex_client as vc
+
+    class _Rejecting:
+        def __init__(self, **kwargs):
+            raise TypeError("unexpected keyword argument 'client_args'")
+
+    monkeypatch.setenv("GEMINI_TLS_INSECURE", "1")
+    monkeypatch.setattr(vc, "_apply_tls", lambda mode: {"truststore": False})
+    calls = _install_fake_genai(monkeypatch, [VALID_BUNDLE])
+    import sys as _sys
+    _sys.modules["google.genai.types"].HttpOptions = _Rejecting
+    _sys.modules["google.genai"].types.HttpOptions = _Rejecting
+    from synapse.enrichment.vertex_client import VertexLLMClient
+    client = VertexLLMClient()
+    assert client.tls_sdk_direct is False        # fell back, didn't crash
+    del calls
 
 
 def test_ca_bundle_mode_sets_standard_env_vars(monkeypatch, tmp_path):

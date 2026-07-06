@@ -187,12 +187,29 @@ def env_and_key_report() -> dict[str, Any]:
 
 
 def make_client(args: argparse.Namespace):
-    """env mode = EXACTLY what the pipeline's VertexLLMClient does."""
+    """env mode = EXACTLY what the pipeline's VertexLLMClient does —
+    including its TLS handling, so a probe pass PREDICTS a pipeline
+    pass (the earlier accidental divergence: probe --insecure imported
+    truststore as a side effect and 'worked' while the pipeline died)."""
     from google import genai  # lazy — --env-only works without it
+    from google.genai import types
+
+    from synapse.enrichment.vertex_client import (
+        _apply_tls, _http_options_for_tls, _tls_mode)
     if args.project:
         os.environ["GOOGLE_CLOUD_PROJECT"] = args.project
     if args.location:
         os.environ["GOOGLE_CLOUD_LOCATION"] = args.location
+
+    mode = _tls_mode()
+    detail = _apply_tls(mode)
+    http_options = _http_options_for_tls(types, mode)
+    if mode != "default":
+        print(f"{DIM}tls: {mode} · truststore="
+              f"{'yes' if detail.get('truststore') else 'no'} · sdk-verify="
+              f"{'direct' if http_options is not None else 'patched only'}"
+              f"{END}")
+
     if args.auth == "key":
         from google.oauth2 import service_account
         key_file = args.key_file or os.environ.get(
@@ -203,11 +220,16 @@ def make_client(args: argparse.Namespace):
         creds = service_account.Credentials.from_service_account_file(
             str(Path(key_file).expanduser()),
             scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        return genai.Client(
+        kwargs: dict[str, Any] = dict(
             vertexai=True,
             project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
             location=os.environ.get("GOOGLE_CLOUD_LOCATION") or "global",
             credentials=creds)
+        if http_options is not None:
+            kwargs["http_options"] = http_options
+        return genai.Client(**kwargs)
+    if http_options is not None:
+        return genai.Client(http_options=http_options)
     return genai.Client()      # env-driven — the pipeline's exact path
 
 
@@ -425,14 +447,12 @@ def main(argv: list[str] | None = None) -> int:
         _save(args.report, full_report)
         return 0 if verdict_ok else 1
 
-    # TLS bootstrap (reuses the proven corporate-proxy handling)
-    if args.ca_bundle or args.insecure:
-        from check_vertex_gemini import (
-            _disable_ssl_verification, _set_ca_bundle)
-        if args.ca_bundle:
-            _set_ca_bundle(args.ca_bundle)
-        if args.insecure:
-            _disable_ssl_verification()
+    # TLS flags map onto the SAME env mechanism the pipeline uses, so
+    # this probe fails/succeeds exactly like `pipeline.py --enrich`
+    if args.insecure:
+        os.environ["GEMINI_TLS_INSECURE"] = "1"
+    if args.ca_bundle:
+        os.environ["GEMINI_CA_BUNDLE"] = args.ca_bundle
 
     try:
         client = make_client(args)

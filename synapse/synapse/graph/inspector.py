@@ -537,3 +537,54 @@ def _code_resolutions_for_table(
             "confidence_score": round(prov.confidence_score, 3),
         })
     return out
+
+
+def context_readiness(
+    store: GraphStore, table_names: list[str],
+) -> list[dict[str, Any]]:
+    """Per-table completeness scorecard — is this graph a good context
+    machine for the consuming agent?
+
+    Node/edge counts don't measure retrieval quality; what matters is
+    whether the answer to a question about THIS table is in the graph:
+    do its columns carry business meaning, are its joins proved, its
+    codes decoded, its ownership/lineage known? One row per table, meant
+    to be printed after every compile and tracked run over run."""
+    rows: list[dict[str, Any]] = []
+    for name in table_names:
+        t_uri = canonical_uri("table", name)
+        if store.get(t_uri) is None:
+            rows.append({"table": name, "in_graph": False})
+            continue
+        col_nodes = [
+            store.get(e.to_uri) for e in store.outgoing(t_uri, "CONTAINS")
+        ]
+        col_nodes = [
+            c for c in col_nodes if c is not None and c.node_type == "Column"
+        ]
+        n_cols = len(col_nodes)
+        n_meaning = sum(
+            1 for c in col_nodes
+            if any(str(c.properties.get(k) or "").strip()
+                   for k in ("business_name", "description",
+                             "ai_generated_description"))
+        )
+        insp = inspect_table(store, name)
+        lineage = insp.get("lineage") or {}
+        governance = insp.get("governance") or {}
+        rows.append({
+            "table": name,
+            "in_graph": True,
+            "n_columns": n_cols,
+            "pct_columns_with_meaning": (
+                round(100 * n_meaning / n_cols) if n_cols else 0),
+            "n_related_tables": len(insp.get("related_tables") or []),
+            "n_metrics": len(insp.get("metrics") or []),
+            "n_code_resolutions": len(insp.get("code_resolutions") or []),
+            "has_governance": any(bool(v) for v in governance.values()),
+            "has_lineage": bool(
+                lineage.get("upstream") or lineage.get("downstream")),
+            "confidence_tier": (
+                insp.get("fused_view") or {}).get("confidence_tier"),
+        })
+    return rows

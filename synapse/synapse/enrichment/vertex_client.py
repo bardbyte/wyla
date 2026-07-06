@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -64,26 +65,42 @@ def _tls_mode() -> str:
     return "default"
 
 
-def _apply_tls(mode: str) -> None:
+def _apply_tls(mode: str) -> dict[str, Any]:
     """Apply the chosen TLS mode process-wide (idempotent).
 
-    The insecure patch set is lifted from the proven
-    scripts/check_vertex_gemini.py: stdlib ssl + httpx (google-genai's
-    transport) + google-auth's token-exchange session."""
+    Lesson from the field: monkey-patching httpx is NOT sufficient —
+    google-genai's transport can bind httpx classes before the patch
+    lands, which is exactly how a run printed 'tls: insecure' and still
+    died on CERTIFICATE_VERIFY_FAILED. Defense in depth now:
+
+      1. truststore (ALL modes): the OS keychain — where corporate root
+         CAs actually live — becomes the trust source. The clean fix.
+      2. `verify` is ALSO handed straight to the SDK's httpx client via
+         HttpOptions.client_args (see _http_options_for_tls) — immune
+         to import order; this is the load-bearing insecure mechanism.
+      3. The legacy patches stay as a belt for old SDKs, plus a
+         requests.Session default for google-auth's token exchange.
+
+    Returns a detail dict of which mechanisms engaged (printed by the
+    pipeline so the next TLS surprise is diagnosable from the console).
+    """
+    detail: dict[str, Any] = {"truststore": False}
+    try:  # best effort in EVERY mode — strictly better than disabling
+        import truststore
+        truststore.inject_into_ssl()
+        detail["truststore"] = True
+    except ImportError:
+        pass
+
     if mode == "ca-bundle":
         bundle = str(
             Path(os.environ["GEMINI_CA_BUNDLE"]).expanduser().resolve())
         for var in ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE",
                     "CURL_CA_BUNDLE", "GRPC_DEFAULT_SSL_ROOTS_FILE_PATH"):
             os.environ[var] = bundle
-        return
+        return detail
     if mode != "insecure":
-        try:  # best effort — makes the OS keychain the trust source
-            import truststore
-            truststore.inject_into_ssl()
-        except ImportError:
-            pass
-        return
+        return detail
 
     import ssl
     import warnings
@@ -114,6 +131,22 @@ def _apply_tls(mode: str) -> None:
     except ImportError:
         pass
     try:
+        # google-auth's token exchange rides on requests, not httpx —
+        # default every new Session to no-verify so the OAuth hop can't
+        # be the one that still fails
+        import requests
+        if not getattr(requests.Session, "_synapse_no_verify", False):
+            _orig_init = requests.Session.__init__
+
+            def _init_no_verify(self: Any, *args: Any, **kwargs: Any) -> None:
+                _orig_init(self, *args, **kwargs)
+                self.verify = False
+
+            requests.Session.__init__ = _init_no_verify  # type: ignore[method-assign]
+            requests.Session._synapse_no_verify = True  # type: ignore[attr-defined]
+    except ImportError:
+        pass
+    try:
         import google.auth.transport.requests as gat
         if not getattr(gat.AuthorizedSession, "_synapse_no_verify", False):
             _orig_session = gat.AuthorizedSession
@@ -132,6 +165,28 @@ def _apply_tls(mode: str) -> None:
         "GEMINI_TLS_INSECURE=1 — TLS verification disabled for Vertex "
         "calls; only safe behind a trusted corporate proxy.",
         stacklevel=2)
+    return detail
+
+
+def _http_options_for_tls(types_mod: Any, mode: str) -> Any | None:
+    """`verify` handed straight to the SDK's own httpx construction —
+    the mechanism that CANNOT be defeated by import order. Returns None
+    in default mode or when the installed SDK predates client_args
+    (the process-wide patches then remain the only lever)."""
+    if mode == "insecure":
+        verify: Any = False
+    elif mode == "ca-bundle":
+        verify = str(
+            Path(os.environ["GEMINI_CA_BUNDLE"]).expanduser().resolve())
+    else:
+        return None
+    try:
+        return types_mod.HttpOptions(
+            client_args={"verify": verify},
+            async_client_args={"verify": verify},
+        )
+    except Exception:
+        return None
 
 _PROMPT_TEMPLATE = """{skill_md}
 
@@ -242,8 +297,11 @@ class VertexLLMClient:
             ) from exc
         self._types = types
         self.tls_mode = _tls_mode()
-        _apply_tls(self.tls_mode)     # BEFORE the client builds its httpx
-        self._client = genai.Client()
+        self.tls_detail = _apply_tls(self.tls_mode) or {}
+        http_options = _http_options_for_tls(types, self.tls_mode)
+        self.tls_sdk_direct = http_options is not None
+        self._client = (genai.Client(http_options=http_options)
+                        if http_options is not None else genai.Client())
         self.model = model or os.environ.get(
             "GEMINI_MODEL", "gemini-3.1-pro-preview")
         self.temperature = temperature
@@ -252,8 +310,11 @@ class VertexLLMClient:
             os.environ.get("GEMINI_THINKING_BUDGET", "-1"))
         self.max_context_chars = int(os.environ.get(
             "GEMINI_MAX_CONTEXT_CHARS", str(_DEFAULT_MAX_CONTEXT_CHARS)))
+        self.retry_backoff_s = float(
+            os.environ.get("GEMINI_RETRY_BACKOFF_S", "2"))
         self.stats = {"calls": 0, "corrective_retries": 0,
-                      "thinking_fallbacks": 0}
+                      "thinking_fallbacks": 0, "call_retries": 0,
+                      "context_truncations": 0}
 
     def _generate(self, prompt: str) -> str:
         """One model call. Thinking on by default; endpoints that reject
@@ -281,22 +342,63 @@ class VertexLLMClient:
                 )
             else:
                 raise
-        return response.text or ""
+        try:
+            text = response.text or ""
+        except Exception:      # some SDK versions raise on empty candidates
+            text = ""
+        if not text.strip():
+            # surface WHY the model returned nothing — safety block and
+            # thinking-consumed-token cases are invisible otherwise
+            finish = block = None
+            try:
+                cand = (response.candidates or [None])[0]
+                finish = str(getattr(cand, "finish_reason", None))
+            except Exception:
+                pass
+            try:
+                block = str(getattr(
+                    getattr(response, "prompt_feedback", None),
+                    "block_reason", None))
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"empty model response (finish_reason={finish}, "
+                f"block_reason={block})")
+        return text
+
+    def _generate_with_retry(self, prompt: str) -> str:
+        """One transient-failure retry with backoff — a blip must not
+        cost a whole chunk; a real failure still lands in-band with the
+        exception type attached."""
+        try:
+            return self._generate(prompt)
+        except Exception:
+            self.stats["call_retries"] += 1
+            time.sleep(self.retry_backoff_s)
+            try:
+                return self._generate(prompt)
+            except Exception as second:
+                raise RuntimeError(
+                    f"{type(second).__name__}: {str(second)[:180]}"
+                ) from second
 
     def enrich(self, *, skill_md: str, context: dict[str, Any],
                table_name: str) -> EnrichmentBundle:
         batch = context.get("batch") or {}
+        context_json = _serialize_context(context, self.max_context_chars)
+        if context_json.endswith(_TRUNCATION_MARKER):
+            self.stats["context_truncations"] += 1
         prompt = _PROMPT_TEMPLATE.format(
             skill_md=skill_md,
             table_name=table_name,
             chunk=batch.get("chunk", 1),
             of=batch.get("of", 1),
             n_cols=batch.get("columns_in_chunk", "all"),
-            context_json=_serialize_context(context, self.max_context_chars),
+            context_json=context_json,
         )
         self.stats["calls"] += 1
         try:
-            text = self._generate(prompt)
+            text = self._generate_with_retry(prompt)
         except Exception as exc:  # network/model error → in-band failure
             return _empty_bundle(
                 table_name, f"vertex call failed: {str(exc)[:200]}")
@@ -316,7 +418,7 @@ class VertexLLMClient:
             "EnrichmentBundle schema. No prose, no fences."
         )
         try:
-            retry_text = self._generate(retry_prompt)
+            retry_text = self._generate_with_retry(retry_prompt)
         except Exception as exc:
             bundle.self_assessment.requires_steward_attention.append(
                 f"corrective retry also failed: {str(exc)[:160]}")
@@ -365,6 +467,8 @@ class TieredLLMClient:
                                        temperature=temperature)
                        if self.flash_model else self._pro)
         self.tls_mode = self._pro.tls_mode
+        self.tls_detail = self._pro.tls_detail
+        self.tls_sdk_direct = self._pro.tls_sdk_direct
 
     @property
     def stats(self) -> dict[str, int]:
