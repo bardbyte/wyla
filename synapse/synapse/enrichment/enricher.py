@@ -14,6 +14,7 @@ Two public functions:
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -50,42 +51,105 @@ def enrich_graph(
     *,
     only_tables: list[str] | None = None,
     memory_out: Path | None = None,
+    column_batch_size: int = 40,
+    max_calls: int | None = None,
+    grounding_reports: dict[str, dict] | None = None,
+    evidence_dir: Path | None = None,
 ) -> dict[str, EnrichmentBundle]:
-    """Run the LLM enrichment pass over every Table in the store.
+    """Run the LLM enrichment pass over every Table in the store — BATCHED.
+
+    Wide tables (the warehouse has 1,400-column tables) cannot ship their
+    whole inspection in one prompt, so columns are chunked: one LLM call
+    per ≤column_batch_size columns, table-level context repeated per
+    chunk, partial bundles merged before a single apply per table.
 
     Args:
         store: the built GraphStore (mutated in place).
-        llm_client: implementor of LLMClient — call .enrich() per table.
-        only_tables: if provided, restrict enrichment to these table names
-            (useful for dev — start with one table).
-        memory_out: if provided, the raw EnrichmentBundle list is dumped
-            to this path as JSON for steward audit + entity-proposal input.
+        llm_client: implementor of LLMClient — called once per column batch.
+        only_tables: restrict enrichment to these table names.
+        memory_out: dump the merged EnrichmentBundles as JSON for steward
+            audit + entity-proposal input.
+        column_batch_size: columns per LLM call (0/None → one call per
+            table regardless of width — legacy behavior).
+        max_calls: hard budget across the whole run; tables that don't fit
+            are skipped and reported (never silently).
+        evidence_dir: staged per-table signal files (the session split's
+            ``mdm_cache/<table>.json``) — real SQL snippets from
+            ``queries_using_this`` are fed to the LLM as primary evidence.
 
     Returns:
-        dict mapping table_name → EnrichmentBundle (also written into the
-        graph as `llm_generated` provenance).
+        dict mapping table_name → merged EnrichmentBundle (also written
+        into the graph as `llm_generated` provenance). Skipped tables are
+        listed in each bundle's self_assessment when the budget ran out.
     """
     skill_md = _SKILL_MD_PATH.read_text(encoding="utf-8")
     bundles: dict[str, EnrichmentBundle] = {}
+    calls_made = 0
+    skipped_for_budget: list[str] = []
 
     table_nodes = [
         n for n in store.nodes_by_type("Table")
         if n.properties.get("table_name")
     ]
+    # cross-table awareness: every call sees the names+columns of ALL
+    # in-graph tables (not just the enrich scope) so relates_to proposals
+    # can target real siblings instead of hallucinated table names
+    scope_digest = _scope_digest(store, table_nodes)
     if only_tables:
+        wanted = {t.lower() for t in only_tables}
         table_nodes = [
             n for n in table_nodes
-            if n.properties.get("table_name") in only_tables
+            if str(n.properties.get("table_name", "")).lower() in wanted
         ]
 
     for node in table_nodes:
         table_name = node.properties["table_name"]
-        context = _build_context_for_table(store, table_name)
-        bundle = llm_client.enrich(
-            skill_md=skill_md, context=context, table_name=table_name,
-        )
-        _apply_bundle(store, bundle)
+        context = _build_context_for_table(
+            store, table_name,
+            evidence_dir=evidence_dir, scope_digest=scope_digest)
+        all_columns = (context.get("inspection") or {}).get("columns") or []
+        if column_batch_size and len(all_columns) > column_batch_size:
+            chunks = [
+                all_columns[i:i + column_batch_size]
+                for i in range(0, len(all_columns), column_batch_size)
+            ]
+        else:
+            chunks = [all_columns]
+
+        if max_calls is not None and calls_made + len(chunks) > max_calls:
+            skipped_for_budget.append(table_name)
+            continue
+
+        parts: list[EnrichmentBundle] = []
+        for chunk_no, chunk in enumerate(chunks):
+            chunk_context = dict(context)
+            inspection = dict(context.get("inspection") or {})
+            inspection["columns"] = chunk
+            chunk_context["inspection"] = inspection
+            chunk_context["batch"] = {
+                "chunk": chunk_no + 1, "of": len(chunks),
+                "columns_in_chunk": len(chunk),
+                "total_columns": len(all_columns),
+            }
+            parts.append(llm_client.enrich(
+                skill_md=skill_md, context=chunk_context,
+                table_name=table_name,
+            ))
+            calls_made += 1
+
+        bundle = parts[0] if len(parts) == 1 else _merge_bundles(
+            table_name, parts)
+        table_report = _apply_bundle(store, bundle)
+        if grounding_reports is not None:
+            grounding_reports[table_name] = table_report
         bundles[table_name] = bundle
+
+    if skipped_for_budget and bundles:
+        # surface the budget skip in-band, never silently
+        first = next(iter(bundles.values()))
+        first.self_assessment.tables_skipped_for_lack_of_signal.extend(
+            f"{t} (enrichment budget exhausted)" for t in skipped_for_budget
+        )
 
     if memory_out is not None:
         memory_out.parent.mkdir(parents=True, exist_ok=True)
@@ -97,6 +161,55 @@ def enrich_graph(
             encoding="utf-8",
         )
     return bundles
+
+
+def _merge_bundles(
+    table_name: str, parts: list[EnrichmentBundle],
+) -> EnrichmentBundle:
+    """Column-batch partials → one table bundle (dedupe by natural keys)."""
+    from synapse.enrichment.schemas import SelfAssessment
+
+    description = next(
+        (p.table_description_proposal for p in parts
+         if p.table_description_proposal), None)
+    observations, seen_cols = [], set()
+    for p in parts:
+        for obs in p.column_observations:
+            if obs.column_name not in seen_cols:
+                seen_cols.add(obs.column_name)
+                observations.append(obs)
+    synonyms, seen_syn = [], set()
+    for p in parts:
+        for syn in p.candidate_synonyms:
+            key = (syn.surface_form.lower(), syn.canonical_form.lower())
+            if key not in seen_syn:
+                seen_syn.add(key)
+                synonyms.append(syn)
+    resolutions, seen_res = [], set()
+    for p in parts:
+        for cr in p.candidate_code_resolutions:
+            key = (cr.column.lower(), cr.raw_value)
+            if key not in seen_res:
+                seen_res.add(key)
+                resolutions.append(cr)
+    filters = [f for p in parts for f in p.candidate_filter_rationale]
+    attention = [a for p in parts
+                 for a in p.self_assessment.requires_steward_attention]
+    return EnrichmentBundle(
+        table_name=table_name,
+        table_description_proposal=description,
+        column_observations=observations,
+        candidate_synonyms=synonyms,
+        candidate_code_resolutions=resolutions,
+        candidate_filter_rationale=filters,
+        self_assessment=SelfAssessment(
+            tables_skipped_for_lack_of_signal=[],
+            columns_marked_ambiguous=sum(
+                1 for o in observations if o.ambiguity_flag),
+            proposed_entities_with_low_evidence=[],
+            requires_steward_attention=attention,
+        ),
+    )
 
 
 def propose_entities(
@@ -173,33 +286,177 @@ def propose_entities(
 # ─── Internals ───────────────────────────────────────────────
 
 
-def _build_context_for_table(store: GraphStore, table_name: str) -> dict[str, Any]:
+def _build_context_for_table(
+    store: GraphStore,
+    table_name: str,
+    *,
+    evidence_dir: Path | None = None,
+    scope_digest: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """The JSON payload handed to the LLM per table.
 
-    Includes the full inspector dict + corpus snippets + any steward
-    glossary entries that mention this table. The LLM consumes ONLY this
-    payload — it does not see the raw graph."""
+    Gemini's accuracy is bounded by the evidence it sees, so this packs
+    ALL primary sources — the fused inspector view, the real SQL that
+    analysts ran against this table (session signals), the credit-risk
+    skill knowledge that governs it, and a digest of every sibling table
+    in the graph (the only legal relates_to targets). The LLM consumes
+    ONLY this payload — it does not see the raw graph."""
     inspection = inspect_table(store, table_name)
     return {
         "inspection": inspection,
-        # Corpus snippets — pull from gold_queries dir if we had access here;
-        # for now the inspector already surfaces JOIN observations + metrics.
         "corpus_evidence": {
             "related_tables": inspection.get("related_tables", []),
             "metrics": inspection.get("metrics", []),
             "code_resolutions": inspection.get("code_resolutions", []),
         },
+        # real analyst SQL — the strongest grounding signal we own
+        "corpus_sql_evidence": _corpus_sql_evidence(evidence_dir, table_name),
+        # curated skill knowledge that APPLIES_TO this table
+        "skills_evidence": _skills_evidence(store, table_name),
+        # sibling tables: names + columns; relates_to may ONLY target these
+        "tables_in_scope": scope_digest or [],
         # Steward glossary entries — the loader will populate this once
         # we ingest the steward glossary.md. For v1, empty.
         "steward_glossary": [],
     }
 
 
-def _apply_bundle(store: GraphStore, bundle: EnrichmentBundle) -> None:
-    """Fold the LLM bundle back into the graph as `llm_generated` facts.
+def _corpus_sql_evidence(
+    evidence_dir: Path | None, table_name: str,
+    *, max_queries: int = 15, max_chars: int = 1500,
+) -> dict[str, Any]:
+    """Real SQL snippets from the staged session signals for this table.
 
-    Tag every write with source='llm_generated'. The provenance + tier
-    machinery in store.py caps these at `inferred` (skill.md rule 2)."""
+    Tolerates both entry shapes (dict with sql/query/text keys, or a bare
+    string) and trims hard — evidence, not a transcript dump."""
+    if evidence_dir is None:
+        return {}
+    path = Path(evidence_dir) / f"{table_name}.json"
+    if not path.exists():
+        return {}
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    queries: list[str] = []
+    for entry in (blob.get("queries_using_this") or [])[:max_queries]:
+        if isinstance(entry, dict):
+            text = str(entry.get("sql") or entry.get("query")
+                       or entry.get("query_text") or entry.get("text") or "")
+        else:
+            text = str(entry)
+        text = text.strip()
+        if text:
+            queries.append(text[:max_chars])
+    return {
+        "queries": queries,
+        "aggregations": (blob.get("aggregations") or [])[:30],
+        "n_queries_total": len(blob.get("queries_using_this") or []),
+    }
+
+
+def _skills_evidence(
+    store: GraphStore, table_name: str, *, max_excerpt: int = 2000,
+) -> list[dict[str, Any]]:
+    """Curated skill packages that APPLIES_TO this table — steward-grade
+    domain knowledge the LLM should treat as high-authority evidence."""
+    t_uri = canonical_uri("table", table_name)
+    out: list[dict[str, Any]] = []
+    for edge in store.incoming(t_uri, "APPLIES_TO"):
+        skill = store.get(edge.from_uri)
+        if skill is None or skill.node_type != "Skill":
+            continue
+        props = skill.properties
+        out.append({
+            "skill_id": props.get("skill_id"),
+            "domain": props.get("domain"),
+            "description": props.get("description"),
+            "knowledge_excerpt": str(
+                props.get("knowledge_excerpt") or "")[:max_excerpt],
+            "metrics_defined": props.get("metrics_defined") or [],
+        })
+    return out
+
+
+def _scope_digest(
+    store: GraphStore, table_nodes: list, *, max_tables: int = 40,
+    max_columns: int = 80,
+) -> list[dict[str, Any]]:
+    """Compact per-table digest of the whole graph scope — lets Gemini
+    ground cross-table relates_to proposals in real sibling schemas."""
+    digest: list[dict[str, Any]] = []
+    for node in table_nodes[:max_tables]:
+        cols = sorted(
+            e.to_uri.rsplit("/", 1)[-1]
+            for e in store.outgoing(node.canonical_uri, "CONTAINS")
+        )
+        digest.append({
+            "table": node.properties.get("table_name"),
+            "description": str(node.properties.get("description") or "")[:200],
+            "columns": cols[:max_columns],
+            "n_columns": len(cols),
+        })
+    return digest
+
+
+def _grounding_index(store: GraphStore) -> set[str]:
+    """Every name the graph actually knows, normalized — the reference
+    set the grounding gate checks LLM claims against."""
+    names: set[str] = set()
+
+    def add(value: Any) -> None:
+        text = str(value or "").strip().lower()
+        if text:
+            names.add(re.sub(r"[^a-z0-9]", "", text))
+
+    for node in store.nodes.values():
+        add(node.canonical_uri.rsplit("/", 1)[-1])
+        for key in ("table_name", "business_name", "surface_form",
+                    "canonical_entity", "skill_id"):
+            add(node.properties.get(key))
+    names.discard("")
+    return names
+
+
+def _norm(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def _apply_bundle(
+    store: GraphStore, bundle: EnrichmentBundle,
+) -> dict[str, Any]:
+    """Fold the LLM bundle back into the graph as `llm_generated` facts —
+    through the GROUNDING GATE. skill.md's anti-patterns are enforced
+    here as code, not prose:
+
+      * observations for columns the graph doesn't have → dropped
+      * descriptions with self_confidence < 0.3 OR empty evidence_used
+        → HELD (ambiguity/role still recorded; text never written)
+      * synonyms whose canonical_form matches nothing the graph knows
+        (any column/metric/table/entity name or business name) → dropped
+      * code resolutions for columns that don't exist → dropped
+      * relates_to targets that don't exist as real columns → dropped;
+        relations the graph already witnessed (corpus joins) → skipped —
+        the LLM only echoes corpus evidence, it is not an independent
+        witness, so re-asserting would inflate confidence
+
+    Every drop/hold is counted in the returned grounding report so the
+    run is auditable — accuracy is enforced, not assumed. Tag every
+    write with source='llm_generated'; the tier machinery keeps these
+    facts below `grounded` until real witnesses corroborate."""
+    report = {
+        "applied_descriptions": 0,
+        "held_low_confidence": 0,
+        "held_no_evidence": 0,
+        "dropped_imagined_columns": 0,
+        "dropped_ungrounded_synonyms": 0,
+        "dropped_ungrounded_code_resolutions": 0,
+        "applied_relations": 0,
+        "skipped_existing_relations": 0,
+        "dropped_ungrounded_relations": 0,
+        "ambiguity_flags": 0,
+    }
+    known = _grounding_index(store)
     t_uri = canonical_uri("table", bundle.table_name)
 
     # Table description (only if sparse — see skill.md decision rules)
@@ -221,6 +478,7 @@ def _apply_bundle(store: GraphStore, bundle: EnrichmentBundle) -> None:
     for obs in bundle.column_observations:
         c_uri = canonical_uri("column", bundle.table_name, obs.column_name)
         if c_uri not in store.nodes:
+            report["dropped_imagined_columns"] += 1
             continue  # don't mint columns the LLM imagined
         update: dict[str, Any] = {
             "table_name": bundle.table_name,
@@ -228,17 +486,55 @@ def _apply_bundle(store: GraphStore, bundle: EnrichmentBundle) -> None:
             "llm_self_confidence": obs.self_confidence,
         }
         if obs.proposed_description:
-            update["ai_generated_description"] = obs.proposed_description
+            # anti-patterns 7 + calibration: no evidence or low confidence
+            # → the TEXT is held; role/ambiguity still land for audit
+            if not obs.evidence_used:
+                report["held_no_evidence"] += 1
+            elif obs.self_confidence < 0.3:
+                report["held_low_confidence"] += 1
+            else:
+                update["ai_generated_description"] = obs.proposed_description
+                report["applied_descriptions"] += 1
         if obs.candidate_entity_name:
             update["candidate_entity_name"] = obs.candidate_entity_name
         if obs.ambiguity_flag:
             update["ambiguity_flag"] = obs.ambiguity_flag
+            report["ambiguity_flags"] += 1
         store.upsert_node(
             "Column", c_uri, properties=update, source="llm_generated",
         )
 
-    # Candidate synonyms — mint Synonym nodes (capped at inferred via tier)
+        # relates_to → EQUIVALENT_TO edges, gap-fill only. The target
+        # must exist as a real column, and an edge the corpus already
+        # observed is skipped — the LLM read that corpus, so re-asserting
+        # the same join is not independent corroboration.
+        for rel in obs.relates_to:
+            target_uri = canonical_uri(
+                "column", rel.target_table, rel.target_column)
+            if target_uri == c_uri or target_uri not in store.nodes:
+                report["dropped_ungrounded_relations"] += 1
+                continue
+            fwd = f"{c_uri}::EQUIVALENT_TO::{target_uri}"
+            rev = f"{target_uri}::EQUIVALENT_TO::{c_uri}"
+            if fwd in store.edges or rev in store.edges:
+                report["skipped_existing_relations"] += 1
+                continue
+            store.upsert_edge(
+                "EQUIVALENT_TO", c_uri, target_uri,
+                properties={
+                    "verb": rel.verb,
+                    "llm_evidence_count": rel.evidence_count,
+                },
+                source="llm_generated",
+            )
+            report["applied_relations"] += 1
+
+    # Candidate synonyms — ONLY when the canonical form grounds to
+    # something the graph actually knows (anti-pattern 3 enforced)
     for syn in bundle.candidate_synonyms:
+        if _norm(syn.canonical_form) not in known:
+            report["dropped_ungrounded_synonyms"] += 1
+            continue
         s_uri = canonical_uri(
             "synonym", syn.surface_form,
             syn.scope_business_unit or "global",
@@ -256,8 +552,11 @@ def _apply_bundle(store: GraphStore, bundle: EnrichmentBundle) -> None:
             source="llm_generated",
         )
 
-    # Candidate code resolutions — mint CodeMapping nodes
+    # Candidate code resolutions — the column must exist (anti-pattern 5)
     for cr in bundle.candidate_code_resolutions:
+        if _norm(cr.column) not in known:
+            report["dropped_ungrounded_code_resolutions"] += 1
+            continue
         cm_uri = canonical_uri("codemapping", cr.column, cr.raw_value)
         store.upsert_node(
             "CodeMapping", cm_uri,
@@ -270,6 +569,7 @@ def _apply_bundle(store: GraphStore, bundle: EnrichmentBundle) -> None:
             },
             source="llm_generated",
         )
+    return report
 
 
 # ─── Convenience factory: a mock LLM client for tests ───────
