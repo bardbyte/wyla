@@ -1196,6 +1196,9 @@ def _ingest_skills(store: GraphStore, skills_dir: Path) -> None:
                 "parameters": blob.get("parameters") or [],
                 "knowledge_excerpt": blob.get("knowledge_excerpt") or "",
                 "files": blob.get("files") or [],
+                # chart_contract.yaml — per-KPI viz rules for the render layer
+                "chart_contracts": blob.get("chart_contracts") or {},
+                "has_data_specs": bool(blob.get("data_specs_text")),
             },
             source="skills",
         )
@@ -1307,6 +1310,46 @@ def _ingest_skills(store: GraphStore, skills_dir: Path) -> None:
                     "VALIDATED_BY", canonical_uri("table", first_table), r_uri,
                     properties={"origin": skill_id}, source="skills",
                 )
+
+        # data_specs.md valid values → FilterValue (curated, is_structural)
+        for entry in blob.get("valid_values") or []:
+            table = str(entry.get("table") or "")
+            column = str(entry.get("column") or "")
+            if not (table and column):
+                continue
+            store.upsert_node(
+                "Column", canonical_uri("column", table, column),
+                properties={"table_name": table}, source="skills",
+            )
+            for value in entry.get("values") or []:
+                fv_uri = canonical_uri("filtervalue", table, column, value)
+                store.upsert_node(
+                    "FilterValue", fv_uri,
+                    properties={
+                        "table_name": table, "column_name": column,
+                        "value": value, "is_structural": False,
+                        "origin_skill": skill_id, "curated": True,
+                    },
+                    source="skills",
+                )
+
+        # data_specs.md segmentation bands → CodeMapping (raw → human label)
+        for band in blob.get("bands") or []:
+            column = str(band.get("column") or "")
+            raw = str(band.get("raw") or "")
+            label = str(band.get("label") or "")
+            if not (column and raw and label):
+                continue
+            cm_uri = canonical_uri("codemapping", column, raw)
+            store.upsert_node(
+                "CodeMapping", cm_uri,
+                properties={
+                    "column": column, "raw_value": raw,
+                    "human_meaning": label, "source": "data_specs",
+                    "origin_skill": skill_id,
+                },
+                source="skills",
+            )
 
 
 def _resolve_guardrail_target(

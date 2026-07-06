@@ -1,0 +1,3 @@
+id: CPS_ContributionAnalysis
+description: Rate/mix contribution decomposition.
+tables: [common.roll_rate_calc]
