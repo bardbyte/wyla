@@ -245,6 +245,9 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             else:
                 client = VertexLLMClient()
                 _note(f"strategy: pro-only · model={client.model}")
+            if getattr(client, "tls_mode", "default") != "default":
+                _note(f"tls: {client.tls_mode} "
+                      "(via GEMINI_CA_BUNDLE / GEMINI_TLS_INSECURE)")
         except RuntimeError as exc:
             _note(f"⚠ enrichment skipped: {exc}")
             run_report["enrichment"] = {"status": "skipped",
@@ -266,6 +269,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                 # real analyst SQL staged by the session split — Gemini's
                 # strongest grounding evidence
                 evidence_dir=sources_dir / "mdm_cache",
+                demo_out=out_root / "demo_questions.json",
             )
             n_obs = sum(len(b.column_observations) for b in bundles.values())
             n_syn = sum(len(b.candidate_synonyms) for b in bundles.values())
@@ -293,6 +297,13 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                   "corpus-witnessed (skipped) · "
                   f"{totals.get('dropped_ungrounded_relations', 0)} "
                   "ungrounded (dropped)")
+            _note(f"demo pack: {totals.get('applied_demo_questions', 0)} "
+                  "verified-answerable question(s) · "
+                  f"{totals.get('held_unanswerable_demo_questions', 0)} "
+                  "held (capability missing) · "
+                  f"{totals.get('dropped_ungrounded_demo_questions', 0)} "
+                  "dropped ungrounded → "
+                  f"{out_root / 'demo_questions.md'}")
             if getattr(client, "stats", None):
                 _note(f"gemini: {client.stats.get('calls', 0)} call(s) · "
                       f"{client.stats.get('corrective_retries', 0)} "

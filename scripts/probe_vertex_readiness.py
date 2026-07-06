@@ -566,6 +566,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  export GEMINI_MODEL_PRO={rec['pro']}")
     if rec["flash"]:
         print(f"  export GEMINI_MODEL_FLASH={rec['flash']}")
+    # the pipeline's VertexLLMClient needs the SAME TLS handling that
+    # made this probe succeed
+    if args.insecure:
+        print("  export GEMINI_TLS_INSECURE=1   # pipeline --enrich needs "
+              "the same TLS bypass the probe needed")
+    elif args.ca_bundle:
+        print(f"  export GEMINI_CA_BUNDLE={args.ca_bundle}")
     if rec["strategy"] == "tiered":
         print("  pipeline: --enrich --enrich-strategy tiered   "
               "(chunk 1 + narrow tables → PRO; chunks 2..N of wide "
