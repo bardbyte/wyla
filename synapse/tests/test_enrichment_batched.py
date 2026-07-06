@@ -82,7 +82,9 @@ def test_wide_table_is_chunked_and_merged():
     assert "llm_generated" in node.provenance.sources
 
 
-def test_call_budget_skips_tables_in_band_not_silently():
+def test_call_budget_partially_enriches_wide_tables_in_band():
+    """A wide table must never be skippable forever: it gets its first
+    remaining chunks; only a fully-spent budget skips tables outright."""
     store = _store_with("t_one", 10)
     t2 = canonical_uri("table", "t_two")
     store.upsert_node("Table", t2, {"table_name": "t_two"}, source="mdm")
@@ -93,15 +95,27 @@ def test_call_budget_skips_tables_in_band_not_silently():
         store.upsert_edge("CONTAINS", t2,
                           canonical_uri("column", "t_two", f"c{i}"),
                           {}, source="mdm")
+    t3 = canonical_uri("table", "t_three")
+    store.upsert_node("Table", t3, {"table_name": "t_three"}, source="mdm")
+    store.upsert_node(
+        "Column", canonical_uri("column", "t_three", "z"),
+        {"table_name": "t_three"}, source="mdm")
+    store.upsert_edge("CONTAINS", t3,
+                      canonical_uri("column", "t_three", "z"),
+                      {}, source="mdm")
+
     client = CountingClient()
     bundles = enrich_graph(store, client, column_batch_size=40, max_calls=2)
 
-    assert len(client.calls) <= 2
-    enriched = set(bundles)
-    assert len(enriched) == 1                            # one table fit
-    only = bundles[next(iter(enriched))]
-    skipped = only.self_assessment.tables_skipped_for_lack_of_signal
-    assert any("enrichment budget exhausted" in s for s in skipped)
+    assert len(client.calls) == 2
+    assert set(bundles) == {"t_one", "t_two"}          # t_two PARTIAL, not skipped
+    assert len(bundles["t_two"].column_observations) == 40   # first chunk only
+    partial_notes = bundles["t_two"].self_assessment.requires_steward_attention
+    assert any("partial enrichment: first 1 of 3" in n for n in partial_notes)
+    # budget now spent → t_three is skipped, and loudly
+    skipped = [s for b in bundles.values()
+               for s in b.self_assessment.tables_skipped_for_lack_of_signal]
+    assert any("t_three (enrichment budget exhausted)" in s for s in skipped)
 
 
 def test_only_tables_filter_is_case_insensitive():

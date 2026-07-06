@@ -68,6 +68,7 @@ def _install_fake_genai(monkeypatch, responses: list):
 
 def _client(monkeypatch, responses: list):
     calls = _install_fake_genai(monkeypatch, responses)
+    monkeypatch.setenv("GEMINI_RETRY_BACKOFF_S", "0")   # no sleeps in tests
     from synapse.enrichment.vertex_client import VertexLLMClient
     return VertexLLMClient(), calls
 
@@ -81,7 +82,8 @@ def test_thinking_enabled_by_default_with_dynamic_budget(monkeypatch):
     assert cfg["thinking_config"].thinking_budget == -1   # dynamic
     assert cfg["response_mime_type"] == "application/json"
     assert client.stats == {"calls": 1, "corrective_retries": 0,
-                            "thinking_fallbacks": 0}
+                            "thinking_fallbacks": 0, "call_retries": 0,
+                            "context_truncations": 0}
 
 
 def test_thinking_budget_zero_disables_thinking(monkeypatch):
@@ -132,11 +134,41 @@ def test_second_failure_keeps_original_in_band_note(monkeypatch):
                for n in bundle.self_assessment.requires_steward_attention)
 
 
-def test_network_error_is_in_band_not_raised(monkeypatch):
-    client, _ = _client(monkeypatch, [RuntimeError("503 unavailable")])
+def test_transient_call_failure_is_retried_and_recovers(monkeypatch):
+    client, calls = _client(monkeypatch, [
+        RuntimeError("503 unavailable"),          # transient blip
+        VALID_BUNDLE,                             # retry succeeds
+    ])
     bundle = client.enrich(skill_md="s", context={}, table_name="t")
-    assert any("vertex call failed" in n
-               for n in bundle.self_assessment.requires_steward_attention)
+    assert bundle.column_observations[0].column_name == "c1"
+    assert client.stats["call_retries"] == 1
+    assert len(calls) == 2
+
+
+def test_persistent_call_failure_is_in_band_with_type(monkeypatch):
+    client, _ = _client(monkeypatch, [
+        RuntimeError("503 unavailable"), RuntimeError("503 unavailable"),
+    ])
+    bundle = client.enrich(skill_md="s", context={}, table_name="t")
+    notes = bundle.self_assessment.requires_steward_attention
+    assert any("vertex call failed" in n and "503" in n for n in notes)
+    assert client.stats["call_retries"] == 1      # exactly one retry
+
+
+def test_empty_model_response_carries_finish_reason(monkeypatch):
+    client, _ = _client(monkeypatch, ["", ""])    # empty text both tries
+    bundle = client.enrich(skill_md="s", context={}, table_name="t")
+    notes = bundle.self_assessment.requires_steward_attention
+    assert any("empty model response" in n and "finish_reason" in n
+               for n in notes)
+
+
+def test_context_truncation_is_counted(monkeypatch):
+    monkeypatch.setenv("GEMINI_MAX_CONTEXT_CHARS", "200")
+    client, _ = _client(monkeypatch, [VALID_BUNDLE])
+    client.enrich(skill_md="s", context={"blob": "x" * 2000},
+                  table_name="t")
+    assert client.stats["context_truncations"] == 1
 
 
 def test_context_cap_default_and_env_override(monkeypatch):

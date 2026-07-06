@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -252,8 +253,11 @@ class VertexLLMClient:
             os.environ.get("GEMINI_THINKING_BUDGET", "-1"))
         self.max_context_chars = int(os.environ.get(
             "GEMINI_MAX_CONTEXT_CHARS", str(_DEFAULT_MAX_CONTEXT_CHARS)))
+        self.retry_backoff_s = float(
+            os.environ.get("GEMINI_RETRY_BACKOFF_S", "2"))
         self.stats = {"calls": 0, "corrective_retries": 0,
-                      "thinking_fallbacks": 0}
+                      "thinking_fallbacks": 0, "call_retries": 0,
+                      "context_truncations": 0}
 
     def _generate(self, prompt: str) -> str:
         """One model call. Thinking on by default; endpoints that reject
@@ -281,22 +285,63 @@ class VertexLLMClient:
                 )
             else:
                 raise
-        return response.text or ""
+        try:
+            text = response.text or ""
+        except Exception:      # some SDK versions raise on empty candidates
+            text = ""
+        if not text.strip():
+            # surface WHY the model returned nothing — safety block and
+            # thinking-consumed-token cases are invisible otherwise
+            finish = block = None
+            try:
+                cand = (response.candidates or [None])[0]
+                finish = str(getattr(cand, "finish_reason", None))
+            except Exception:
+                pass
+            try:
+                block = str(getattr(
+                    getattr(response, "prompt_feedback", None),
+                    "block_reason", None))
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"empty model response (finish_reason={finish}, "
+                f"block_reason={block})")
+        return text
+
+    def _generate_with_retry(self, prompt: str) -> str:
+        """One transient-failure retry with backoff — a blip must not
+        cost a whole chunk; a real failure still lands in-band with the
+        exception type attached."""
+        try:
+            return self._generate(prompt)
+        except Exception:
+            self.stats["call_retries"] += 1
+            time.sleep(self.retry_backoff_s)
+            try:
+                return self._generate(prompt)
+            except Exception as second:
+                raise RuntimeError(
+                    f"{type(second).__name__}: {str(second)[:180]}"
+                ) from second
 
     def enrich(self, *, skill_md: str, context: dict[str, Any],
                table_name: str) -> EnrichmentBundle:
         batch = context.get("batch") or {}
+        context_json = _serialize_context(context, self.max_context_chars)
+        if context_json.endswith(_TRUNCATION_MARKER):
+            self.stats["context_truncations"] += 1
         prompt = _PROMPT_TEMPLATE.format(
             skill_md=skill_md,
             table_name=table_name,
             chunk=batch.get("chunk", 1),
             of=batch.get("of", 1),
             n_cols=batch.get("columns_in_chunk", "all"),
-            context_json=_serialize_context(context, self.max_context_chars),
+            context_json=context_json,
         )
         self.stats["calls"] += 1
         try:
-            text = self._generate(prompt)
+            text = self._generate_with_retry(prompt)
         except Exception as exc:  # network/model error → in-band failure
             return _empty_bundle(
                 table_name, f"vertex call failed: {str(exc)[:200]}")
@@ -316,7 +361,7 @@ class VertexLLMClient:
             "EnrichmentBundle schema. No prose, no fences."
         )
         try:
-            retry_text = self._generate(retry_prompt)
+            retry_text = self._generate_with_retry(retry_prompt)
         except Exception as exc:
             bundle.self_assessment.requires_steward_attention.append(
                 f"corrective retry also failed: {str(exc)[:160]}")
