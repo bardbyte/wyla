@@ -112,3 +112,44 @@ def test_readiness_probe_flags_unextracted_manifest_tables(tmp_path):
     )
     assert "roll_rate_calc" in proc.stdout
     assert "not_extracted" in proc.stdout
+
+
+# ─── bq_loader tolerates every meta JSON shape (crash repro) ──
+
+
+def test_bq_loader_reads_pretty_printed_table_meta(tmp_path):
+    """Repro of the laptop crash: bq_batch_extract writes 1_3__table_meta
+    .json with json.dump(indent=2); the reader used to grab the first
+    line ('{') and crash with JSONDecodeError."""
+    from synapse.loaders.bq_loader import _read_json_first_row, load_bq_for_table
+
+    # exactly what json.dump(..., indent=2) produces — starts with a bare '{'
+    pretty = ('{\n  "table_name": "custins_customer_insights_cardmember",\n'
+              '  "table_type": "VIEW",\n  "ddl": "CREATE VIEW x AS SELECT 1"\n}\n')
+    p = tmp_path / "1_3__table_meta.json"
+    p.write_text(pretty, encoding="utf-8")
+    meta = _read_json_first_row(p)                 # must NOT raise
+    assert meta["table_type"] == "VIEW"
+
+    # array form and JSONL form both still work
+    (tmp_path / "arr.json").write_text('[{"table_type": "BASE TABLE"}]')
+    assert _read_json_first_row(tmp_path / "arr.json")["table_type"] == "BASE TABLE"
+    (tmp_path / "jsonl.json").write_text(
+        '{"table_type": "VIEW"}\n{"table_type": "IGNORED"}\n')
+    assert _read_json_first_row(tmp_path / "jsonl.json")["table_type"] == "VIEW"
+
+    # end-to-end: a cardmember-shaped folder now loads without crashing
+    tdir = tmp_path / "custins_customer_insights_cardmember"
+    tdir.mkdir()
+    (tdir / "1_1__columns.csv").write_text(
+        "column_name,data_type,is_nullable,is_partitioning_column,"
+        "clustering_ordinal_position\ncm11,STRING,NO,NO,\n", encoding="utf-8")
+    (tdir / "1_3__table_meta.json").write_text(pretty, encoding="utf-8")
+    result = load_bq_for_table(
+        "custins_customer_insights_cardmember",
+        source_dir=tmp_path, out_dir=tmp_path / "out")
+    assert result.status in ("ok", "partial")
+    blob = json.loads(
+        (tmp_path / "out" / "bq_cache"
+         / "custins_customer_insights_cardmember.json").read_text())
+    assert blob["asset_kind"] == "View"

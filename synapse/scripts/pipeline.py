@@ -98,11 +98,23 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         outcomes = []
         for tdir in table_dirs:
             # loader contract: source_dir is the PARENT containing <table>/
-            result = load_bq_for_table(
-                tdir.name, source_dir=bq_root, out_dir=sources_dir)
-            outcomes.append({"table": tdir.name, "status": result.status})
+            # One malformed artifact must not kill the whole run — catch,
+            # report, keep going (matches the sparse-tolerant MDM stage).
+            try:
+                result = load_bq_for_table(
+                    tdir.name, source_dir=bq_root, out_dir=sources_dir)
+                status, note = result.status, (result.error or "")
+            except Exception as exc:
+                status, note = "error", f"{type(exc).__name__}: {exc}"
+            outcomes.append({"table": tdir.name, "status": status,
+                             "note": note[:120]})
+            if status == "error":
+                _note(f"  ✗ {tdir.name}: {note[:80]}")
+        n_ok = sum(1 for o in outcomes if o["status"] in ("ok", "partial"))
         run_report["bq"] = {"tables": outcomes}
-        _note(f"{len(outcomes)} table extraction folder(s) staged")
+        _note(f"{n_ok}/{len(outcomes)} table extraction folder(s) staged"
+              + (f" · {len(outcomes) - n_ok} failed" if n_ok < len(outcomes)
+                 else ""))
 
     # ── 4. Lumi fused output (governance + corpus witness) ───
     if args.lumi_session:

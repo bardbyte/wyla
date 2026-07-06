@@ -517,12 +517,30 @@ def _team_from_email(email: str) -> str:
 
 
 def _read_json_first_row(path: Path) -> dict[str, Any]:
-    """BigQuery JSON exports are usually newline-delimited."""
+    """First/only JSON object from a file, whatever its shape.
+
+    Accepts a single (possibly pretty-printed multi-line) object, a JSON
+    array, or newline-delimited JSON — bq_batch_extract writes the meta
+    with ``json.dump(..., indent=2)`` (pretty single object), so reading
+    only the first line grabbed a bare ``{`` and crashed. Whole-file
+    parse first, JSONL fallback second.
+    """
     text = path.read_text(encoding="utf-8").strip()
     if not text:
         return {}
-    if text.startswith("["):
-        rows = json.loads(text)
-        return rows[0] if rows else {}
-    first_line = text.splitlines()[0]
-    return json.loads(first_line)
+    try:
+        data = json.loads(text)                    # pretty object OR array
+    except json.JSONDecodeError:
+        data = None
+        for line in text.splitlines():             # newline-delimited JSON
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                data = {}
+            break
+    if isinstance(data, list):
+        data = data[0] if data else {}
+    return data if isinstance(data, dict) else {}
