@@ -50,6 +50,7 @@ class EnrichmentBundle:
     candidate_synonyms: list[CandidateSynonym]    # acronyms / aliases not in glossary
     candidate_code_resolutions: list[CodeResolution]
     candidate_filter_rationale: list[FilterRationale]
+    candidate_demo_questions: list[DemoQuestion]  # showcase questions (chunk 1 only)
     self_assessment: SelfAssessment
 ```
 
@@ -95,6 +96,17 @@ class FilterRationale:
     observed_in_pct_of_queries: float
     proposed_rationale: str                       # WHY does this filter exist?
     safety_note: str | None                       # "queries without this likely double-count"
+
+class DemoQuestion:
+    question: str                                 # exec-friendly natural language
+    audience: Literal["analyst", "vp", "c_suite"]
+    answered_by: list[Literal[                    # capabilities the answer uses
+        "column_semantics", "metrics", "code_resolutions",
+        "related_tables", "lineage", "governance", "guardrails",
+        "usage", "warehouse_sql"]]
+    grounding: list[str]                          # REAL table/column/metric/skill names
+    expected_answer_sketch: str                   # 1-2 sentences: what the graph says
+    wow_factor: str                               # 1 sentence: why this impresses
 
 class SelfAssessment:
     tables_skipped_for_lack_of_signal: list[str]
@@ -163,6 +175,42 @@ class SelfAssessment:
   double-count rows from legacy backfills" or equivalent.
 - The user can later promote this to a Rule node in the glossary.
 
+### When to propose a DemoQuestion (chunk 1 only, ≤5 per table)
+
+The demo audience KNOWS this data — a question only lands if the answer
+surfaces something true and non-obvious about THEIR tables. Propose
+questions ONLY when you can already see the answer in the evidence
+provided; the gate re-verifies every claimed capability against the
+built graph and silently holds anything the graph can't back.
+
+The archetypes that impress, in rough order:
+
+1. **Tribal knowledge surfaced** — "What does status code '005' actually
+   mean, and where did that meaning come from?" (code_resolutions with
+   corpus evidence), or "Why does every query on this table filter
+   data_source = 'CAS'?" (filter rationale).
+2. **Fused-witness answers** — "Who owns roll_rate_calc, which pipeline
+   feeds it, and who actually queries it?" — one question, three
+   sources (governance + lineage + usage) fused in one answer.
+3. **The guardrail save** — "Show me cardmember-level spend by
+   cm11_encrypted" — the agent REFUSES with the skill-sourced rule and
+   proposes the compliant alternative. Ask the forbidden thing on
+   purpose.
+4. **Proved relationships** — "Can I join sbs_new_accounts to the roll
+   rate summary, and on what keys?" (related_tables backed by real
+   corpus joins).
+
+Rules:
+- `grounding` must name real tables/columns/metrics/skills from your
+  context — a question grounded in nothing is dropped.
+- `answered_by` uses only the fixed vocabulary; claim ONLY capabilities
+  whose evidence you can see (e.g. don't claim `lineage` if the
+  inspection shows empty upstream AND downstream).
+- `expected_answer_sketch` is what the graph would say — if you can't
+  sketch the answer, don't propose the question.
+- Match `audience`: c_suite = one-breath business answers; vp =
+  trust/governance/ownership; analyst = mechanics and joins.
+
 ### When to propose relates_to
 
 - The target MUST be a table+column you can see in `tables_in_scope`
@@ -204,6 +252,8 @@ this chunk's columns.
   Never mention a column from another chunk — you haven't seen it.
 - Propose `table_description_proposal` ONLY on chunk 1 of N; leave it
   null on later chunks (chunks are merged; first wins).
+- Propose `candidate_demo_questions` ONLY on chunk 1 (table-level
+  reasoning); leave the list empty on later chunks.
 - Synonyms / code resolutions / filter rationale: emit what THIS chunk
   evidences; duplicates across chunks are deduped at merge.
 
@@ -222,6 +272,10 @@ in code before anything reaches the graph:
 - `relates_to` whose target table+column doesn't exist → **dropped**;
   relations the corpus already witnessed → **skipped** (you read that
   corpus — echoing it back is not independent corroboration)
+- `candidate_demo_questions` with no grounded reference → **dropped**;
+  questions claiming a capability the built graph doesn't have for the
+  table (e.g. `lineage` when both directions are empty) → **held** out
+  of the demo script
 
 Every drop is counted and reported to the operator. High drop counts get
 your run flagged — abstaining (`null` + `ambiguity_flag`) is always

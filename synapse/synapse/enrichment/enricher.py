@@ -55,6 +55,7 @@ def enrich_graph(
     max_calls: int | None = None,
     grounding_reports: dict[str, dict] | None = None,
     evidence_dir: Path | None = None,
+    demo_out: Path | None = None,
 ) -> dict[str, EnrichmentBundle]:
     """Run the LLM enrichment pass over every Table in the store — BATCHED.
 
@@ -76,6 +77,11 @@ def enrich_graph(
         evidence_dir: staged per-table signal files (the session split's
             ``mdm_cache/<table>.json``) — real SQL snippets from
             ``queries_using_this`` are fed to the LLM as primary evidence.
+        demo_out: where to write the demo pack (a ``.json`` path; a
+            rehearsal-ready ``.md`` script lands alongside it). Only
+            questions that survived BOTH gates — grounded references AND
+            every claimed capability present in the built graph — reach
+            the script.
 
     Returns:
         dict mapping table_name → merged EnrichmentBundle (also written
@@ -86,6 +92,8 @@ def enrich_graph(
     bundles: dict[str, EnrichmentBundle] = {}
     calls_made = 0
     skipped_for_budget: list[str] = []
+    demo_pack: list[dict[str, Any]] = []
+    demo_pack_held: list[dict[str, Any]] = []
 
     table_nodes = [
         n for n in store.nodes_by_type("Table")
@@ -140,6 +148,10 @@ def enrich_graph(
         bundle = parts[0] if len(parts) == 1 else _merge_bundles(
             table_name, parts)
         table_report = _apply_bundle(store, bundle)
+        # demo packs are payloads, not counters — pull them out so
+        # grounding_reports stays int-only for the pipeline's totals
+        demo_pack.extend(table_report.pop("demo_pack", []))
+        demo_pack_held.extend(table_report.pop("demo_pack_held", []))
         if grounding_reports is not None:
             grounding_reports[table_name] = table_report
         bundles[table_name] = bundle
@@ -158,6 +170,17 @@ def enrich_graph(
                 {tn: b.model_dump() for tn, b in bundles.items()},
                 indent=2, default=str,
             ),
+            encoding="utf-8",
+        )
+    if demo_out is not None:
+        demo_out.parent.mkdir(parents=True, exist_ok=True)
+        demo_out.write_text(
+            json.dumps({"verified": demo_pack, "held": demo_pack_held},
+                       indent=2, default=str),
+            encoding="utf-8",
+        )
+        demo_out.with_suffix(".md").write_text(
+            _render_demo_script(demo_pack, n_held=len(demo_pack_held)),
             encoding="utf-8",
         )
     return bundles
@@ -193,6 +216,13 @@ def _merge_bundles(
                 seen_res.add(key)
                 resolutions.append(cr)
     filters = [f for p in parts for f in p.candidate_filter_rationale]
+    questions, seen_q = [], set()
+    for p in parts:
+        for q in p.candidate_demo_questions:
+            key = _norm(q.question)
+            if key and key not in seen_q:
+                seen_q.add(key)
+                questions.append(q)
     attention = [a for p in parts
                  for a in p.self_assessment.requires_steward_attention]
     return EnrichmentBundle(
@@ -202,6 +232,7 @@ def _merge_bundles(
         candidate_synonyms=synonyms,
         candidate_code_resolutions=resolutions,
         candidate_filter_rationale=filters,
+        candidate_demo_questions=questions,
         self_assessment=SelfAssessment(
             tables_skipped_for_lack_of_signal=[],
             columns_marked_ambiguous=sum(
@@ -422,6 +453,37 @@ def _norm(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
 
 
+def _has_signal(value: Any) -> bool:
+    """True when a chunk of inspector output carries real content."""
+    if isinstance(value, dict):
+        return any(_has_signal(v) for v in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return len(value) > 0
+    return value not in (None, "", 0, False)
+
+
+def _capabilities_present(store: GraphStore, table_name: str) -> dict[str, bool]:
+    """Which demo capabilities the BUILT graph actually has for this
+    table — the answerability check behind the demo-question gate."""
+    inspection = inspect_table(store, table_name)
+    norm_table = _norm(table_name)
+    return {
+        "column_semantics": _has_signal(inspection.get("columns")),
+        "metrics": _has_signal(inspection.get("metrics")),
+        "code_resolutions": _has_signal(inspection.get("code_resolutions")),
+        "related_tables": _has_signal(inspection.get("related_tables")),
+        "lineage": _has_signal(inspection.get("lineage")),
+        "governance": _has_signal(inspection.get("governance")),
+        "usage": _has_signal(inspection.get("usage")),
+        "guardrails": any(
+            e.edge_type == "CONSTRAINS" and norm_table in _norm(e.to_uri)
+            for e in store.edges.values()),
+        # verifiable only against live BQ at demo time — allowed through,
+        # flagged in the rendered script
+        "warehouse_sql": True,
+    }
+
+
 def _apply_bundle(
     store: GraphStore, bundle: EnrichmentBundle,
 ) -> dict[str, Any]:
@@ -454,7 +516,14 @@ def _apply_bundle(
         "applied_relations": 0,
         "skipped_existing_relations": 0,
         "dropped_ungrounded_relations": 0,
+        "applied_demo_questions": 0,
+        "held_unanswerable_demo_questions": 0,
+        "dropped_ungrounded_demo_questions": 0,
         "ambiguity_flags": 0,
+        # non-counter payloads — popped by enrich_graph before the report
+        # joins grounding_reports (which stay int-only for aggregation)
+        "demo_pack": [],
+        "demo_pack_held": [],
     }
     known = _grounding_index(store)
     t_uri = canonical_uri("table", bundle.table_name)
@@ -569,7 +638,76 @@ def _apply_bundle(
             },
             source="llm_generated",
         )
+
+    # Demo questions — never written to the graph (they're a demo
+    # artifact, not facts). Survive only when (a) at least one grounding
+    # reference names something the graph knows, and (b) every claimed
+    # capability is PRESENT in the built graph for this table — the
+    # demo script must not contain a question the graph can't answer.
+    if bundle.candidate_demo_questions:
+        caps = _capabilities_present(store, bundle.table_name)
+        for q in bundle.candidate_demo_questions:
+            if not any(_norm(g) in known for g in q.grounding):
+                report["dropped_ungrounded_demo_questions"] += 1
+                continue
+            missing = [c for c in q.answered_by if not caps.get(c)]
+            entry = {**q.model_dump(), "table": bundle.table_name}
+            if not q.answered_by or missing:
+                entry["missing_capabilities"] = missing or ["(none claimed)"]
+                report["held_unanswerable_demo_questions"] += 1
+                report["demo_pack_held"].append(entry)
+                continue
+            report["applied_demo_questions"] += 1
+            report["demo_pack"].append(entry)
     return report
+
+
+_AUDIENCE_ORDER = [
+    ("c_suite", "C-Suite — the 30-second wins"),
+    ("vp", "VP — governance, lineage, and trust"),
+    ("analyst", "Analyst — depth on demand"),
+]
+
+
+def _render_demo_script(
+    pack: list[dict[str, Any]], *, n_held: int = 0,
+) -> str:
+    """The verified demo pack → a rehearsal-ready markdown script.
+
+    Every question in here passed BOTH gates: its grounding references
+    resolve against the graph, and every capability its answer needs is
+    present in the compiled snapshot. Ask any of these live."""
+    lines = [
+        "# Demo script — questions this graph provably answers",
+        "",
+        f"{len(pack)} verified question(s)"
+        + (f" · {n_held} held back (capability not yet in this compile — "
+           "see demo_questions.json)" if n_held else "") + ".",
+        "Every entry passed the grounding gate: real entities, and the",
+        "graph sections its answer needs are populated in THIS snapshot.",
+        "",
+    ]
+    for audience, heading in _AUDIENCE_ORDER:
+        rows = [q for q in pack if q.get("audience") == audience]
+        if not rows:
+            continue
+        lines += [f"## {heading}", ""]
+        for q in rows:
+            caps = ", ".join(q.get("answered_by") or [])
+            grounding = ", ".join(f"`{g}`" for g in (q.get("grounding") or []))
+            lines += [
+                f"### “{q.get('question', '').strip()}”",
+                "",
+                f"- **Table:** `{q.get('table', '')}` · **Uses:** {caps}",
+                f"- **Grounded in:** {grounding}",
+                f"- **Expected answer:** {q.get('expected_answer_sketch', '')}",
+                f"- **Why it lands:** {q.get('wow_factor', '')}",
+            ]
+            if "warehouse_sql" in (q.get("answered_by") or []):
+                lines.append(
+                    "- ⚠ needs the live gated BigQuery path at demo time")
+            lines.append("")
+    return "\n".join(lines) + "\n"
 
 
 # ─── Convenience factory: a mock LLM client for tests ───────
