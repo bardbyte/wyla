@@ -41,7 +41,10 @@ def _install_fake_genai(monkeypatch, responses: list):
             return pytypes.SimpleNamespace(text=outcome)
 
     class FakeClient:
+        inits: list[dict] = []          # shared: records constructor kwargs
+
         def __init__(self, *args, **kwargs):
+            FakeClient.inits.append(kwargs)
             self.models = FakeModels()
 
     class ThinkingConfig:
@@ -52,9 +55,14 @@ def _install_fake_genai(monkeypatch, responses: list):
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
+    class HttpOptions:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
     fake_types = pytypes.ModuleType("google.genai.types")
     fake_types.ThinkingConfig = ThinkingConfig
     fake_types.GenerateContentConfig = GenerateContentConfig
+    fake_types.HttpOptions = HttpOptions
     fake_genai = pytypes.ModuleType("google.genai")
     fake_genai.Client = FakeClient
     fake_genai.types = fake_types
@@ -208,10 +216,69 @@ def test_client_applies_tls_before_building_transport(monkeypatch):
     import synapse.enrichment.vertex_client as vc
     monkeypatch.setenv("GEMINI_TLS_INSECURE", "true")
     applied: list[str] = []
-    monkeypatch.setattr(vc, "_apply_tls", applied.append)
+    monkeypatch.setattr(
+        vc, "_apply_tls", lambda mode: (applied.append(mode), {})[1])
     client, _ = _client(monkeypatch, [VALID_BUNDLE])
     assert client.tls_mode == "insecure"
     assert applied == ["insecure"]
+
+
+def test_insecure_verify_is_handed_to_sdk_directly(monkeypatch):
+    """The field lesson: monkey-patching httpx was defeated by import
+    order. verify MUST reach genai.Client via HttpOptions.client_args."""
+    import sys as _sys
+
+    import synapse.enrichment.vertex_client as vc
+    monkeypatch.setenv("GEMINI_TLS_INSECURE", "1")
+    monkeypatch.setattr(vc, "_apply_tls", lambda mode: {"truststore": False})
+    client, _ = _client(monkeypatch, [VALID_BUNDLE])
+    assert client.tls_sdk_direct is True
+    inits = _sys.modules["google.genai"].Client.inits
+    http_options = inits[-1]["http_options"]
+    assert http_options.kwargs["client_args"] == {"verify": False}
+    assert http_options.kwargs["async_client_args"] == {"verify": False}
+
+
+def test_ca_bundle_verify_path_reaches_sdk(monkeypatch, tmp_path):
+    import sys as _sys
+
+    import synapse.enrichment.vertex_client as vc
+    pem = tmp_path / "corp.pem"
+    pem.write_text("dummy", encoding="utf-8")
+    monkeypatch.setenv("GEMINI_CA_BUNDLE", str(pem))
+    monkeypatch.setattr(vc, "_apply_tls", lambda mode: {"truststore": False})
+    client, _ = _client(monkeypatch, [VALID_BUNDLE])
+    inits = _sys.modules["google.genai"].Client.inits
+    verify = inits[-1]["http_options"].kwargs["client_args"]["verify"]
+    assert verify == str(pem.resolve())
+
+
+def test_default_mode_passes_no_http_options(monkeypatch):
+    import sys as _sys
+    for var in ("GEMINI_TLS_INSECURE", "GEMINI_CA_BUNDLE"):
+        monkeypatch.delenv(var, raising=False)
+    client, _ = _client(monkeypatch, [VALID_BUNDLE])
+    assert client.tls_sdk_direct is False
+    assert "http_options" not in _sys.modules["google.genai"].Client.inits[-1]
+
+
+def test_old_sdk_without_client_args_degrades_to_patches(monkeypatch):
+    import synapse.enrichment.vertex_client as vc
+
+    class _Rejecting:
+        def __init__(self, **kwargs):
+            raise TypeError("unexpected keyword argument 'client_args'")
+
+    monkeypatch.setenv("GEMINI_TLS_INSECURE", "1")
+    monkeypatch.setattr(vc, "_apply_tls", lambda mode: {"truststore": False})
+    calls = _install_fake_genai(monkeypatch, [VALID_BUNDLE])
+    import sys as _sys
+    _sys.modules["google.genai.types"].HttpOptions = _Rejecting
+    _sys.modules["google.genai"].types.HttpOptions = _Rejecting
+    from synapse.enrichment.vertex_client import VertexLLMClient
+    client = VertexLLMClient()
+    assert client.tls_sdk_direct is False        # fell back, didn't crash
+    del calls
 
 
 def test_ca_bundle_mode_sets_standard_env_vars(monkeypatch, tmp_path):

@@ -246,8 +246,14 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                 client = VertexLLMClient()
                 _note(f"strategy: pro-only · model={client.model}")
             if getattr(client, "tls_mode", "default") != "default":
-                _note(f"tls: {client.tls_mode} "
-                      "(via GEMINI_CA_BUNDLE / GEMINI_TLS_INSECURE)")
+                detail = getattr(client, "tls_detail", None) or {}
+                _note(f"tls: {client.tls_mode} · "
+                      f"truststore={'yes' if detail.get('truststore') else 'no'}"
+                      " · sdk-verify="
+                      + ("direct (HttpOptions.client_args)"
+                         if getattr(client, "tls_sdk_direct", False)
+                         else "patched only (old SDK — upgrade "
+                              "google-genai if TLS errors persist)"))
         except RuntimeError as exc:
             _note(f"⚠ enrichment skipped: {exc}")
             run_report["enrichment"] = {"status": "skipped",
