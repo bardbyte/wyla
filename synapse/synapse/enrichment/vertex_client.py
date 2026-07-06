@@ -233,3 +233,59 @@ class VertexLLMClient:
                 f"recovered after corrective retry ({note})")
             return retry_bundle
         return bundle
+
+
+class TieredLLMClient:
+    """Route column chunks across the Gemini family — PRO where reasoning
+    lives, FLASH where breadth lives.
+
+    Chunk 1 of every table carries the semantic load: the table
+    description, cross-table relates_to, synonyms, and the scope digest
+    against which they must ground → PRO. Chunks 2..N of wide tables are
+    mechanical per-column observation work → FLASH (≈10x cheaper/faster,
+    and the grounding gate catches its mistakes the same way). Narrow
+    tables (single chunk) go entirely to PRO — they're the semantically
+    dense ones.
+
+    Concretely: risk_pers_acct_history (1,404 columns, 36 chunks) costs
+    1 PRO + 35 FLASH calls instead of 36 PRO calls.
+
+    Same LLMClient protocol — the enricher never knows. Routing reads the
+    `batch` metadata the enricher already sends. With no flash model
+    configured, everything falls back to PRO (probe first, then set
+    GEMINI_MODEL_FLASH from its recommendation).
+    """
+
+    def __init__(self, pro_model: str | None = None,
+                 flash_model: str | None = None,
+                 temperature: float = 0.0) -> None:
+        self.pro_model = (pro_model
+                          or os.environ.get("GEMINI_MODEL_PRO")
+                          or os.environ.get("GEMINI_MODEL",
+                                            "gemini-3.1-pro-preview"))
+        self.flash_model = (flash_model
+                            or os.environ.get("GEMINI_MODEL_FLASH"))
+        self._pro = VertexLLMClient(model=self.pro_model,
+                                    temperature=temperature)
+        self._flash = (VertexLLMClient(model=self.flash_model,
+                                       temperature=temperature)
+                       if self.flash_model else self._pro)
+
+    @property
+    def stats(self) -> dict[str, int]:
+        merged = {
+            key: self._pro.stats[key] + (
+                self._flash.stats[key] if self._flash is not self._pro else 0)
+            for key in self._pro.stats
+        }
+        merged["pro_calls"] = self._pro.stats["calls"]
+        merged["flash_calls"] = (self._flash.stats["calls"]
+                                 if self._flash is not self._pro else 0)
+        return merged
+
+    def enrich(self, *, skill_md: str, context: dict[str, Any],
+               table_name: str) -> EnrichmentBundle:
+        chunk = (context.get("batch") or {}).get("chunk", 1)
+        client = self._pro if chunk == 1 else self._flash
+        return client.enrich(skill_md=skill_md, context=context,
+                             table_name=table_name)

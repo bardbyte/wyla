@@ -158,6 +158,63 @@ def test_serialize_context_truncation_is_explicit():
     assert len(big) == 100 + len(_TRUNCATION_MARKER)
 
 
+# ─── tiered routing: pro for reasoning, flash for breadth ────
+
+
+def _tiered(monkeypatch, responses: list, **env):
+    calls = _install_fake_genai(monkeypatch, responses)
+    for var in ("GEMINI_MODEL_PRO", "GEMINI_MODEL_FLASH", "GEMINI_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+    for var, value in env.items():
+        monkeypatch.setenv(var, value)
+    from synapse.enrichment.vertex_client import TieredLLMClient
+    return TieredLLMClient(), calls
+
+
+def test_tiered_routes_chunk1_to_pro_rest_to_flash(monkeypatch):
+    client, calls = _tiered(
+        monkeypatch, [VALID_BUNDLE] * 3,
+        GEMINI_MODEL_PRO="pro-x", GEMINI_MODEL_FLASH="flash-y")
+    for chunk in (1, 2, 3):
+        client.enrich(skill_md="s",
+                      context={"batch": {"chunk": chunk, "of": 3}},
+                      table_name="t")
+    assert [c["model"] for c in calls] == ["pro-x", "flash-y", "flash-y"]
+    stats = client.stats
+    assert stats["calls"] == 3
+    assert stats["pro_calls"] == 1
+    assert stats["flash_calls"] == 2
+
+
+def test_tiered_single_chunk_table_stays_on_pro(monkeypatch):
+    client, calls = _tiered(
+        monkeypatch, [VALID_BUNDLE],
+        GEMINI_MODEL_PRO="pro-x", GEMINI_MODEL_FLASH="flash-y")
+    client.enrich(skill_md="s", context={"batch": {"chunk": 1, "of": 1}},
+                  table_name="t")
+    assert calls[0]["model"] == "pro-x"
+
+
+def test_tiered_without_flash_model_falls_back_to_pro(monkeypatch):
+    client, calls = _tiered(
+        monkeypatch, [VALID_BUNDLE] * 2, GEMINI_MODEL_PRO="pro-x")
+    for chunk in (1, 2):
+        client.enrich(skill_md="s",
+                      context={"batch": {"chunk": chunk, "of": 2}},
+                      table_name="t")
+    assert [c["model"] for c in calls] == ["pro-x", "pro-x"]
+    assert client.stats["flash_calls"] == 0
+    assert client.stats["calls"] == 2                 # not double-counted
+
+
+def test_tiered_missing_batch_metadata_defaults_to_pro(monkeypatch):
+    client, calls = _tiered(
+        monkeypatch, [VALID_BUNDLE],
+        GEMINI_MODEL_PRO="pro-x", GEMINI_MODEL_FLASH="flash-y")
+    client.enrich(skill_md="s", context={}, table_name="t")
+    assert calls[0]["model"] == "pro-x"
+
+
 def test_import_error_without_google_genai():
     """No fake installed + no real package → actionable RuntimeError."""
     try:

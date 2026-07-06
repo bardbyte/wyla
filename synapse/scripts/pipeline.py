@@ -236,8 +236,15 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         try:
             from synapse.enrichment.enricher import (
                 enrich_graph, propose_entities)
-            from synapse.enrichment.vertex_client import VertexLLMClient
-            client = VertexLLMClient()
+            from synapse.enrichment.vertex_client import (
+                TieredLLMClient, VertexLLMClient)
+            if args.enrich_strategy == "tiered":
+                client = TieredLLMClient()
+                _note(f"strategy: tiered · pro={client.pro_model} · "
+                      f"flash={client.flash_model or 'UNSET → all pro'}")
+            else:
+                client = VertexLLMClient()
+                _note(f"strategy: pro-only · model={client.model}")
         except RuntimeError as exc:
             _note(f"⚠ enrichment skipped: {exc}")
             run_report["enrichment"] = {"status": "skipped",
@@ -374,6 +381,13 @@ def main() -> None:
     parser.add_argument("--enrich-tables", default="",
                         help="comma list to enrich (default: manifest "
                              "tables, else every table in the graph)")
+    parser.add_argument("--enrich-strategy", default="pro-only",
+                        choices=["pro-only", "tiered"],
+                        help="tiered = chunk 1 + narrow tables on "
+                             "$GEMINI_MODEL_PRO, chunks 2..N of wide "
+                             "tables on $GEMINI_MODEL_FLASH (run "
+                             "scripts/probe_vertex_readiness.py first to "
+                             "pick the models)")
     parser.add_argument("--sources-dir",
                         default=str(SYNAPSE_ROOT / "data" / "cache" / "sources"),
                         help="staging dir for canonical artifacts")
