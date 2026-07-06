@@ -177,6 +177,37 @@ class SelfAssessment:
 8. You skipped the ambiguity_flag on a column where MDM and BQ disagree
    (e.g., MDM says nullable=True, BQ profile shows 100% non-null — flag it).
 
+## Batched input — wide tables arrive in chunks
+
+Tables can be very wide (1,400+ columns). You will receive them in
+COLUMN CHUNKS: the context carries `batch: {chunk: k, of: N,
+columns_in_chunk, total_columns}` and `inspection.columns` contains ONLY
+this chunk's columns.
+
+- Emit `column_observations` ONLY for columns present in this chunk.
+  Never mention a column from another chunk — you haven't seen it.
+- Propose `table_description_proposal` ONLY on chunk 1 of N; leave it
+  null on later chunks (chunks are merged; first wins).
+- Synonyms / code resolutions / filter rationale: emit what THIS chunk
+  evidences; duplicates across chunks are deduped at merge.
+
+## Machine enforcement — the gate that applies your output
+
+The anti-patterns above are not advisory. A grounding gate enforces them
+in code before anything reaches the graph:
+
+- observations for columns the graph doesn't have → **dropped**
+- `proposed_description` with `self_confidence < 0.3` OR empty
+  `evidence_used` → **held** (never written; your role/ambiguity notes
+  still land for audit)
+- `candidate_synonyms` whose `canonical_form` matches nothing the graph
+  knows (no column, metric, table, entity, or business name) → **dropped**
+- `candidate_code_resolutions` for columns that don't exist → **dropped**
+
+Every drop is counted and reported to the operator. High drop counts get
+your run flagged — abstaining (`null` + `ambiguity_flag`) is always
+better than being dropped.
+
 ## Input you'll receive per table
 
 A JSON document containing:

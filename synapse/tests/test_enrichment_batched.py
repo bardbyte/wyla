@@ -50,7 +50,8 @@ class CountingClient:
             column_observations=[
                 ColumnObservation(
                     column_name=c, proposed_description=f"about {c}",
-                    candidate_role="attribute", self_confidence=0.8)
+                    candidate_role="attribute", self_confidence=0.8,
+                    evidence_used=["mdm"])   # grounding gate holds no-evidence text
                 for c in cols
             ],
             self_assessment=SelfAssessment(

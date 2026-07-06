@@ -14,6 +14,7 @@ Two public functions:
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -52,6 +53,7 @@ def enrich_graph(
     memory_out: Path | None = None,
     column_batch_size: int = 40,
     max_calls: int | None = None,
+    grounding_reports: dict[str, dict] | None = None,
 ) -> dict[str, EnrichmentBundle]:
     """Run the LLM enrichment pass over every Table in the store — BATCHED.
 
@@ -127,7 +129,9 @@ def enrich_graph(
 
         bundle = parts[0] if len(parts) == 1 else _merge_bundles(
             table_name, parts)
-        _apply_bundle(store, bundle)
+        table_report = _apply_bundle(store, bundle)
+        if grounding_reports is not None:
+            grounding_reports[table_name] = table_report
         bundles[table_name] = bundle
 
     if skipped_for_budget and bundles:
@@ -294,11 +298,57 @@ def _build_context_for_table(store: GraphStore, table_name: str) -> dict[str, An
     }
 
 
-def _apply_bundle(store: GraphStore, bundle: EnrichmentBundle) -> None:
-    """Fold the LLM bundle back into the graph as `llm_generated` facts.
+def _grounding_index(store: GraphStore) -> set[str]:
+    """Every name the graph actually knows, normalized — the reference
+    set the grounding gate checks LLM claims against."""
+    names: set[str] = set()
 
-    Tag every write with source='llm_generated'. The provenance + tier
-    machinery in store.py caps these at `inferred` (skill.md rule 2)."""
+    def add(value: Any) -> None:
+        text = str(value or "").strip().lower()
+        if text:
+            names.add(re.sub(r"[^a-z0-9]", "", text))
+
+    for node in store.nodes.values():
+        add(node.canonical_uri.rsplit("/", 1)[-1])
+        for key in ("table_name", "business_name", "surface_form",
+                    "canonical_entity", "skill_id"):
+            add(node.properties.get(key))
+    names.discard("")
+    return names
+
+
+def _norm(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def _apply_bundle(
+    store: GraphStore, bundle: EnrichmentBundle,
+) -> dict[str, Any]:
+    """Fold the LLM bundle back into the graph as `llm_generated` facts —
+    through the GROUNDING GATE. skill.md's anti-patterns are enforced
+    here as code, not prose:
+
+      * observations for columns the graph doesn't have → dropped
+      * descriptions with self_confidence < 0.3 OR empty evidence_used
+        → HELD (ambiguity/role still recorded; text never written)
+      * synonyms whose canonical_form matches nothing the graph knows
+        (any column/metric/table/entity name or business name) → dropped
+      * code resolutions for columns that don't exist → dropped
+
+    Every drop/hold is counted in the returned grounding report so the
+    run is auditable — accuracy is enforced, not assumed. Tag every
+    write with source='llm_generated'; the tier machinery keeps these
+    facts below `grounded` until real witnesses corroborate."""
+    report = {
+        "applied_descriptions": 0,
+        "held_low_confidence": 0,
+        "held_no_evidence": 0,
+        "dropped_imagined_columns": 0,
+        "dropped_ungrounded_synonyms": 0,
+        "dropped_ungrounded_code_resolutions": 0,
+        "ambiguity_flags": 0,
+    }
+    known = _grounding_index(store)
     t_uri = canonical_uri("table", bundle.table_name)
 
     # Table description (only if sparse — see skill.md decision rules)
@@ -320,6 +370,7 @@ def _apply_bundle(store: GraphStore, bundle: EnrichmentBundle) -> None:
     for obs in bundle.column_observations:
         c_uri = canonical_uri("column", bundle.table_name, obs.column_name)
         if c_uri not in store.nodes:
+            report["dropped_imagined_columns"] += 1
             continue  # don't mint columns the LLM imagined
         update: dict[str, Any] = {
             "table_name": bundle.table_name,
@@ -327,17 +378,30 @@ def _apply_bundle(store: GraphStore, bundle: EnrichmentBundle) -> None:
             "llm_self_confidence": obs.self_confidence,
         }
         if obs.proposed_description:
-            update["ai_generated_description"] = obs.proposed_description
+            # anti-patterns 7 + calibration: no evidence or low confidence
+            # → the TEXT is held; role/ambiguity still land for audit
+            if not obs.evidence_used:
+                report["held_no_evidence"] += 1
+            elif obs.self_confidence < 0.3:
+                report["held_low_confidence"] += 1
+            else:
+                update["ai_generated_description"] = obs.proposed_description
+                report["applied_descriptions"] += 1
         if obs.candidate_entity_name:
             update["candidate_entity_name"] = obs.candidate_entity_name
         if obs.ambiguity_flag:
             update["ambiguity_flag"] = obs.ambiguity_flag
+            report["ambiguity_flags"] += 1
         store.upsert_node(
             "Column", c_uri, properties=update, source="llm_generated",
         )
 
-    # Candidate synonyms — mint Synonym nodes (capped at inferred via tier)
+    # Candidate synonyms — ONLY when the canonical form grounds to
+    # something the graph actually knows (anti-pattern 3 enforced)
     for syn in bundle.candidate_synonyms:
+        if _norm(syn.canonical_form) not in known:
+            report["dropped_ungrounded_synonyms"] += 1
+            continue
         s_uri = canonical_uri(
             "synonym", syn.surface_form,
             syn.scope_business_unit or "global",
@@ -355,8 +419,11 @@ def _apply_bundle(store: GraphStore, bundle: EnrichmentBundle) -> None:
             source="llm_generated",
         )
 
-    # Candidate code resolutions — mint CodeMapping nodes
+    # Candidate code resolutions — the column must exist (anti-pattern 5)
     for cr in bundle.candidate_code_resolutions:
+        if _norm(cr.column) not in known:
+            report["dropped_ungrounded_code_resolutions"] += 1
+            continue
         cm_uri = canonical_uri("codemapping", cr.column, cr.raw_value)
         store.upsert_node(
             "CodeMapping", cm_uri,
@@ -369,6 +436,7 @@ def _apply_bundle(store: GraphStore, bundle: EnrichmentBundle) -> None:
             },
             source="llm_generated",
         )
+    return report
 
 
 # ─── Convenience factory: a mock LLM client for tests ───────

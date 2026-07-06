@@ -248,17 +248,37 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                     if args.enrich_tables
                     else (sorted(manifest_names) if manifest_names else None))
             out_root = Path(args.out).expanduser().parent
+            grounding: dict[str, dict] = {}
             bundles = enrich_graph(
                 store, client,
                 only_tables=only,
                 column_batch_size=args.enrich_batch_size,
                 max_calls=args.enrich_max_calls,
                 memory_out=out_root / "enrichment_memory.json",
+                grounding_reports=grounding,
             )
             n_obs = sum(len(b.column_observations) for b in bundles.values())
             n_syn = sum(len(b.candidate_synonyms) for b in bundles.values())
             _note(f"{len(bundles)} table(s) enriched · {n_obs} column "
                   f"observations · {n_syn} synonym candidates")
+            # the grounding gate's verdict — accuracy enforced, not assumed
+            totals: dict[str, int] = {}
+            for table_report in grounding.values():
+                for key, value in table_report.items():
+                    totals[key] = totals.get(key, 0) + value
+            _note("grounding gate: "
+                  f"{totals.get('applied_descriptions', 0)} descriptions "
+                  f"applied · held {totals.get('held_low_confidence', 0)} "
+                  f"low-confidence + {totals.get('held_no_evidence', 0)} "
+                  "no-evidence · dropped "
+                  f"{totals.get('dropped_imagined_columns', 0)} imagined "
+                  f"columns, {totals.get('dropped_ungrounded_synonyms', 0)} "
+                  "ungrounded synonyms, "
+                  f"{totals.get('dropped_ungrounded_code_resolutions', 0)} "
+                  "ungrounded code resolutions · "
+                  f"{totals.get('ambiguity_flags', 0)} ambiguity flags")
+            run_report["enrichment_grounding"] = {
+                "totals": totals, "per_table": grounding}
             proposals = propose_entities(bundles)
             (out_root / "entity_proposals.json").write_text(
                 json.dumps([p.model_dump() for p in proposals], indent=2),
