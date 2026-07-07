@@ -332,7 +332,18 @@ class VertexLLMClient:
                 config=self._types.GenerateContentConfig(**config_kwargs),
             )
         except Exception as exc:
-            if "thinking" in str(exc).lower() and "thinking_config" in config_kwargs:
+            # The proven pre-thinking client never sent thinking_config.
+            # If this endpoint rejects it — by name OR as a generic
+            # 400/INVALID_ARGUMENT — drop thinking once and stay off;
+            # a real error will surface again on the retry.
+            msg = str(exc).lower()
+            config_rejected = (
+                "thinking" in msg
+                or "invalid_argument" in msg
+                or "400" in msg.split(":", 1)[0]  # leading status code
+                or " 400 " in msg
+            )
+            if config_rejected and "thinking_config" in config_kwargs:
                 self.stats["thinking_fallbacks"] += 1
                 self.thinking_budget = 0        # don't re-fail every call
                 config_kwargs.pop("thinking_config")

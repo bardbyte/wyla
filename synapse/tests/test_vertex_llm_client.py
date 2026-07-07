@@ -117,6 +117,35 @@ def test_endpoint_rejecting_thinking_degrades_gracefully(monkeypatch):
     assert client.stats["thinking_fallbacks"] == 1    # no re-fail per call
 
 
+def test_generic_400_also_triggers_thinking_fallback(monkeypatch):
+    """The proven pre-thinking client never sent thinking_config; a
+    Vertex endpoint may reject it with a generic 400 that never says
+    the word 'thinking' — that must still fall back, not kill the run."""
+    monkeypatch.delenv("GEMINI_THINKING_BUDGET", raising=False)
+    client, calls = _client(monkeypatch, [
+        RuntimeError("400 INVALID_ARGUMENT: Unknown field for "
+                     "GenerationConfig"),
+        VALID_BUNDLE,
+    ])
+    bundle = client.enrich(skill_md="s", context={}, table_name="t")
+    assert bundle.column_observations
+    assert client.stats["thinking_fallbacks"] == 1
+    assert "thinking_config" not in calls[1]["config"].kwargs
+
+
+def test_non_config_errors_do_not_disable_thinking(monkeypatch):
+    monkeypatch.delenv("GEMINI_THINKING_BUDGET", raising=False)
+    client, calls = _client(monkeypatch, [
+        RuntimeError("503 service unavailable"),   # transient, NOT a 400
+        VALID_BUNDLE,                              # call-retry succeeds
+    ])
+    bundle = client.enrich(skill_md="s", context={}, table_name="t")
+    assert bundle.column_observations
+    assert client.stats["thinking_fallbacks"] == 0
+    assert client.stats["call_retries"] == 1
+    assert "thinking_config" in calls[1]["config"].kwargs   # still on
+
+
 def test_corrective_retry_recovers_bad_first_response(monkeypatch):
     client, calls = _client(monkeypatch, [
         "I cannot produce JSON, sorry.",              # failure #1
