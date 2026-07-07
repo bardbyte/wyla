@@ -135,12 +135,15 @@ class ConsoleData:
     def graph_thread(self) -> dict[str, Any]:
         """The one curated storyline: entity → identifying columns in two
         tables → join evidence → metric → skill. Falls back hop-by-hop —
-        a thin graph still yields a partial, honest thread."""
-        if not self.live:
-            return self._wrap("thread", _SAMPLE["thread"])
-        thread = self._thread_from_graph()
-        return self._wrap("thread",
-                          thread if thread["hops"] else _SAMPLE["thread"])
+        a thin graph still yields a partial, honest thread. A graph that
+        yields NO hops falls back to the sample thread but is labeled
+        sample — live data and live labels never diverge."""
+        if self.live:
+            thread = self._thread_from_graph()
+            if thread["hops"]:
+                return self._wrap("thread", thread)
+        return {"live": False, "source": "sample",
+                "thread": _SAMPLE["thread"]}
 
     def _thread_from_graph(self) -> dict[str, Any]:
         hops: list[dict[str, Any]] = []

@@ -90,6 +90,36 @@ def test_witness_panel_says_not_found_honestly(tmp_path):
     assert data.witness("synapse://table/ghost")["witness"]["found"] is False
 
 
+def test_threadless_live_graph_serves_sample_labeled_sample(tmp_path):
+    """A live snapshot with no thread-worthy nodes falls back to the
+    sample storyline — and says so. live:true + sample content is the
+    one combination that must never ship."""
+    from synapse.graph.store import GraphStore, canonical_uri
+    store = GraphStore()
+    t = canonical_uri("table", "bare")
+    store.upsert_node("Table", t, {"table_name": "bare"}, source="mdm")
+    snap = tmp_path / "thin.json"
+    store.save_json(snap)
+    data = ConsoleData(snapshot_path=snap)
+    assert data.live is True                   # snapshot loaded fine
+    thread = data.graph_thread()
+    assert thread["live"] is False             # …but the thread is sample
+    assert thread["source"] == "sample"
+
+
+def test_briefs_not_seeded_for_a_live_runner():
+    """Sample briefs furnish the scripted demo only — a live agent's
+    workspace starts empty."""
+
+    class _Liveish:                            # not a ScriptedRunner
+        async def stream(self, m, *, turn_id, conversation_id=None):
+            return
+            yield
+
+    client = TestClient(create_app(_Liveish()))
+    assert client.get("/api/briefs").json()["briefs"] == []
+
+
 # ─── metric viability: canon-first, three verdicts ───────────
 
 

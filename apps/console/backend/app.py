@@ -93,7 +93,10 @@ def create_app(runner: Runner | None = None,
         allow_headers=["*"])
     app.state.runner = runner or _make_runner()
     app.state.data = data or ConsoleData()
-    app.state.briefs = briefs or BriefStore()
+    # sample briefs furnish the scripted demo only — a live agent's
+    # workspace starts empty and fills with real work
+    app.state.briefs = briefs or BriefStore(
+        seed=isinstance(app.state.runner, ScriptedRunner))
     app.state.tls = (_configure_tls()
                      if isinstance(app.state.runner, ADKRunner)
                      else {"mode": "n/a (scripted)"})

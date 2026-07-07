@@ -287,6 +287,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                 # strongest grounding evidence
                 evidence_dir=sources_dir / "mdm_cache",
                 demo_out=out_root / "demo_questions.json",
+                verbose=True,
             )
             n_obs = sum(len(b.column_observations) for b in bundles.values())
             n_syn = sum(len(b.candidate_synonyms) for b in bundles.values())

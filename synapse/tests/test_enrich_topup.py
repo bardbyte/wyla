@@ -196,6 +196,95 @@ def test_cli_plan_nothing_to_do(tmp_path):
     assert "nothing to do" in proc.stdout
 
 
+class CrashingClient:
+    """Succeeds on the first table, dies on the second — simulates a
+    mid-run interrupt so the checkpoint property is testable."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def enrich(self, *, skill_md, context, table_name) -> EnrichmentBundle:
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("simulated crash")
+        cols = [c["name"] for c in context["inspection"]["columns"]]
+        return EnrichmentBundle(
+            table_name=table_name,
+            column_observations=[_obs(c) for c in cols],
+            self_assessment=_sa())
+
+
+def test_memory_checkpoints_after_every_table(tmp_path):
+    """A run that dies on table 2 must leave table 1's observations on
+    disk — hours of calls survive an interrupt."""
+    import pytest
+
+    store = _store()
+    out = tmp_path / "partial.json"
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        enrich_graph(store, CrashingClient(),
+                     only_tables=["covered", "partial"], memory_out=out)
+    saved = json.loads(out.read_text(encoding="utf-8"))
+    assert list(saved) == ["covered"]          # table 1 checkpointed
+    assert len(saved["covered"]["column_observations"]) == 2
+
+
+def test_verbose_progress_prints_tables_and_calls(capsys):
+    store = _store()
+    enrich_graph(store, RecordingClient(), only_tables=["covered"],
+                 verbose=True, planned_calls=1)
+    out = capsys.readouterr().out
+    assert "enriching 1 table(s)" in out
+    assert "▶ [1/1] covered: 2 column(s) in 1 call(s)" in out
+    assert "[1/~1] chunk 1/1" in out and "2 obs" in out
+    assert "✓ covered:" in out                 # gate one-liner
+
+
+def test_cli_resumes_interrupted_run_without_respending_calls(tmp_path):
+    """A partial checkpoint covering the whole remainder → the resumed
+    run folds it into memory + snapshot and exits with nothing to do,
+    constructing no Vertex client at all."""
+    snap = tmp_path / "graph_snapshot.json"
+    _store().save_json(snap)
+    mem = tmp_path / "enrichment_memory.json"
+    mem.write_text(json.dumps(
+        {t: b.model_dump() for t, b in _old_bundles().items()}, default=str),
+        encoding="utf-8")
+    partial = {
+        "partial": EnrichmentBundle(
+            table_name="partial",
+            column_observations=[_obs("p3"), _obs("p4")],
+            self_assessment=_sa()),
+        "untouched": EnrichmentBundle(
+            table_name="untouched",
+            column_observations=[_obs("x"), _obs("y"), _obs("z")],
+            self_assessment=_sa()),
+    }
+    partial_path = snap.with_name("_topup_memory_partial.json")
+    partial_path.write_text(json.dumps(
+        {t: b.model_dump() for t, b in partial.items()}, default=str),
+        encoding="utf-8")
+
+    proc = subprocess.run(
+        [sys.executable,
+         str(REPO_ROOT / "synapse" / "scripts" / "enrich_topup.py"),
+         "--all-tables", "--snapshot", str(snap), "--memory", str(mem)],
+        capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "resumed interrupted run: 2 table(s)" in proc.stdout
+    assert "nothing to do" in proc.stdout
+    assert not partial_path.exists()           # checkpoint consumed
+    # observations landed durably: memory has the union…
+    merged = json.loads(mem.read_text(encoding="utf-8"))
+    assert {o["column_name"] for o in
+            merged["partial"]["column_observations"]} \
+        == {"p1", "p2", "p3", "p4"}
+    # …and the snapshot got the facts re-applied
+    loaded = GraphStore.load_json(snap)
+    node = loaded.get(canonical_uri("column", "untouched", "x"))
+    assert node.properties["ai_generated_description"] == "about x"
+
+
 def test_cli_plan_scopes_to_manifest_by_default(tmp_path):
     """The graph carries out-of-scope tables (staged by earlier runs);
     the plan must spend calls on manifest tables only."""
