@@ -56,6 +56,7 @@ def enrich_graph(
     grounding_reports: dict[str, dict] | None = None,
     evidence_dir: Path | None = None,
     demo_out: Path | None = None,
+    skip_columns: dict[str, set[str]] | None = None,
 ) -> dict[str, EnrichmentBundle]:
     """Run the LLM enrichment pass over every Table in the store — BATCHED.
 
@@ -82,6 +83,10 @@ def enrich_graph(
             questions that survived BOTH gates — grounded references AND
             every claimed capability present in the built graph — reach
             the script.
+        skip_columns: per-table sets of column names to EXCLUDE (already
+            observed in a prior run) — the top-up mode. A table whose
+            every column is skipped is not called at all, and its prior
+            facts are untouched.
 
     Returns:
         dict mapping table_name → merged EnrichmentBundle (also written
@@ -116,6 +121,16 @@ def enrich_graph(
             store, table_name,
             evidence_dir=evidence_dir, scope_digest=scope_digest)
         all_columns = (context.get("inspection") or {}).get("columns") or []
+        if skip_columns:
+            skip = {c.lower()
+                    for c in skip_columns.get(str(table_name).lower(), set())}
+            if skip:
+                all_columns = [
+                    c for c in all_columns
+                    if str(c.get("name", "")).lower() not in skip
+                ]
+                if not all_columns:
+                    continue    # fully covered by a prior run — zero calls
         if column_batch_size and len(all_columns) > column_batch_size:
             chunks = [
                 all_columns[i:i + column_batch_size]
@@ -675,6 +690,56 @@ def _apply_bundle(
             report["applied_demo_questions"] += 1
             report["demo_pack"].append(entry)
     return report
+
+
+def compute_topup_plan(
+    store: GraphStore, bundles: dict[str, EnrichmentBundle],
+) -> dict[str, list[str]]:
+    """What the last run DIDN'T cover: per table, the column names that
+    have no observation in the enrichment memory.
+
+    The top-up contract: tables fully covered are absent from the plan
+    (zero calls, prior facts untouched); tables never enriched list
+    every column; partially-enriched tables list only the remainder."""
+    observed: dict[str, set[str]] = {
+        table.lower(): {
+            obs.column_name.lower() for obs in bundle.column_observations
+        }
+        for table, bundle in bundles.items()
+    }
+    plan: dict[str, list[str]] = {}
+    for node in store.nodes_by_type("Table"):
+        table_name = str(node.properties.get("table_name") or "")
+        if not table_name:
+            continue
+        cols = [
+            e.to_uri.rsplit("/", 1)[-1]
+            for e in store.outgoing(node.canonical_uri, "CONTAINS")
+        ]
+        if not cols:
+            continue
+        seen = observed.get(table_name.lower(), set())
+        remaining = [c for c in cols if c.lower() not in seen]
+        if remaining:
+            plan[table_name] = sorted(remaining)
+    return plan
+
+
+def merge_memories(
+    old: dict[str, EnrichmentBundle], new: dict[str, EnrichmentBundle],
+) -> dict[str, EnrichmentBundle]:
+    """Prior memory + top-up memory → one memory, nothing lost.
+
+    Untouched tables carry over verbatim; overlapping tables merge via
+    the same dedup used for column chunks (old first, so an existing
+    table description wins over a re-proposed one)."""
+    merged: dict[str, EnrichmentBundle] = dict(old)
+    for table, bundle in new.items():
+        merged[table] = (
+            _merge_bundles(table, [old[table], bundle])
+            if table in old else bundle
+        )
+    return merged
 
 
 def collect_enrichment_failures(
