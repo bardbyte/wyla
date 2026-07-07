@@ -236,6 +236,7 @@ code, pre { font-family: var(--font-mono); font-size: var(--fs-12); }
   font-size: var(--fs-13); padding: var(--s-2) var(--s-5);
   border-radius: var(--r-md); border: 1px solid var(--accent);
   background: var(--accent); color: var(--on-accent);
+  white-space: nowrap;
 }
 .hold-btn .fillbar {
   position: absolute; inset: 0; width: 0%;
