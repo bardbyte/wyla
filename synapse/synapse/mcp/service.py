@@ -830,6 +830,102 @@ class GraphService:
         return self._ok("find_columns_for_concept", started,
                         {"columns": result})
 
+    def get_entity(self, name: str) -> dict[str, Any]:
+        """One business entity (Account, Card Product…): its steward-
+        approved definition, which physical columns identify it, and the
+        tables those columns live in. Entities are minted only by human
+        approval — this is the strongest-tier object in the graph."""
+        started = time.monotonic()
+        entities = self.store.nodes_by_type("Entity")
+        if not entities:
+            return self._err(
+                "get_entity", started, "not_found",
+                "no entities are minted in this snapshot yet — proposals "
+                "are approved via scripts/entities.py (propose → review "
+                "→ apply)",
+                suggestions=["search_entities(query=...)"],
+            )
+        want = self._tokens(name)
+        best, best_score = None, 0.0
+        for e in entities:
+            e_name = str(e.properties.get(
+                "name", e.canonical_uri.rsplit("/", 1)[-1]))
+            if "".join(sorted(self._tokens(e_name))) == \
+                    "".join(sorted(want)):
+                best, best_score = e, 10.0
+                break
+            score = self._score_node(e, want)
+            if score > best_score:
+                best, best_score = e, score
+        if best is None:
+            return self._err(
+                "get_entity", started, "not_found",
+                f"no entity matches {name!r}; known: "
+                + ", ".join(sorted(str(e.properties.get('name', ''))
+                                   for e in entities)[:10]),
+            )
+        identified_by = []
+        for edge in self.store.incoming(best.canonical_uri, "IDENTIFIES"):
+            col = self.store.get(edge.from_uri)
+            if col is None:
+                continue
+            identified_by.append({
+                "column": edge.from_uri.rsplit("/", 1)[-1],
+                "table": col.properties.get(
+                    "table_name", edge.from_uri.rsplit("/", 2)[-2]),
+                "uri": edge.from_uri,
+                "provenance": self._prov(edge),
+            })
+        return self._ok("get_entity", started, {
+            "name": best.properties.get(
+                "name", best.canonical_uri.rsplit("/", 1)[-1]),
+            "uri": best.canonical_uri,
+            "description": best.properties.get("description", ""),
+            "properties": {k: v for k, v in best.properties.items()
+                           if k not in ("name", "description")},
+            "provenance": self._prov(best),
+            "identified_by": identified_by,
+            "n_supporting_tables": len({c["table"]
+                                        for c in identified_by}),
+        })
+
+    def get_steward_review_queue(self, limit: int = 20) -> dict[str, Any]:
+        """The facts most in need of a human: lowest-confidence,
+        fewest-witness assertions, ranked weakest first. Use when asked
+        what needs review/curation, or to qualify how settled an area of
+        the graph is."""
+        started = time.monotonic()
+        queue: list[tuple[float, dict[str, Any]]] = []
+        for node in self.store.nodes.values():
+            prov = node.provenance
+            if prov.confidence_tier not in ("guessed", "deprecated") \
+                    and set(prov.sources) != {"llm"}:
+                continue
+            reason = ("deprecated — superseded or retired"
+                      if prov.confidence_tier == "deprecated" else
+                      "single witness: llm enrichment only"
+                      if set(prov.sources) == {"llm"} else
+                      "unverified — no corroborating source")
+            queue.append((prov.confidence_score, {
+                "name": str(node.properties.get(
+                    "name", node.properties.get(
+                        "table_name",
+                        node.canonical_uri.rsplit("/", 1)[-1]))),
+                "kind": node.node_type,
+                "uri": node.canonical_uri,
+                "tier": prov.confidence_tier,
+                "score": round(prov.confidence_score, 3),
+                "sources": list(prov.sources),
+                "reason": reason,
+            }))
+        queue.sort(key=lambda pair: (pair[0], pair[1]["uri"]))
+        items = [item for _, item in queue[:max(1, min(limit, 100))]]
+        return self._ok("get_steward_review_queue", started, {
+            "total_in_queue": len(queue),
+            "showing": len(items),
+            "items": items,
+        })
+
 
 # Ordered registry — single source of truth for both transports.
 TOOL_NAMES: tuple[str, ...] = (
@@ -848,4 +944,6 @@ TOOL_NAMES: tuple[str, ...] = (
     "explain_confidence",
     "disambiguate_term",
     "validate_sql_plan",
+    "get_entity",
+    "get_steward_review_queue",
 )
