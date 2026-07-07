@@ -1,0 +1,146 @@
+/* Radix design tokens — the entire visual system in one file.
+ *
+ * Color doctrine (in priority order):
+ *   1. Surfaces are quiet: cool, blue-leaning neutrals. No brand color
+ *      on backgrounds, cards, or chrome — restraint is what makes the
+ *      accent legible.
+ *   2. Blue (#006FCF) is the INTERACTIVE accent only: primary actions,
+ *      links, the active tab, focus rings, the brand mark. If it isn't
+ *      clickable, it isn't blue.
+ *   3. Evidence tiers are the only other semantic colors — green for
+ *      corroborated/signed, amber for inferred, neutral for unverified,
+ *      red for declined. A color in content always MEANS something.
+ *   4. Data visuals use one reserved hue so charts never masquerade as
+ *      either brand or evidence.
+ *
+ * Both themes are first-class. Dark is not inverted light: elevation
+ * lightens surfaces, the accent shifts to #57A9F2 for contrast, and
+ * tier colors brighten to hold 4.5:1 on dark ground.
+ */
+
+:root {
+  /* type */
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --fs-11: 0.6875rem;
+  --fs-12: 0.75rem;
+  --fs-13: 0.8125rem;
+  --fs-14: 0.875rem;
+  --fs-16: 1rem;
+  --fs-20: 1.25rem;
+  --fs-28: 1.75rem;
+
+  /* geometry */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+
+  /* motion */
+  --t-fast: 120ms ease;
+  --t-med: 220ms ease;
+
+  /* ── light ── */
+  --bg: #f4f6f9;            /* app canvas */
+  --surface: #ffffff;       /* cards, panels */
+  --surface-2: #eef1f6;     /* insets, rails, code */
+  --surface-3: #e4e9f0;     /* hover, pressed */
+  --line: #d8dee8;          /* hairlines */
+  --line-strong: #b9c2d0;
+
+  --ink: #1a2332;           /* primary text */
+  --ink-2: #4a5568;         /* secondary */
+  --ink-3: #71809b;         /* tertiary, labels */
+
+  --accent: #006fcf;        /* interactive only */
+  --accent-hover: #005fb8;
+  --accent-soft: #e5f1fb;   /* selected-state wash */
+  --on-accent: #ffffff;
+
+  --tier-high: #0e7a55;     /* corroborated / signed */
+  --tier-high-soft: #e2f3ec;
+  --tier-mid: #9a6407;      /* inferred */
+  --tier-mid-soft: #f9efdc;
+  --tier-low: #5b6778;      /* unverified */
+  --tier-low-soft: #eaedf2;
+  --tier-block: #be3a48;    /* declined / guardrail */
+  --tier-block-soft: #fbe9eb;
+
+  --data: #3b6fe0;          /* charts only */
+  --shadow: 0 1px 2px rgba(26, 35, 50, 0.06), 0 4px 16px rgba(26, 35, 50, 0.07);
+  --shadow-lift: 0 4px 12px rgba(26, 35, 50, 0.1), 0 12px 40px rgba(26, 35, 50, 0.12);
+}
+
+[data-theme="dark"] {
+  --bg: #0f1420;
+  --surface: #161d2c;
+  --surface-2: #1d2536;
+  --surface-3: #242e42;
+  --line: #2a3448;
+  --line-strong: #3b4864;
+
+  --ink: #e8edf5;
+  --ink-2: #a8b3c7;
+  --ink-3: #7c89a3;
+
+  --accent: #57a9f2;
+  --accent-hover: #7cbcf6;
+  --accent-soft: #17293d;
+  --on-accent: #0c1520;
+
+  --tier-high: #2bae84;
+  --tier-high-soft: #14291f;
+  --tier-mid: #d29a3a;
+  --tier-mid-soft: #2c2213;
+  --tier-low: #8b98b0;
+  --tier-low-soft: #202839;
+  --tier-block: #e4697a;
+  --tier-block-soft: #301721;
+
+  --data: #5e8df0;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lift: 0 4px 12px rgba(0, 0, 0, 0.45), 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* system preference is the default; an explicit choice overrides it */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1420;
+    --surface: #161d2c;
+    --surface-2: #1d2536;
+    --surface-3: #242e42;
+    --line: #2a3448;
+    --line-strong: #3b4864;
+    --ink: #e8edf5;
+    --ink-2: #a8b3c7;
+    --ink-3: #7c89a3;
+    --accent: #57a9f2;
+    --accent-hover: #7cbcf6;
+    --accent-soft: #17293d;
+    --on-accent: #0c1520;
+    --tier-high: #2bae84;
+    --tier-high-soft: #14291f;
+    --tier-mid: #d29a3a;
+    --tier-mid-soft: #2c2213;
+    --tier-low: #8b98b0;
+    --tier-low-soft: #202839;
+    --tier-block: #e4697a;
+    --tier-block-soft: #301721;
+    --data: #5e8df0;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.35);
+    --shadow-lift: 0 4px 12px rgba(0, 0, 0, 0.45), 0 12px 40px rgba(0, 0, 0, 0.5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0ms;
+    --t-med: 0ms;
+  }
+}

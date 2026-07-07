@@ -80,17 +80,54 @@ flip to real when Vertex is live.
 ## Run
 
 ```bash
-# backend — offline scripted (no creds), great for building the UI
-uvicorn apps.console.backend.app:app --reload --port 8080
+# 1. build the SPA once (or `npm run dev` for hot reload on :5173)
+cd apps/console/frontend && npm install && npm run build && cd -
 
-# backend — real Gemini (laptop; needs the Vertex env + GEMINI_TLS_INSECURE)
-SYNAPSE_CONSOLE_RUNNER=adk SYNAPSE_GRAPH_PATH=$SNAP \
-  uvicorn apps.console.backend.app:app --port 8080
+# 2a. offline demo — scripted transcripts, sample-labeled reads, no creds
+uvicorn apps.console.backend.app:app --port 8080
+# open http://localhost:8080
+
+# 2b. laptop, real graph + real agent — the SAME env contract as the
+#     pipeline; nothing console-specific to learn:
+export GOOGLE_GENAI_USE_VERTEXAI=1
+export GOOGLE_CLOUD_PROJECT=<project>
+export GOOGLE_CLOUD_LOCATION=<region>
+export GOOGLE_APPLICATION_CREDENTIALS=~/keys/svc.json   # never in-repo
+export GEMINI_MODEL=gemini-3.1-pro-preview
+export GEMINI_THINKING_BUDGET=-1          # dynamic thinking
+export GEMINI_TLS_INSECURE=1              # intranet proxy (or GEMINI_CA_BUNDLE)
+export SYNAPSE_GRAPH_PATH=synapse/data/cache/graph_snapshot.json
+SYNAPSE_CONSOLE_RUNNER=adk uvicorn apps.console.backend.app:app --port 8080
 
 # smoke it
+curl -s localhost:8080/api/config          # non-secret env echo + graph liveness
 curl -N localhost:8080/chat -H 'content-type: application/json' \
   -d '{"message":"who owns sbs_new_accounts?"}'
 ```
+
+TLS is applied at server startup through the same `_apply_tls` path the
+enrichment pipeline uses — the ADK runner never re-learns the
+corporate-proxy lesson. Failures stream as `error` events whose message
+names the fix (TLS → the env to set; 403 → the credential to check;
+429 → retry), with the raw error preserved in brackets.
+
+## Read-side API (the tabs)
+
+Every payload carries `live: true|false` — graph-backed when
+`SYNAPSE_GRAPH_PATH` resolves to a compiled snapshot, coherent labeled
+samples otherwise. The UI shows which world it is in; the demo never
+blurs real and illustrative.
+
+| endpoint | serves |
+|---|---|
+| `/api/products` | Table nodes + context-readiness scorecards |
+| `/api/metrics`, `POST /api/metrics/viability` | the metric canon + the copilot's canon-first check |
+| `/api/terms/resolve` | canonical term + witnesses |
+| `/api/graph/summary`, `/api/graph/thread` | counts by type/tier/witness + the curated storyline |
+| `/api/briefs` | seeded brief store; `/chat` tees every Answer in |
+| `/api/questions` | verified-answerable questions from the enrichment demo pack |
+| `/api/witness?ref=` | the evidence panel behind any chip or citation |
+| `/api/config` | the environment contract, booleans for anything credential-shaped |
 
 ## The intricacies (why craft matters here)
 
@@ -108,15 +145,19 @@ curl -N localhost:8080/chat -H 'content-type: application/json' \
 
 ## Phase plan
 
-- **Phase 0 (this PR)** — event protocol + Runner abstraction +
-  ScriptedRunner golden transcripts + ADKRunner + FastAPI SSE + /approve
-  + tests. The contract, testable offline.
-- **Phase 1** — React shell: conversation + streaming text + trace rail.
-- **Phase 2** — rich renders: answer contract, provenance chips,
-  inline artifacts, sandbox cells.
-- **Phase 3** — the HITL SQL gate + the guardrail-refusal beat (the
-  trust moments), with a resumable loop.
-- **Phase 4** — persona toggle (analyst/VP lens) + AmEx branding.
-- **Graduation** — chat → chat + canvas (persistent workspace, the graph
-  viz as an interactive panel) → ambient briefings (the demo-questions
-  surface proactively).
+- **Phase 0** ✅ — event protocol + Runner abstraction + ScriptedRunner
+  golden transcripts + ADKRunner + FastAPI SSE + /approve + tests.
+- **Phase 1** ✅ — the Radix SPA (`frontend/`): five tabs (Inquiries ·
+  Data products · Metrics · Knowledge graph · Bring your knowledge),
+  design tokens with light + dark themes, the brief document with
+  Brief/Analysis modes and Thread/Ledger toggles, hold-to-run SQL gate,
+  witness drawer, read-side API with graph-backed/sample-labeled reads,
+  conversation memory in the ADK runner, thinking-config parity with
+  the pipeline, legible failure mapping.
+- **Phase 2** — resumable ADK loop (the gate genuinely pauses the
+  agent), durable brief store, steward write-paths (metric signature,
+  entity approval) surfaced in-app.
+- **Phase 3** — reader/mobile projections of a brief, cost framing on
+  the gate, connector previews go live.
+- **Graduation** — ambient briefings: the verified demo questions
+  surface proactively on a schedule.
