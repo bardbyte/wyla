@@ -189,6 +189,13 @@ def build_server(graph_path: str | Path, *, tenant_id: str = "default"):
         review/curation?" or to qualify how settled an area is."""
         return service.get_steward_review_queue(limit)
 
+    @mcp.tool()
+    def get_failed_query_corrections(column_name: str = "") -> dict:
+        """Known column misnamings captured from failed queries
+        ("fico" → fico_score). Check BEFORE naming a column in SQL or
+        an answer; surface matches educationally."""
+        return service.get_failed_query_corrections(column_name)
+
     # ── resources (bulk reference data, browse-style) ────────
 
     import json as _json

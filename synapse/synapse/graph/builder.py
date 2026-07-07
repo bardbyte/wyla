@@ -77,6 +77,16 @@ def build_graph_from_sources(sources_dir: Path) -> GraphStore:
     from synapse.graph.entities import ingest_entities_file
     ingest_entities_file(store, sources_dir / "entities.yaml")
 
+    # Witness #7 — steward briefings: hand-written per-table capsules
+    # (grain, gotchas, known analyst mistakes) as human_approval facts
+    from synapse.graph.briefings import ingest_briefings_dir
+    ingest_briefings_dir(store, sources_dir / "briefings")
+
+    # Failed-query corrections: known column misnamings as bq facts on
+    # the CORRECT column — the graph learns from analyst mistakes too
+    from synapse.graph.corrections import ingest_corrections_file
+    ingest_corrections_file(store, sources_dir / "corrections.json")
+
     # Code-resolution pass — runs after corpus to mine CASE WHENs
     _resolve_codes_from_lookup_tables(store)
 

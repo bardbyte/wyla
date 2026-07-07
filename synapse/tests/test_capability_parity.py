@@ -4,10 +4,9 @@ do, the analyst agent can do too.
 The first agent (semantic-graph, one graph over one table) carried 13
 tools. This suite maps each of those capabilities onto the current
 toolset and exercises them end-to-end against a snapshot, so parity is
-pinned, not asserted. The one deliberate non-port is
-get_failed_query_corrections: the current corpus witness ingests gold
-SQL only — shipping the tool without its data would be a dead surface.
-It returns when the corpus loader ingests failed→fixed pairs.
+pinned, not asserted. All 13 are now covered — the last port,
+get_failed_query_corrections, is fed by curated corrections.json today
+and by failed-job mining when the laptop extraction adds it.
 
     old tool                      current tool
     ────────────────────────────  ─────────────────────────────────────
@@ -20,7 +19,9 @@ It returns when the corpus loader ingests failed→fixed pairs.
     get_lineage                   get_lineage
     get_entity                    get_entity                (added here)
     resolve_synonym               search_entities + disambiguate_term
-    get_failed_query_corrections  — data gap, documented above
+    get_failed_query_corrections  get_failed_query_corrections (ported —
+                                  fed by corrections.json curation and,
+                                  later, failed-job mining)
     get_dq_status                 get_dq_status
     validate_sql                  validate_sql_plan (+ live dry_run_sql)
     get_steward_review_queue      get_steward_review_queue  (added here)
@@ -93,6 +94,7 @@ def test_every_old_capability_answers():
         "validate_sql": svc.validate_sql_plan(
             "SELECT acct_id FROM accounts"),
         "review_queue": svc.get_steward_review_queue(),
+        "corrections": svc.get_failed_query_corrections(),
     }
     for capability, resp in checks.items():
         assert resp.get("status") == "ok", (capability, resp)
@@ -130,5 +132,6 @@ def test_registry_and_adk_roster_carry_the_new_tools():
     assert "get_entity" in TOOL_NAMES
     assert "get_steward_review_queue" in TOOL_NAMES
     names = {t.__name__ for t in build_adk_tools(_world())}
-    assert {"get_entity", "get_steward_review_queue"} <= names
-    assert len(names) == 17                        # 15 + the 2 ports
+    assert {"get_entity", "get_steward_review_queue",
+            "get_failed_query_corrections"} <= names
+    assert len(names) == 18                        # 15 + the 3 ports

@@ -195,9 +195,12 @@ TOOL-SELECTION RULES (ordered; first match wins)
  6. Multi-table need → get_join_path. Empty → say no observed path
     exists; do not fabricate ON clauses.
  7. Ownership / freshness / impact → get_lineage and get_dq_status.
- 8. Every SQL draft → validate_sql_plan BEFORE the user sees it; fix
+ 8. Before naming ANY column in SQL or an answer →
+    get_failed_query_corrections. A known misnaming ("fico" when the
+    column is fico_score) gets surfaced educationally, never repeated.
+ 9. Every SQL draft → validate_sql_plan BEFORE the user sees it; fix
     violations and re-validate.
- 9. Data needed to answer → dry_run_sql (report the GB estimate) →
+10. Data needed to answer → dry_run_sql (report the GB estimate) →
     execute_sql. Refused? The refusal names the gate — fix and retry
     once, else surface it plainly.
 
