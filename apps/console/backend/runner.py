@@ -329,7 +329,7 @@ def _map_adk_event(ev) -> list[ConsoleEvent]:
             out.append(ToolResult(
                 call_id=getattr(fr, "id", "") or getattr(fr, "name", ""),
                 ok=not bool(resp.get("error")),
-                summary=str(resp.get("summary", ""))[:200],
+                summary=_summarize_payload(resp),
                 provenance=_lift_provenance(resp),
                 payload=resp if isinstance(resp, dict) else None))
             continue
@@ -342,6 +342,37 @@ def _map_adk_event(ev) -> list[ConsoleEvent]:
             else:
                 out.append(Text(delta=text))
     return out
+
+
+def _summarize_payload(resp: dict) -> str:
+    """One legible line per tool result. Real tools rarely ship a
+    `summary` field — derive one from the payload's shape instead of
+    rendering an empty row in the work log."""
+    if not isinstance(resp, dict):
+        return str(resp)[:200]
+    if resp.get("summary"):
+        return str(resp["summary"])[:200]
+    err = resp.get("error")
+    if err:
+        msg = err.get("message") if isinstance(err, dict) else err
+        return f"✗ {str(msg)[:180]}"
+    data = resp.get("data") if isinstance(resp.get("data"), dict) else resp
+    rows = data.get("rows")
+    if isinstance(rows, list):
+        return f"{len(rows)} row(s) returned"
+    for key in ("total_bytes_processed", "bytes_processed",
+                "bytes_estimate"):
+        if isinstance(data.get(key), (int, float)):
+            gb = data[key] / 1e9
+            return f"dry run OK · ~{gb:.2f} GB scan"
+    status = resp.get("status")
+    for key in ("columns", "items", "matches", "hits", "tables",
+                "paths", "identified_by"):
+        if isinstance(data.get(key), list):
+            return f"{status or 'ok'} · {len(data[key])} {key}"
+    if status:
+        return str(status)[:200]
+    return ""
 
 
 def _lift_provenance(resp: dict) -> Provenance | None:

@@ -82,18 +82,6 @@ export interface ThreadHop {
   kind: string; label: string; ref: string; tier: Tier; detail: string;
 }
 
-export interface BriefCard {
-  id: string; title: string; created_at: string; status: string;
-  tier: string; live: boolean; citation_count: number;
-}
-
-export interface Brief extends BriefCard {
-  question: string;
-  sections: AnswerSections;
-  thread: { role: string; text: string }[];
-  ledger: { ref: string }[];
-}
-
 export interface Witness {
   ref: string; found: boolean; kind?: string;
   properties?: Record<string, unknown>;

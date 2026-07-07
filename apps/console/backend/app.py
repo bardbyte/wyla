@@ -40,7 +40,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from apps.console.backend.briefs import BriefStore
 from apps.console.backend.data import ConsoleData
 from apps.console.backend.events import to_sse
 from apps.console.backend.runner import ADKRunner, Runner, ScriptedRunner
@@ -85,18 +84,13 @@ def _configure_tls() -> dict:
 
 
 def create_app(runner: Runner | None = None,
-               data: ConsoleData | None = None,
-               briefs: BriefStore | None = None) -> FastAPI:
-    app = FastAPI(title="Radix Console", version="0.2.0")
+               data: ConsoleData | None = None) -> FastAPI:
+    app = FastAPI(title="Radix Console", version="0.3.0")
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
         allow_headers=["*"])
     app.state.runner = runner or _make_runner()
     app.state.data = data or ConsoleData()
-    # sample briefs furnish the scripted demo only — a live agent's
-    # workspace starts empty and fills with real work
-    app.state.briefs = briefs or BriefStore(
-        seed=isinstance(app.state.runner, ScriptedRunner))
     app.state.tls = (_configure_tls()
                      if isinstance(app.state.runner, ADKRunner)
                      else {"mode": "n/a (scripted)"})
@@ -159,10 +153,6 @@ def create_app(runner: Runner | None = None,
             async for event in app.state.runner.stream(
                     req.message, turn_id=turn_id,
                     conversation_id=conversation_id):
-                if event.type == "answer":       # every answer becomes a brief
-                    app.state.briefs.add_from_answer(
-                        turn_id=turn_id, question=req.message,
-                        sections=event.sections.model_dump(), ts=event.ts)
                 yield to_sse(event)
 
         return StreamingResponse(
@@ -200,15 +190,6 @@ def create_app(runner: Runner | None = None,
     @app.get("/api/graph/thread")
     def graph_thread(table: str = "") -> dict:
         return app.state.data.graph_thread(table)
-
-    @app.get("/api/briefs")
-    def briefs_list() -> dict:
-        return {"briefs": app.state.briefs.list()}
-
-    @app.get("/api/briefs/{brief_id}")
-    def brief_get(brief_id: str) -> dict:
-        brief = app.state.briefs.get(brief_id)
-        return brief if brief else {"id": brief_id, "found": False}
 
     @app.get("/api/questions")
     def questions() -> dict:

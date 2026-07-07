@@ -49,8 +49,6 @@ export const COMMON = {
 };
 
 export const INQUIRIES = {
-  railTitle: "Briefs",
-  newInquiry: "New inquiry",
   emptyTitle: "Ask about your data.",
   emptySub:
     "Answers arrive with their sources, their confidence, and the " +
@@ -59,7 +57,6 @@ export const INQUIRIES = {
     "Ask about ownership, definitions, lineage, or the numbers themselves…",
   send: "Ask",
   working: "Working…",
-  needsSignature: "Needs your approval",
   gateTitle: "Approval needed to run this query",
   gateSub: "Nothing runs without you. Review the query and its cost.",
   gateScan: "Estimated scan",
@@ -69,17 +66,9 @@ export const INQUIRIES = {
   heldNote:
     "Held. The query is drafted and validated — run it whenever " +
     "you're ready.",
-  briefMode: "Brief",
-  analysisMode: "Analysis",
-  threadToggle: "Thread",
-  ledgerToggle: "Ledger",
-  noBriefYet: "The brief composes here as the answer lands.",
   citations: "Citations",
   governance: "Governance",
   howTitle: "How this was produced",
-  ledgerTitle: "Audit ledger",
-  ledgerEmpty: "No queries have run in this brief.",
-  threadTitle: "Thread",
   errorTitle: "That didn't go through",
   suggestTitle: "Verified questions you can ask now",
 };

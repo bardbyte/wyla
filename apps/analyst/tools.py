@@ -163,3 +163,26 @@ def build_analyst_tools() -> list[Callable[..., dict[str, Any]]]:
         list_agent_skills, load_agent_skill,
         run_python_analysis,
     ]
+
+
+# The original single-graph agent's capability set, plus the gated
+# warehouse pair — the user-selected bound for the chat experience.
+_CLASSIC_GRAPH_TOOLS = (
+    "search_entities", "list_tables_for_domain", "inspect_table",
+    "find_columns_for_concept", "get_join_path", "get_lineage",
+    "get_metric", "get_dq_status", "disambiguate_term",
+    "validate_sql_plan", "get_entity", "get_steward_review_queue",
+)
+
+
+def build_classic_tools() -> list[Callable[..., dict[str, Any]]]:
+    """The bounded chat roster: the original agent's 12 capabilities
+    (under their current names) + dry_run_sql + execute_sql. No charts,
+    no sandbox, no skill loader — guardrails still bind because they
+    are enforced INSIDE validate_sql_plan and the execute gate chain,
+    not by tool availability."""
+    by_name = {t.__name__: t for t in build_adk_tools(_service())}
+    return [
+        *[by_name[n] for n in _CLASSIC_GRAPH_TOOLS],
+        dry_run_sql, execute_sql,
+    ]
