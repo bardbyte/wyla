@@ -1,0 +1,716 @@
+<title>Radix — Brief Workspace Mock v2</title>
+<style>
+/* ─── tokens · Amex Bright Blue system ────────────────────── */
+:root{
+  --bg:#F4F7FB; --panel:#FFFFFF; --panel-2:#F9FBFE; --inset:#EFF4FA;
+  --ink:#101B2B; --ink-2:#42536B; --ink-3:#66788F;
+  --line:#DFE7F1; --line-2:#EAF0F7;
+  --accent:#006FCF; --accent-deep:#005EB0; --brand-ink:#00175A; --on-accent:#FFFFFF;
+  --accent-tint:#E7F1FB;
+  --data:#3B6FE0;
+  --grounded:#0E7A55; --inferred:#9A6407; --guessed:#66788F; --blocked:#BE3A48;
+  --good:#0E7A55;
+  --code-bg:#F0F4FA;
+  --shadow:0 1px 2px rgba(16,27,43,.05),0 10px 28px rgba(16,27,43,.08);
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0C1220; --panel:#131B2C; --panel-2:#172136; --inset:#0F1727;
+    --ink:#E9EEF7; --ink-2:#AEBBD0; --ink-3:#8595AD;
+    --line:#243350; --line-2:#1C2A44;
+    --accent:#57A9F2; --accent-deep:#7FBEF6; --brand-ink:#BBD9F8; --on-accent:#0C1220;
+    --accent-tint:#16385C;
+    --data:#5E8DF0;
+    --grounded:#2BAE84; --inferred:#D29A3A; --guessed:#8595AD; --blocked:#E4697A;
+    --good:#2BAE84;
+    --code-bg:#0E1626;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 12px 32px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="light"]{
+  --bg:#F4F7FB; --panel:#FFFFFF; --panel-2:#F9FBFE; --inset:#EFF4FA;
+  --ink:#101B2B; --ink-2:#42536B; --ink-3:#66788F;
+  --line:#DFE7F1; --line-2:#EAF0F7;
+  --accent:#006FCF; --accent-deep:#005EB0; --brand-ink:#00175A; --on-accent:#FFFFFF;
+  --accent-tint:#E7F1FB;
+  --data:#3B6FE0;
+  --grounded:#0E7A55; --inferred:#9A6407; --guessed:#66788F; --blocked:#BE3A48;
+  --good:#0E7A55;
+  --code-bg:#F0F4FA;
+  --shadow:0 1px 2px rgba(16,27,43,.05),0 10px 28px rgba(16,27,43,.08);
+}
+:root[data-theme="dark"]{
+  --bg:#0C1220; --panel:#131B2C; --panel-2:#172136; --inset:#0F1727;
+  --ink:#E9EEF7; --ink-2:#AEBBD0; --ink-3:#8595AD;
+  --line:#243350; --line-2:#1C2A44;
+  --accent:#57A9F2; --accent-deep:#7FBEF6; --brand-ink:#BBD9F8; --on-accent:#0C1220;
+  --accent-tint:#16385C;
+  --data:#5E8DF0;
+  --grounded:#2BAE84; --inferred:#D29A3A; --guessed:#8595AD; --blocked:#E4697A;
+  --good:#2BAE84;
+  --code-bg:#0E1626;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 12px 32px rgba(0,0,0,.4);
+}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14.5px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+code,pre,.mono{font-family:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace}
+button{font:inherit;cursor:pointer;color:inherit}
+button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+
+/* ─── intro ───────────────────────────────────────────────── */
+.intro{max-width:980px;margin:0 auto;padding:52px 24px 26px}
+.eyebrow{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+.intro h1{font-size:30px;line-height:1.18;margin:10px 0 12px;letter-spacing:-.015em;font-weight:780;text-wrap:balance}
+.intro p{max-width:66ch;color:var(--ink-2);margin:0 0 7px}
+.trylist{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.trylist span{display:inline-flex;gap:7px;align-items:center;font-size:12.5px;font-weight:600;color:var(--ink-2);
+  background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:6px 12px}
+.trylist b{color:var(--accent)}
+
+/* ─── app frame ───────────────────────────────────────────── */
+.frame-wrap{max-width:1400px;margin:24px auto 12px;padding:0 20px}
+.chrome{display:flex;align-items:center;gap:10px;background:var(--panel-2);border:1px solid var(--line);
+  border-bottom:none;border-radius:14px 14px 0 0;padding:9px 16px}
+.dots{display:flex;gap:6px}.dots i{width:10px;height:10px;border-radius:50%;background:var(--line)}
+.url{flex:1;text-align:center;font-size:12px;color:var(--ink-3)}
+.url span{background:var(--bg);border:1px solid var(--line-2);border-radius:7px;padding:3px 14px;display:inline-block}
+.app{border:1px solid var(--line);border-radius:0 0 14px 14px;background:var(--bg);box-shadow:var(--shadow);
+  overflow:hidden;position:relative}
+
+.appbar{display:flex;align-items:center;gap:14px;background:var(--panel);border-bottom:1px solid var(--line);padding:10px 18px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:850;font-size:16px;letter-spacing:-.02em;color:var(--brand-ink)}
+.brand .mark{width:24px;height:24px;border-radius:7px;background:var(--accent);color:var(--on-accent);
+  display:grid;place-items:center;font-size:13px;font-weight:900}
+.brand small{font-size:10.5px;font-weight:650;color:var(--ink-3);letter-spacing:.06em;margin-left:2px}
+.appbar .spacer{flex:1}
+.legend{display:flex;gap:10px;align-items:center;font-size:11px;color:var(--ink-2)}
+.legend .g{display:inline-flex;align-items:center;gap:4px;font-weight:650}
+.runner{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--ink-2);border:1px solid var(--line);
+  border-radius:999px;padding:4px 11px}
+.runner .live{width:7px;height:7px;border-radius:50%;background:var(--good)}
+
+.shell{display:flex;min-height:780px}
+
+/* ─── sidebar: inquiries ──────────────────────────────────── */
+.side{width:268px;flex-shrink:0;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+.side .shead{padding:14px 16px 8px;display:flex;align-items:center;gap:8px}
+.side .shead b{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);font-weight:800}
+.newbtn{margin:6px 14px 12px;border:1px dashed var(--line);background:var(--panel-2);color:var(--accent);
+  border-radius:9px;padding:9px;font-weight:700;font-size:13px}
+.inq{width:100%;text-align:left;border:0;background:transparent;padding:11px 16px;border-left:3px solid transparent;
+  display:block}
+.inq:hover{background:var(--panel-2)}
+.inq[aria-current="true"]{background:var(--accent-tint);border-left-color:var(--accent)}
+.inq .t{font-size:13.5px;font-weight:700;line-height:1.35}
+.inq .s{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:11px;color:var(--ink-2)}
+.state{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:750;border-radius:999px;padding:2px 8px;
+  border:1px solid var(--line);background:var(--panel-2)}
+.state i{width:6px;height:6px;border-radius:50%;background:var(--ink-3);display:block}
+.state.ready i{background:var(--good)}
+.state.working i{background:var(--accent)}
+.state.gatewait i{background:var(--inferred)}
+.state.refused i{background:var(--blocked)}
+.side .example-note{margin:auto 16px 14px;font-size:11.5px;color:var(--ink-2);border-top:1px solid var(--line-2);padding-top:10px}
+.exlabel{font-size:9.5px;font-weight:800;letter-spacing:.1em;color:var(--accent);text-transform:uppercase}
+
+/* ─── center: the brief ───────────────────────────────────── */
+.center{flex:1;min-width:0;display:flex;flex-direction:column}
+.view{display:none;flex:1;min-width:0}
+.view.on{display:block}
+.bhead{display:flex;align-items:center;gap:12px;padding:14px 26px 0}
+.bhead h2{margin:0;font-size:19px;letter-spacing:-.015em;font-weight:780;flex:1}
+.proj{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--panel-2)}
+.proj button{border:0;background:transparent;font-size:12px;font-weight:700;color:var(--ink-2);padding:6px 13px}
+.proj button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+.exportbtn{border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:6px 13px;font-size:12px;font-weight:700;color:var(--accent-deep)}
+.bmeta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 26px 0;font-size:11.5px;color:var(--ink-2)}
+.bmeta .mono{font-size:10.5px}
+
+.bwrap{padding:14px 26px 26px;max-width:880px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+
+/* trust chips: word + fill glyph, color secondary, never color-alone */
+.tchip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:750;border-radius:999px;
+  padding:2.5px 10px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink-2);cursor:pointer}
+.tchip .fill{display:inline-flex;gap:2px}
+.tchip .fill i{width:5px;height:9px;border-radius:2px;background:var(--line);display:block}
+.tchip.c3 .fill i:nth-child(-n+3){background:var(--grounded)}
+.tchip.c2 .fill i:nth-child(-n+2){background:var(--grounded)}
+.tchip.c1 .fill i:nth-child(1){background:var(--inferred)}
+.tchip.c0{border-style:dashed;border-color:color-mix(in srgb,var(--inferred) 55%,var(--line))}
+.tchip.c0 .fill i{background:transparent;border:1px dashed var(--inferred)}
+.tchip:hover{border-color:var(--accent)}
+
+/* top sheet */
+.topsheet{padding:18px 20px 14px}
+.topsheet .head1{font-size:17px;font-weight:770;margin:0 0 4px;letter-spacing:-.01em}
+.topsheet .head1 b{color:var(--accent-deep)}
+.topsheet .sub{font-size:12.5px;color:var(--ink-2);margin:0}
+.reads{display:flex;gap:14px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line-2);
+  font-size:10.5px;color:var(--ink-3);letter-spacing:.06em;text-transform:uppercase;font-weight:750}
+
+.claims{margin-top:14px;display:flex;flex-direction:column;gap:10px}
+.claim{padding:13px 16px;display:flex;gap:12px;align-items:flex-start}
+.claim .txt{flex:1;font-size:14px}
+.claim .txt .chal{display:block;margin-top:6px}
+.chal button{border:0;background:none;color:var(--accent-deep);font-size:11.5px;font-weight:700;padding:0}
+.chal .fix{display:none;margin-top:7px;font-size:12px;color:var(--ink-2);background:var(--inset);
+  border-left:2px solid var(--accent);padding:8px 11px;border-radius:0 7px 7px 0}
+.chal.open .fix{display:block}
+.claim .side-chip{flex-shrink:0}
+
+/* chart */
+.viz{padding:16px 18px 12px;margin-top:14px}
+.viz .vhead{display:flex;align-items:baseline;gap:10px}
+.viz h3{margin:0;font-size:14px;font-weight:760}
+.viz .delta{margin-left:auto;font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}
+.viz .delta .up{color:var(--good)}
+.viz .src{font-size:11.5px;color:var(--ink-2);margin:2px 0 14px}
+.plot{position:relative;height:132px;margin:0 4px}
+.gridline{position:absolute;left:0;right:32px;border-top:1px solid var(--line-2)}
+.gridline span{position:absolute;right:-32px;top:-7px;font-size:10px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.bars{position:absolute;inset:0 32px 0 0;display:flex;align-items:flex-end;gap:9px;padding:0 6px}
+.bcol{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;position:relative}
+.bar{width:100%;max-width:32px;border-radius:4px 4px 0 0;background:color-mix(in srgb,var(--data) 42%,var(--panel));
+  border:1px solid color-mix(in srgb,var(--data) 30%,var(--panel))}
+.bcol.hot .bar{background:var(--data);border-color:var(--data)}
+.blabel{position:absolute;top:-19px;font-size:11px;font-weight:760;font-variant-numeric:tabular-nums}
+.tip{position:absolute;bottom:calc(100% + 24px);left:50%;transform:translateX(-50%);white-space:nowrap;background:var(--ink);
+  color:var(--bg);font-size:11px;font-weight:650;border-radius:6px;padding:4px 9px;opacity:0;pointer-events:none;transition:opacity .12s}
+.bcol:hover .tip{opacity:1}
+.xlabels{display:flex;gap:9px;margin:6px 38px 0 6px}
+.xlabels span{flex:1;text-align:center;font-size:10.5px;color:var(--ink-2)}
+
+.govfoot{margin-top:14px;padding:12px 16px;font-size:12px;color:var(--ink-2);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.govfoot::before{content:"◈";color:var(--grounded)}
+
+/* thread projection */
+.thread{padding:16px 0 0;max-width:760px}
+.tu{max-width:75%;background:var(--accent);color:var(--on-accent);padding:9px 14px;border-radius:14px 14px 4px 14px;
+  font-weight:550;font-size:13.5px;margin:0 0 12px auto;width:fit-content}
+.ta{max-width:85%;background:var(--panel);border:1px solid var(--line);padding:10px 14px;border-radius:14px 14px 14px 4px;
+  font-size:13.5px;margin-bottom:12px;width:fit-content}
+.composer{display:flex;gap:10px;margin-top:16px}
+.input{flex:1;border:1px solid var(--line);background:var(--panel);border-radius:11px;padding:10px 15px;color:var(--ink-3);font-size:13.5px}
+.send{background:var(--accent);color:var(--on-accent);border:0;border-radius:10px;width:42px;font-size:15px;font-weight:800}
+
+/* ledger projection */
+table.ledger{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.ledgerwrap{overflow-x:auto;border-radius:var(--r);margin-top:16px}
+table.ledger th{text-align:left;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);
+  padding:9px 13px;border-bottom:1px solid var(--line);background:var(--panel-2)}
+table.ledger td{padding:8px 13px;border-bottom:1px solid var(--line-2);color:var(--ink-2);font-variant-numeric:tabular-nums}
+table.ledger tr:last-child td{border-bottom:none}
+table.ledger .mono{font-size:11px}
+
+/* ─── the wait + the gate (Q3 view) ───────────────────────── */
+.workhead{display:flex;align-items:center;gap:12px;padding:16px 26px 0}
+.workhead h2{margin:0;font-size:19px;font-weight:780;flex:1;letter-spacing:-.015em}
+.timer{font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace;font-size:14px;font-weight:700;color:var(--accent-deep);
+  border:1px solid var(--line);border-radius:9px;padding:5px 12px;background:var(--panel)}
+.worklog{margin:14px 26px 0;max-width:760px}
+.wrow{display:flex;gap:11px;padding:9px 14px;border-bottom:1px solid var(--line-2);align-items:flex-start;background:var(--panel)}
+.wrow:first-child{border-radius:var(--r) var(--r) 0 0;border:1px solid var(--line);border-bottom:1px solid var(--line-2)}
+.wrow{border-left:1px solid var(--line);border-right:1px solid var(--line)}
+.wrow:last-child{border-radius:0 0 var(--r) var(--r);border-bottom:1px solid var(--line)}
+.wrow .st{width:8px;height:8px;border-radius:50%;background:var(--good);flex-shrink:0;margin-top:5px}
+.wrow.active .st{background:var(--accent);box-shadow:0 0 0 3px var(--accent-tint)}
+.wrow .wtxt{flex:1;min-width:0}
+.wrow .wtxt .v{font-size:13px;font-weight:680}
+.wrow .wtxt .f{font-size:12px;color:var(--ink-2);margin-top:2px}
+.wrow .dur{font-size:10.5px;color:var(--ink-2);font-family:ui-monospace,Menlo,monospace}
+.pinfind{color:var(--accent-deep);font-weight:650}
+
+.gatecard{margin:16px 26px;max-width:760px;border-left:3px solid var(--inferred)}
+.gatecard.done{border-left-color:var(--grounded)}
+.gatecard .ghead{display:flex;align-items:center;gap:10px;padding:13px 18px 0;font-weight:780;font-size:14px}
+.gatecard .ghead .badge{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--inferred);
+  border:1px solid color-mix(in srgb,var(--inferred) 45%,var(--line));border-radius:5px;padding:2px 7px;font-weight:850}
+.gatecard.done .ghead .badge{color:var(--grounded);border-color:color-mix(in srgb,var(--grounded) 45%,var(--line))}
+.intent{padding:8px 18px 0;font-size:13px;color:var(--ink-2)}
+.gatecard pre{margin:10px 18px;background:var(--code-bg);border:1px solid var(--line-2);border-radius:8px;padding:11px 14px;
+  font-size:12.5px;line-height:1.6;overflow-x:auto;color:var(--ink-2)}
+.gatecard pre b{color:var(--ink);font-weight:650}
+.pols{display:flex;gap:8px;flex-wrap:wrap;padding:0 18px}
+.pol{font-size:11px;font-weight:650;color:var(--ink-2);background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+.pol::before{content:"✓ ";color:var(--grounded);font-weight:800}
+.pol.cost{font-weight:760;color:var(--ink);background:color-mix(in srgb,var(--inferred) 12%,var(--panel));
+  border-color:color-mix(in srgb,var(--inferred) 40%,var(--line))}
+.pol.cost::before{content:"≈ ";color:var(--inferred)}
+.gact{display:flex;gap:12px;align-items:center;padding:14px 18px 16px;flex-wrap:wrap}
+.hold{position:relative;overflow:hidden;background:var(--accent);color:var(--on-accent);border:0;border-radius:9px;
+  padding:10px 20px;font-size:13px;font-weight:800;min-width:190px}
+.hold .prog{position:absolute;inset:0;background:rgba(255,255,255,.28);transform-origin:left;transform:scaleX(0)}
+.hold.holding .prog{transform:scaleX(1);transition:transform .7s linear}
+.hold span{position:relative}
+.gnote{font-size:11.5px;color:var(--ink-2)}
+.gnote b{color:var(--ink)}
+.gdone{display:none;padding:12px 18px 15px;font-size:12.5px;color:var(--ink-2)}
+.gdone b{color:var(--grounded)}
+.gatecard.done .gact{display:none}
+.gatecard.done .gdone{display:block}
+.q3ready{display:none;margin:0 26px 22px;max-width:760px;padding:15px 18px}
+.q3ready.show{display:block}
+.q3ready .lead{font-size:14.5px;margin:0 0 8px}
+
+/* refusal view */
+.refcard{margin:18px 26px;max-width:760px;border-left:3px solid var(--blocked)}
+.refcard .rhead{display:flex;align-items:center;gap:9px;padding:14px 18px 0}
+.refcard .shield{width:23px;height:23px;border-radius:7px;display:grid;place-items:center;font-size:12px;
+  background:color-mix(in srgb,var(--blocked) 13%,var(--panel));color:var(--blocked)}
+.refcard .rhead b{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--blocked);font-weight:850}
+.refcard .lead{padding:10px 18px 0;margin:0;font-size:14.5px}
+.refcard .lead code{background:var(--code-bg);border-radius:5px;padding:1px 6px;font-size:.88em}
+.refcard .foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:13px 18px 16px}
+.altbtn{border:1px solid var(--line);background:var(--panel-2);border-radius:9px;padding:8px 15px;font-size:12.5px;
+  font-weight:750;color:var(--accent-deep)}
+
+/* witness panel */
+.witness{position:absolute;top:0;right:0;bottom:0;width:330px;background:var(--panel);border-left:1px solid var(--line);
+  box-shadow:var(--shadow);transform:translateX(105%);transition:transform .18s ease;z-index:30;display:flex;flex-direction:column}
+.witness.open{transform:none}
+.witness .whead{display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line-2)}
+.witness .whead b{font-size:13px;font-weight:800;flex:1}
+.wclose{border:1px solid var(--line);background:var(--panel-2);border-radius:7px;width:26px;height:26px;font-size:12px}
+.witness .wbody{padding:14px 16px;overflow-y:auto}
+.witness .wclaim{font-size:12.5px;color:var(--ink-2);border-left:2px solid var(--accent);padding:6px 10px;background:var(--inset);
+  border-radius:0 7px 7px 0;margin-bottom:12px}
+.wsrc{display:flex;align-items:center;gap:9px;padding:8px 2px;border-bottom:1px solid var(--line-2);font-size:12.5px}
+.wsrc .nm{flex:1;font-weight:650}
+.wsrc .ok{color:var(--grounded);font-weight:800}
+.wsrc .no{color:var(--ink-3)}
+.wscore{margin-top:12px;font-size:12px;color:var(--ink-2)}
+.wscore b{font-variant-numeric:tabular-nums;color:var(--ink)}
+.wopen{margin-top:12px;display:inline-block;font-size:12px;font-weight:750;color:var(--accent-deep)}
+
+/* toast */
+.toast{position:absolute;left:50%;bottom:18px;transform:translate(-50%,8px);background:var(--ink);color:var(--bg);
+  font-size:12.5px;font-weight:650;border-radius:9px;padding:9px 16px;opacity:0;pointer-events:none;transition:all .18s;z-index:40}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* pins + notes */
+.pin{position:absolute;width:19px;height:19px;border-radius:50%;background:var(--accent);color:var(--on-accent);
+  font-size:10.5px;font-weight:850;display:grid;place-items:center;box-shadow:var(--shadow);z-index:20}
+.pinlegend{max-width:1400px;margin:14px auto 0;padding:0 20px;display:flex;gap:16px;flex-wrap:wrap}
+.pinlegend div{display:flex;gap:7px;align-items:baseline;font-size:12.5px;color:var(--ink-2)}
+.pinlegend i{font-style:normal;width:17px;height:17px;border-radius:50%;background:var(--accent);color:var(--on-accent);
+  font-size:10px;font-weight:850;display:inline-grid;place-items:center;flex-shrink:0;transform:translateY(2px)}
+.notes{max-width:1080px;margin:52px auto 80px;padding:0 24px}
+.notes h2{font-size:20px;letter-spacing:-.01em;margin:42px 0 6px;font-weight:770}
+.notes .sub{color:var(--ink-2);margin:0 0 16px;max-width:72ch}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}
+.grid2 .card{padding:16px 18px}
+.grid2 h4{margin:0 0 6px;font-size:14px;font-weight:760}
+.grid2 h4 span{color:var(--accent);margin-right:6px}
+.grid2 p{margin:0;font-size:12.5px;color:var(--ink-2)}
+table.map{width:100%;border-collapse:collapse;font-size:13px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.tablewrap{overflow-x:auto;border-radius:var(--r)}
+table.map th{text-align:left;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);padding:10px 14px;
+  border-bottom:1px solid var(--line);background:var(--panel-2)}
+table.map td{padding:9px 14px;border-bottom:1px solid var(--line-2);color:var(--ink-2);vertical-align:top}
+table.map tr:last-child td{border-bottom:none}
+table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-size:11.5px;color:var(--ink)}
+
+@media (max-width:1080px){.side{display:none}.witness{width:290px}}
+</style>
+
+<header class="intro">
+  <div class="eyebrow">Radix · Brief Workspace · design mock v2 · the D1 decision</div>
+  <h1>The Brief is the product. Chat steers it.</h1>
+  <p>This is the clean-room panel's architecture rendered for real: an <strong>Inquiry workspace</strong> where every question becomes a durable, auditable <strong>Brief</strong> with evidence bound to each claim — not a scroll position. Compare it against mock v1 (the chat console) and take the D1 call.</p>
+  <p><strong>Try it:</strong></p>
+  <div class="trylist">
+    <span><b>1</b> Click <em>Q3 delinquency drivers</em> → watch the wait, then <em>hold</em> the approve button</span>
+    <span><b>2</b> Click any evidence chip → the witness panel opens</span>
+    <span><b>3</b> Switch projections: Brief / Thread / Ledger</span>
+    <span><b>4</b> Find the deliberately <em>Inferred</em> claim</span>
+  </div>
+</header>
+
+<div class="frame-wrap">
+  <div class="chrome">
+    <div class="dots"><i></i><i></i><i></i></div>
+    <div class="url"><span>radix.aexp.internal</span></div>
+  </div>
+  <div class="app" id="app">
+    <div class="appbar">
+      <div class="brand"><span class="mark">R</span> Radix <small>CREDIT-RISK ANALYST</small></div>
+      <div class="spacer"></div>
+      <div class="legend" aria-label="Evidence vocabulary">
+        <span class="g"><span class="tchip c3" tabindex="-1" style="cursor:default"><span class="fill"><i></i><i></i><i></i></span>Corroborated</span></span>
+        <span class="g"><span class="tchip c2" tabindex="-1" style="cursor:default"><span class="fill"><i></i><i></i><i></i></span>Sourced</span></span>
+        <span class="g"><span class="tchip c1" tabindex="-1" style="cursor:default"><span class="fill"><i></i><i></i><i></i></span>Reported</span></span>
+        <span class="g"><span class="tchip c0" tabindex="-1" style="cursor:default"><span class="fill"><i></i><i></i><i></i></span>Inferred</span></span>
+      </div>
+      <span class="runner"><span class="live"></span> Gemini 3.1 Pro · Vertex</span>
+    </div>
+
+    <div class="shell">
+      <!-- ── inquiries sidebar ── -->
+      <nav class="side" aria-label="Inquiries" style="position:relative">
+        <div class="pin" style="top:12px;right:12px">1</div>
+        <div class="shead"><b>Inquiries</b></div>
+        <button class="newbtn">+ New inquiry</button>
+        <button class="inq" data-view="newacct" aria-current="true">
+          <div class="t">New-accounts momentum</div>
+          <div class="s"><span class="state ready"><i></i>Ready</span><span class="mono">RB-0142</span></div>
+        </button>
+        <button class="inq" data-view="q3">
+          <div class="t">Q3 delinquency drivers</div>
+          <div class="s"><span class="state working" id="q3state"><i></i><span id="q3statetxt">Composing</span></span><span class="mono">RB-0143</span></div>
+        </button>
+        <button class="inq" data-view="cm11">
+          <div class="t">Spend by cm11 (cardmember)</div>
+          <div class="s"><span class="state refused"><i></i>Refused</span><span class="mono">RB-0141</span></div>
+        </button>
+        <button class="inq" data-view="rollrate">
+          <div class="t"><span class="exlabel">Example ·</span> Who owns roll_rate_calc?</div>
+          <div class="s"><span class="state ready"><i></i>Ready</span><span class="mono">RB-0007</span></div>
+        </button>
+        <div class="example-note">New here? Open an <b>Example</b> and hover its chips — then ask something you already know.</div>
+      </nav>
+
+      <!-- ── center ── -->
+      <main class="center" style="position:relative">
+
+        <!-- ══ VIEW: hero brief ══ -->
+        <section class="view on" id="view-newacct">
+          <div class="bhead">
+            <h2>New-accounts momentum</h2>
+            <div class="pin" style="position:static">3</div>
+            <div class="proj" role="group" aria-label="Projection">
+              <button data-proj="brief" aria-pressed="true">Brief</button>
+              <button data-proj="thread" aria-pressed="false">Thread</button>
+              <button data-proj="ledger" aria-pressed="false">Ledger</button>
+            </div>
+            <button class="exportbtn" id="export">Export ⭳</button>
+          </div>
+          <div class="bmeta">
+            <span class="mono">RB-0142 · v2</span> · asked by S. Gandhi · Jul 6, 21:42
+            · <span class="mono">ledger #4821</span> · exports carry chips + provenance appendix
+          </div>
+
+          <!-- projection: BRIEF -->
+          <div class="bwrap projpane" id="proj-brief">
+            <div class="card topsheet" style="position:relative">
+              <div class="pin" style="top:-9px;left:-9px">2</div>
+              <p class="head1">New accounts are up <b>8.4% month-over-month</b> — 11.8k opened in June, the strongest month in the window.</p>
+              <p class="sub">Fourth consecutive monthly rise. Read the claims below for what's established vs. inferred.</p>
+              <div class="reads"><span>1-second read: the headline</span><span>10-second: claims + chips</span><span>10-minute: witness panels + ledger</span></div>
+            </div>
+
+            <div class="claims">
+              <div class="card claim">
+                <div class="txt">June opened <b>11,792</b> new accounts, up from 10,878 in May (+8.4%).
+                  <span class="chal"><button>Challenge</button><span class="fix">Cheapest verification: re-run the count on May–Jun only (≈0.2&nbsp;GB, one gate approval). <b>Queue it →</b></span></span>
+                </div>
+                <button class="tchip c3 side-chip" data-w="w1"><span class="fill"><i></i><i></i><i></i></span>Corroborated</button>
+              </div>
+              <div class="card claim">
+                <div class="txt"><code>sbs_new_accounts</code> is owned by <b>New Accounts (SBS)</b> and fed by the approval pipeline.
+                  <span class="chal"><button>Challenge</button><span class="fix">Cheapest verification: fetch the MDM ownership record live (no warehouse cost). <b>Queue it →</b></span></span>
+                </div>
+                <button class="tchip c2 side-chip" data-w="w2"><span class="fill"><i></i><i></i><i></i></span>Sourced</button>
+              </div>
+              <div class="card claim">
+                <div class="txt">The growth is <b>likely driven by the Q2 SBS acquisition campaign</b> — timing aligns, but no campaign attribution field exists in this data.
+                  <span class="chal"><button>Challenge</button><span class="fix">This is a hypothesis. Cheapest test: compare approval-channel mix May vs June (≈0.4&nbsp;GB). <b>Queue it →</b></span></span>
+                </div>
+                <button class="tchip c0 side-chip" data-w="w3"><span class="fill"><i></i><i></i><i></i></span>Inferred</button>
+              </div>
+            </div>
+
+            <div class="card viz">
+              <div class="vhead"><h3>New accounts by month</h3><span class="delta"><span class="up">▲ 8.4%</span> <small style="color:var(--ink-2);font-weight:600">MoM</small></span></div>
+              <div class="src">sbs_new_accounts · live query · row-capped · ledger #4821</div>
+              <div class="plot">
+                <div class="gridline" style="bottom:116px"><span>12k</span></div>
+                <div class="gridline" style="bottom:87px"><span>9k</span></div>
+                <div class="gridline" style="bottom:58px"><span>6k</span></div>
+                <div class="gridline" style="bottom:29px"><span>3k</span></div>
+                <div class="gridline" style="bottom:0"><span>0</span></div>
+                <div class="bars">
+                  <div class="bcol"><span class="tip">Nov · 8,096</span><div class="bar" style="height:78px"></div></div>
+                  <div class="bcol"><span class="tip">Dec · 7,884</span><div class="bar" style="height:76px"></div></div>
+                  <div class="bcol"><span class="tip">Jan · 9,187</span><div class="bar" style="height:89px"></div></div>
+                  <div class="bcol"><span class="tip">Feb · 9,012</span><div class="bar" style="height:87px"></div></div>
+                  <div class="bcol"><span class="tip">Mar · 9,845</span><div class="bar" style="height:95px"></div></div>
+                  <div class="bcol"><span class="tip">Apr · 10,310</span><div class="bar" style="height:100px"></div></div>
+                  <div class="bcol"><span class="tip">May · 10,878</span><div class="bar" style="height:105px"></div></div>
+                  <div class="bcol hot"><span class="tip">Jun · 11,792</span><span class="blabel">11.8k</span><div class="bar" style="height:114px"></div></div>
+                </div>
+              </div>
+              <div class="xlabels"><span>Nov</span><span>Dec</span><span>Jan</span><span>Feb</span><span>Mar</span><span>Apr</span><span>May</span><span>Jun</span></div>
+            </div>
+
+            <div class="card govfoot">Read-only · row-capped · every execution on the audit ledger · no PII columns touched. <span class="mono" style="margin-left:auto">no naked numbers leave the building</span></div>
+          </div>
+
+          <!-- projection: THREAD -->
+          <div class="bwrap projpane" id="proj-thread" hidden>
+            <div class="thread">
+              <div class="tu">How many new accounts are we opening per month? Chart it.</div>
+              <div class="ta">Drafted a monthly count on <code>sbs_new_accounts</code>. Cost ≈ 1.24 GB — approved by you at 21:42 (ledger #4821). Brief updated with the results.</div>
+              <div class="tu">Why the June jump?</div>
+              <div class="ta">Added a claim: timing aligns with the Q2 SBS campaign — marked <b>Inferred</b> (no attribution field exists to corroborate). I proposed the cheapest verification on the claim.</div>
+              <div class="composer"><div class="input">Steer this brief — refine, extend, or challenge…</div><button class="send" aria-label="Send">↑</button></div>
+            </div>
+          </div>
+
+          <!-- projection: LEDGER -->
+          <div class="bwrap projpane" id="proj-ledger" hidden>
+            <div class="ledgerwrap"><table class="ledger">
+              <tr><th>When</th><th>Event</th><th>Actor</th><th>Ref</th></tr>
+              <tr><td class="mono">21:41:58</td><td>Resolved “new accounts by month” → acct_open_dt, acct_id</td><td>agent</td><td class="mono">graph</td></tr>
+              <tr><td class="mono">21:42:03</td><td>SQL validated — policies PII-4, ROWCAP-1 passed</td><td>agent</td><td class="mono">validate</td></tr>
+              <tr><td class="mono">21:42:07</td><td>Dry-run cost estimate ≈ 1.24 GB</td><td>agent</td><td class="mono">dry_run</td></tr>
+              <tr><td class="mono">21:42:31</td><td><b>Approved</b> — hold-to-sign</td><td><b>S. Gandhi</b></td><td class="mono">#4821</td></tr>
+              <tr><td class="mono">21:42:39</td><td>Executed row-capped · 8 rows</td><td>agent</td><td class="mono">#4821</td></tr>
+              <tr><td class="mono">21:42:41</td><td>Sandbox: mom_pct = 8.4</td><td>agent</td><td class="mono">sandbox</td></tr>
+              <tr><td class="mono">21:42:44</td><td>Brief v2 composed — 3 claims, 1 flagged Inferred</td><td>agent</td><td class="mono">RB-0142</td></tr>
+            </table></div>
+          </div>
+        </section>
+
+        <!-- ══ VIEW: Q3 — the wait + the gate ══ -->
+        <section class="view" id="view-q3">
+          <div class="workhead">
+            <h2>Q3 delinquency drivers</h2>
+            <div class="pin" style="position:static">4</div>
+            <span class="timer" id="timer" aria-live="off">00:31</span>
+          </div>
+          <div class="bmeta" style="padding-left:26px">The answer will land whole — Radix streams its <b>work</b>, never half-finished prose.</div>
+          <div class="worklog" id="worklog" role="log" aria-live="polite">
+            <div class="wrow"><span class="st"></span><div class="wtxt"><div class="v">Read the metadata spine for risk_pers_acct_history</div><div class="f">1,404 columns · owner on file · <span class="pinfind">pinned: pre-lagged table — LAG() forbidden by skill rule</span></div></div><span class="dur">2.1s</span></div>
+            <div class="wrow"><span class="st"></span><div class="wtxt"><div class="v">Searched the graph for “delinquency drivers”</div><div class="f"><span class="pinfind">pinned: roll_rate metric + 3 corroborated join paths</span></div></div><span class="dur">1.4s</span></div>
+            <div class="wrow"><span class="st"></span><div class="wtxt"><div class="v">Validated SQL against guardrails</div><div class="f">Policies PII-4, LAG-1, ROWCAP-1 · all passed</div></div><span class="dur">0.3s</span></div>
+            <div class="wrow active" id="waitrow"><span class="st"></span><div class="wtxt"><div class="v" id="waitverb">Waiting for your authorization</div><div class="f">the loop is paused — Radix cannot touch the warehouse without you</div></div><span class="dur">—</span></div>
+          </div>
+
+          <div class="card gatecard" id="gate">
+            <div class="ghead"><span class="badge">Authorization</span> Signing ceremony — a warehouse read needs you</div>
+            <div class="intent"><b>Intent:</b> compare Q3 vs Q2 roll-rates by segment to isolate delinquency drivers.</div>
+            <pre><b>SELECT</b> seg, period, roll_rate <b>FROM</b> common.roll_rate_calc
+<b>WHERE</b> period <b>IN</b> ('2026Q2','2026Q3') <b>ORDER BY</b> seg</pre>
+            <div class="pols">
+              <span class="pol cost">0.9 GB scanned</span>
+              <span class="pol">PII-4 · no cm11 exposure</span>
+              <span class="pol">LAG-1 · pre-lagged respected</span>
+              <span class="pol">ROWCAP-1 · 100 rows</span>
+            </div>
+            <div class="gact">
+              <button class="hold" id="holdbtn"><span class="prog"></span><span>Hold to approve (0.7s)</span></button>
+              <span class="gnote">Deliberate by design — never plain Enter. Keyboard: focus + hold <b>Space</b>. If the SQL changes, you re-approve the <b>diff</b>.</span>
+            </div>
+            <div class="gdone"><b>✓ Signed by you</b> · 21:58 · ledger <span class="mono">#4822</span> · executed row-capped</div>
+          </div>
+
+          <div class="card q3ready" id="q3ready">
+            <p class="lead">Brief ready: <b>90+ roll-rate deterioration concentrates in two SBS segments</b>; the drivers brief has 4 claims (1 Inferred) and one chart.</p>
+            <span class="tchip c3" tabindex="-1" style="cursor:default"><span class="fill"><i></i><i></i><i></i></span>Corroborated</span>
+            <span class="mono" style="font-size:11px;color:var(--ink-2)"> · RB-0143 · ledger #4822</span>
+          </div>
+        </section>
+
+        <!-- ══ VIEW: refusal ══ -->
+        <section class="view" id="view-cm11">
+          <div class="bhead"><h2>Spend by cm11 (cardmember)</h2><div class="pin" style="position:static">5</div></div>
+          <div class="card refcard">
+            <div class="rhead"><span class="shield">▲</span><b>Blocked by policy PII-4 — enforced below this assistant</b></div>
+            <p class="lead">Radix can't expose <code>cm11_encrypted</code> at cardmember grain. The rule is machine-checked bank policy, not the model's judgment — no phrasing will route around it. The same breakdown works on the <b>masked account key</b>: identical insight, compliant grain.</p>
+            <div class="foot">
+              <button class="altbtn">Run with masked key →</button>
+              <span class="gnote">cited: <span class="mono">skill:SBS_RollRates/guardrail#cm11</span></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ══ VIEW: example brief ══ -->
+        <section class="view" id="view-rollrate">
+          <div class="bhead"><h2><span class="exlabel" style="font-size:11px">Example</span> Who owns roll_rate_calc?</h2></div>
+          <div class="bmeta" style="padding-left:26px">Pre-run against the live graph so your first minute teaches the trust system. Hover the chips.</div>
+          <div class="bwrap">
+            <div class="card topsheet">
+              <p class="head1"><b>Portfolio Analytics (CPS)</b> stewards <code>common.roll_rate_calc</code>; the metric definition comes from the RollRates skill.</p>
+            </div>
+            <div class="claims">
+              <div class="card claim">
+                <div class="txt">Table ownership: Portfolio Analytics (CPS), lifecycle <b>active</b>.</div>
+                <button class="tchip c2 side-chip" data-w="w4"><span class="fill"><i></i><i></i><i></i></span>Sourced</button>
+              </div>
+              <div class="card claim">
+                <div class="txt">The <b>roll_rate</b> metric definition (30→60→90+ bucket transitions) is curated by the skill library and corroborated by 14 analyst queries.</div>
+                <button class="tchip c3 side-chip" data-w="w5"><span class="fill"><i></i><i></i><i></i></span>Corroborated</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- witness panel -->
+        <aside class="witness" id="witness" aria-label="Witness panel">
+          <div class="whead"><b id="wtitle">Evidence</b><button class="wclose" id="wclose" aria-label="Close">✕</button></div>
+          <div class="wbody">
+            <div class="wclaim" id="wclaim">—</div>
+            <div id="wsources"></div>
+            <div class="wscore">Structural confidence <b id="wscore">—</b> · computed from source fusion, not model self-belief.</div>
+            <a class="wopen" href="#" onclick="return false">Open in graph →</a>
+          </div>
+        </aside>
+
+        <div class="toast" id="toast">Exported with chips, provenance appendix &amp; ledger stamp</div>
+      </main>
+    </div>
+  </div>
+</div>
+
+<div class="pinlegend">
+  <div><i>1</i> Inquiries: Briefs are durable objects with states — including live Composing</div>
+  <div><i>2</i> The top sheet: 1-second / 10-second / 10-minute read depths</div>
+  <div><i>3</i> Three projections of ONE object: Brief · Thread · Ledger</div>
+  <div><i>4</i> The wait streams the work; the answer lands whole</div>
+  <div><i>5</i> Refusal is institutional — policy id, enforced below the assistant</div>
+</div>
+
+<section class="notes">
+  <h2>What changed since mock v1 — and why</h2>
+  <p class="sub">Every delta below traces to the evaluative study (<span class="mono">ux-research-notes.md</span>) or the clean-room vision (<span class="mono">greenfield-vision.md</span>); the mapping lives in <span class="mono">synthesis-vision.md</span>.</p>
+  <div class="grid2">
+    <div class="card"><h4><span>D1</span>Brief over transcript</h4><p>The unit of work is a durable, versioned, exportable artifact with a ledger stamp — auditable and shareable in a way a scroll position never is. Chat survives as the steering thread.</p></div>
+    <div class="card"><h4><span>D2</span>The answer never streams</h4><p>Streamed prose reads as confidence before evidence exists. Radix streams the <em>work log</em>; the Brief composes atomically — a claim cannot render before its chip.</p></div>
+    <div class="card"><h4><span>D3</span>Four words, no percentages</h4><p>Corroborated / Sourced / Reported / Inferred as word + fill-glyph (never color alone). The structural score lives one level down, in the witness panel.</p></div>
+    <div class="card"><h4><span>D4</span>The signing ceremony</h4><p>Hold-to-approve (or hold Space) — deliberately never plain Enter, so approval can't become a reflex. Changed SQL requires re-approving the diff.</p></div>
+    <div class="card"><h4><span>D6</span>Every claim is challengeable</h4><p>Challenge → the agent proposes the cheapest verification instead of defending itself. Corrections version the Brief and feed steward review.</p></div>
+    <div class="card"><h4><span>S1</span>Study-1 fixes baked in</h4><p>In-flight grammar (active row + count-up), metadata contrast raised to AA, one deliberately Inferred claim so the tier system is learned by contrast, witness panel makes chips doors.</p></div>
+  </div>
+
+  <h2>Trust vocabulary → graph tiers</h2>
+  <div class="tablewrap"><table class="map">
+    <tr><th>Display word</th><th>Glyph</th><th>Canonical graph tiers</th><th>Reader behavior</th></tr>
+    <tr><td><b>Corroborated</b></td><td>3 filled</td><td><code>human_asserted</code>, <code>grounded</code> (multi-witness)</td><td>Cite freely</td></tr>
+    <tr><td><b>Sourced</b></td><td>2 filled</td><td>single strong witness (MDM / skills / BQ)</td><td>Cite with source</td></tr>
+    <tr><td><b>Reported</b></td><td>1 filled</td><td>usage / corpus-observed only</td><td>Verify before shipping</td></tr>
+    <tr><td><b>Inferred</b></td><td>dashed</td><td><code>llm_generated</code> (tier-capped)</td><td>Treat as hypothesis — never ship naked</td></tr>
+  </table></div>
+
+  <h2>The D1 decision, framed</h2>
+  <p class="sub"><strong>Mock v1</strong> (chat console) is the fastest credible build and demos the agent loop beautifully. <strong>Mock v2</strong> (this) is the clean-room architecture: stronger audit/share/version story, native home for the gate ledger and the repair loop, and the exec projection falls out for free. The honest middle — v1's build cost with v2's DNA — is the chat surface whose answer cards ARE Briefs (ids, exports, ledger stamps), graduating to this workspace as v2 of the product. Both mocks are live; compare, then call it.</p>
+</section>
+
+<script>
+(function(){
+  // inquiry switching
+  var views = {newacct:1,q3:1,cm11:1,rollrate:1};
+  document.querySelectorAll('.inq').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      document.querySelectorAll('.inq').forEach(function(b){b.setAttribute('aria-current','false');});
+      btn.setAttribute('aria-current','true');
+      Object.keys(views).forEach(function(v){
+        document.getElementById('view-'+v).classList.toggle('on', btn.dataset.view===v);
+      });
+      closeWitness();
+    });
+  });
+
+  // projections (hero brief)
+  document.querySelectorAll('.proj button').forEach(function(b){
+    b.addEventListener('click', function(){
+      document.querySelectorAll('.proj button').forEach(function(x){x.setAttribute('aria-pressed','false');});
+      b.setAttribute('aria-pressed','true');
+      ['brief','thread','ledger'].forEach(function(p){
+        document.getElementById('proj-'+p).hidden = (b.dataset.proj!==p);
+      });
+    });
+  });
+
+  // witness panel
+  var W = {
+    w1:{t:'June count vs May', c:'June opened 11,792 new accounts (+8.4% MoM).', s:[['BigQuery (live query #4821)',1],['MDM row-count profile',1],['Analyst corpus (7 queries)',1],['AI inference',0]], score:'0.93'},
+    w2:{t:'Ownership', c:'sbs_new_accounts is owned by New Accounts (SBS).', s:[['MDM ownership record',1],['Skills library',0],['BigQuery',0],['AI inference',0]], score:'0.74'},
+    w3:{t:'Campaign hypothesis', c:'Growth likely driven by the Q2 SBS campaign.', s:[['AI inference (timing correlation)',1],['MDM',0],['BigQuery',0],['Corpus',0]], score:'0.31'},
+    w4:{t:'Ownership', c:'roll_rate_calc stewarded by Portfolio Analytics (CPS).', s:[['MDM ownership record',1],['Skills library',0]], score:'0.71'},
+    w5:{t:'Metric definition', c:'roll_rate = 30→60→90+ bucket transitions.', s:[['Skills library (curated)',1],['Analyst corpus (14 queries)',1],['MDM attribute notes',1]], score:'0.95'}
+  };
+  var wp = document.getElementById('witness');
+  function closeWitness(){ wp.classList.remove('open'); }
+  document.getElementById('wclose').addEventListener('click', closeWitness);
+  document.querySelectorAll('.tchip[data-w]').forEach(function(chip){
+    chip.addEventListener('click', function(){
+      var d = W[chip.dataset.w]; if(!d) return;
+      document.getElementById('wtitle').textContent = 'Evidence — ' + d.t;
+      document.getElementById('wclaim').textContent = d.c;
+      document.getElementById('wscore').textContent = d.score;
+      var rows = d.s.map(function(s){
+        return '<div class="wsrc"><span class="nm">'+s[0]+'</span>'+(s[1]?'<span class="ok">✓ supports</span>':'<span class="no">— silent</span>')+'</div>';
+      }).join('');
+      document.getElementById('wsources').innerHTML = rows;
+      wp.classList.add('open');
+    });
+  });
+
+  // challenge reveals
+  document.querySelectorAll('.chal > button').forEach(function(b){
+    b.addEventListener('click', function(){ b.parentElement.classList.toggle('open'); });
+  });
+
+  // export toast
+  var toast = document.getElementById('toast');
+  document.getElementById('export').addEventListener('click', function(){
+    toast.classList.add('show');
+    setTimeout(function(){ toast.classList.remove('show'); }, 2200);
+  });
+
+  // Q3: count-up timer
+  var secs = 31, done = false;
+  var timerEl = document.getElementById('timer');
+  setInterval(function(){
+    if(done) return;
+    secs++;
+    var m = String(Math.floor(secs/60)).padStart(2,'0'), s = String(secs%60).padStart(2,'0');
+    timerEl.textContent = m+':'+s;
+  }, 1000);
+
+  // Q3: hold-to-approve (mouse, touch, or hold Space)
+  var hold = document.getElementById('holdbtn'), gate = document.getElementById('gate');
+  var hTimer = null;
+  function startHold(){
+    if(done) return;
+    hold.classList.add('holding');
+    hTimer = setTimeout(approve, 700);
+  }
+  function cancelHold(){
+    hold.classList.remove('holding');
+    if(hTimer){ clearTimeout(hTimer); hTimer = null; }
+  }
+  function approve(){
+    done = true; cancelHold();
+    gate.classList.add('done');
+    var wr = document.getElementById('waitrow');
+    wr.classList.remove('active');
+    document.getElementById('waitverb').textContent = 'Signed — resuming the plan';
+    wr.querySelector('.f').textContent = 'decision on the audit ledger (#4822)';
+    var log = document.getElementById('worklog');
+    [['Executed the approved query (row-capped)','8 segments · ledger #4822','5.8s'],
+     ['Computed segment deltas in the sandbox','worst: SBS-C 90+ roll +212 bps','0.4s'],
+     ['Composed Brief RB-0143','4 claims · 1 Inferred · 1 chart','0.6s']].forEach(function(r){
+      var d = document.createElement('div'); d.className = 'wrow';
+      d.innerHTML = '<span class="st"></span><div class="wtxt"><div class="v">'+r[0]+'</div><div class="f">'+r[1]+'</div></div><span class="dur">'+r[2]+'</span>';
+      log.appendChild(d);
+    });
+    document.getElementById('q3ready').classList.add('show');
+    var st = document.getElementById('q3state');
+    st.classList.remove('working'); st.classList.add('ready');
+    document.getElementById('q3statetxt').textContent = 'Ready';
+  }
+  hold.addEventListener('mousedown', startHold);
+  hold.addEventListener('touchstart', function(e){ e.preventDefault(); startHold(); });
+  ['mouseup','mouseleave','touchend','touchcancel'].forEach(function(ev){ hold.addEventListener(ev, cancelHold); });
+  hold.addEventListener('keydown', function(e){
+    if(e.code==='Space' && !e.repeat){ e.preventDefault(); startHold(); }
+  });
+  hold.addEventListener('keyup', function(e){ if(e.code==='Space'){ e.preventDefault(); cancelHold(); } });
+})();
+</script>
