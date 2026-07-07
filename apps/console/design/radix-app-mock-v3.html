@@ -393,6 +393,24 @@ table.products tr:last-child td{border-bottom:none}
 .anacell .anaout code{font-weight:650;color:var(--ink)}
 .anacell{margin-top:14px}
 
+/* ─── v3.2: metric copilot ────────────────────────────── */
+.cop-in{display:flex;gap:10px;align-items:center;margin-bottom:14px}
+.cop-in .forminput{flex:1;max-width:640px}
+.minilog{margin:0 0 14px;max-width:760px}
+.draft{border-left:3px solid var(--accent)}
+.draft .dn{font-weight:800;font-size:14.5px;padding:13px 16px 0}
+.draft .dn small{font-weight:650;color:var(--ink-2)}
+.draft pre{margin:10px 16px;background:var(--code-bg);border:1px solid var(--line-2);border-radius:8px;
+  padding:11px 14px;font-size:12.5px;color:var(--ink-2);overflow-x:auto;line-height:1.6}
+.draft .grounded{display:flex;gap:7px;flex-wrap:wrap;align-items:center;padding:0 16px;font-size:11px;color:var(--ink-2)}
+.draft .grounded .kgcol{margin-top:0}
+.draft .pols{padding:10px 16px 0}
+.draft .tierline{display:flex;gap:9px;align-items:center;padding:12px 16px 0;font-size:12px;color:var(--ink-2)}
+.draft .acts{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:13px 16px 15px}
+.bindcard{padding:16px 18px;margin-top:14px}
+.bindcard h4{margin:0 0 8px;font-size:13.5px;font-weight:760}
+.bindcard ul{margin:0;padding-left:18px;font-size:12.5px;color:var(--ink-2);display:flex;flex-direction:column;gap:6px}
+
 /* pins + notes */
 .pin{position:absolute;width:19px;height:19px;border-radius:50%;background:var(--accent);color:var(--on-accent);
   font-size:10.5px;font-weight:850;display:grid;place-items:center;box-shadow:var(--shadow);z-index:20}
@@ -427,7 +445,7 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
   <div class="trylist">
     <span><b>Inquiries</b> flip Brief|Analysis on the doc · toggle Thread / Ledger · hold-to-approve the Q3 gate</span>
     <span><b>Data Products</b> readiness badges are your real Jul 6 scorecard</span>
-    <span><b>Metrics</b> hit “Check viability” — the canonical match has a witness panel</span>
+    <span><b>Metrics</b> hit “Draft with copilot” — canon first, then the guardrailed draft</span>
     <span><b>Knowledge Graph</b> the entity→join→metric thread, two real tables</span>
     <span><b>Bring your knowledge</b> all preview — honestly badged</span>
   </div>
@@ -725,40 +743,78 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
     <!-- ══ TAB: Metrics ══ -->
     <div class="tabpane" id="tab-metrics">
       <div class="pane-pad">
-        <h2>Metrics — define against the canon</h2>
-        <p class="psub">Draft a metric and Radix checks it against every canonical definition the graph knows — skills, glossary, corpus — before a duplicate is born.</p>
+        <h2>Metrics — a guardrailed copilot</h2>
+        <p class="psub">Describe the metric you need; the copilot drafts it <b>against the graph</b> — real columns, canon checked, guardrails validated. It can never mint canon: drafts stay <b>Inferred</b> until a steward signs.</p>
         <div class="metgrid">
           <div>
-            <div class="card formcard">
-              <label>Metric name</label>
-              <div class="forminput">approval_rate_new</div>
-              <label>Table</label>
-              <div class="forminput mono">sbs_new_accounts</div>
-              <label>Definition</label>
-              <div class="forminput">approved applications ÷ submitted applications, monthly</div>
-              <div style="margin-top:14px"><button class="btn primary" id="viab-btn">Check viability</button></div>
+            <div class="cop-in">
+              <div class="forminput" style="color:var(--ink)">I need a monthly approval rate for small-business new accounts, split by acquisition channel</div>
+              <button class="btn primary" id="viab-btn">Draft with copilot</button>
             </div>
+
             <div class="viab" id="viab-result">
-              <div class="card viabflag"><b>Near-duplicate of a canonical metric.</b> Same table, same ratio family — creating a second definition would fork the truth.</div>
+              <div class="minilog">
+                <div class="wrow"><span class="st"></span><div class="wtxt"><div class="v">Resolved the concepts to real columns</div><div class="f"><span class="pinfind">appl_status_cd · acct_open_dt · channel_cd on sbs_new_accounts</span> — all grounded</div></div><span class="dur">0.8s</span></div>
+                <div class="wrow"><span class="st"></span><div class="wtxt"><div class="v">Checked the canon before drafting anything</div><div class="f">1 near-duplicate found — canonical shown first, by rule</div></div><span class="dur">0.4s</span></div>
+                <div class="wrow"><span class="st"></span><div class="wtxt"><div class="v">Validated guardrails on the draft</div><div class="f">PII-4 no cm11 · compliant grain · read-only shape — passed</div></div><span class="dur">0.2s</span></div>
+              </div>
+
+              <div class="card viabflag"><b>A canonical metric already covers the base rate.</b> The copilot will never draft a duplicate — use the canon for the rate; the channel split below is the only genuinely new piece.</div>
+
               <div class="card canon">
                 <div class="cn">new_accounts_approval_rate <span style="font-weight:600;color:var(--ink-2)">· canonical</span></div>
                 <div class="cs">Defined by the <b>SBS_NewAccountsApprovalRate</b> skill · corroborated by 14 analyst queries · glossary entry present</div>
                 <button class="tchip c3" data-w="w6"><span class="fill"><i></i><i></i><i></i></span>Corroborated — see witnesses</button>
                 <div class="acts">
                   <button class="btn primary">Use canonical</button>
-                  <button class="btn quiet" disabled>Submit as new — steward review</button> <span class="pv">Preview</span>
+                </div>
+              </div>
+
+              <div class="card draft" style="margin-top:12px">
+                <div class="dn">sb_approval_rate_by_channel <small>· copilot draft — covers the uncovered slice</small></div>
+                <pre><b>approved</b>(appl_status_cd = 'A') ÷ <b>submitted</b>(all) · monthly(acct_open_dt) · BY channel_cd</pre>
+                <div class="grounded">grounded in
+                  <span class="kgcol">appl_status_cd</span>
+                  <span class="kgcol">acct_open_dt</span>
+                  <span class="kgcol">channel_cd</span>
+                  <span style="color:var(--ink-3)">— columns verified to exist; the copilot cannot reference what the graph doesn't have</span>
+                </div>
+                <div class="pols">
+                  <span class="pol">PII-4 · no cm11 exposure</span>
+                  <span class="pol">grain · account-level, compliant</span>
+                  <span class="pol">read-only shape</span>
+                </div>
+                <div class="tierline">
+                  <span class="tchip c0" style="cursor:default"><span class="fill"><i></i><i></i><i></i></span>Inferred — draft</span>
+                  becomes Corroborated <b>only</b> after steward signature (weight 10)
+                </div>
+                <div class="acts">
+                  <button class="btn primary" disabled>Send to steward</button> <span class="pv">Preview</span>
+                  <button class="btn quiet">Refine with copilot</button>
                 </div>
               </div>
             </div>
           </div>
-          <div class="card term">
-            <h4 style="margin:0 0 4px;font-size:14px;font-weight:760">Canonical term lookup</h4>
-            <p class="psub" style="margin-bottom:10px;font-size:12px">What does the org actually mean by a term — and who says so.</p>
-            <div class="forminput" style="color:var(--ink-3)">TBB</div>
-            <div class="termres">
-              <div style="flex:1"><div class="tr-nm">Total Billed Business</div>
-              <div class="st" style="font-size:11.5px;color:var(--ink-2)">curated by CPS skills · seen in corpus aliases</div></div>
-              <button class="tchip c2" data-w="w7"><span class="fill"><i></i><i></i><i></i></span>Sourced</button>
+
+          <div>
+            <div class="card term">
+              <h4 style="margin:0 0 4px;font-size:14px;font-weight:760">Canonical term lookup</h4>
+              <p class="psub" style="margin-bottom:10px;font-size:12px">What does the org actually mean by a term — and who says so.</p>
+              <div class="forminput" style="color:var(--ink-3)">TBB</div>
+              <div class="termres">
+                <div style="flex:1"><div class="tr-nm">Total Billed Business</div>
+                <div class="st" style="font-size:11.5px;color:var(--ink-2)">curated by CPS skills · seen in corpus aliases</div></div>
+                <button class="tchip c2" data-w="w7"><span class="fill"><i></i><i></i><i></i></span>Sourced</button>
+              </div>
+            </div>
+            <div class="card bindcard">
+              <h4>How the guardrails bind the copilot</h4>
+              <ul>
+                <li><b>Grounds only in existing columns</b> — the same grounding gate that polices enrichment polices drafts.</li>
+                <li><b>Never-expose columns are unreachable</b> — validate_sql_plan blocks them structurally, not by prompt.</li>
+                <li><b>The canon check is mandatory</b> — a duplicate cannot be drafted past an existing canonical metric.</li>
+                <li><b>Canonization requires a human signature</b> — the copilot's ceiling is a tier-stamped draft; weight 10 belongs to stewards.</li>
+              </ul>
             </div>
           </div>
         </div>
@@ -877,7 +933,7 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
     <tr><th>Route</th><th>Components</th><th>Data source</th><th>Liveness</th></tr>
     <tr><td><code>/inquiries</code></td><td>BriefDoc (artifact-style · Brief|Analysis modes) · ThreadToggle · LedgerToggle · Gate · WitnessPanel</td><td>/chat SSE + brief store</td><td>LIVE (Phase 1-3 build)</td></tr>
     <tr><td><code>/products</code></td><td>ProductSearch · ReadinessTable</td><td>MDM dataset search + run_manifest.context_readiness</td><td>LIVE read · sync trigger <b>Preview</b></td></tr>
-    <tr><td><code>/metrics</code></td><td>MetricDraft · ViabilityCard · TermLookup</td><td>GraphService (metrics · synonyms · explain_confidence)</td><td>LIVE read · submit <b>Preview</b></td></tr>
+    <tr><td><code>/metrics</code></td><td>MetricCopilot (agent loop) · CanonCheck · DraftCard · TermLookup</td><td>GraphService (metrics · synonyms · explain_confidence)</td><td>LIVE read · submit <b>Preview</b></td></tr>
     <tr><td><code>/graph</code></td><td>ThreadDiagram · TierLegend · StatsBar</td><td>snapshot (viz thread endpoint)</td><td>LIVE</td></tr>
     <tr><td><code>/knowledge</code></td><td>ConnectorTiles · TrustLadder</td><td>static</td><td><b>Preview</b> — all disabled</td></tr>
   </table></div>

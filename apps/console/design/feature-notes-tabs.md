@@ -37,6 +37,21 @@ previews ("coming soon") — see the design rule at the bottom.
    resolve_synonym + explain_confidence, surfaced.
 3. **Submit for canonicalization** — steward-gated write path (same
    pattern as entities.yaml, witness #6). Ships as labeled preview.
+4. **Metric Copilot (added 2026-07-07)** — the whole tab is driven by a
+   guardrailed AI copilot: describe the metric in natural language →
+   the copilot resolves concepts to real columns, checks the canon,
+   validates guardrails, and produces (a) the canonical match when one
+   exists and (b) a grounded DRAFT for anything uncovered. The
+   guardrails are structural, not prompt-level:
+     - grounds only in columns that exist (the grounding gate),
+     - never-expose columns are unreachable (validate_sql_plan),
+     - the canon check is mandatory before any draft,
+     - drafts are tier-stamped **Inferred** and become Corroborated
+       ONLY via steward signature (human_approval, weight 10) — the
+       copilot cannot mint canon, ever.
+   Same agent loop + tools as Inquiries; only the surface differs.
+   Liveness: copilot read-path LIVE-capable today; steward submission
+   ships Preview.
 
 ## Tab: Knowledge Graph
 
