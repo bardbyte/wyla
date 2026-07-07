@@ -364,6 +364,35 @@ table.products tr:last-child td{border-bottom:none}
 .tagline{margin:16px 0 0;padding:14px 18px;border-left:3px solid var(--accent);background:var(--panel);border-radius:0 var(--r) var(--r) 0;
   font-size:14.5px;font-weight:650;box-shadow:var(--shadow)}
 
+/* ─── v3.1: artifact-style Brief doc + toggled Thread/Ledger ── */
+.docrow{display:flex;align-items:flex-start}
+.docrow .bwrap{flex:1;min-width:0}
+.dochead{display:flex;align-items:center;gap:9px;font-size:11px;color:var(--ink-2);background:var(--panel);
+  border:1px solid var(--line);border-radius:9px;padding:8px 14px;margin-bottom:12px;box-shadow:var(--shadow)}
+.dochead .ddot{color:var(--accent-deep);font-size:13px}
+.dochead b{color:var(--ink)}
+.tglbtn{border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:6px 13px;font-size:12px;
+  font-weight:700;color:var(--ink-2)}
+.tglbtn[aria-pressed="true"]{background:var(--accent-tint);color:var(--accent-deep);
+  border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+#proj-thread,#proj-ledger{width:372px;flex-shrink:0;max-width:none;background:var(--panel);
+  border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);
+  padding:16px 18px;margin:14px 26px 26px 0}
+#proj-thread .thread{padding:0;max-width:none}
+.panelhead{font-size:10px;font-weight:850;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
+  padding-bottom:9px;border-bottom:1px solid var(--line-2);margin-bottom:12px}
+#proj-brief[data-mode="brief"] .ana-only{display:none}
+#proj-brief[data-mode="analysis"] .claims,
+#proj-brief[data-mode="analysis"] .govfoot,
+#proj-brief[data-mode="analysis"] .reads{display:none}
+.anacell .anahead{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
+  padding:10px 16px;border-bottom:1px solid var(--line-2)}
+.anacell pre{margin:0;padding:12px 16px;font-size:12px;background:var(--code-bg);overflow-x:auto;color:var(--ink-2);line-height:1.6}
+.anacell .anaout{display:flex;gap:8px;align-items:baseline;padding:9px 16px;border-top:1px solid var(--line-2);font-size:12px}
+.anacell .anaout span{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.anacell .anaout code{font-weight:650;color:var(--ink)}
+.anacell{margin-top:14px}
+
 /* pins + notes */
 .pin{position:absolute;width:19px;height:19px;border-radius:50%;background:var(--accent);color:var(--on-accent);
   font-size:10.5px;font-weight:850;display:grid;place-items:center;box-shadow:var(--shadow);z-index:20}
@@ -396,7 +425,7 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
   <p>Everything from v2 (the Brief workspace) plus the four sections we scoped: <strong>Data Products</strong> with measured readiness badges, <strong>Metrics</strong> with the canonical-viability check, the <strong>Knowledge Graph</strong> thread, and <strong>Bring your knowledge</strong> connectors. This mock IS the React IA — the notes section maps every tab to routes, components, and data sources.</p>
   <p><strong>Try, per tab:</strong></p>
   <div class="trylist">
-    <span><b>Inquiries</b> hold-to-approve the Q3 gate · click chips · switch projections</span>
+    <span><b>Inquiries</b> flip Brief|Analysis on the doc · toggle Thread / Ledger · hold-to-approve the Q3 gate</span>
     <span><b>Data Products</b> readiness badges are your real Jul 6 scorecard</span>
     <span><b>Metrics</b> hit “Check viability” — the canonical match has a witness panel</span>
     <span><b>Knowledge Graph</b> the entity→join→metric thread, two real tables</span>
@@ -466,11 +495,12 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
           <div class="bhead">
             <h2>New-accounts momentum</h2>
             <div class="pin" style="position:static">3</div>
-            <div class="proj" role="group" aria-label="Projection">
-              <button data-proj="brief" aria-pressed="true">Brief</button>
-              <button data-proj="thread" aria-pressed="false">Thread</button>
-              <button data-proj="ledger" aria-pressed="false">Ledger</button>
+            <div class="proj" role="group" aria-label="Document mode">
+              <button data-mode="brief" aria-pressed="true">Brief</button>
+              <button data-mode="analysis" aria-pressed="false">Analysis</button>
             </div>
+            <button class="tglbtn" id="tgl-thread" aria-pressed="false">Thread</button>
+            <button class="tglbtn" id="tgl-ledger" aria-pressed="false">Ledger</button>
             <button class="exportbtn" id="export">Export ⭳</button>
           </div>
           <div class="bmeta">
@@ -478,8 +508,11 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
             · <span class="mono">ledger #4821</span> · exports carry chips + provenance appendix
           </div>
 
+          <div class="docrow">
+
           <!-- projection: BRIEF -->
-          <div class="bwrap projpane" id="proj-brief">
+          <div class="bwrap projpane" id="proj-brief" data-mode="brief">
+            <div class="dochead"><span class="ddot">▤</span> <b class="mono">RB-0142</b> · Brief v2 · composed atomically — the answer landed whole, like an artifact <span style="margin-left:auto">Brief = the document · Analysis = the working layer</span></div>
             <div class="card topsheet" style="position:relative">
               <div class="pin" style="top:-9px;left:-9px">2</div>
               <p class="head1">New accounts are up <b>8.4% month-over-month</b> — 11.8k opened in June, the strongest month in the window.</p>
@@ -531,11 +564,24 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
               <div class="xlabels"><span>Nov</span><span>Dec</span><span>Jan</span><span>Feb</span><span>Mar</span><span>Apr</span><span>May</span><span>Jun</span></div>
             </div>
 
+            <div class="card anacell ana-only">
+              <div class="anahead">Analysis · executed query</div>
+              <pre><b>SELECT</b> DATE_TRUNC(acct_open_dt, MONTH) m, COUNT(*) n <b>FROM</b> sbs_new_accounts <b>GROUP BY</b> 1 <b>ORDER BY</b> 1</pre>
+              <div class="anaout"><span>run</span><code>8 rows · 1.24 GB · ledger #4821 · signed by you</code></div>
+            </div>
+
+            <div class="card anacell ana-only">
+              <div class="anahead">Analysis · sandbox (python · scrubbed env)</div>
+              <pre>mom = (n[-1] - n[-2]) / n[-2] * 100   # 11,792 vs 10,878</pre>
+              <div class="anaout"><span>result</span><code>{"mom_pct": 8.4}</code></div>
+            </div>
+
             <div class="card govfoot">Read-only · row-capped · every execution on the audit ledger · no PII columns touched. <span class="mono" style="margin-left:auto">no naked numbers leave the building</span></div>
           </div>
 
           <!-- projection: THREAD -->
           <div class="bwrap projpane" id="proj-thread" hidden>
+            <div class="panelhead">Thread — steer this brief</div>
             <div class="thread">
               <div class="tu">How many new accounts are we opening per month? Chart it.</div>
               <div class="ta">Drafted a monthly count on <code>sbs_new_accounts</code>. Cost ≈ 1.24 GB — approved by you at 21:42 (ledger #4821). Brief updated with the results.</div>
@@ -547,6 +593,7 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
 
           <!-- projection: LEDGER -->
           <div class="bwrap projpane" id="proj-ledger" hidden>
+            <div class="panelhead">Ledger — every action, signed</div>
             <div class="ledgerwrap"><table class="ledger">
               <tr><th>When</th><th>Event</th><th>Actor</th><th>Ref</th></tr>
               <tr><td class="mono">21:41:58</td><td>Resolved “new accounts by month” → acct_open_dt, acct_id</td><td>agent</td><td class="mono">graph</td></tr>
@@ -558,6 +605,7 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
               <tr><td class="mono">21:42:44</td><td>Brief v2 composed — 3 claims, 1 flagged Inferred</td><td>agent</td><td class="mono">RB-0142</td></tr>
             </table></div>
           </div>
+          </div><!-- /docrow -->
         </section>
 
         <!-- ══ VIEW: Q3 — the wait + the gate ══ -->
@@ -827,7 +875,7 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
   <p class="sub">This mock is the IA. Every tab maps to a route, its components, its data source, and an honest liveness flag.</p>
   <div class="tablewrap"><table class="map">
     <tr><th>Route</th><th>Components</th><th>Data source</th><th>Liveness</th></tr>
-    <tr><td><code>/inquiries</code></td><td>BriefList · Brief · Thread · Ledger · Gate · WitnessPanel</td><td>/chat SSE + brief store</td><td>LIVE (Phase 1-3 build)</td></tr>
+    <tr><td><code>/inquiries</code></td><td>BriefDoc (artifact-style · Brief|Analysis modes) · ThreadToggle · LedgerToggle · Gate · WitnessPanel</td><td>/chat SSE + brief store</td><td>LIVE (Phase 1-3 build)</td></tr>
     <tr><td><code>/products</code></td><td>ProductSearch · ReadinessTable</td><td>MDM dataset search + run_manifest.context_readiness</td><td>LIVE read · sync trigger <b>Preview</b></td></tr>
     <tr><td><code>/metrics</code></td><td>MetricDraft · ViabilityCard · TermLookup</td><td>GraphService (metrics · synonyms · explain_confidence)</td><td>LIVE read · submit <b>Preview</b></td></tr>
     <tr><td><code>/graph</code></td><td>ThreadDiagram · TierLegend · StatsBar</td><td>snapshot (viz thread endpoint)</td><td>LIVE</td></tr>
@@ -874,16 +922,32 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
     });
   });
 
-  // projections (hero brief)
+  // artifact-style doc: Brief|Analysis modes on the document itself
+  var briefDoc = document.getElementById('proj-brief');
   document.querySelectorAll('.proj button').forEach(function(b){
     b.addEventListener('click', function(){
       document.querySelectorAll('.proj button').forEach(function(x){x.setAttribute('aria-pressed','false');});
       b.setAttribute('aria-pressed','true');
-      ['brief','thread','ledger'].forEach(function(p){
-        document.getElementById('proj-'+p).hidden = (b.dataset.proj!==p);
-      });
+      briefDoc.dataset.mode = b.dataset.mode;
     });
   });
+
+  // Thread + Ledger are toggles beside the doc — mutually exclusive
+  function bindPanel(btnId, panelId, otherBtnId, otherPanelId){
+    var btn = document.getElementById(btnId);
+    btn.addEventListener('click', function(){
+      var panel = document.getElementById(panelId);
+      var show = panel.hidden;
+      panel.hidden = !show;
+      btn.setAttribute('aria-pressed', String(show));
+      if (show){
+        document.getElementById(otherPanelId).hidden = true;
+        document.getElementById(otherBtnId).setAttribute('aria-pressed', 'false');
+      }
+    });
+  }
+  bindPanel('tgl-thread', 'proj-thread', 'tgl-ledger', 'proj-ledger');
+  bindPanel('tgl-ledger', 'proj-ledger', 'tgl-thread', 'proj-thread');
 
   // witness panel
   var W = {
