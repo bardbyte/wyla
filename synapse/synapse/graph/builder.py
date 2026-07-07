@@ -72,6 +72,10 @@ def build_graph_from_sources(sources_dir: Path) -> GraphStore:
     _ingest_baseline_artifacts(store, sources_dir / "baseline_artifacts")
     # Skills library — curated skill packages (no-op when absent)
     _ingest_skills(store, sources_dir / "skills")
+    # Witness #6 — steward-approved business entities (no-op when absent).
+    # Runs after every column-producing witness so IDENTIFIES edges ground.
+    from synapse.graph.entities import ingest_entities_file
+    ingest_entities_file(store, sources_dir / "entities.yaml")
 
     # Code-resolution pass — runs after corpus to mine CASE WHENs
     _resolve_codes_from_lookup_tables(store)

@@ -458,7 +458,7 @@ def _grounding_index(store: GraphStore) -> set[str]:
     for node in store.nodes.values():
         add(node.canonical_uri.rsplit("/", 1)[-1])
         for key in ("table_name", "business_name", "surface_form",
-                    "canonical_entity", "skill_id"):
+                    "canonical_entity", "skill_id", "entity_name"):
             add(node.properties.get(key))
     names.discard("")
     return names

@@ -219,6 +219,17 @@ def run_pipeline(args: argparse.Namespace) -> Path:
 
     # ── 6. Compile ───────────────────────────────────────────
     _stage("Compile: assertions → typed graph")
+    # Witness #6 — steward-approved entities: stage the approvals file
+    # (explicit --entities, else the persisted default) into the
+    # compile's sources so build_graph_from_sources ingests it
+    entities_src = (Path(args.entities).expanduser() if args.entities
+                    else REPO_ROOT / "semantic-graph" / "config"
+                    / "entities.yaml")
+    if entities_src.exists():
+        import shutil
+        sources_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(entities_src, sources_dir / "entities.yaml")
+        _note(f"entities: staged steward approvals from {entities_src}")
     store = build_graph_from_sources(sources_dir)
     stats = store.stats()
     _note(f"nodes: {stats['n_nodes']}  edges: {stats['n_edges']}")
@@ -452,6 +463,10 @@ def main() -> None:
                              "tables on $GEMINI_MODEL_FLASH (run "
                              "scripts/probe_vertex_readiness.py first to "
                              "pick the models)")
+    parser.add_argument("--entities", default="",
+                        help="steward-approved entities YAML (default: "
+                             "semantic-graph/config/entities.yaml when it "
+                             "exists; produced by scripts/entities.py apply)")
     parser.add_argument("--sources-dir",
                         default=str(SYNAPSE_ROOT / "data" / "cache" / "sources"),
                         help="staging dir for canonical artifacts")
