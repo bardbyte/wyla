@@ -88,7 +88,13 @@ uvicorn apps.console.backend.app:app --port 8080
 # open http://localhost:8080
 
 # 2b. laptop, real graph + real agent — the SAME env contract as the
-#     pipeline; nothing console-specific to learn:
+#     pipeline; nothing console-specific to learn.
+#     Dependencies: use the certified pins (see requirements.txt) —
+#     adk/genai are a matched pair, never upgraded one at a time:
+#         pip install -r apps/console/requirements.txt
+#     and always launch via `python -m uvicorn` from that venv (a bare
+#     `uvicorn` can resolve to another interpreter). Confirm what the
+#     server loaded at /api/config → sdk.
 export GOOGLE_GENAI_USE_VERTEXAI=1
 export GOOGLE_CLOUD_PROJECT=<project>
 export GOOGLE_CLOUD_LOCATION=<region>

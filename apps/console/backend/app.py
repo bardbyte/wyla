@@ -115,9 +115,26 @@ def create_app(runner: Runner | None = None,
     @app.get("/api/config")
     def config() -> dict:
         """The environment contract, echoed without secrets: booleans
-        for anything credential-shaped, values only for tuning knobs."""
+        for anything credential-shaped, values only for tuning knobs.
+        The sdk block reports what THIS PROCESS actually imported —
+        version-mismatch bugs are invisible without it."""
+        import sys
+        from importlib import metadata
+
+        def _ver(pkg: str) -> str | None:
+            try:
+                return metadata.version(pkg)
+            except Exception:
+                return None
+
         env = os.environ.get
         return {
+            "sdk": {
+                "python": sys.version.split()[0],
+                "google_adk": _ver("google-adk"),
+                "google_genai": _ver("google-genai"),
+                "fastapi": _ver("fastapi"),
+            },
             "runner": type(app.state.runner).__name__,
             "model": env("GEMINI_MODEL", "gemini-3.1-pro-preview"),
             "model_flash": env("GEMINI_MODEL_FLASH", ""),

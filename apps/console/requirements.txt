@@ -1,0 +1,20 @@
+# Console server dependencies — the CERTIFIED laptop pair.
+#
+# google-adk and google-genai must be a matched pair INSIDE the venv
+# the server runs from. This pair is certified against the full test
+# suite and the live agent path, and it keeps google-cloud-aiplatform
+# (<2.0 genai constraint) and the OpenTelemetry exporters satisfied.
+#
+# Newer pairs work too (e.g. adk 2.3.0 + genai 2.10.0) but MUST be
+# upgraded together — and adk 2.x / genai 2.x conflicts with
+# google-cloud-aiplatform's genai<2.0 pin, so keep 2.x in a separate
+# venv if you need it. Never upgrade one of the two alone.
+#
+# Launch with `python -m uvicorn …` from this venv — a bare `uvicorn`
+# can resolve to a different interpreter and load different versions.
+# Verify what the server actually imported at GET /api/config → sdk.
+
+fastapi>=0.110
+uvicorn>=0.29
+google-adk==1.31.1
+google-genai==1.73.1
