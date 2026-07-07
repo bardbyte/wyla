@@ -37,19 +37,32 @@ def build_agent(model: str = DEFAULT_MODEL):
     except (AttributeError, TypeError, ValueError):
         pass                       # older SDK: run without thinking config
 
-    return Agent(
-        model=model,
-        name="warehouse_analyst",
-        description=(
-            "Senior data & business analyst over the semantic knowledge "
-            "graph — grounds every answer in provenance-typed facts, "
-            "honors skill guardrails, validates SQL statically, and runs "
-            "sandboxed python for on-the-fly analysis."
-        ),
-        instruction=ANALYST_INSTRUCTION,
-        tools=build_analyst_tools(),
-        generate_content_config=config,
-    )
+    def _agent(cfg):
+        return Agent(
+            model=model,
+            name="warehouse_analyst",
+            description=(
+                "Senior data & business analyst over the semantic "
+                "knowledge graph — grounds every answer in "
+                "provenance-typed facts, honors skill guardrails, "
+                "validates SQL statically, and runs sandboxed python "
+                "for on-the-fly analysis."
+            ),
+            instruction=ANALYST_INSTRUCTION,
+            tools=build_analyst_tools(),
+            generate_content_config=cfg,
+        )
+
+    try:
+        return _agent(config)
+    except Exception:
+        # older google-adk validates generate_content_config and rejects
+        # thinking_config at Agent construction — degrade to no thought
+        # streaming rather than no agent
+        if getattr(config, "thinking_config", None) is None:
+            raise
+        config.thinking_config = None
+        return _agent(config)
 
 
 try:  # module-level instance required for `adk web` discovery

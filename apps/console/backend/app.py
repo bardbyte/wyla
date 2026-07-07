@@ -181,8 +181,8 @@ def create_app(runner: Runner | None = None,
         return app.state.data.graph_summary()
 
     @app.get("/api/graph/thread")
-    def graph_thread() -> dict:
-        return app.state.data.graph_thread()
+    def graph_thread(table: str = "") -> dict:
+        return app.state.data.graph_thread(table)
 
     @app.get("/api/briefs")
     def briefs_list() -> dict:

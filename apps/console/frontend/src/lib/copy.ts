@@ -14,15 +14,14 @@ import type { Tier } from "./types";
 
 export const BRAND = {
   name: "Radix",
-  sub: "Answers with evidence",
 };
 
 export const TABS = [
-  { id: "inquiries", label: "Inquiries" },
-  { id: "products", label: "Data products" },
-  { id: "metrics", label: "Metrics" },
-  { id: "graph", label: "Knowledge graph" },
-  { id: "knowledge", label: "Bring your knowledge" },
+  { id: "inquiries", label: "Inquiries", preview: false },
+  { id: "products", label: "Data products", preview: false },
+  { id: "metrics", label: "Metrics", preview: false },
+  { id: "graph", label: "Knowledge graph", preview: false },
+  { id: "knowledge", label: "Bring your knowledge", preview: true },
 ] as const;
 
 export type TabId = (typeof TABS)[number]["id"];
@@ -159,6 +158,10 @@ export const GRAPH = {
   storySub:
     "How a business entity connects to physical columns, a proven " +
     "join, a canonical metric, and the playbook that governs it.",
+  pickerLabel: "Explore a data product",
+  pickerDefault: "The canonical thread",
+  pickerEmpty:
+    "Nothing is recorded for this table in the current snapshot.",
   statsTitle: "What the graph knows",
   witnessTitle: "Where the facts come from",
   witnessSub:

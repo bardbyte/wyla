@@ -6,7 +6,7 @@ import { GRAPH } from "../lib/copy";
 import type { GraphSummary, ThreadHop, Tier } from "../lib/types";
 
 const HOP_ICON: Record<string, string> = {
-  entity: "◆", column: "▦", join: "⋈", metric: "∑", skill: "❖",
+  table: "▤", entity: "◆", column: "▦", join: "⋈", metric: "∑", skill: "❖",
 };
 
 export function GraphTab() {
@@ -14,14 +14,25 @@ export function GraphTab() {
   const [hops, setHops] = useState<ThreadHop[] | null>(null);
   const [live, setLive] = useState(false);
   const [inspect, setInspect] = useState<string | null>(null);
+  const [tables, setTables] = useState<string[]>([]);
+  const [anchor, setAnchor] = useState("");
 
   useEffect(() => {
     api.graphSummary().then((d) => {
       setSummary(d.summary as GraphSummary);
       setLive(d.live);
     }).catch(() => setSummary(null));
-    api.graphThread().then((d) => setHops(d.thread.hops)).catch(() => setHops([]));
+    api.products().then((d) =>
+      setTables((d.products as { name: string }[]).map((p) => p.name)),
+    ).catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    setHops(null);
+    api.graphThread(anchor)
+      .then((d) => setHops(d.thread.hops))
+      .catch(() => setHops([]));
+  }, [anchor]);
 
   const witnesses = summary ? Object.entries(summary.witnesses) : [];
   const maxW = witnesses.reduce((m, [, n]) => Math.max(m, n), 1);
@@ -38,11 +49,32 @@ export function GraphTab() {
         </div>
 
         <section className="card card-pad" style={{ marginBottom: "var(--s-5)" }}>
-          <div className="h-section">{GRAPH.storyTitle}</div>
-          <p style={{ color: "var(--ink-2)", margin: "var(--s-2) 0 var(--s-3)" }}>
-            {GRAPH.storySub}
-          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--s-4)", flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <div className="h-section">{GRAPH.storyTitle}</div>
+              <p style={{ color: "var(--ink-2)", margin: "var(--s-2) 0 var(--s-3)" }}>
+                {GRAPH.storySub}
+              </p>
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: "var(--s-2)", fontSize: "var(--fs-12)", color: "var(--ink-2)" }}>
+              {GRAPH.pickerLabel}
+              <select
+                className="input"
+                style={{ width: "auto", fontSize: "var(--fs-13)" }}
+                value={anchor}
+                onChange={(e) => setAnchor(e.target.value)}
+              >
+                <option value="">{GRAPH.pickerDefault}</option>
+                {tables.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </label>
+          </div>
           {hops === null && <Spinner />}
+          {hops !== null && hops.length === 0 && (
+            <div className="empty">{GRAPH.pickerEmpty}</div>
+          )}
           <div className="thread-flow">
             {(hops ?? []).map((h, i) => (
               <span key={i} style={{ display: "contents" }}>

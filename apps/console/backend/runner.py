@@ -262,6 +262,24 @@ def _explain_failure(exc: Exception) -> str:
     The raw error rides along — legible never means lossy."""
     raw = f"{type(exc).__name__}: {exc}"
     msg = str(exc).lower()
+    # adk/genai version mismatch: adk's pydantic models evaluate their
+    # annotations against the INSTALLED genai's `types` module, so an
+    # old genai next to a newer adk dies at import with shape-shifting
+    # errors — "unsupported operand type(s) for |: 'function' and
+    # 'NoneType'", "module 'google.genai.types' has no attribute …",
+    # or a ValidationError on thinking/generate_content_config.
+    mismatch = (
+        ("unsupported operand" in msg and "|" in msg)
+        or "google.genai.types" in msg
+        or ("has no attribute" in msg and "genai" in msg)
+        or ("validation error" in msg and
+            ("thinking" in msg or "generatecontentconfig" in msg))
+    )
+    if mismatch:
+        return ("The installed google-adk and google-genai versions "
+                "don't match — upgrade them TOGETHER: "
+                "pip install -U google-adk google-genai "
+                f"then restart the console server. [{raw}]")
     if "certificate_verify_failed" in msg or "ssl" in msg:
         return ("The secure connection to Vertex was intercepted "
                 "(corporate proxy). Set GEMINI_TLS_INSECURE=1 on the "

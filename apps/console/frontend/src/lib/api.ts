@@ -38,8 +38,9 @@ export const api = {
   graphSummary: () =>
     get<Live<{ summary: GraphSummary }>>("/api/graph/summary"),
 
-  graphThread: () =>
-    get<Live<{ thread: { hops: ThreadHop[] } }>>("/api/graph/thread"),
+  graphThread: (table = "") =>
+    get<Live<{ thread: { hops: ThreadHop[] } }>>(
+      `/api/graph/thread?table=${encodeURIComponent(table)}`),
 
   briefs: () => get<{ briefs: BriefCard[] }>("/api/briefs"),
   brief: (id: string) => get<Brief & { found?: boolean }>(`/api/briefs/${id}`),

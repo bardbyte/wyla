@@ -44,7 +44,16 @@ class ConsoleData:
         raw = (snapshot_path
                or os.environ.get("SYNAPSE_GRAPH_PATH")
                or _DEFAULT_SNAPSHOT)
-        self.snapshot_path = Path(raw).expanduser()
+        path = Path(raw).expanduser()
+        # a relative SYNAPSE_GRAPH_PATH resolves against the server's
+        # cwd; when that misses, fall back to repo-root-relative so
+        # `export SYNAPSE_GRAPH_PATH=synapse/data/cache/…` works no
+        # matter where uvicorn was launched from
+        if not path.is_absolute() and not path.exists():
+            alt = REPO_ROOT / str(raw)
+            if alt.exists():
+                path = alt
+        self.snapshot_path = path
         self.store = None
         if self.snapshot_path.exists():
             try:
@@ -132,18 +141,120 @@ class ConsoleData:
                                         None),
         })
 
-    def graph_thread(self) -> dict[str, Any]:
-        """The one curated storyline: entity → identifying columns in two
-        tables → join evidence → metric → skill. Falls back hop-by-hop —
+    def graph_thread(self, table: str = "") -> dict[str, Any]:
+        """The curated storyline: entity → identifying columns → join
+        evidence → metric → skill. With `table`, the thread anchors on
+        that table and explores ITS connections. Falls back hop-by-hop —
         a thin graph still yields a partial, honest thread. A graph that
         yields NO hops falls back to the sample thread but is labeled
-        sample — live data and live labels never diverge."""
+        sample — live data and live labels never diverge. An anchored
+        request never silently swaps in the sample storyline."""
         if self.live:
-            thread = self._thread_from_graph()
-            if thread["hops"]:
+            thread = (self._table_thread(table) if table
+                      else self._thread_from_graph())
+            if thread["hops"] or table:
                 return self._wrap("thread", thread)
         return {"live": False, "source": "sample",
                 "thread": _SAMPLE["thread"]}
+
+    def _find_table_node(self, table: str):
+        """Resolve a table by canonical URI, then by normalized name —
+        snapshots compiled before identity normalization carry qualified
+        names in their URIs, and callers pass either form."""
+        from synapse.graph.store import canonical_uri, normalize_table_name
+        node = self.store.get(canonical_uri("table", table))
+        if node is not None:
+            return node
+        want = normalize_table_name(table)
+        for n in self.store.nodes_by_type("Table"):
+            name = str(n.properties.get("table_name", ""))
+            if name and normalize_table_name(name) == want:
+                return n
+        return None
+
+    def _table_thread(self, table: str) -> dict[str, Any]:
+        """One table's place in the graph: the table, the entity its
+        columns identify, its join evidence, a metric computed from it,
+        and the playbook that governs it. Every hop is optional."""
+        node = self._find_table_node(table)
+        if node is None:
+            return {"hops": [], "table": table}
+        t_uri = node.canonical_uri
+        hops: list[dict[str, Any]] = [{
+            "kind": "table",
+            "label": node.properties.get("table_name", table),
+            "ref": t_uri, "tier": node.provenance.confidence_tier,
+            "detail": (node.properties.get("description")
+                       or node.properties.get("ai_generated_description")
+                       or "")[:90],
+        }]
+        col_uris = [e.to_uri for e in self.store.outgoing(t_uri, "CONTAINS")]
+        col_set = set(col_uris)
+
+        # entity identified by one of this table's columns
+        for c in col_uris:
+            idents = self.store.outgoing(c, "IDENTIFIES")
+            if idents:
+                ent = self.store.get(idents[0].to_uri)
+                if ent is not None:
+                    hops.append({
+                        "kind": "entity",
+                        "label": ent.properties.get(
+                            "name", ent.canonical_uri.rsplit("/", 1)[-1]),
+                        "ref": ent.canonical_uri,
+                        "tier": ent.provenance.confidence_tier,
+                        "detail": "identified by "
+                                  f"{c.rsplit('/', 1)[-1]}",
+                    })
+                break
+
+        # join evidence touching this table's columns
+        for e in self.store.edges.values():
+            if e.edge_type == "EQUIVALENT_TO" and (
+                    e.from_uri in col_set or e.to_uri in col_set):
+                other = e.to_uri if e.from_uri in col_set else e.from_uri
+                hops.append({
+                    "kind": "join", "label": "join evidence",
+                    "ref": e.canonical_uri,
+                    "tier": e.provenance.confidence_tier,
+                    "detail": f"{e.from_uri.rsplit('/', 1)[-1]} ≍ "
+                              f"{other.rsplit('/', 2)[-2]}."
+                              f"{other.rsplit('/', 1)[-1]}",
+                })
+                break
+
+        # a metric computed from this table's columns
+        for e in self.store.edges.values():
+            if e.edge_type == "COMPUTED_FROM" and (
+                    e.from_uri in col_set or e.to_uri in col_set):
+                m_uri = e.to_uri if e.from_uri in col_set else e.from_uri
+                m = self.store.get(m_uri)
+                if m is not None and m.node_type == "Metric":
+                    hops.append({
+                        "kind": "metric",
+                        "label": m.properties.get(
+                            "name", m_uri.rsplit("/", 1)[-1]),
+                        "ref": m_uri,
+                        "tier": m.provenance.confidence_tier,
+                        "detail": str(m.properties.get("formula", ""))[:80],
+                    })
+                    break
+
+        # the skill/playbook that applies to this table
+        for e in list(self.store.incoming(t_uri, "APPLIES_TO")) + \
+                list(self.store.outgoing(t_uri, "APPLIES_TO")):
+            other = (e.from_uri if e.to_uri == t_uri else e.to_uri)
+            s = self.store.get(other)
+            if s is not None and s.node_type == "Skill":
+                hops.append({
+                    "kind": "skill",
+                    "label": s.properties.get(
+                        "name", other.rsplit("/", 1)[-1]),
+                    "ref": other, "tier": s.provenance.confidence_tier,
+                    "detail": "expert playbook",
+                })
+                break
+        return {"hops": hops, "table": table}
 
     def _thread_from_graph(self) -> dict[str, Any]:
         hops: list[dict[str, Any]] = []
