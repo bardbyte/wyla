@@ -163,7 +163,8 @@ def test_cli_plan_mode_is_offline_and_correct(tmp_path):
     proc = subprocess.run(
         [sys.executable,
          str(REPO_ROOT / "synapse" / "scripts" / "enrich_topup.py"),
-         "--plan", "--snapshot", str(snap), "--memory", str(mem)],
+         "--plan", "--all-tables", "--snapshot", str(snap),
+         "--memory", str(mem)],
         capture_output=True, text=True)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "partial" in proc.stdout and "untouched" in proc.stdout
@@ -188,7 +189,33 @@ def test_cli_plan_nothing_to_do(tmp_path):
     proc = subprocess.run(
         [sys.executable,
          str(REPO_ROOT / "synapse" / "scripts" / "enrich_topup.py"),
-         "--plan", "--snapshot", str(snap), "--memory", str(mem)],
+         "--plan", "--all-tables", "--snapshot", str(snap),
+         "--memory", str(mem)],
         capture_output=True, text=True)
     assert proc.returncode == 0
     assert "nothing to do" in proc.stdout
+
+
+def test_cli_plan_scopes_to_manifest_by_default(tmp_path):
+    """The graph carries out-of-scope tables (staged by earlier runs);
+    the plan must spend calls on manifest tables only."""
+    snap = tmp_path / "graph_snapshot.json"
+    _store().save_json(snap)                 # covered, partial, untouched
+    mem = tmp_path / "enrichment_memory.json"
+    mem.write_text(json.dumps(
+        {t: b.model_dump() for t, b in _old_bundles().items()}, default=str),
+        encoding="utf-8")
+    manifest = tmp_path / "tables.yaml"
+    manifest.write_text("tables:\n  - name: partial\n", encoding="utf-8")
+
+    proc = subprocess.run(
+        [sys.executable,
+         str(REPO_ROOT / "synapse" / "scripts" / "enrich_topup.py"),
+         "--plan", "--snapshot", str(snap), "--memory", str(mem),
+         "--manifest", str(manifest)],
+        capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "manifest scope" in proc.stdout
+    assert "1 out-of-scope skipped" in proc.stdout    # untouched excluded
+    assert "partial" in proc.stdout
+    assert "untouched" not in proc.stdout
