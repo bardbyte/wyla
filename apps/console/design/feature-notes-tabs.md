@@ -50,6 +50,23 @@ previews ("coming soon") — see the design rule at the bottom.
   thread matters more than the tech.
 - Secondary: tier legend + node/edge counts as ambient credibility.
 
+## Section: Bring your knowledge (disabled · labeled coming soon)
+
+- A connectors section showcasing how org knowledge enters the graph:
+  **Knowledge Catalog** (native connect) · **Confluence (via MCP)** ·
+  **Google Docs** · **Slides**. All tiles rendered but disabled, each
+  wearing the preview badge — the capability is the showcase.
+- Architecture note (why this is cheap to promise honestly): every
+  connector is just **another witness** — a loader emitting
+  (subject, predicate, object, source, confidence) assertions with its
+  own SOURCE_WEIGHT, fused like the existing five. The grounding gate
+  and tier machinery need zero changes; a Confluence page lands as
+  curated-but-unapproved evidence (its own weight, below skills, above
+  llm), promotable to human_asserted through the same steward flow as
+  entities/metrics.
+- UI copy should say exactly that: "Your runbooks and wikis become
+  evidence with a weight — not pasted context."
+
 ## Design rule for synthetic features (binding)
 
 Radix is a trust product — the demo must not blur real and fake.
