@@ -31,8 +31,13 @@ from synapse.warehouse.runner import GateConfig, WarehouseRunner  # noqa: E402
 from .agent_skills import list_agent_skills, load_agent_skill  # noqa: E402,F401
 
 _DEFAULT_SNAPSHOT = _SYNAPSE_ROOT / "data" / "cache" / "graph_snapshot.json"
-_ARTIFACTS_DIR = Path(os.environ.get(
-    "SYNAPSE_ARTIFACTS_DIR", str(_SYNAPSE_ROOT / "data" / "artifacts")))
+
+
+def _artifacts_dir() -> Path:
+    """Read at use time, not import time — the env must win regardless
+    of which module imported us first."""
+    return Path(os.environ.get(
+        "SYNAPSE_ARTIFACTS_DIR", str(_SYNAPSE_ROOT / "data" / "artifacts")))
 
 
 def snapshot_path() -> Path:
@@ -67,7 +72,7 @@ def _runner() -> WarehouseRunner:
                 project=os.environ.get("BQ_BILLING_PROJECT") or None)
         except Exception:
             client = None  # runner reports no_client with guidance
-    audit = _ARTIFACTS_DIR / "audit" / "warehouse_ledger.jsonl"
+    audit = _artifacts_dir() / "audit" / "warehouse_ledger.jsonl"
     return WarehouseRunner(
         client,
         graph_service=_service(),
@@ -113,7 +118,7 @@ def render_chart(spec: dict[str, Any]) -> dict[str, Any]:
                 "error": "use render_dashboard for kind='dashboard'"}
     stamp = _dt.datetime.now().strftime("%H%M%S")
     path = render_page(
-        parsed, _ARTIFACTS_DIR / f"{_slug(parsed.title)}-{stamp}.html")
+        parsed, _artifacts_dir() / f"{_slug(parsed.title)}-{stamp}.html")
     return {"status": "ok", "path": str(path), "kind": parsed.kind,
             "title": parsed.title}
 
@@ -134,7 +139,7 @@ def render_dashboard(spec: dict[str, Any]) -> dict[str, Any]:
                          "for single visuals"}
     stamp = _dt.datetime.now().strftime("%H%M%S")
     path = render_page(
-        parsed, _ARTIFACTS_DIR / f"{_slug(parsed.title)}-{stamp}.html")
+        parsed, _artifacts_dir() / f"{_slug(parsed.title)}-{stamp}.html")
     return {"status": "ok", "path": str(path), "kind": "dashboard",
             "title": parsed.title, "n_items": len(parsed.items)}
 
@@ -162,4 +167,30 @@ def build_analyst_tools() -> list[Callable[..., dict[str, Any]]]:
         render_chart, render_dashboard,
         list_agent_skills, load_agent_skill,
         run_python_analysis,
+    ]
+
+
+# The original single-graph agent's capability set, plus the gated
+# warehouse pair and the skills library — the user-selected bound for
+# the chat experience. get_skill is in the bound because the curated
+# playbooks are how the agent UNDERSTANDS a question (definitions,
+# metric contracts, guardrails) before designing any answer.
+_CLASSIC_GRAPH_TOOLS = (
+    "search_entities", "list_tables_for_domain", "inspect_table",
+    "find_columns_for_concept", "get_join_path", "get_lineage",
+    "get_metric", "get_skill", "get_dq_status", "disambiguate_term",
+    "validate_sql_plan", "get_entity", "get_steward_review_queue",
+)
+
+
+def build_classic_tools() -> list[Callable[..., dict[str, Any]]]:
+    """The bounded chat roster: the original agent's 12 capabilities
+    (under their current names) + dry_run_sql + execute_sql. No charts,
+    no sandbox, no skill loader — guardrails still bind because they
+    are enforced INSIDE validate_sql_plan and the execute gate chain,
+    not by tool availability."""
+    by_name = {t.__name__: t for t in build_adk_tools(_service())}
+    return [
+        *[by_name[n] for n in _CLASSIC_GRAPH_TOOLS],
+        dry_run_sql, execute_sql,
     ]

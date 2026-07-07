@@ -49,8 +49,6 @@ export const COMMON = {
 };
 
 export const INQUIRIES = {
-  railTitle: "Briefs",
-  newInquiry: "New inquiry",
   emptyTitle: "Ask about your data.",
   emptySub:
     "Answers arrive with their sources, their confidence, and the " +
@@ -59,7 +57,6 @@ export const INQUIRIES = {
     "Ask about ownership, definitions, lineage, or the numbers themselves…",
   send: "Ask",
   working: "Working…",
-  needsSignature: "Needs your approval",
   gateTitle: "Approval needed to run this query",
   gateSub: "Nothing runs without you. Review the query and its cost.",
   gateScan: "Estimated scan",
@@ -69,17 +66,9 @@ export const INQUIRIES = {
   heldNote:
     "Held. The query is drafted and validated — run it whenever " +
     "you're ready.",
-  briefMode: "Brief",
-  analysisMode: "Analysis",
-  threadToggle: "Thread",
-  ledgerToggle: "Ledger",
-  noBriefYet: "The brief composes here as the answer lands.",
   citations: "Citations",
   governance: "Governance",
   howTitle: "How this was produced",
-  ledgerTitle: "Audit ledger",
-  ledgerEmpty: "No queries have run in this brief.",
-  threadTitle: "Thread",
   errorTitle: "That didn't go through",
   suggestTitle: "Verified questions you can ask now",
 };
@@ -187,7 +176,7 @@ export const KNOWLEDGE = {
   connectors: [
     {
       icon: "▤",
-      name: "Knowledge catalog",
+      name: "Google Knowledge Catalog",
       desc: "Sync curated glossary terms and dataset documentation.",
     },
     {
@@ -197,23 +186,40 @@ export const KNOWLEDGE = {
     },
     {
       icon: "▢",
-      name: "Google Docs",
+      name: "SharePoint & Word",
       desc: "Working documents contribute definitions and context.",
     },
     {
       icon: "▣",
-      name: "Slides",
+      name: "PowerPoint",
       desc: "Business reviews carry metric context worth keeping.",
     },
   ],
   connect: "Connect",
-  ladderTitle: "How outside knowledge earns trust",
+  ladderTitle: "How outside knowledge earns its evidence level",
   ladder: [
-    "A connected source contributes facts with its own weight.",
-    "Independent agreement raises an assertion's confidence.",
-    "A steward's signature promotes it to the highest level.",
-    "Everything stays attributed — every fact can name its origin.",
+    {
+      tier: "inferred" as const,
+      text:
+        "A connected source contributes facts with its own weight — " +
+        "labeled evidence, never pasted context.",
+    },
+    {
+      tier: "grounded" as const,
+      text:
+        "Independent agreement across sources corroborates an " +
+        "assertion and raises its level.",
+    },
+    {
+      tier: "human_asserted" as const,
+      text:
+        "A steward's signature settles it — the highest level, and " +
+        "the only way to reach it.",
+    },
   ],
+  ladderFoot:
+    "Everything stays attributed: every fact can name the document, " +
+    "page, or catalog entry it came from.",
 };
 
 export const CONFIG = {

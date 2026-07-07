@@ -1,4 +1,4 @@
-import { PreviewBadge } from "../components/ui";
+import { PreviewBadge, TierChip } from "../components/ui";
 import { KNOWLEDGE } from "../lib/copy";
 
 export function KnowledgeTab() {
@@ -35,15 +35,23 @@ export function KnowledgeTab() {
           ))}
         </div>
 
-        <section className="card card-pad" style={{ maxWidth: 640 }}>
-          <div className="h-section" style={{ marginBottom: "var(--s-3)" }}>
+        <section className="card card-pad" style={{ maxWidth: 680 }}>
+          <div className="h-section" style={{ marginBottom: "var(--s-4)" }}>
             {KNOWLEDGE.ladderTitle}
           </div>
-          <ol style={{ paddingLeft: "1.2em", display: "flex", flexDirection: "column", gap: "var(--s-2)", color: "var(--ink-2)" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--s-3)" }}>
             {KNOWLEDGE.ladder.map((step, i) => (
-              <li key={i}>{step}</li>
+              <div key={i} style={{ display: "flex", gap: "var(--s-3)", alignItems: "baseline" }}>
+                <span style={{ flex: "none", width: 148 }}>
+                  <TierChip tier={step.tier} />
+                </span>
+                <span style={{ color: "var(--ink-2)" }}>{step.text}</span>
+              </div>
             ))}
-          </ol>
+          </div>
+          <p style={{ color: "var(--ink-3)", fontSize: "var(--fs-12)", marginTop: "var(--s-4)", borderTop: "1px solid var(--line)", paddingTop: "var(--s-3)" }}>
+            {KNOWLEDGE.ladderFoot}
+          </p>
         </section>
       </div>
     </div>

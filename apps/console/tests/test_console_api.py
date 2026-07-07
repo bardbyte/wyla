@@ -1,9 +1,9 @@
-"""The read-side API + brief store + failure legibility.
+"""The read-side API + the classic chat surface + failure legibility.
 
 Pins the truth-of-state rule (every payload says live vs sample and the
-two worlds share one shape), the no-secrets config echo, the /chat →
-brief tee, the guarded witness panel, and the actionable failure
-messages the ADK path emits.
+two worlds share one shape), the no-secrets config echo, the guarded
+witness panel, the user-selected 14-tool classic roster, and the
+actionable failure messages the ADK path emits.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from apps.console.backend.app import create_app
-from apps.console.backend.briefs import BriefStore
 from apps.console.backend.data import ConsoleData
 from apps.console.backend.runner import ScriptedRunner, _explain_failure
 
@@ -165,19 +164,6 @@ def test_config_reports_what_this_process_imported():
     assert body["sdk"]["fastapi"]              # versions, not secrets
 
 
-def test_briefs_not_seeded_for_a_live_runner():
-    """Sample briefs furnish the scripted demo only — a live agent's
-    workspace starts empty."""
-
-    class _Liveish:                            # not a ScriptedRunner
-        async def stream(self, m, *, turn_id, conversation_id=None):
-            return
-            yield
-
-    client = TestClient(create_app(_Liveish()))
-    assert client.get("/api/briefs").json()["briefs"] == []
-
-
 # ─── metric viability: canon-first, three verdicts ───────────
 
 
@@ -193,36 +179,43 @@ def test_viability_exact_near_and_clear(tmp_path):
         "verdict"] == "clear"
 
 
-# ─── briefs: seeded, then fed by the chat tee ────────────────
+# ─── the classic chat surface ────────────────────────────────
 
 
-def test_brief_store_seeds_newest_first():
-    briefs = BriefStore().list()
-    assert len(briefs) == 3
-    assert briefs[0]["created_at"] > briefs[-1]["created_at"]
-    assert all(b["live"] is False for b in briefs)   # seeds are samples
+def test_classic_roster_is_the_user_selected_bound():
+    """The bounded chat agent: the original agent's capabilities under
+    their current names + the skills library + the warehouse pair."""
+    from apps.analyst.tools import build_classic_tools
+    names = {t.__name__ for t in build_classic_tools()}
+    assert names == {
+        "search_entities", "list_tables_for_domain", "inspect_table",
+        "find_columns_for_concept", "get_join_path", "get_lineage",
+        "get_metric", "get_skill", "get_dq_status", "disambiguate_term",
+        "validate_sql_plan", "get_entity", "get_steward_review_queue",
+        "dry_run_sql", "execute_sql",
+    }
+    assert len(names) == 15
 
 
-def test_chat_tees_every_answer_into_a_brief():
-    store = BriefStore(seed=False)
-    client = TestClient(create_app(ScriptedRunner(), briefs=store))
-    resp = client.post("/chat", json={
-        "message": "Who owns sbs_new_accounts?"})
-    assert resp.status_code == 200
-    briefs = store.list()
-    assert len(briefs) == 1
-    brief = store.get(briefs[0]["id"])
-    assert brief["question"] == "Who owns sbs_new_accounts?"
-    assert brief["sections"]["citations"]
-    assert brief["live"] is True
+def test_classic_instruction_keeps_the_output_contract():
+    from apps.analyst.prompts import CLASSIC_INSTRUCTION
+    for section in ("## Answer", "## How I got there", "## Citations",
+                    "## Governance & caveats", "## Status"):
+        assert section in CLASSIC_INSTRUCTION
+    # the skills library shapes question-understanding AND the answer
+    assert "get_skill BEFORE" in CLASSIC_INSTRUCTION
+    assert "IN ITS VOCABULARY" in CLASSIC_INSTRUCTION
+    # tools outside the bound are never referenced
+    for absent in ("render_chart", "run_python_analysis",
+                   "load_agent_skill", "get_filter_values"):
+        assert absent not in CLASSIC_INSTRUCTION
 
 
-def test_warehouse_brief_records_its_ledger_row():
-    store = BriefStore(seed=False)
-    client = TestClient(create_app(ScriptedRunner(), briefs=store))
-    client.post("/chat", json={"message": "run the count by month"})
-    brief = store.get(store.list()[0]["id"])
-    assert brief["ledger"] == [{"ref": "ledger:#4821"}]
+def test_briefs_surface_is_gone():
+    client = _client()
+    assert client.get("/api/briefs").status_code == 404
+    resp = client.post("/chat", json={"message": "who owns this table?"})
+    assert resp.status_code == 200               # chat unaffected
 
 
 # ─── endpoints ───────────────────────────────────────────────
@@ -245,14 +238,11 @@ def test_api_surface_round_trips():
     assert client.get("/api/graph/summary").json()["summary"]["nodes"] > 0
     assert client.get("/api/graph/thread").json()["thread"]["hops"]
     assert client.get("/api/questions").json()["questions"]
-    assert client.get("/api/briefs").json()["briefs"]
     v = client.post("/api/metrics/viability",
                     json={"name": "approval rate"}).json()
     assert v["viability"]["verdict"] in ("exact", "near_duplicate", "clear")
     r = client.get("/api/terms/resolve", params={"term": "roll rate"}).json()
     assert r["resolution"]["canonical"]["name"]
-    missing = client.get("/api/briefs/nope").json()
-    assert missing["found"] is False
 
 
 # ─── failures name the fix ───────────────────────────────────

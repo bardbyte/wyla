@@ -12,15 +12,26 @@ from __future__ import annotations
 
 import os
 
-from .prompts import ANALYST_INSTRUCTION
-from .tools import build_analyst_tools
+from .prompts import ANALYST_INSTRUCTION, CLASSIC_INSTRUCTION
+from .tools import build_analyst_tools, build_classic_tools
 
 DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-pro-preview")
 
 
-def build_agent(model: str = DEFAULT_MODEL):
+def build_agent(model: str = DEFAULT_MODEL, toolset: str | None = None):
     from google.adk import Agent
     from google.genai import types
+
+    # Toolset selection (env SYNAPSE_AGENT_TOOLSET):
+    #   "classic" (default) — the original single-graph agent's 12
+    #       capabilities + the gated dry_run/execute pair. The chat
+    #       experience the user validated, on the multi-table graph.
+    #   "full" — all 24 tools incl. charts, sandbox, craft skills.
+    mode = (toolset or os.environ.get(
+        "SYNAPSE_AGENT_TOOLSET", "classic")).lower()
+    classic = mode != "full"
+    tools = build_classic_tools() if classic else build_analyst_tools()
+    instruction = CLASSIC_INSTRUCTION if classic else ANALYST_INSTRUCTION
 
     # Same environment contract as the enrichment pipeline:
     # GEMINI_THINKING_BUDGET=-1 → dynamic thinking (Gemini 3.1 Pro's
@@ -48,8 +59,8 @@ def build_agent(model: str = DEFAULT_MODEL):
                 "validates SQL statically, and runs sandboxed python "
                 "for on-the-fly analysis."
             ),
-            instruction=ANALYST_INSTRUCTION,
-            tools=build_analyst_tools(),
+            instruction=instruction,
+            tools=tools,
             generate_content_config=cfg,
         )
 

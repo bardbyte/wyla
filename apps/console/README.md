@@ -103,7 +103,10 @@ export GEMINI_MODEL=gemini-3.1-pro-preview
 export GEMINI_THINKING_BUDGET=-1          # dynamic thinking
 export GEMINI_TLS_INSECURE=1              # intranet proxy (or GEMINI_CA_BUNDLE)
 export SYNAPSE_GRAPH_PATH=synapse/data/cache/graph_snapshot.json
-SYNAPSE_CONSOLE_RUNNER=adk uvicorn apps.console.backend.app:app --port 8080
+# optional: SYNAPSE_AGENT_TOOLSET=classic (default) bounds the chat to
+# the original single-graph agent's 12 capabilities + dry_run/execute;
+# =full restores all 24 tools (charts, sandbox, craft skills)
+SYNAPSE_CONSOLE_RUNNER=adk python -m uvicorn apps.console.backend.app:app --port 8080
 
 # smoke it
 curl -s localhost:8080/api/config          # non-secret env echo + graph liveness
@@ -129,8 +132,7 @@ blurs real and illustrative.
 | `/api/products` | Table nodes + context-readiness scorecards |
 | `/api/metrics`, `POST /api/metrics/viability` | the metric canon + the copilot's canon-first check |
 | `/api/terms/resolve` | canonical term + witnesses |
-| `/api/graph/summary`, `/api/graph/thread` | counts by type/tier/witness + the curated storyline |
-| `/api/briefs` | seeded brief store; `/chat` tees every Answer in |
+| `/api/graph/summary`, `/api/graph/thread` | counts by type/tier/witness + the curated storyline (`?table=` anchors it) |
 | `/api/questions` | verified-answerable questions from the enrichment demo pack |
 | `/api/witness?ref=` | the evidence panel behind any chip or citation |
 | `/api/config` | the environment contract, booleans for anything credential-shaped |

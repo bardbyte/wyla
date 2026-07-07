@@ -1,43 +1,37 @@
-/** The inquiry workspace — three zones:
- *  rail (finished briefs) · conversation (composer + work log) ·
- *  brief document (the artifact the turn produces).
+/** The chat — one column, no document workspace.
  *
- * Contract with the event stream (events.py):
- *  - streamed `text` is the in-flight rendering; `answer` REPLACES it.
- *  - `sql_gate` pauses rendering: later events buffer until the user
- *    approves (hold-to-run) or holds. A gate never just vanishes.
- *  - the work log renders thinking/tools/sandbox — the work, visibly,
- *    while the user waits. The answer is never streamed as tokens.
+ * Each turn renders: the question, the live work log (thinking, tool
+ * calls with provenance chips, the SQL gate, query results as a
+ * table), then the answer. Scripted turns end with a structured
+ * `answer` card; live agent turns end with the model's markdown
+ * (the five-section contract), rendered by the small renderer below.
+ * The gate still buffers the stream and requires hold-to-run.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { WitnessDrawer } from "../components/WitnessDrawer";
 import {
-  formatBytes, formatWhen, HoldButton, RichText, Spinner, TierChip,
+  formatBytes, HoldButton, RichText, Spinner, TierChip,
 } from "../components/ui";
 import { api } from "../lib/api";
-import { COMMON, INQUIRIES as C } from "../lib/copy";
+import { INQUIRIES as C } from "../lib/copy";
 import { streamChat } from "../lib/sse";
-import type {
-  AnswerSections, Brief, BriefCard, ConsoleEvent, Tier,
-} from "../lib/types";
+import type { AnswerSections, ConsoleEvent } from "../lib/types";
 
-type RunState = "idle" | "streaming" | "gated" | "done" | "error";
-
-interface LiveTurn {
+interface Turn {
   question: string;
   log: ConsoleEvent[];
   liveText: string;
   answer: AnswerSections | null;
-  artifacts: { title: string; html: string }[];
   gate: Extract<ConsoleEvent, { type: "sql_gate" }> | null;
   heldNote: string | null;
+  done: boolean;
 }
 
-const EMPTY_TURN: LiveTurn = {
-  question: "", log: [], liveText: "", answer: null,
-  artifacts: [], gate: null, heldNote: null,
-};
+const newTurn = (question: string): Turn => ({
+  question, log: [], liveText: "", answer: null,
+  gate: null, heldNote: null, done: false,
+});
 
 export function InquiriesTab() {
   const conversationId = useRef<string>(
@@ -45,30 +39,27 @@ export function InquiriesTab() {
   const pending = useRef<ConsoleEvent[]>([]);
   const gated = useRef(false);
 
-  const [briefs, setBriefs] = useState<BriefCard[]>([]);
-  const [selected, setSelected] = useState<Brief | null>(null);
-  const [run, setRun] = useState<RunState>("idle");
-  const [turn, setTurn] = useState<LiveTurn>(EMPTY_TURN);
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [busy, setBusy] = useState(false);
   const [question, setQuestion] = useState("");
   const [suggestions, setSuggestions] = useState<
     { question: string; archetype: string }[]
   >([]);
-  const [mode, setMode] = useState<"brief" | "analysis">("brief");
-  const [panel, setPanel] = useState<"none" | "thread" | "ledger">("none");
   const [inspect, setInspect] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const refreshBriefs = () =>
-    api.briefs().then((d) => setBriefs(d.briefs)).catch(() => undefined);
-
   useEffect(() => {
-    refreshBriefs();
-    api.questions().then((d) => setSuggestions(d.questions)).catch(() => undefined);
+    api.questions().then((d) => setSuggestions(d.questions))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [turn, run]);
+  }, [turns, busy]);
+
+  const patchLast = (fn: (t: Turn) => Turn) =>
+    setTurns((ts) =>
+      ts.length ? [...ts.slice(0, -1), fn(ts[ts.length - 1])] : ts);
 
   const handleEvent = (ev: ConsoleEvent) => {
     switch (ev.type) {
@@ -79,72 +70,58 @@ export function InquiriesTab() {
       case "tool_result":
       case "sandbox":
       case "gate_resolved":
-        setTurn((t) => ({ ...t, log: [...t.log, ev] }));
+      case "artifact":
+      case "error":
+        patchLast((t) => ({ ...t, log: [...t.log, ev] }));
         break;
       case "text":
-        setTurn((t) => ({ ...t, liveText: t.liveText + ev.delta }));
+        patchLast((t) => ({ ...t, liveText: t.liveText + ev.delta }));
         break;
       case "sql_gate":
         gated.current = true;
-        setTurn((t) => ({ ...t, gate: ev }));
-        setRun("gated");
-        break;
-      case "artifact":
-        setTurn((t) => ({
-          ...t,
-          artifacts: [...t.artifacts, { title: ev.title, html: ev.html }],
-        }));
+        patchLast((t) => ({ ...t, gate: ev }));
         break;
       case "answer":
-        // the answer SUPERSEDES streamed text — replace, never both
-        setTurn((t) => ({ ...t, liveText: "", answer: ev.sections }));
-        break;
-      case "error":
-        setTurn((t) => ({ ...t, log: [...t.log, ev] }));
-        setRun("error");
+        // the structured card supersedes streamed text (scripted mode)
+        patchLast((t) => ({ ...t, liveText: "", answer: ev.sections }));
         break;
       case "turn_end":
-        setRun((s) => (s === "error" ? s : "done"));
-        refreshBriefs();
+        patchLast((t) => ({ ...t, done: true }));
+        setBusy(false);
         break;
     }
   };
 
   const ask = async (text: string) => {
     const q = text.trim();
-    if (!q || run === "streaming" || run === "gated") return;
-    setSelected(null);
+    if (!q || busy) return;
     setQuestion("");
-    setMode("brief");
-    setPanel("none");
     gated.current = false;
     pending.current = [];
-    setTurn({ ...EMPTY_TURN, question: q });
-    setRun("streaming");
+    setTurns((ts) => [...ts, newTurn(q)]);
+    setBusy(true);
     try {
       for await (const ev of streamChat(q, conversationId.current)) {
-        if (gated.current && ev.type !== "turn_end") {
-          pending.current.push(ev);      // hold rendering at the gate
-        } else if (gated.current && ev.type === "turn_end") {
-          pending.current.push(ev);      // flushed on approval
-        } else {
-          handleEvent(ev);
-        }
+        if (gated.current) pending.current.push(ev);
+        else handleEvent(ev);
       }
+      // stream closed while gated (live mode): keep the gate visible
+      if (!gated.current && pending.current.length === 0) setBusy(false);
     } catch (e) {
       handleEvent({
         type: "error",
         message: e instanceof Error ? e.message : String(e),
         recoverable: true,
       });
-      setRun("error");
+      patchLast((t) => ({ ...t, done: true }));
+      setBusy(false);
     }
   };
 
   const approveGate = async (gateId: string) => {
     await api.approve(gateId, true).catch(() => undefined);
     gated.current = false;
-    setRun("streaming");
+    patchLast((t) => ({ ...t, gate: null }));
     const queued = pending.current;
     pending.current = [];
     queued.forEach(handleEvent);
@@ -154,315 +131,96 @@ export function InquiriesTab() {
     await api.approve(gateId, false).catch(() => undefined);
     gated.current = false;
     pending.current = [];
-    setTurn((t) => ({ ...t, heldNote: C.heldNote }));
-    setRun("done");
-    refreshBriefs();
+    patchLast((t) => ({
+      ...t, gate: null, heldNote: C.heldNote, done: true,
+    }));
+    setBusy(false);
   };
-
-  const openBrief = (id: string) => {
-    api.brief(id).then((b) => {
-      if (b && (b as { found?: boolean }).found !== false) {
-        setSelected(b as Brief);
-        setMode("brief");
-        setPanel("none");
-      }
-    }).catch(() => undefined);
-  };
-
-  const newInquiry = () => {
-    setSelected(null);
-    setTurn(EMPTY_TURN);
-    setRun("idle");
-  };
-
-  // what the document panel shows: the selected brief, or the live turn
-  const doc = selected
-    ? {
-        title: selected.title,
-        status: selected.status,
-        tier: selected.tier as Tier | "blocked",
-        sections: selected.sections,
-        thread: selected.thread,
-        ledger: selected.ledger,
-        artifacts: [] as { title: string; html: string }[],
-        log: [] as ConsoleEvent[],
-      }
-    : turn.answer
-      ? {
-          title: turn.question,
-          status: turn.answer.status,
-          tier: tierFromStatus(turn.answer.status),
-          sections: turn.answer,
-          thread: [
-            { role: "user", text: turn.question },
-            { role: "agent", text: turn.answer.answer },
-          ],
-          ledger: ledgerFromLog(turn.log),
-          artifacts: turn.artifacts,
-          log: turn.log,
-        }
-      : null;
-
-  const busy = run === "streaming" || run === "gated";
 
   return (
-    <div className="inquiries">
-      {/* ── rail: finished briefs ── */}
-      <aside className="rail">
-        <div className="rail-head">
-          <span className="h-section">{C.railTitle}</span>
-          <button type="button" className="btn quiet" onClick={newInquiry}>
-            {C.newInquiry}
-          </button>
-        </div>
-        <div className="rail-list">
-          {briefs.map((b) => (
-            <button
-              key={b.id}
-              type="button"
-              className="brief-item"
-              aria-current={selected?.id === b.id}
-              onClick={() => openBrief(b.id)}
-            >
-              <div className="t">{b.title}</div>
-              <div className="m">
-                <TierChip tier={b.tier as Tier | "blocked"} />
-                <span>{formatWhen(b.created_at)}</span>
-              </div>
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      {/* ── conversation column ── */}
-      <section className="convo">
-        <div className="convo-scroll" ref={scrollRef}>
-          {run === "idle" && !selected && (
-            <div className="empty" style={{ margin: "auto", maxWidth: 480 }}>
-              <h1 className="h-page" style={{ color: "var(--ink)" }}>
-                {C.emptyTitle}
-              </h1>
-              <p className="h-sub" style={{ margin: "var(--s-3) auto 0" }}>
-                {C.emptySub}
-              </p>
-            </div>
-          )}
-
-          {selected && (
-            <ThreadList thread={selected.thread} />
-          )}
-
-          {!selected && turn.question && (
-            <div className="msg-user">{turn.question}</div>
-          )}
-
-          {!selected && turn.log.length > 0 && (
-            <WorkLog log={turn.log} onInspect={setInspect} />
-          )}
-
-          {!selected && turn.liveText && (
-            <p style={{ color: "var(--ink-2)" }}>{turn.liveText}</p>
-          )}
-
-          {!selected && run === "streaming" && (
-            <div className="status-line">
-              <Spinner /> {C.working}
-            </div>
-          )}
-
-          {!selected && run === "gated" && turn.gate && (
-            <GateCard
-              gate={turn.gate}
-              onApprove={() => approveGate(turn.gate!.gate_id)}
-              onHold={() => holdGate(turn.gate!.gate_id)}
-            />
-          )}
-
-          {!selected && turn.heldNote && (
-            <div className="notice">
-              <span aria-hidden>⏸</span>
-              <span>{turn.heldNote}</span>
-            </div>
-          )}
-        </div>
-
-        {/* composer */}
-        <div className="composer">
-          {run === "idle" && !selected && suggestions.length > 0 && (
-            <div className="suggest" aria-label={C.suggestTitle}>
-              {suggestions.slice(0, 4).map((s) => (
-                <button
-                  key={s.question}
-                  type="button"
-                  onClick={() => ask(s.question)}
-                >
-                  {s.question}
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="composer-row">
-            <textarea
-              className="textarea"
-              rows={2}
-              placeholder={C.placeholder}
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  ask(question);
-                }
-              }}
-              aria-label={C.placeholder}
-            />
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => ask(question)}
-              disabled={!question.trim() || busy}
-            >
-              {C.send}
-            </button>
+    <div className="chat">
+      <div className="chat-scroll" ref={scrollRef}>
+        {turns.length === 0 && (
+          <div className="empty" style={{ margin: "auto", maxWidth: 480 }}>
+            <h1 className="h-page" style={{ color: "var(--ink)" }}>
+              {C.emptyTitle}
+            </h1>
+            <p className="h-sub" style={{ margin: "var(--s-3) auto 0" }}>
+              {C.emptySub}
+            </p>
           </div>
-        </div>
-      </section>
+        )}
 
-      {/* ── brief document panel ── */}
-      <section className="briefdoc">
-        <div className="briefdoc-bar">
-          <div className="mode-switch" role="tablist" aria-label="Document mode">
-            <button role="tab" aria-selected={mode === "brief"}
-              onClick={() => setMode("brief")}>{C.briefMode}</button>
-            <button role="tab" aria-selected={mode === "analysis"}
-              onClick={() => setMode("analysis")}>{C.analysisMode}</button>
+        {turns.map((t, i) => (
+          <section key={i} className="turn">
+            <div className="msg-user">{t.question}</div>
+            {t.log.length > 0 && (
+              <WorkLog log={t.log} onInspect={setInspect} />
+            )}
+            {t.gate && (
+              <GateCard
+                gate={t.gate}
+                onApprove={() => approveGate(t.gate!.gate_id)}
+                onHold={() => holdGate(t.gate!.gate_id)}
+              />
+            )}
+            {t.heldNote && (
+              <div className="notice">
+                <span aria-hidden>⏸</span>
+                <span>{t.heldNote}</span>
+              </div>
+            )}
+            {t.answer && (
+              <AnswerCard sections={t.answer} onInspect={setInspect} />
+            )}
+            {!t.answer && t.liveText && (
+              <div className="answer-card card card-pad">
+                <Markdown text={t.liveText} />
+              </div>
+            )}
+          </section>
+        ))}
+
+        {busy && (
+          <div className="status-line">
+            <Spinner /> {C.working}
           </div>
-          <span style={{ flex: 1 }} />
-          <button type="button" className="toggle-btn"
-            aria-pressed={panel === "thread"}
-            onClick={() => setPanel(panel === "thread" ? "none" : "thread")}>
-            {C.threadToggle}
-          </button>
-          <button type="button" className="toggle-btn"
-            aria-pressed={panel === "ledger"}
-            onClick={() => setPanel(panel === "ledger" ? "none" : "ledger")}>
-            {C.ledgerToggle}
+        )}
+      </div>
+
+      <div className="composer">
+        {turns.length === 0 && suggestions.length > 0 && (
+          <div className="suggest" aria-label={C.suggestTitle}>
+            {suggestions.slice(0, 4).map((s) => (
+              <button key={s.question} type="button"
+                onClick={() => ask(s.question)}>
+                {s.question}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="composer-row">
+          <textarea
+            className="textarea"
+            rows={2}
+            placeholder={C.placeholder}
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                ask(question);
+              }
+            }}
+            aria-label={C.placeholder}
+          />
+          <button type="button" className="btn primary"
+            onClick={() => ask(question)}
+            disabled={!question.trim() || busy}>
+            {C.send}
           </button>
         </div>
-
-        <div className="briefdoc-scroll">
-          {!doc && (
-            <div className="empty">
-              {run === "gated" ? C.needsSignature : C.noBriefYet}
-            </div>
-          )}
-
-          {doc && panel === "thread" && (
-            <>
-              <div className="h-section" style={{ marginBottom: "var(--s-3)" }}>
-                {C.threadTitle}
-              </div>
-              <ThreadList thread={doc.thread} />
-            </>
-          )}
-
-          {doc && panel === "ledger" && (
-            <>
-              <div className="h-section" style={{ marginBottom: "var(--s-3)" }}>
-                {C.ledgerTitle}
-              </div>
-              {doc.ledger.length === 0 ? (
-                <p style={{ color: "var(--ink-3)" }}>{C.ledgerEmpty}</p>
-              ) : (
-                <div className="cite-list">
-                  {doc.ledger.map((l, i) => (
-                    <button key={i} type="button" className="cite"
-                      onClick={() => setInspect(l.ref)}>
-                      <span aria-hidden>▤</span> Executed query
-                      <span className="ref">{l.ref}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-          {doc && panel === "none" && (
-            <>
-              <h2 className="brief-title">{doc.title}</h2>
-              <div className="brief-meta">
-                <TierChip tier={doc.tier} />
-                {doc.status && (
-                  <span style={{ color: "var(--ink-3)", fontSize: "var(--fs-12)" }}>
-                    {doc.status}
-                  </span>
-                )}
-              </div>
-
-              {mode === "brief" && (
-                <>
-                  <p className="brief-answer">
-                    <RichText text={doc.sections.answer} />
-                  </p>
-                  {doc.sections.citations.length > 0 && (
-                    <div className="brief-block">
-                      <div className="h-section">{C.citations}</div>
-                      <div className="cite-list">
-                        {doc.sections.citations.map((c) => (
-                          <button key={c.ref + c.label} type="button"
-                            className="cite" onClick={() => setInspect(c.ref)}>
-                            <span aria-hidden>⌕</span> {c.label}
-                            <span className="ref">{c.ref}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {doc.sections.governance && (
-                    <div className="brief-block">
-                      <div className="h-section">{C.governance}</div>
-                      <p style={{ color: "var(--ink-2)" }}>
-                        {doc.sections.governance}
-                      </p>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {mode === "analysis" && (
-                <>
-                  {doc.sections.how_i_got_there && (
-                    <div className="brief-block" style={{ marginTop: 0 }}>
-                      <div className="h-section">{C.howTitle}</div>
-                      <p style={{ color: "var(--ink-2)" }}>
-                        {doc.sections.how_i_got_there}
-                      </p>
-                    </div>
-                  )}
-                  {doc.artifacts.map((a, i) => (
-                    <div className="brief-block" key={i}>
-                      <div className="h-section">{a.title}</div>
-                      <iframe
-                        className="artifact-frame"
-                        title={a.title || `artifact ${i + 1}`}
-                        sandbox=""
-                        srcDoc={a.html}
-                      />
-                    </div>
-                  ))}
-                  {doc.log.length > 0 && (
-                    <div className="brief-block">
-                      <div className="h-section">Work log</div>
-                      <WorkLog log={doc.log} onInspect={setInspect} />
-                    </div>
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </div>
-        <div className="govfoot">{COMMON.evidenceFooter}</div>
-      </section>
+      </div>
 
       {inspect && (
         <WitnessDrawer refUri={inspect} onClose={() => setInspect(null)} />
@@ -472,22 +230,6 @@ export function InquiriesTab() {
 }
 
 /* ── pieces ── */
-
-function ThreadList({ thread }: { thread: { role: string; text: string }[] }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--s-3)" }}>
-      {thread.map((m, i) =>
-        m.role === "user" ? (
-          <div key={i} className="msg-user">{m.text}</div>
-        ) : (
-          <p key={i} style={{ color: "var(--ink-2)" }}>
-            <RichText text={m.text} />
-          </p>
-        ),
-      )}
-    </div>
-  );
-}
 
 function WorkLog({
   log, onInspect,
@@ -515,20 +257,25 @@ function WorkLog({
                 </span>
               </div>
             );
-          case "tool_result":
+          case "tool_result": {
+            const rows = extractRows(ev.payload);
             return (
-              <div key={i} className="wl-row">
-                <span className="g" aria-hidden>{ev.ok ? "✓" : "✕"}</span>
-                <span className="sum">{ev.summary}</span>
-                {ev.provenance && <TierChip tier={ev.provenance.tier} />}
+              <div key={i}>
+                <div className="wl-row">
+                  <span className="g" aria-hidden>{ev.ok ? "✓" : "✕"}</span>
+                  <span className="sum">{ev.summary}</span>
+                  {ev.provenance && <TierChip tier={ev.provenance.tier} />}
+                </div>
+                {rows && <ResultsTable rows={rows} />}
               </div>
             );
+          }
           case "sandbox":
             return (
               <div key={i}>
                 <div className="wl-row">
                   <span className="g" aria-hidden>⌗</span>
-                  <span className="sum">Computed in the sandbox</span>
+                  <span className="sum">Computed</span>
                 </div>
                 <pre className="wl-code">
                   {ev.code}
@@ -552,15 +299,17 @@ function WorkLog({
                     : `Held by ${ev.actor} — nothing ran`}
                 </span>
                 {ev.ledger_id && (
-                  <button
-                    type="button"
-                    className="toggle-btn"
-                    onClick={() => onInspect(`ledger:#${ev.ledger_id}`)}
-                  >
+                  <button type="button" className="toggle-btn"
+                    onClick={() => onInspect(`ledger:#${ev.ledger_id}`)}>
                     ledger
                   </button>
                 )}
               </div>
+            );
+          case "artifact":
+            return (
+              <iframe key={i} className="artifact-frame" title={ev.title}
+                sandbox="" srcDoc={ev.html} />
             );
           case "error":
             return (
@@ -575,6 +324,90 @@ function WorkLog({
             return null;
         }
       })}
+    </div>
+  );
+}
+
+function AnswerCard({
+  sections, onInspect,
+}: {
+  sections: AnswerSections; onInspect: (ref: string) => void;
+}) {
+  return (
+    <div className="answer-card card card-pad">
+      <p className="brief-answer">
+        <RichText text={sections.answer} />
+      </p>
+      {sections.citations.length > 0 && (
+        <div className="ac-block">
+          <div className="h-section">{C.citations}</div>
+          <div className="cite-list">
+            {sections.citations.map((c) => (
+              <button key={c.ref + c.label} type="button" className="cite"
+                onClick={() => onInspect(c.ref)}>
+                <span aria-hidden>⌕</span> {c.label}
+                <span className="ref">{c.ref}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {sections.how_i_got_there && (
+        <details className="ac-block">
+          <summary className="h-section" style={{ cursor: "pointer" }}>
+            {C.howTitle}
+          </summary>
+          <p style={{ color: "var(--ink-2)", marginTop: "var(--s-2)" }}>
+            {sections.how_i_got_there}
+          </p>
+        </details>
+      )}
+      {(sections.governance || sections.status) && (
+        <div className="ac-foot">
+          {sections.governance && <span>{sections.governance}</span>}
+          {sections.status && <span className="tag">{sections.status}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Query rows out of a tool payload, wherever the runner put them. */
+function extractRows(
+  payload: Record<string, unknown> | null,
+): Record<string, unknown>[] | null {
+  if (!payload) return null;
+  const data = (payload.data ?? payload) as Record<string, unknown>;
+  const rows = data?.rows;
+  if (Array.isArray(rows) && rows.length &&
+      typeof rows[0] === "object" && rows[0] !== null) {
+    return rows as Record<string, unknown>[];
+  }
+  return null;
+}
+
+function ResultsTable({ rows }: { rows: Record<string, unknown>[] }) {
+  const cols = Object.keys(rows[0]).slice(0, 8);
+  const shown = rows.slice(0, 20);
+  return (
+    <div className="results-wrap">
+      <table className="results-table">
+        <thead>
+          <tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr>
+        </thead>
+        <tbody>
+          {shown.map((r, i) => (
+            <tr key={i}>
+              {cols.map((c) => <td key={c}>{String(r[c] ?? "")}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length > shown.length && (
+        <div className="results-more">
+          …and {rows.length - shown.length} more row(s)
+        </div>
+      )}
     </div>
   );
 }
@@ -620,18 +453,81 @@ function GateCard({
   );
 }
 
-function tierFromStatus(status: string): Tier | "blocked" {
-  const s = status.toLowerCase();
-  if (s.includes("guardrail") || s.includes("refused")) return "blocked";
-  if (s.includes("grounded")) return "grounded";
-  return "inferred";
-}
-
-function ledgerFromLog(log: ConsoleEvent[]): { ref: string }[] {
-  return log
-    .filter(
-      (e): e is Extract<ConsoleEvent, { type: "gate_resolved" }> =>
-        e.type === "gate_resolved" && !!e.ledger_id,
-    )
-    .map((e) => ({ ref: `ledger:#${e.ledger_id}` }));
+/** Minimal markdown for the live agent's five-section answers:
+ * ## headings, **bold**, `code`, - lists, | tables. No HTML input. */
+function Markdown({ text }: { text: string }) {
+  const blocks: JSX.Element[] = [];
+  const lines = text.split("\n");
+  let i = 0;
+  let k = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^#{1,3}\s/.test(line)) {
+      blocks.push(
+        <div key={k++} className="h-section md-h">
+          {line.replace(/^#{1,3}\s*/, "")}
+        </div>,
+      );
+      i += 1;
+    } else if (line.trimStart().startsWith("|")) {
+      const tbl: string[] = [];
+      while (i < lines.length && lines[i].trimStart().startsWith("|")) {
+        tbl.push(lines[i]);
+        i += 1;
+      }
+      const parse = (l: string) =>
+        l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const body = tbl.filter((l) => !/^[\s|:-]+$/.test(l));
+      const [head, ...rest] = body.map(parse);
+      blocks.push(
+        <div key={k++} className="results-wrap">
+          <table className="results-table">
+            <thead>
+              <tr>{(head ?? []).map((h, j) => <th key={j}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {rest.map((r, ri) => (
+                <tr key={ri}>
+                  {r.map((c, ci) => (
+                    <td key={ci}><RichText text={c} /></td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+    } else if (/^\s*[-*]\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*]\s+/, ""));
+        i += 1;
+      }
+      blocks.push(
+        <ul key={k++} className="md-list">
+          {items.map((it, j) => (
+            <li key={j}><RichText text={it} /></li>
+          ))}
+        </ul>,
+      );
+    } else if (line.trim() === "") {
+      i += 1;
+    } else {
+      const para: string[] = [line];
+      i += 1;
+      while (i < lines.length && lines[i].trim() !== "" &&
+             !/^#{1,3}\s/.test(lines[i]) &&
+             !lines[i].trimStart().startsWith("|") &&
+             !/^\s*[-*]\s+/.test(lines[i])) {
+        para.push(lines[i]);
+        i += 1;
+      }
+      blocks.push(
+        <p key={k++} className="md-p">
+          <RichText text={para.join(" ")} />
+        </p>,
+      );
+    }
+  }
+  return <>{blocks}</>;
 }

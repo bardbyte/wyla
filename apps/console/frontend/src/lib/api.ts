@@ -2,7 +2,7 @@
  * payload plus its `live` flag so callers can label sample data. */
 
 import type {
-  AppConfig, Brief, BriefCard, GraphSummary, Metric, Product, ThreadHop,
+  AppConfig, GraphSummary, Metric, Product, ThreadHop,
   Viability, Witness,
 } from "./types";
 
@@ -41,9 +41,6 @@ export const api = {
   graphThread: (table = "") =>
     get<Live<{ thread: { hops: ThreadHop[] } }>>(
       `/api/graph/thread?table=${encodeURIComponent(table)}`),
-
-  briefs: () => get<{ briefs: BriefCard[] }>("/api/briefs"),
-  brief: (id: string) => get<Brief & { found?: boolean }>(`/api/briefs/${id}`),
 
   questions: () =>
     get<Live<{ questions: { question: string; archetype: string }[] }>>(
