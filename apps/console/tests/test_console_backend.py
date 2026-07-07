@@ -80,6 +80,14 @@ def test_warehouse_flow_gates_sql_then_charts_when_approved():
     assert gate.requires_approval is True
     assert gate.bytes_estimate and gate.bytes_estimate > 0
     assert any("cm11" in c for c in gate.guardrail_checks)
+    # a gate NEVER just vanishes — its resolution is a typed event
+    # carrying the audit story (approver + ledger id + rows)
+    res = next(e for e in events if e.type == "gate_resolved")
+    assert res.gate_id == gate.gate_id
+    assert res.decision == "approved"
+    assert res.actor == "user"
+    assert res.ledger_id == "4821"
+    assert res.rows_returned == 8
     # approved → sandbox compute + artifact + answer
     assert "sandbox" in _types(events)
     assert "artifact" in _types(events)
@@ -91,9 +99,55 @@ def test_warehouse_flow_holds_when_not_approved():
     events = _collect("How many new accounts per month?",
                             approve_sql=False)
     assert "sql_gate" in _types(events)
+    res = next(e for e in events if e.type == "gate_resolved")
+    assert res.decision == "held"                    # held is a live state
     assert "artifact" not in _types(events)          # never ran
     answer = next(e for e in events if e.type == "answer")
     assert "approval" in answer.sections.answer.lower()
+
+
+# ─── the amended trust contract (ux-research S1 fixes) ───────
+
+
+def test_citations_are_resolvable_refs_not_strings():
+    for message in ("Who owns sbs_new_accounts?",
+                    "How many new accounts per month?",
+                    "spend by cm11_encrypted"):
+        events = _collect(message)
+        answer = next(e for e in events if e.type == "answer")
+        assert answer.sections.citations, message
+        for cite in answer.sections.citations:
+            assert cite.label                        # what the reader sees
+            assert cite.ref.startswith(("synapse://", "ledger:")), cite.ref
+
+
+def test_provenance_tier_is_a_closed_enum():
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from apps.console.backend.events import Provenance
+    Provenance(tier="grounded", score=0.9)           # every ladder value ok
+    Provenance(tier="human_asserted", score=1.0)
+    with _pytest.raises(ValidationError):
+        Provenance(tier="very_confident", score=0.9)  # no invented tiers
+
+
+def test_lifted_provenance_degrades_off_ladder_tiers_to_guessed():
+    from apps.console.backend.runner import _lift_provenance
+    prov = _lift_provenance({"provenance": {
+        "tier": "very_confident", "score": 1.7, "sources": ["mdm"],
+        "evidence_count": 3}})
+    assert prov is not None                          # envelope survives
+    assert prov.tier == "guessed"                    # honest floor
+    assert prov.score == 1.0                         # clamped
+    assert prov.sources == ["mdm"]                   # evidence kept
+
+
+def test_every_event_carries_optional_timestamp():
+    from apps.console.backend.events import GateResolved, ToolCall
+    tc = ToolCall(call_id="c", tool="t", verb="v", ts="2026-07-07T09:00:00Z")
+    assert tc.ts == "2026-07-07T09:00:00Z"
+    assert GateResolved(gate_id="g", decision="held").ts is None  # optional
 
 
 # ─── SSE framing + endpoints ─────────────────────────────────

@@ -23,9 +23,9 @@ from __future__ import annotations
 from typing import AsyncIterator, Protocol
 
 from apps.console.backend.events import (
-    Answer, AnswerSections, Artifact, ConsoleEvent, ErrorEvent, Provenance,
-    SqlGate, Sandbox, Text, Thinking, ToolCall, ToolResult, TurnEnd,
-    TurnStart,
+    Answer, AnswerSections, Artifact, Citation, ConsoleEvent, ErrorEvent,
+    GateResolved, Provenance, SqlGate, Sandbox, Text, Thinking, ToolCall,
+    ToolResult, TurnEnd, TurnStart,
 )
 from apps.console.backend.verbs import verb_for
 
@@ -109,8 +109,12 @@ class ScriptedRunner:
             how_i_got_there="Read the MDM metadata spine for ownership + "
                             "lifecycle, then traced lineage for the feeding "
                             "pipeline.",
-            citations=["mdm:sbs_new_accounts/ownership",
-                       "mdm:sbs_new_accounts/lineage"],
+            citations=[
+                Citation(label="mdm:ownership",
+                         ref="synapse://table/sbs_new_accounts"),
+                Citation(label="mdm:lineage",
+                         ref="synapse://table/sbs_new_accounts"),
+            ],
             governance="No PII columns surfaced in this answer.",
             status="grounded · 2 sources"))
 
@@ -133,7 +137,8 @@ class ScriptedRunner:
                    "the same analysis on the **masked** account key instead.",
             how_i_got_there="Statically validated the plan; the RollRates "
                             "skill marks cm11_encrypted as never-expose.",
-            citations=["skill:SBS_RollRates/guardrail#cm11"],
+            citations=[Citation(label="skill:SBS_RollRates/guardrail#cm11",
+                                ref="synapse://guardrail/sbs_rollrates/cm11")],
             governance="Refused: PII exposure. Compliant alternative offered.",
             status="guardrail enforced"))
 
@@ -158,12 +163,14 @@ class ScriptedRunner:
             guardrail_checks=["read-only ✓", "no cm11 exposure ✓",
                               "row cap 100 ✓"])
         if not self.approve_sql:
+            yield GateResolved(gate_id="g1", decision="held", actor="user")
             yield Answer(sections=AnswerSections(
                 answer="Holding — the query is drafted and validated, "
                        "awaiting your approval to run.",
                 status="awaiting approval"))
             return
-        yield ToolResult(call_id="g1", summary="Approved · 1.24 GB scanned")
+        yield GateResolved(gate_id="g1", decision="approved", actor="user",
+                           ledger_id="4821", rows_returned=8)
         yield Sandbox(code="pct = (n[-1]-n[-2])/n[-2]*100",
                       stdout="", result={"mom_pct": 8.4}, ok=True)
         yield Artifact(artifact_id="a1", kind="chart",
@@ -176,7 +183,11 @@ class ScriptedRunner:
             how_i_got_there="Resolved the columns, validated + dry-ran the "
                             "SQL (1.24 GB), ran it row-capped, computed the "
                             "delta in the sandbox, charted it.",
-            citations=["bq:sbs_new_accounts"],
+            citations=[
+                Citation(label="bq:sbs_new_accounts",
+                         ref="synapse://table/sbs_new_accounts"),
+                Citation(label="ledger#4821", ref="ledger:#4821"),
+            ],
             governance="Read-only, row-capped, on the audit ledger.",
             status="grounded · live query"))
 
@@ -273,10 +284,18 @@ def _lift_provenance(resp: dict) -> Provenance | None:
     env = resp.get("provenance") or resp.get("_envelope") or {}
     if not isinstance(env, dict) or not env:
         return None
+    # ConfidenceTier is a CLOSED enum — an off-ladder string from a raw
+    # payload degrades to "guessed" (the honest floor) instead of
+    # discarding the whole envelope and losing sources/evidence
+    tier = str(env.get("tier", env.get("confidence_tier", "guessed")))
+    if tier not in ("deprecated", "guessed", "inferred", "grounded",
+                    "human_asserted"):
+        tier = "guessed"
     try:
         return Provenance(
-            tier=str(env.get("tier", env.get("confidence_tier", "guessed"))),
-            score=float(env.get("score", env.get("confidence_score", 0.0))),
+            tier=tier,  # type: ignore[arg-type]
+            score=max(0.0, min(1.0, float(
+                env.get("score", env.get("confidence_score", 0.0))))),
             sources=list(env.get("sources", []) or []),
             evidence_count=int(env.get("evidence_count", 0) or 0))
     except Exception:
