@@ -158,6 +158,17 @@ def test_version_mismatch_failures_name_the_certified_pair():
         assert "python -m uvicorn" in msg
 
 
+def test_live_agent_is_the_default_runner(monkeypatch):
+    """A canned transcript that looks real is worse than an error that
+    names its fix — the scripted demo is opt-in now."""
+    from apps.console.backend.app import _make_runner
+    from apps.console.backend.runner import ADKRunner
+    monkeypatch.delenv("SYNAPSE_CONSOLE_RUNNER", raising=False)
+    assert isinstance(_make_runner(), ADKRunner)
+    monkeypatch.setenv("SYNAPSE_CONSOLE_RUNNER", "scripted")
+    assert isinstance(_make_runner(), ScriptedRunner)
+
+
 def test_config_reports_what_this_process_imported():
     body = _client().get("/api/config").json()
     assert body["sdk"]["python"]
@@ -192,9 +203,10 @@ def test_classic_roster_is_the_user_selected_bound():
         "find_columns_for_concept", "get_join_path", "get_lineage",
         "get_metric", "get_skill", "get_dq_status", "disambiguate_term",
         "validate_sql_plan", "get_entity", "get_steward_review_queue",
+        "get_failed_query_corrections",
         "dry_run_sql", "execute_sql",
     }
-    assert len(names) == 15
+    assert len(names) == 16
 
 
 def test_classic_instruction_keeps_the_output_contract():

@@ -46,10 +46,14 @@ export function InquiriesTab() {
     { question: string; archetype: string }[]
   >([]);
   const [inspect, setInspect] = useState<string | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     api.questions().then((d) => setSuggestions(d.questions))
+      .catch(() => undefined);
+    api.config()
+      .then((c) => setDemoMode(c.runner === "ScriptedRunner"))
       .catch(() => undefined);
   }, []);
 
@@ -139,6 +143,11 @@ export function InquiriesTab() {
 
   return (
     <div className="chat">
+      {demoMode && (
+        <div className="demo-banner" role="alert">
+          <span aria-hidden>▲</span> {C.demoBanner}
+        </div>
+      )}
       <div className="chat-scroll" ref={scrollRef}>
         {turns.length === 0 && (
           <div className="empty" style={{ margin: "auto", maxWidth: 480 }}>

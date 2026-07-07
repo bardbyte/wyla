@@ -64,9 +64,15 @@ class ViabilityRequest(BaseModel):
 
 
 def _make_runner() -> Runner:
-    if os.environ.get("SYNAPSE_CONSOLE_RUNNER", "scripted").lower() == "adk":
-        return ADKRunner()
-    return ScriptedRunner()
+    """LIVE AGENT BY DEFAULT. The scripted demo answered every question
+    with a canned transcript, and an unset env var made that the silent
+    default — a canned answer that looks real is worse than an error
+    that names its fix. The demo is now an explicit opt-in
+    (SYNAPSE_CONSOLE_RUNNER=scripted), and the UI banners it."""
+    if os.environ.get("SYNAPSE_CONSOLE_RUNNER",
+                      "adk").lower() == "scripted":
+        return ScriptedRunner()
+    return ADKRunner()
 
 
 def _configure_tls() -> dict:

@@ -71,6 +71,10 @@ export const INQUIRIES = {
   howTitle: "How this was produced",
   errorTitle: "That didn't go through",
   suggestTitle: "Verified questions you can ask now",
+  demoBanner:
+    "Demo mode — scripted transcripts, not the live agent. Unset " +
+    "SYNAPSE_CONSOLE_RUNNER (or set it to adk) and restart the server " +
+    "to chat with Gemini.",
 };
 
 export const PRODUCTS = {
