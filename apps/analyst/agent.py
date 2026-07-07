@@ -22,6 +22,21 @@ def build_agent(model: str = DEFAULT_MODEL):
     from google.adk import Agent
     from google.genai import types
 
+    # Same environment contract as the enrichment pipeline:
+    # GEMINI_THINKING_BUDGET=-1 → dynamic thinking (Gemini 3.1 Pro's
+    # strongest mode), 0 → off, N → capped. include_thoughts streams
+    # reasoning into the console's work log while the user waits.
+    config = types.GenerateContentConfig(
+        temperature=0.0,
+        max_output_tokens=8192,
+    )
+    try:
+        budget = int(os.environ.get("GEMINI_THINKING_BUDGET", "-1"))
+        config.thinking_config = types.ThinkingConfig(
+            include_thoughts=True, thinking_budget=budget)
+    except (AttributeError, TypeError, ValueError):
+        pass                       # older SDK: run without thinking config
+
     return Agent(
         model=model,
         name="warehouse_analyst",
@@ -33,10 +48,7 @@ def build_agent(model: str = DEFAULT_MODEL):
         ),
         instruction=ANALYST_INSTRUCTION,
         tools=build_analyst_tools(),
-        generate_content_config=types.GenerateContentConfig(
-            temperature=0.0,
-            max_output_tokens=8192,
-        ),
+        generate_content_config=config,
     )
 
 

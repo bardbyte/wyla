@@ -106,3 +106,5 @@ review_queue/
 # Probe stats + reports
 *_stats.json
 CORPUS_PROBE_REPORT.md
+node_modules/
+*.tsbuildinfo

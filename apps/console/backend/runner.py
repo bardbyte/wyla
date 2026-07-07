@@ -31,8 +31,9 @@ from apps.console.backend.verbs import verb_for
 
 
 class Runner(Protocol):
-    def stream(self, user_message: str, *,
-               turn_id: str) -> AsyncIterator[ConsoleEvent]: ...
+    def stream(self, user_message: str, *, turn_id: str,
+               conversation_id: str | None = None,
+               ) -> AsyncIterator[ConsoleEvent]: ...
 
 
 # ─── offline golden transcripts ──────────────────────────────
@@ -63,8 +64,9 @@ class ScriptedRunner:
         # runner takes the decision up front so tests are deterministic
         self.approve_sql = approve_sql
 
-    async def stream(self, user_message: str, *,
-                     turn_id: str) -> AsyncIterator[ConsoleEvent]:
+    async def stream(self, user_message: str, *, turn_id: str,
+                     conversation_id: str | None = None,
+                     ) -> AsyncIterator[ConsoleEvent]:
         yield TurnStart(turn_id=turn_id)
         intent = _classify(user_message)
         if intent == "guardrail":
@@ -208,6 +210,7 @@ class ADKRunner:
         self._model = model
         self._runner = None
         self._session_service = None
+        self._sessions: set[str] = set()      # conversation memory
 
     def _ensure(self):
         if self._runner is not None:
@@ -226,26 +229,61 @@ class ADKRunner:
             app_name="synapse_console", agent=agent,
             session_service=self._session_service)
 
-    async def stream(self, user_message: str, *,
-                     turn_id: str) -> AsyncIterator[ConsoleEvent]:
+    async def stream(self, user_message: str, *, turn_id: str,
+                     conversation_id: str | None = None,
+                     ) -> AsyncIterator[ConsoleEvent]:
         yield TurnStart(turn_id=turn_id)
+        session_id = conversation_id or turn_id
         try:
             self._ensure()
             from google.genai import types
             content = types.Content(
                 role="user", parts=[types.Part(text=user_message)])
-            await self._session_service.create_session(
-                app_name="synapse_console", user_id="console",
-                session_id=turn_id)
+            # one ADK session per CONVERSATION, created once and reused —
+            # follow-up turns see prior tool results and answers
+            if session_id not in self._sessions:
+                await self._session_service.create_session(
+                    app_name="synapse_console", user_id="console",
+                    session_id=session_id)
+                self._sessions.add(session_id)
             async for ev in self._runner.run_async(
-                    user_id="console", session_id=turn_id,
+                    user_id="console", session_id=session_id,
                     new_message=content):
                 for out in _map_adk_event(ev):
                     yield out
-        except Exception as exc:  # never fail silently
-            yield ErrorEvent(message=f"{type(exc).__name__}: {exc}",
+        except Exception as exc:  # never fail silently — and fail legibly
+            yield ErrorEvent(message=_explain_failure(exc),
                              recoverable=True)
         yield TurnEnd(turn_id=turn_id, usage={"runner": "adk"})
+
+
+def _explain_failure(exc: Exception) -> str:
+    """Map raw Vertex/network failures to the action that fixes them.
+    The raw error rides along — legible never means lossy."""
+    raw = f"{type(exc).__name__}: {exc}"
+    msg = str(exc).lower()
+    if "certificate_verify_failed" in msg or "ssl" in msg:
+        return ("The secure connection to Vertex was intercepted "
+                "(corporate proxy). Set GEMINI_TLS_INSECURE=1 on the "
+                "intranet, or GEMINI_CA_BUNDLE to your CA file, then "
+                f"restart the console server. [{raw}]")
+    if "permission" in msg or "403" in msg or "credential" in msg \
+            or "unauthenticated" in msg or "401" in msg:
+        return ("Vertex declined the credentials. Check "
+                "GOOGLE_APPLICATION_CREDENTIALS points at the service-"
+                "account key and the account has Vertex AI access. "
+                f"[{raw}]")
+    if "resource_exhausted" in msg or "429" in msg or "quota" in msg:
+        return ("Vertex is rate-limiting this project right now — retry "
+                f"in a moment; nothing is lost. [{raw}]")
+    if "not found" in msg and "model" in msg:
+        return ("The configured model is not available to this project. "
+                f"Check GEMINI_MODEL. [{raw}]")
+    if isinstance(exc, (ConnectionError, TimeoutError)) \
+            or "timed out" in msg or "connection" in msg:
+        return ("Could not reach Vertex — check the VPN/network and "
+                f"retry. [{raw}]")
+    return raw
 
 
 def _map_adk_event(ev) -> list[ConsoleEvent]:
@@ -276,7 +314,12 @@ def _map_adk_event(ev) -> list[ConsoleEvent]:
             continue
         text = getattr(part, "text", None)
         if text:
-            out.append(Text(delta=text))
+            # thought parts stream into the work log, not the answer —
+            # watching the model reason is the latency-masking channel
+            if getattr(part, "thought", False):
+                out.append(Thinking(delta=text))
+            else:
+                out.append(Text(delta=text))
     return out
 
 

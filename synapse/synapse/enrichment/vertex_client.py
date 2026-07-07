@@ -347,6 +347,9 @@ class VertexLLMClient:
                 self.stats["thinking_fallbacks"] += 1
                 self.thinking_budget = 0        # don't re-fail every call
                 config_kwargs.pop("thinking_config")
+                print("      ⚠ endpoint rejected thinking_config — "
+                      "retrying without; thinking stays off this run",
+                      flush=True)
                 response = self._client.models.generate_content(
                     model=self.model, contents=prompt,
                     config=self._types.GenerateContentConfig(**config_kwargs),
@@ -383,8 +386,11 @@ class VertexLLMClient:
         exception type attached."""
         try:
             return self._generate(prompt)
-        except Exception:
+        except Exception as first:
             self.stats["call_retries"] += 1
+            print(f"      ⚠ transient call failure "
+                  f"({type(first).__name__}: {str(first)[:90]}) — "
+                  f"retrying in {self.retry_backoff_s:g}s", flush=True)
             time.sleep(self.retry_backoff_s)
             try:
                 return self._generate(prompt)
@@ -399,6 +405,9 @@ class VertexLLMClient:
         context_json = _serialize_context(context, self.max_context_chars)
         if context_json.endswith(_TRUNCATION_MARKER):
             self.stats["context_truncations"] += 1
+            print(f"      ⚠ context truncated to "
+                  f"{self.max_context_chars:,} chars for {table_name}",
+                  flush=True)
         prompt = _PROMPT_TEMPLATE.format(
             skill_md=skill_md,
             table_name=table_name,
@@ -411,6 +420,8 @@ class VertexLLMClient:
         try:
             text = self._generate_with_retry(prompt)
         except Exception as exc:  # network/model error → in-band failure
+            print(f"      ✗ vertex call failed after retry: "
+                  f"{str(exc)[:140]}", flush=True)
             return _empty_bundle(
                 table_name, f"vertex call failed: {str(exc)[:200]}")
         bundle = parse_bundle_text(text, table_name)
@@ -423,6 +434,8 @@ class VertexLLMClient:
             return bundle
         self.stats["corrective_retries"] += 1
         self.stats["calls"] += 1
+        print(f"      ↻ response failed validation ({str(note)[:90]}) — "
+              "one corrective retry", flush=True)
         retry_prompt = (
             f"{prompt}\n\nYOUR PREVIOUS RESPONSE FAILED VALIDATION: {note}\n"
             "Return ONLY the corrected JSON object matching the "

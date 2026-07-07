@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -57,6 +58,8 @@ def enrich_graph(
     evidence_dir: Path | None = None,
     demo_out: Path | None = None,
     skip_columns: dict[str, set[str]] | None = None,
+    verbose: bool = False,
+    planned_calls: int | None = None,
 ) -> dict[str, EnrichmentBundle]:
     """Run the LLM enrichment pass over every Table in the store — BATCHED.
 
@@ -87,6 +90,13 @@ def enrich_graph(
             observed in a prior run) — the top-up mode. A table whose
             every column is skipped is not called at all, and its prior
             facts are untouched.
+        verbose: print live per-table/per-chunk progress (call counter,
+            durations, rolling ETA). Silence during a multi-hour run is
+            indistinguishable from a hang — callers with a terminal
+            should pass True.
+        planned_calls: expected total calls (from the caller's plan) —
+            gives the verbose counter a denominator and the ETA a
+            horizon. Purely cosmetic.
 
     Returns:
         dict mapping table_name → merged EnrichmentBundle (also written
@@ -115,7 +125,20 @@ def enrich_graph(
             if str(n.properties.get("table_name", "")).lower() in wanted
         ]
 
-    for node in table_nodes:
+    run_t0 = time.monotonic()
+    call_durations: list[float] = []
+    n_tables = len(table_nodes)
+    if verbose:
+        budget = "∞" if max_calls is None else str(max_calls)
+        plan = f" · planned ~{planned_calls} call(s)" if planned_calls else ""
+        print(f"    enriching {n_tables} table(s) · "
+              f"batch {column_batch_size or 'off'} · budget {budget}{plan}",
+              flush=True)
+        if memory_out is not None:
+            print(f"    checkpointing memory after each table → "
+                  f"{memory_out}", flush=True)
+
+    for t_idx, node in enumerate(table_nodes, 1):
         table_name = node.properties["table_name"]
         context = _build_context_for_table(
             store, table_name,
@@ -130,6 +153,9 @@ def enrich_graph(
                     if str(c.get("name", "")).lower() not in skip
                 ]
                 if not all_columns:
+                    if verbose:
+                        print(f"    · [{t_idx}/{n_tables}] {table_name} — "
+                              "fully covered, zero calls", flush=True)
                     continue    # fully covered by a prior run — zero calls
         if column_batch_size and len(all_columns) > column_batch_size:
             chunks = [
@@ -148,12 +174,21 @@ def enrich_graph(
             remaining = max_calls - calls_made
             if remaining <= 0:
                 skipped_for_budget.append(table_name)
+                if verbose:
+                    print(f"    ⏭ [{t_idx}/{n_tables}] {table_name} — "
+                          "budget exhausted, skipped", flush=True)
                 continue
             if len(chunks) > remaining:
                 partial_note = (
                     f"partial enrichment: first {remaining} of "
                     f"{len(chunks)} column chunks (call budget)")
                 chunks = chunks[:remaining]
+
+        if verbose:
+            note = f" ({partial_note})" if partial_note else ""
+            print(f"    ▶ [{t_idx}/{n_tables}] {table_name}: "
+                  f"{len(all_columns)} column(s) in {len(chunks)} "
+                  f"call(s){note}", flush=True)
 
         parts: list[EnrichmentBundle] = []
         for chunk_no, chunk in enumerate(chunks):
@@ -166,11 +201,30 @@ def enrich_graph(
                 "columns_in_chunk": len(chunk),
                 "total_columns": len(all_columns),
             }
-            parts.append(llm_client.enrich(
+            call_t0 = time.monotonic()
+            part = llm_client.enrich(
                 skill_md=skill_md, context=chunk_context,
                 table_name=table_name,
-            ))
+            )
+            parts.append(part)
             calls_made += 1
+            call_durations.append(time.monotonic() - call_t0)
+            if verbose:
+                n_obs = len(part.column_observations)
+                notes = part.self_assessment.requires_steward_attention
+                fail = (f" · ✗ {str(notes[0])[:100]}"
+                        if n_obs == 0 and notes else "")
+                avg = (sum(call_durations[-10:])
+                       / len(call_durations[-10:]))
+                denom = f"/~{planned_calls}" if planned_calls else ""
+                eta = ""
+                if planned_calls and planned_calls > calls_made:
+                    eta = (f" · ~{(planned_calls - calls_made) * avg / 60:.0f}"
+                           "m left")
+                print(f"      [{calls_made}{denom}] chunk "
+                      f"{chunk_no + 1}/{len(chunks)} · "
+                      f"{call_durations[-1]:.0f}s · {n_obs} obs · "
+                      f"avg {avg:.0f}s{eta}{fail}", flush=True)
 
         bundle = parts[0] if len(parts) == 1 else _merge_bundles(
             table_name, parts)
@@ -185,6 +239,27 @@ def enrich_graph(
         if grounding_reports is not None:
             grounding_reports[table_name] = table_report
         bundles[table_name] = bundle
+        if verbose:
+            print(f"      ✓ {table_name}: "
+                  f"{table_report.get('applied_descriptions', 0)} "
+                  f"descriptions applied · dropped "
+                  f"{table_report.get('dropped_imagined_columns', 0)} "
+                  f"imagined, "
+                  f"{table_report.get('dropped_ungrounded_synonyms', 0)} "
+                  f"synonyms · "
+                  f"{table_report.get('applied_relations', 0)} relation(s) "
+                  f"· elapsed {(time.monotonic() - run_t0) / 60:.0f}m",
+                  flush=True)
+        if memory_out is not None:
+            # checkpoint after EVERY table — an interrupted multi-hour
+            # run keeps everything already observed (the final write
+            # below then just re-stamps the complete set)
+            memory_out.parent.mkdir(parents=True, exist_ok=True)
+            memory_out.write_text(
+                json.dumps(
+                    {tn: b.model_dump() for tn, b in bundles.items()},
+                    indent=2, default=str),
+                encoding="utf-8")
 
     if skipped_for_budget and bundles:
         # surface the budget skip in-band, never silently

@@ -17,6 +17,12 @@ Laptop flow:
     # top it up (same Vertex env + TLS as the pipeline)
     python synapse/scripts/enrich_topup.py --max-calls 130
 
+Progress prints live (per table, per call, rolling ETA), and every
+finished table is checkpointed to _topup_memory_partial.json next to
+the snapshot — if a run is interrupted, just rerun the same command:
+the checkpoint is folded into memory + snapshot first and only the
+true remainder spends calls.
+
 Defaults point at the pipeline's artifact paths under
 synapse/data/cache/; override any of them for non-default layouts.
 """
@@ -83,6 +89,33 @@ def main(argv: list[str] | None = None) -> int:
     old_bundles = (load_bundles_from_memory(memory_path)
                    if memory_path.exists() else {})
 
+    # Resume: enrich_graph checkpoints each finished table to a partial
+    # file. If a prior run died mid-flight, fold that checkpoint in —
+    # facts re-applied to the snapshot, observations into memory — so an
+    # interrupted run never re-buys the calls it already made.
+    partial_path = snapshot_path.with_name("_topup_memory_partial.json")
+    resume_note = None
+    partial = (load_bundles_from_memory(partial_path)
+               if partial_path.exists() else {})
+    if partial and args.plan:
+        resume_note = (f"interrupted-run checkpoint present "
+                       f"({len(partial)} table(s)) — folded in when the "
+                       "top-up runs")
+    elif partial:
+        from synapse.enrichment.enricher import _apply_bundle
+        for bundle in partial.values():
+            _apply_bundle(store, bundle)
+        old_bundles = merge_memories(old_bundles, partial)
+        memory_path.parent.mkdir(parents=True, exist_ok=True)
+        memory_path.write_text(
+            json.dumps({t: b.model_dump() for t, b in old_bundles.items()},
+                       indent=2, default=str), encoding="utf-8")
+        store.save_json(snapshot_path)
+        partial_path.unlink()
+        resume_note = (f"resumed interrupted run: {len(partial)} table(s) "
+                       "folded into memory + snapshot — those calls are "
+                       "not re-spent")
+
     plan = compute_topup_plan(store, old_bundles)
     scope_note = None
 
@@ -112,6 +145,8 @@ def main(argv: list[str] | None = None) -> int:
         plan = {t: cols for t, cols in plan.items() if t.lower() in wanted}
 
     print(f"\n═══ Top-up plan (snapshot {snapshot_path.name}) ═══")
+    if resume_note:
+        print(f"  {resume_note}")
     if scope_note:
         print(f"  {scope_note}")
     if not plan:
@@ -153,11 +188,13 @@ def main(argv: list[str] | None = None) -> int:
         only_tables=sorted(plan),
         column_batch_size=args.batch_size,
         max_calls=args.max_calls,
-        memory_out=None,                      # merged + written below
-        grounding_reports=grounding,
+        memory_out=partial_path,              # per-table crash checkpoint;
+        grounding_reports=grounding,          # merged + removed at the end
         evidence_dir=Path(args.evidence_dir).expanduser(),
         demo_out=demo_tmp,
         skip_columns=skip,
+        verbose=True,
+        planned_calls=min(est_total, args.max_calls),
     )
 
     # ── gate summary + failure digest (never silent) ─────────
@@ -227,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # ── save + the delta that makes the update legible ───────
     store.save_json(snapshot_path)
+    partial_path.unlink(missing_ok=True)   # snapshot + memory now durable
     tiers_after = store.stats()["nodes_by_confidence_tier"]
     print(f"\n═══ Delta ═══")
     for tier in ("human_asserted", "grounded", "inferred", "guessed",
