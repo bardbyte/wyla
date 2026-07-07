@@ -107,6 +107,57 @@ def test_threadless_live_graph_serves_sample_labeled_sample(tmp_path):
     assert thread["source"] == "sample"
 
 
+def test_relative_snapshot_path_falls_back_to_repo_root(tmp_path, monkeypatch):
+    """`export SYNAPSE_GRAPH_PATH=synapse/data/…` must work no matter
+    which directory uvicorn was launched from."""
+    monkeypatch.chdir(tmp_path)                # cwd far from the repo
+    data = ConsoleData(
+        snapshot_path="synapse/data/cache/graph_snapshot.json")
+    assert data.snapshot_path.is_absolute()
+    assert data.live is True                   # resolved via repo root
+
+
+def test_table_anchored_thread_explores_that_table(tmp_path):
+    from synapse.graph.store import GraphStore, canonical_uri
+    store = GraphStore()
+    t = canonical_uri("table", "accounts")
+    store.upsert_node("Table", t, {"table_name": "accounts",
+                                   "description": "account master"},
+                      source="mdm")
+    c = canonical_uri("column", "accounts", "acct_id")
+    store.upsert_node("Column", c, {"table_name": "accounts"}, source="mdm")
+    store.upsert_edge("CONTAINS", t, c, {}, source="mdm")
+    ent = canonical_uri("entity", "Account")
+    store.upsert_node("Entity", ent, {"name": "Account"},
+                      source="human_approval")
+    store.upsert_edge("IDENTIFIES", c, ent, {}, source="human_approval")
+    snap = tmp_path / "s.json"
+    store.save_json(snap)
+
+    data = ConsoleData(snapshot_path=snap)
+    out = data.graph_thread("accounts")
+    assert out["live"] is True
+    kinds = [h["kind"] for h in out["thread"]["hops"]]
+    assert kinds[0] == "table"
+    assert "entity" in kinds                   # found via IDENTIFIES
+
+    # unknown anchor: honest empty, never the sample storyline
+    missing = data.graph_thread("ghost_table")
+    assert missing["live"] is True
+    assert missing["thread"]["hops"] == []
+
+
+def test_version_mismatch_failures_name_the_upgrade():
+    for exc in (
+        TypeError("unsupported operand type(s) for |: 'function' and "
+                  "'NoneType'"),
+        AttributeError("module 'google.genai.types' has no attribute "
+                       "'TurnCompleteReason'"),
+    ):
+        msg = _explain_failure(exc)
+        assert "pip install -U google-adk google-genai" in msg
+
+
 def test_briefs_not_seeded_for_a_live_runner():
     """Sample briefs furnish the scripted demo only — a live agent's
     workspace starts empty."""

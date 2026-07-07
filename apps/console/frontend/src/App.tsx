@@ -1,8 +1,6 @@
-import { useEffect, useState } from "react";
-import { api } from "./lib/api";
-import { BRAND, CONFIG, TABS, type TabId } from "./lib/copy";
+import { useState } from "react";
+import { BRAND, TABS, type TabId } from "./lib/copy";
 import { useTheme } from "./lib/theme";
-import type { AppConfig } from "./lib/types";
 import { GraphTab } from "./tabs/Graph";
 import { InquiriesTab } from "./tabs/Inquiries";
 import { KnowledgeTab } from "./tabs/Knowledge";
@@ -12,24 +10,12 @@ import { ProductsTab } from "./tabs/Products";
 export default function App() {
   const [tab, setTab] = useState<TabId>("inquiries");
   const [theme, toggleTheme] = useTheme();
-  const [config, setConfig] = useState<AppConfig | null>(null);
-
-  useEffect(() => {
-    api.config().then(setConfig).catch(() => setConfig(null));
-  }, []);
-
-  const runnerLabel = config
-    ? config.runner === "ADKRunner"
-      ? `${CONFIG.live} · ${config.model}`
-      : CONFIG.scripted
-    : "…";
 
   return (
     <div className="shell">
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark">{BRAND.name}</span>
-          <span className="brand-sub">{BRAND.sub}</span>
         </div>
         <nav className="tabnav" role="tablist" aria-label="Sections">
           {TABS.map((t) => (
@@ -41,21 +27,11 @@ export default function App() {
               onClick={() => setTab(t.id)}
             >
               {t.label}
+              {t.preview && <sup className="nav-preview">Preview</sup>}
             </button>
           ))}
         </nav>
         <div className="topbar-right">
-          <span className="env-badge" title={
-            config
-              ? `Graph: ${config.graph.live ? "live snapshot" : "sample"} · ${config.graph.path}`
-              : "Connecting to the console server…"
-          }>
-            <span
-              className={`live-dot ${config?.graph.live ? "" : "sample"}`}
-              aria-hidden
-            />
-            {runnerLabel}
-          </span>
           <button
             type="button"
             className="icon-btn"
