@@ -276,10 +276,13 @@ def _explain_failure(exc: Exception) -> str:
             ("thinking" in msg or "generatecontentconfig" in msg))
     )
     if mismatch:
-        return ("The installed google-adk and google-genai versions "
-                "don't match — upgrade them TOGETHER: "
-                "pip install -U google-adk google-genai "
-                f"then restart the console server. [{raw}]")
+        return ("The google-adk and google-genai versions this server "
+                "loaded don't match. Install a certified pair in the "
+                "SAME venv the server runs from — "
+                "pip install 'google-adk==1.31.1' 'google-genai==1.73.1' "
+                "— then relaunch with python -m uvicorn (a bare `uvicorn` "
+                "can resolve to a different environment). Check what the "
+                f"server actually sees at /api/config. [{raw}]")
     if "certificate_verify_failed" in msg or "ssl" in msg:
         return ("The secure connection to Vertex was intercepted "
                 "(corporate proxy). Set GEMINI_TLS_INSECURE=1 on the "

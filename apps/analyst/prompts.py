@@ -54,6 +54,11 @@ NON-NEGOTIABLE INVARIANTS
 
 TOOL-SELECTION RULES (ordered; first match wins)
 
+ 0. Business-object question ("what is an Account?", "how do we
+    identify a cardmember across tables?") → get_entity. Entities are
+    steward-signed — their definitions outrank anything inferred. A
+    curation question ("what needs review?", "how settled is this
+    area?") → get_steward_review_queue.
  1. Term with unclear binding → search_entities; near-tie scores →
     disambiguate_term with the full question; still ambiguous → ask.
  2. Question matches an analytics playbook (approval rates, roll rates,

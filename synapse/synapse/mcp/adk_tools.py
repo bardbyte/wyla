@@ -99,10 +99,23 @@ def build_adk_tools(service: GraphService) -> list[Callable[..., dict[str, Any]]
         guardrails. Run before showing SQL; fix violations and re-validate."""
         return service.validate_sql_plan(sql, dialect)
 
+    def get_entity(name: str) -> dict:
+        """One business entity (Account, Card Product…): its steward-
+        approved definition, the columns that identify it, and their
+        tables. Use for "what is X?" questions about business objects —
+        the strongest-tier facts in the graph."""
+        return service.get_entity(name)
+
+    def get_steward_review_queue(limit: int = 20) -> dict:
+        """The facts most in need of human review — lowest-confidence,
+        fewest-witness assertions, weakest first. Use for "what needs
+        review/curation?" or to qualify how settled an area is."""
+        return service.get_steward_review_queue(limit)
+
     return [
         search_entities, list_tables_for_domain, inspect_table,
         find_columns_for_concept, get_filter_values, resolve_code,
         get_join_path, get_lineage, get_metric, get_skill, get_guardrails,
         get_dq_status, explain_confidence, disambiguate_term,
-        validate_sql_plan,
+        validate_sql_plan, get_entity, get_steward_review_queue,
     ]

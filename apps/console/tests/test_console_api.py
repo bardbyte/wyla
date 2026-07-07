@@ -147,7 +147,7 @@ def test_table_anchored_thread_explores_that_table(tmp_path):
     assert missing["thread"]["hops"] == []
 
 
-def test_version_mismatch_failures_name_the_upgrade():
+def test_version_mismatch_failures_name_the_certified_pair():
     for exc in (
         TypeError("unsupported operand type(s) for |: 'function' and "
                   "'NoneType'"),
@@ -155,7 +155,14 @@ def test_version_mismatch_failures_name_the_upgrade():
                        "'TurnCompleteReason'"),
     ):
         msg = _explain_failure(exc)
-        assert "pip install -U google-adk google-genai" in msg
+        assert "google-adk==1.31.1" in msg
+        assert "python -m uvicorn" in msg
+
+
+def test_config_reports_what_this_process_imported():
+    body = _client().get("/api/config").json()
+    assert body["sdk"]["python"]
+    assert body["sdk"]["fastapi"]              # versions, not secrets
 
 
 def test_briefs_not_seeded_for_a_live_runner():

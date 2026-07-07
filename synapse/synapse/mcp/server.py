@@ -174,6 +174,21 @@ def build_server(graph_path: str | Path, *, tenant_id: str = "default"):
         re-validate first."""
         return service.validate_sql_plan(sql, dialect)
 
+    @mcp.tool()
+    def get_entity(name: str) -> dict:
+        """One business entity (Account, Card Product…): its steward-
+        approved definition, the columns that identify it, and their
+        tables. Use for "what is X?" questions about business objects —
+        the strongest-tier facts in the graph."""
+        return service.get_entity(name)
+
+    @mcp.tool()
+    def get_steward_review_queue(limit: int = 20) -> dict:
+        """The facts most in need of human review — lowest-confidence,
+        fewest-witness assertions, weakest first. Use for "what needs
+        review/curation?" or to qualify how settled an area is."""
+        return service.get_steward_review_queue(limit)
+
     # ── resources (bulk reference data, browse-style) ────────
 
     import json as _json
