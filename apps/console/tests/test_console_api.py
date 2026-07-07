@@ -182,19 +182,19 @@ def test_viability_exact_near_and_clear(tmp_path):
 # ─── the classic chat surface ────────────────────────────────
 
 
-def test_classic_roster_is_the_user_selected_fourteen():
-    """The bounded chat agent: the original agent's 12 capabilities
-    under their current names + the gated warehouse pair."""
+def test_classic_roster_is_the_user_selected_bound():
+    """The bounded chat agent: the original agent's capabilities under
+    their current names + the skills library + the warehouse pair."""
     from apps.analyst.tools import build_classic_tools
     names = {t.__name__ for t in build_classic_tools()}
     assert names == {
         "search_entities", "list_tables_for_domain", "inspect_table",
         "find_columns_for_concept", "get_join_path", "get_lineage",
-        "get_metric", "get_dq_status", "disambiguate_term",
+        "get_metric", "get_skill", "get_dq_status", "disambiguate_term",
         "validate_sql_plan", "get_entity", "get_steward_review_queue",
         "dry_run_sql", "execute_sql",
     }
-    assert len(names) == 14
+    assert len(names) == 15
 
 
 def test_classic_instruction_keeps_the_output_contract():
@@ -202,6 +202,9 @@ def test_classic_instruction_keeps_the_output_contract():
     for section in ("## Answer", "## How I got there", "## Citations",
                     "## Governance & caveats", "## Status"):
         assert section in CLASSIC_INSTRUCTION
+    # the skills library shapes question-understanding AND the answer
+    assert "get_skill BEFORE" in CLASSIC_INSTRUCTION
+    assert "IN ITS VOCABULARY" in CLASSIC_INSTRUCTION
     # tools outside the bound are never referenced
     for absent in ("render_chart", "run_python_analysis",
                    "load_agent_skill", "get_filter_values"):
