@@ -361,7 +361,9 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
         </button>
         <button class="inq" data-view="q3">
           <div class="t">Q3 delinquency drivers</div>
-          <div class="s"><span class="state working" id="q3state"><i></i><span id="q3statetxt">Composing</span></span><span class="mono">RB-0143</span></div>
+          <!-- truth-of-state: the system is STOPPED waiting on the human —
+               say so; "Composing" while idle blames the machine for the wait -->
+          <div class="s"><span class="state gatewait" id="q3state"><i></i><span id="q3statetxt">Needs your signature</span></span><span class="mono">RB-0143</span></div>
         </button>
         <button class="inq" data-view="cm11">
           <div class="t">Spend by cm11 (cardmember)</div>
@@ -510,8 +512,12 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
           </div>
 
           <div class="card q3ready" id="q3ready">
-            <p class="lead">Brief ready: <b>90+ roll-rate deterioration concentrates in two SBS segments</b>; the drivers brief has 4 claims (1 Inferred) and one chart.</p>
-            <span class="tchip c3" tabindex="-1" style="cursor:default"><span class="fill"><i></i><i></i><i></i></span>Corroborated</span>
+            <p class="lead">Brief ready: <b>90+ roll-rate deterioration concentrates in two SBS segments</b>; the drivers brief has 4 claims and one chart.</p>
+            <!-- truth-of-state: the ROLLUP wears the weakest tier present
+                 (worst-chip-governs) — never a Corroborated stamp on a
+                 brief that contains an Inferred claim -->
+            <span class="tchip c3" tabindex="-1" style="cursor:default"><span class="fill"><i></i><i></i><i></i></span>3 Corroborated</span>
+            <span class="tchip c0" tabindex="-1" style="cursor:default"><span class="fill"><i></i><i></i><i></i></span>1 Inferred — read before citing</span>
             <span class="mono" style="font-size:11px;color:var(--ink-2)"> · RB-0143 · ledger #4822</span>
           </div>
         </section>
@@ -568,7 +574,7 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
 </div>
 
 <div class="pinlegend">
-  <div><i>1</i> Inquiries: Briefs are durable objects with states — including live Composing</div>
+  <div><i>1</i> Inquiries: Briefs are durable objects with truthful states — "Needs your signature" is the loudest one</div>
   <div><i>2</i> The top sheet: 1-second / 10-second / 10-minute read depths</div>
   <div><i>3</i> Three projections of ONE object: Brief · Thread · Ledger</div>
   <div><i>4</i> The wait streams the work; the answer lands whole</div>
@@ -702,7 +708,7 @@ table.map code{background:var(--code-bg);border-radius:5px;padding:1px 7px;font-
     });
     document.getElementById('q3ready').classList.add('show');
     var st = document.getElementById('q3state');
-    st.classList.remove('working'); st.classList.add('ready');
+    st.classList.remove('gatewait'); st.classList.add('ready');
     document.getElementById('q3statetxt').textContent = 'Ready';
   }
   hold.addEventListener('mousedown', startHold);
