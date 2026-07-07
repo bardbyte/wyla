@@ -58,8 +58,19 @@ def main(argv: list[str] | None = None) -> int:
                         help="staged session signals (real analyst SQL)")
     parser.add_argument("--demo", default=str(CACHE / "demo_questions.json"))
     parser.add_argument("--tables", default="",
-                        help="comma list to restrict the top-up (default: "
-                             "everything the plan finds)")
+                        help="comma list to restrict the top-up (applied "
+                             "after the manifest scope)")
+    parser.add_argument("--manifest",
+                        default=str(REPO_ROOT / "semantic-graph" / "config"
+                                    / "tables.yaml"),
+                        help="tables.yaml scoping the top-up (default: the "
+                             "repo manifest when it exists) — the graph can "
+                             "contain out-of-scope tables staged by earlier "
+                             "runs; only manifest tables get calls")
+    parser.add_argument("--all-tables", action="store_true",
+                        help="bypass the manifest scope and top up every "
+                             "table the plan finds (spends calls on "
+                             "out-of-scope tables — be sure)")
     parser.add_argument("--batch-size", type=int, default=40)
     parser.add_argument("--max-calls", type=int, default=200)
     parser.add_argument("--plan", action="store_true",
@@ -73,11 +84,36 @@ def main(argv: list[str] | None = None) -> int:
                    if memory_path.exists() else {})
 
     plan = compute_topup_plan(store, old_bundles)
+    scope_note = None
+
+    # Manifest scope FIRST — the graph legitimately contains tables the
+    # user never selected (join partners, artifacts staged by earlier
+    # runs); calls are spent on manifest tables only unless --all-tables
+    manifest_path = Path(args.manifest).expanduser() if args.manifest else None
+    if not args.all_tables and manifest_path and manifest_path.exists():
+        from synapse.graph.store import normalize_table_name
+        from synapse.utils.manifest import read_tables_manifest
+        manifest_names = {
+            normalize_table_name(t["name"])
+            for t in read_tables_manifest(manifest_path)
+        }
+        before = len(plan)
+        plan = {t: cols for t, cols in plan.items()
+                if normalize_table_name(t) in manifest_names}
+        skipped = before - len(plan)
+        if skipped:
+            scope_note = (f"manifest scope ({manifest_path.name}): kept "
+                          f"{len(plan)} of {before} planned table(s) — "
+                          f"{skipped} out-of-scope skipped "
+                          "(--all-tables to include)")
+
     if args.tables:
         wanted = {t.strip().lower() for t in args.tables.split(",") if t.strip()}
         plan = {t: cols for t, cols in plan.items() if t.lower() in wanted}
 
     print(f"\n═══ Top-up plan (snapshot {snapshot_path.name}) ═══")
+    if scope_note:
+        print(f"  {scope_note}")
     if not plan:
         print("  nothing to do — every table's columns are already observed")
         return 0
