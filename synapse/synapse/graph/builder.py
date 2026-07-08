@@ -654,9 +654,18 @@ def _ingest_corpus(store: GraphStore, sql_dir: Path) -> None:
     where_re = re.compile(
         r"WHERE\s+(\w+)\s*=\s*'([^']+)'", re.IGNORECASE,
     )
+    # gold-query files carry a "-- user: <email>" provenance comment (BQ
+    # sample queries do; curated lumi gold does not). Only a human analyst's
+    # query votes on salience — a service account running a load a thousand
+    # times is plumbing, not a signal of what matters.
+    user_re = re.compile(r"^--\s*user:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
+    from synapse.enrichment.signals import classify_querier
 
     for path in sorted(sql_dir.glob("*.sql")):
         sql = path.read_text(encoding="utf-8")
+        um = user_re.search(sql)
+        if um and classify_querier(um.group(1)) != "analyst":
+            continue    # operational query — excluded from salience signals
         qid = path.stem
         # Primary table
         primary_match = from_re.search(sql)
