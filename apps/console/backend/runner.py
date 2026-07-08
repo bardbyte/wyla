@@ -173,6 +173,28 @@ class ScriptedRunner:
             return
         yield GateResolved(gate_id="g1", decision="approved", actor="user",
                            ledger_id="4821", rows_returned=8)
+        # the execute leg live turns have — golden turns must carry
+        # everything a pin needs (SQL in args, rows in the payload)
+        rows = [
+            {"m": "2025-11", "n": 980}, {"m": "2025-12", "n": 1004},
+            {"m": "2026-01", "n": 1010}, {"m": "2026-02", "n": 1042},
+            {"m": "2026-03", "n": 1081}, {"m": "2026-04", "n": 1118},
+            {"m": "2026-05", "n": 1150}, {"m": "2026-06", "n": 1247},
+        ]
+        yield ToolCall(
+            call_id="c2", tool="execute_sql",
+            verb=verb_for("execute_sql"),
+            args={"sql": "SELECT DATE_TRUNC(acct_open_dt, MONTH) m, "
+                         "COUNT(*) n\nFROM sbs_new_accounts "
+                         "GROUP BY 1 ORDER BY 1",
+                  "max_rows": 100})
+        yield ToolResult(
+            call_id="c2", ok=True, summary="8 row(s) returned",
+            provenance=Provenance(tier="grounded", score=0.9,
+                                  sources=["bq"], evidence_count=1),
+            payload={"status": "ok",
+                     "data": {"rows": rows, "n_rows_returned": 8,
+                              "total_rows": 8, "job_id": "job_demo"}})
         yield Sandbox(code="pct = (n[-1]-n[-2])/n[-2]*100",
                       stdout="", result={"mom_pct": 8.4}, ok=True)
         yield Artifact(artifact_id="a1", kind="chart",

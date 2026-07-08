@@ -65,14 +65,17 @@ reverse-engineers raw tool JSON.
 
 ## Runners
 
-- **`ScriptedRunner`** (default, offline) — deterministic golden
+- **`ADKRunner`** (**default**) — real Gemini 3.1 Pro via `google-adk`
+  over the analyst tools; maps ADK's event stream onto `ConsoleEvent`s.
+  If creds/SDKs are missing it fails legibly in the stream — it never
+  silently swaps in canned answers.
+- **`ScriptedRunner`** (opt-in, offline) — deterministic golden
   transcripts for three intents: fused-witness governance answer, the
   guardrail refusal ("ask for `cm11_encrypted` on purpose"), and the
-  live-SQL flow (gate → cost → approve → sandbox → chart). This is the
-  frontend's dev fixture, the behavioral spec, and the tests. No creds.
-- **`ADKRunner`** (laptop) — real Gemini 3.1 Pro via `google-adk` over
-  the analyst tools; maps ADK's event stream onto `ConsoleEvent`s.
-  Select with `SYNAPSE_CONSOLE_RUNNER=adk`.
+  live-SQL flow (gate → cost → approve → execute → sandbox → chart).
+  This is the frontend's dev fixture, the behavioral spec, and the
+  tests. No creds. Select with `SYNAPSE_CONSOLE_RUNNER=scripted`; the
+  UI shows an amber "Demo mode" banner the whole time.
 
 The frontend cannot tell them apart — build the whole UI on scripted,
 flip to real when Vertex is live.
@@ -84,8 +87,8 @@ flip to real when Vertex is live.
 cd apps/console/frontend && npm install && npm run build && cd -
 
 # 2a. offline demo — scripted transcripts, sample-labeled reads, no creds
-uvicorn apps.console.backend.app:app --port 8080
-# open http://localhost:8080
+SYNAPSE_CONSOLE_RUNNER=scripted uvicorn apps.console.backend.app:app --port 8080
+# open http://localhost:8080 — amber demo banner stays visible
 
 # 2b. laptop, real graph + real agent — the SAME env contract as the
 #     pipeline; nothing console-specific to learn.
@@ -106,7 +109,7 @@ export SYNAPSE_GRAPH_PATH=synapse/data/cache/graph_snapshot.json
 # optional: SYNAPSE_AGENT_TOOLSET=classic (default) bounds the chat to
 # the original single-graph agent's 12 capabilities + dry_run/execute;
 # =full restores all 24 tools (charts, sandbox, craft skills)
-SYNAPSE_CONSOLE_RUNNER=adk python -m uvicorn apps.console.backend.app:app --port 8080
+python -m uvicorn apps.console.backend.app:app --port 8080   # live agent is the default
 
 # smoke it
 curl -s localhost:8080/api/config          # non-secret env echo + graph liveness
@@ -135,6 +138,8 @@ blurs real and illustrative.
 | `/api/graph/summary`, `/api/graph/thread` | counts by type/tier/witness + the curated storyline (`?table=` anchors it) |
 | `/api/questions` | verified-answerable questions from the enrichment demo pack |
 | `/api/witness?ref=` | the evidence panel behind any chip or citation |
+| `/api/pins` (`POST`, `/{id}/rerun`, `/{id}/verify`, `DELETE`) | the Briefing's verified-query escrow — a pin keeps the question, the **exact SQL**, the result, citations, and the ledger id; re-run replays the stored SQL through the full gate chain (no LLM), onto the same audit ledger |
+| `/api/lexicon` | known graph names (tables > metrics > entities) that answers linkify into doors: Evidence · Explore in graph · Ask about this |
 | `/api/config` | the environment contract, booleans for anything credential-shaped |
 
 ## The intricacies (why craft matters here)
@@ -162,10 +167,20 @@ blurs real and illustrative.
   witness drawer, read-side API with graph-backed/sample-labeled reads,
   conversation memory in the ADK runner, thinking-config parity with
   the pipeline, legible failure mapping.
+- **Wow release** ✅ — **Briefing** is the landing tab. Pin any
+  answered turn (question + exact SQL + result + citations + ledger
+  id); **Re-run replays the stored SQL through every gate with no
+  LLM** — fast, reproducible, every attempt ledgered, refusals rendered
+  honestly on the tile; deltas vs the previous run in neutral ink;
+  steward hold-to-verify. The interconnection spine (`askAbout` /
+  `goToGraph` / `openEvidence`) makes every known graph name in an
+  answer a door, and Products/Metrics/Graph tiles get the same
+  gestures. Seed pins (marked *Sample*) retire on the first real pin.
 - **Phase 2** — resumable ADK loop (the gate genuinely pauses the
-  agent), durable brief store, steward write-paths (metric signature,
-  entity approval) surfaced in-app.
+  agent), verified pins written back to the graph as weight-10 facts,
+  steward write-paths (metric signature, entity approval) in-app.
 - **Phase 3** — reader/mobile projections of a brief, cost framing on
   the gate, connector previews go live.
-- **Graduation** — ambient briefings: the verified demo questions
-  surface proactively on a schedule.
+- **Graduation** — scheduled ambient briefings: the Briefing tab
+  already answers before being asked; the schedule (and push) is what
+  remains.

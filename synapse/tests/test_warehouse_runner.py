@@ -39,8 +39,12 @@ class FakeClient:
 
 @pytest.fixture
 def guarded_service(tmp_path) -> GraphService:
+    # Guardrails are enforced from the SkillsRegistry (files), NOT graph
+    # nodes — the data graph carries no skill nodes. GATE 2 must still bite.
+    from synapse.mcp.skills_registry import SkillsRegistry
     load_skills_library(FIXTURE_LIBRARY, out_dir=tmp_path)
-    return GraphService(build_graph_from_sources(tmp_path))
+    return GraphService(build_graph_from_sources(tmp_path),
+                        skills=SkillsRegistry.from_dir(tmp_path / "skills"))
 
 
 GOOD_SQL = ("SELECT rpt_month, SUM(bal_lag1) AS bal "

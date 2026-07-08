@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { WitnessDrawer } from "../components/WitnessDrawer";
 import { PreviewBadge, SourceBadge, Spinner, TierChip } from "../components/ui";
 import { api } from "../lib/api";
-import { PRODUCTS } from "../lib/copy";
+import { ENTITY, PRODUCTS } from "../lib/copy";
+import { useNav } from "../lib/nav";
 import type { Product } from "../lib/types";
 
 export function ProductsTab() {
+  const nav = useNav();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Product[] | null>(null);
   const [live, setLive] = useState(false);
@@ -73,6 +75,16 @@ export function ProductsTab() {
                   {p.description}
                 </p>
               )}
+              <div style={{ display: "flex", gap: "var(--s-2)" }}>
+                <button type="button" className="btn quiet"
+                  onClick={() => nav.askAbout(ENTITY.askPrefix + p.name)}>
+                  {ENTITY.ask}
+                </button>
+                <button type="button" className="btn quiet"
+                  onClick={() => nav.goToGraph(p.name)}>
+                  {ENTITY.explore}
+                </button>
+              </div>
               <div className="scorecard" aria-label={PRODUCTS.readiness}>
                 <span className="score"><b>{p.readiness.columns}</b>{PRODUCTS.columns}</span>
                 <span className="score"><b>{p.readiness.meaning_pct}%</b>{PRODUCTS.meaning}</span>

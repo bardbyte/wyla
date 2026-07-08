@@ -38,10 +38,17 @@ class GraphService:
         *,
         tenant_id: str = "default",
         cache: TTLCache | None = None,
+        skills: "Any | None" = None,
     ) -> None:
         self.store = store
         self.tenant_id = tenant_id
         self.cache = cache or TTLCache()
+        # The skills registry (business logic + guardrails) is a SEPARATE
+        # source from the graph. When present, get_skill and guardrail
+        # enforcement read it instead of graph nodes — so the data graph
+        # carries no skill-derived nodes. Absent → fall back to graph nodes
+        # (transition/back-compat).
+        self.skills = skills
 
     # ─── envelope helpers ────────────────────────────────────
 
@@ -250,11 +257,15 @@ class GraphService:
         if isinstance(trimmed.get("columns"), list):
             trimmed["columns"] = trimmed["columns"][:max(1, column_limit)]
         # guardrails that constrain this table always ride along — an agent
-        # must not have to remember to ask
-        trimmed["guardrails"] = self._guardrails_for_uris(
-            {node.canonical_uri},
-            prefixes={canonical_uri("column", table_name) + "/"},
-        )
+        # must not have to remember to ask. Sourced from the registry (files)
+        # when wired, else the graph nodes (fallback).
+        if self.skills is not None:
+            trimmed["guardrails"] = self.skills.guardrails_for(table_name)
+        else:
+            trimmed["guardrails"] = self._guardrails_for_uris(
+                {node.canonical_uri},
+                prefixes={canonical_uri("column", table_name) + "/"},
+            )
         self.cache.set(cache_key, trimmed, ttl_seconds=300)
         return self._ok("inspect_table", started, trimmed)
 
@@ -490,8 +501,26 @@ class GraphService:
 
     def get_skill(self, topic: str) -> dict[str, Any]:
         """Fetch the curated skill package covering a topic/table/metric —
-        the highest-trust playbook for HOW to answer a class of question."""
+        the business-logic playbook for HOW to answer a class of question.
+        Sourced from the skills registry (files), never the graph."""
         started = time.monotonic()
+        if self.skills is not None:
+            bundle = self.skills.find_skill(topic)
+            if bundle is None:
+                return self._err(
+                    "get_skill", started, "not_found",
+                    f"no skill covers {topic!r}")
+            others = [b for b in self.skills.skills if b is not bundle]
+            return self._ok("get_skill", started, {
+                "skill": bundle,
+                "guardrails": [g for g in self.skills.guardrails
+                               if g.get("skill_id") == bundle.get("skill_id")],
+                "alternates": [
+                    {"skill_id": b.get("skill_id", ""),
+                     "description": b.get("description", "")}
+                    for b in others[:2]],
+            })
+        # ── graph-node fallback (no registry wired) ──
         want_tokens = self._tokens(topic)
         scored = []
         for s in self.store.nodes_by_type("Skill"):
@@ -545,11 +574,23 @@ class GraphService:
 
     def get_guardrails(self, target: str) -> dict[str, Any]:
         """Every guardrail constraining a table/column/metric. Call before
-        generating SQL that touches the target."""
+        generating SQL that touches the target. Sourced from the skills
+        registry (files) when wired — enforcement never depends on skill
+        nodes being in the data graph."""
         started = time.monotonic()
+        if self.skills is not None:
+            rails = self.skills.guardrails_for(target)
+            rails.sort(key=lambda r: (-_SEVERITY_ORDER.get(
+                str(r.get("severity", "warning")), 1), str(r.get("rule", ""))))
+            # ok even when empty — a table with no guardrails is not an error,
+            # and validate_sql_plan must still iterate the other tables.
+            return self._ok("get_guardrails", started,
+                            {"target": target, "guardrails": rails})
+        # ── graph-node fallback (no registry wired) ──
         uris: set[str] = set()
         prefixes: set[str] = set()
         node = self._resolve_table(target)
+        table_name = target
         if node is not None:
             table_name = str(node.properties.get("table_name"))
             uris.add(node.canonical_uri)
@@ -558,9 +599,14 @@ class GraphService:
                 uris.add(edge.to_uri)
             for edge in self.store.incoming(node.canonical_uri, "COMPUTED_FROM"):
                 uris.add(edge.from_uri)
-            uris.add(canonical_uri("table", table_name))
-            # any column-scoped guardrail of this table, CONTAINS edge or not
-            prefixes.add(canonical_uri("column", table_name) + "/")
+        # Match guardrails by the NAME-derived canonical URI so enforcement
+        # never depends on the target Table node existing in the graph — a
+        # guardrail-only table (no data witness) must still be protected.
+        # Canonical URIs are computed from names at ingest time, so a
+        # CONSTRAINS edge to synapse://table/<name> (or a column under it)
+        # is found whether or not the node was minted.
+        uris.add(canonical_uri("table", table_name))
+        prefixes.add(canonical_uri("column", table_name) + "/")
         if "." in target:
             head, _, col = target.rpartition(".")
             uris.add(canonical_uri("column", head, col))

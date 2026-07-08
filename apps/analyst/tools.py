@@ -53,9 +53,11 @@ def _service() -> GraphService:
             "  python synapse/scripts/pipeline.py --demo\n"
             "or point SYNAPSE_GRAPH_PATH at an existing snapshot."
         )
+    from synapse.mcp.skills_registry import load_registry
     return GraphService(
         GraphStore.load_json(path),
         tenant_id=os.environ.get("SYNAPSE_TENANT_ID", "default"),
+        skills=load_registry(path),   # guardrails enforced from files, not the graph
     )
 
 

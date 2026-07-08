@@ -186,9 +186,16 @@ def test_stats_aggregates_by_type_and_tier():
 
 
 def test_source_weights_ordering_matches_design():
-    """Calibration relies on the source-weight ordering: humans > catalogs >
-    BQ > MDM > corpus. Don't accidentally invert."""
-    assert SOURCE_WEIGHTS["human_approval"] > SOURCE_WEIGHTS["metric_catalog"]
-    assert SOURCE_WEIGHTS["metric_catalog"] >= SOURCE_WEIGHTS["bq"]
-    assert SOURCE_WEIGHTS["bq"] >= SOURCE_WEIGHTS["mdm"]
-    assert SOURCE_WEIGHTS["mdm"] >= SOURCE_WEIGHTS["corpus"]
+    """Calibration relies on the source-weight ordering: the human ceiling,
+    then the MDM metadata spine (the top DATA authority — it carries the
+    business names, ownership, and sensitivity for every column), then BQ
+    (the physical truth), then the curated catalogs, then the soft signals.
+    Skills are guardrails + agent knowledge, NOT a data authority."""
+    assert SOURCE_WEIGHTS["human_approval"] > SOURCE_WEIGHTS["mdm"]
+    assert SOURCE_WEIGHTS["mdm"] > SOURCE_WEIGHTS["bq"]           # MDM highest, BQ second
+    assert SOURCE_WEIGHTS["bq"] > SOURCE_WEIGHTS["metric_catalog"]
+    assert SOURCE_WEIGHTS["metric_catalog"] >= SOURCE_WEIGHTS["dq_engine"]
+    assert SOURCE_WEIGHTS["dq_engine"] > SOURCE_WEIGHTS["corpus"]
+    assert SOURCE_WEIGHTS["mdm"] > SOURCE_WEIGHTS["skills"]       # skills are not a data authority
+    # MDM + BQ agreeing is enough to ground a fact
+    assert confidence_from_sources(["mdm", "bq"])[1] == "grounded"

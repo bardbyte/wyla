@@ -1,0 +1,36 @@
+# Focused manifest — the 5-table risk + cardmember domain.
+#
+# These five tables join into one coherent story:
+#   custins_customer_insights_cardmember  — the cardmember-day P&L fact
+#   fin_consumer_business_card_member_status — account status / lifecycle
+#   risk_pers_acct                        — account-level risk (current)
+#   risk_pers_acct_history                — account-level risk (history)
+#   risk_indv_cust_hist                   — customer-level risk (history)
+#
+# They share the account key (cm11-class) and the customer key
+# (cust_xref_id-class), so a fully-grounded build here demonstrates
+# shared entities, cross-table join paths, and lineage — richer than the
+# original single-table cardmember graph.
+#
+# Used two ways:
+#   • as the extraction/build manifest  (--manifest this-file)
+#   • as the builder ALLOWLIST — only these tables' nodes are minted;
+#     CTE aliases and template placeholders from corpus/skills SQL are
+#     dropped, so the graph is exactly these five and their real columns.
+
+version: 1
+
+defaults:
+  bq_project: axp-lumi
+  bq_dataset: dw
+  billing_project: prj-p-lumi-gpt
+  region: us
+  concurrency: 5
+  low_card_threshold: 1000
+
+tables:
+  - name: custins_customer_insights_cardmember
+  - name: fin_consumer_business_card_member_status
+  - name: risk_pers_acct
+  - name: risk_pers_acct_history
+  - name: risk_indv_cust_hist

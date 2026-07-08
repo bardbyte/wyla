@@ -158,6 +158,17 @@ def test_version_mismatch_failures_name_the_certified_pair():
         assert "python -m uvicorn" in msg
 
 
+def test_live_agent_is_the_default_runner(monkeypatch):
+    """A canned transcript that looks real is worse than an error that
+    names its fix — the scripted demo is opt-in now."""
+    from apps.console.backend.app import _make_runner
+    from apps.console.backend.runner import ADKRunner
+    monkeypatch.delenv("SYNAPSE_CONSOLE_RUNNER", raising=False)
+    assert isinstance(_make_runner(), ADKRunner)
+    monkeypatch.setenv("SYNAPSE_CONSOLE_RUNNER", "scripted")
+    assert isinstance(_make_runner(), ScriptedRunner)
+
+
 def test_config_reports_what_this_process_imported():
     body = _client().get("/api/config").json()
     assert body["sdk"]["python"]
@@ -177,6 +188,20 @@ def test_viability_exact_near_and_clear(tmp_path):
     assert near["viability"]["near"][0]["name"] == "Approval rate"
     assert data.metric_viability("median settlement lag")["viability"][
         "verdict"] == "clear"
+
+
+def test_lexicon_live_and_sample(tmp_path):
+    live = _live_data(tmp_path).lexicon()
+    assert live["live"] is True
+    names = {(e["name"], e["kind"]) for e in live["lexicon"]}
+    assert ("accounts", "table") in names
+    assert ("Approval rate", "metric") in names
+    assert all(len(e["name"]) >= 4 for e in live["lexicon"])
+
+    sample = ConsoleData(snapshot_path="/nonexistent/g.json").lexicon()
+    assert sample["live"] is False
+    assert any(e["name"] == "sbs_new_accounts"
+               for e in sample["lexicon"])
 
 
 # ─── the classic chat surface ────────────────────────────────
@@ -243,6 +268,8 @@ def test_api_surface_round_trips():
     assert v["viability"]["verdict"] in ("exact", "near_duplicate", "clear")
     r = client.get("/api/terms/resolve", params={"term": "roll rate"}).json()
     assert r["resolution"]["canonical"]["name"]
+    assert client.get("/api/lexicon").json()["lexicon"]
+    assert client.get("/api/pins").json()["pins"]
 
 
 # ─── failures name the fix ───────────────────────────────────

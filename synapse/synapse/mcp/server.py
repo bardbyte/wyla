@@ -58,8 +58,10 @@ def build_server(graph_path: str | Path, *, tenant_id: str = "default"):
             "pip install 'mcp[cli]'"
         ) from exc
 
+    from synapse.mcp.skills_registry import load_registry
     store = GraphStore.load_json(graph_path)
-    service = GraphService(store, tenant_id=tenant_id)
+    service = GraphService(store, tenant_id=tenant_id,
+                           skills=load_registry(graph_path))
     mcp = FastMCP(name="synapse", instructions=_INSTRUCTIONS)
 
     # ── tools (thin, typed shims over GraphService) ──────────

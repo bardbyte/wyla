@@ -2,9 +2,24 @@
  * payload plus its `live` flag so callers can label sample data. */
 
 import type {
-  AppConfig, GraphSummary, Metric, Product, ThreadHop,
-  Viability, Witness,
+  AppConfig, GraphSummary, LexiconEntry, Metric, Pin, PinRun, Product,
+  ThreadHop, Viability, Witness,
 } from "./types";
+
+async function post<T>(url: string, body: unknown,
+                        method = "POST"): Promise<T> {
+  const r = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!r.ok) {
+    let code = String(r.status);
+    try { code = (await r.json()).code ?? code; } catch { /* keep */ }
+    throw new Error(code);
+  }
+  return r.json() as Promise<T>;
+}
 
 async function get<T>(url: string): Promise<T> {
   const r = await fetch(url);
@@ -41,6 +56,31 @@ export const api = {
   graphThread: (table = "") =>
     get<Live<{ thread: { hops: ThreadHop[] } }>>(
       `/api/graph/thread?table=${encodeURIComponent(table)}`),
+
+  lexicon: () =>
+    get<Live<{ lexicon: LexiconEntry[] }>>("/api/lexicon"),
+
+  pins: () =>
+    get<Live<{ seeded: boolean; pins: Pin[] }>>("/api/pins"),
+
+  createPin: (body: {
+    question: string; answer?: string;
+    citations?: { label: string; ref: string }[];
+    sql?: string | null; rows?: Record<string, unknown>[] | null;
+    ledger_id?: string | null; source?: string;
+  }) => post<{ pin: Pin }>("/api/pins", body),
+
+  rerunPin: (id: string) =>
+    post<{ pin: Pin; run: PinRun }>(
+      `/api/pins/${encodeURIComponent(id)}/rerun`, {}),
+
+  verifyPin: (id: string, verified = true) =>
+    post<{ pin: Pin }>(
+      `/api/pins/${encodeURIComponent(id)}/verify`, { verified }),
+
+  deletePin: (id: string) =>
+    post<{ deleted: string }>(
+      `/api/pins/${encodeURIComponent(id)}`, undefined, "DELETE"),
 
   questions: () =>
     get<Live<{ questions: { question: string; archetype: string }[] }>>(

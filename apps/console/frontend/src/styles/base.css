@@ -172,6 +172,12 @@ code, pre { font-family: var(--font-mono); font-size: var(--fs-12); }
 /* ── chat layout ───────────────────────────────────────── */
 
 .chat { display: flex; flex-direction: column; height: 100%; }
+.demo-banner {
+  flex: none; display: flex; gap: var(--s-2); justify-content: center;
+  padding: var(--s-2) var(--s-4); font-size: var(--fs-12); font-weight: 550;
+  background: var(--tier-mid-soft); color: var(--tier-mid);
+  border-bottom: 1px solid var(--tier-mid);
+}
 .chat-scroll {
   flex: 1; overflow-y: auto; padding: var(--s-5);
   display: flex; flex-direction: column; gap: var(--s-5);
@@ -363,6 +369,62 @@ code, pre { font-family: var(--font-mono); font-size: var(--fs-12); }
   border-radius: var(--r-md); padding: var(--s-3) var(--s-4);
   color: var(--ink-2); font-size: var(--fs-13);
 }
+
+/* ── briefing tiles ────────────────────────────────────── */
+
+.tab-panel { height: 100%; flex-direction: column; }
+
+.brief-grid {
+  display: grid; gap: var(--s-4);
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+.brief-tile { display: flex; flex-direction: column; gap: var(--s-3); }
+.brief-q {
+  font-size: var(--fs-13); font-weight: 550; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden;
+}
+.brief-headline { display: flex; align-items: baseline; gap: var(--s-2); }
+.brief-num {
+  font-size: var(--fs-28); font-weight: 650; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.brief-col { color: var(--ink-3); font-size: var(--fs-12); font-family: var(--font-mono); }
+.brief-fact { color: var(--ink-2); font-size: var(--fs-13); line-height: 1.5; }
+.brief-delta { color: var(--ink-2); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.brief-meta { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
+.brief-asof { color: var(--ink-3); font-size: var(--fs-11); }
+.brief-actions {
+  display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap;
+  border-top: 1px solid var(--line); padding-top: var(--s-3); margin-top: auto;
+}
+.brief-actions .hold-btn { padding: 4px 10px; font-size: var(--fs-11); }
+
+.pin-row { display: flex; justify-content: flex-end; }
+
+/* ── entity refs (the interconnection tokens) ──────────── */
+
+.entity-wrap { position: relative; display: inline-block; }
+.entity-ref {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  font: inherit; color: var(--accent); padding: 0;
+  border-bottom: 1px dotted var(--accent);
+}
+.entity-ref:hover { border-bottom-style: solid; }
+.entity-menu {
+  position: absolute; left: 0; top: calc(100% + 4px); z-index: 30;
+  display: flex; flex-direction: column; min-width: 170px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-md); box-shadow: var(--shadow-lift);
+  padding: var(--s-1); white-space: nowrap;
+}
+.entity-menu button {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: var(--fs-12); color: var(--ink);
+  text-align: left; padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-sm);
+}
+.entity-menu button:hover { background: var(--surface-2); }
 
 /* ── responsive ────────────────────────────────────────── */
 

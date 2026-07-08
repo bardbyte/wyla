@@ -230,7 +230,14 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         sources_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy(entities_src, sources_dir / "entities.yaml")
         _note(f"entities: staged steward approvals from {entities_src}")
-    store = build_graph_from_sources(sources_dir)
+    # When a manifest scopes the run, use it as the builder allowlist too —
+    # only these tables' nodes survive; CTE aliases and template
+    # placeholders from corpus/skills SQL are pruned instead of minted.
+    build_allowlist = manifest_names or None
+    if build_allowlist:
+        _note(f"allowlist: graph scoped to {len(build_allowlist)} manifest "
+              f"table(s); out-of-scope + CTE-noise nodes pruned")
+    store = build_graph_from_sources(sources_dir, allowlist=build_allowlist)
     stats = store.stats()
     _note(f"nodes: {stats['n_nodes']}  edges: {stats['n_edges']}")
     _note(f"by type: {stats['nodes_by_type']}")
@@ -350,15 +357,23 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             run_report["enrichment_failures"] = failures
             run_report["enrichment_grounding"] = {
                 "totals": totals, "per_table": grounding}
-            proposals = propose_entities(bundles)
+            # Auto-understand entities the cardmember way: a single table is
+            # enough to surface one (min_supporting_tables=1) — it strengthens
+            # as more tables share the key.
+            proposals = propose_entities(
+                bundles, min_supporting_tables=1, min_aggregate_confidence=0.6)
             (out_root / "entity_proposals.json").write_text(
                 json.dumps([p.model_dump() for p in proposals], indent=2),
                 encoding="utf-8")
-            _note(f"{len(proposals)} entity proposal(s) → "
-                  f"{out_root / 'entity_proposals.json'} (steward review)")
+            from synapse.graph.entities import auto_materialize_entities
+            ent_report = auto_materialize_entities(store, proposals)
+            _note(f"{ent_report['entities_added']} entit(y/ies) auto-materialized "
+                  f"(inferred) + {ent_report['edges_added']} IDENTIFIES edge(s); "
+                  f"a steward may upgrade to human_asserted")
             run_report["enrichment"] = {
                 "tables": sorted(bundles), "column_observations": n_obs,
                 "entity_proposals": len(proposals),
+                "entities_materialized": ent_report["entities_added"],
             }
             stats = store.stats()
             _note(f"post-enrichment tiers: "

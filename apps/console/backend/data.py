@@ -436,6 +436,56 @@ class ConsoleData:
             "edges": edges[:40],
         })
 
+    def tier_for(self, ref: str) -> str | None:
+        """The current confidence tier at a ref — the pin store's
+        resolver, so pinned citations stay honest as the graph moves."""
+        if not self.live:
+            w = _SAMPLE["witness"].get(ref)
+            return (w or {}).get("provenance", {}).get("tier")
+        node = self.store.get(ref)
+        return node.provenance.confidence_tier if node else None
+
+    def lexicon(self) -> dict[str, Any]:
+        """Known object names for answer linkification: tables, metrics,
+        entities — name, kind, ref. Conservative by construction: names
+        under 4 chars dropped, case-insensitive dedupe with tables
+        outranking metrics outranking entities, capped at 500."""
+        if not self.live:
+            entries = []
+            for p in _SAMPLE["products"]:
+                entries.append({"name": p["name"], "kind": "table",
+                                "ref": p["ref"]})
+            for m in _SAMPLE["metrics"]:
+                entries.append({"name": m["name"], "kind": "metric",
+                                "ref": m["ref"]})
+            entries.append({"name": "Account", "kind": "entity",
+                            "ref": "synapse://entity/account"})
+            return {"live": False, "source": "sample",
+                    "lexicon": _dedupe_lexicon(entries)}
+        entries = []
+        for node in self.store.nodes_by_type("Table"):
+            name = str(node.properties.get("table_name", "")).strip()
+            if not name:
+                continue
+            entries.append({"name": name, "kind": "table",
+                            "ref": node.canonical_uri})
+            tail = name.rsplit(".", 1)[-1]
+            if tail != name:                     # qualified-name alias
+                entries.append({"name": tail, "kind": "table",
+                                "ref": node.canonical_uri})
+        for node in self.store.nodes_by_type("Metric"):
+            name = str(node.properties.get("name")
+                       or node.properties.get("business_name")
+                       or node.canonical_uri.rsplit("/", 1)[-1]).strip()
+            entries.append({"name": name, "kind": "metric",
+                            "ref": node.canonical_uri})
+        for node in self.store.nodes_by_type("Entity"):
+            name = str(node.properties.get(
+                "name", node.canonical_uri.rsplit("/", 1)[-1])).strip()
+            entries.append({"name": name, "kind": "entity",
+                            "ref": node.canonical_uri})
+        return self._wrap("lexicon", _dedupe_lexicon(entries))
+
     # ── suggested questions ──────────────────────────────────
 
     def questions(self) -> dict[str, Any]:
@@ -455,6 +505,20 @@ class ConsoleData:
                 pass
         return {"live": False, "source": "sample",
                 "questions": _SAMPLE["questions"]}
+
+
+def _dedupe_lexicon(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rank = {"table": 0, "metric": 1, "entity": 2}
+    best: dict[str, dict[str, Any]] = {}
+    for e in entries:
+        name = e["name"]
+        if len(name) < 4:
+            continue
+        key = name.lower()
+        if key not in best or rank[e["kind"]] < rank[best[key]["kind"]]:
+            best[key] = e
+    out = sorted(best.values(), key=lambda e: (-len(e["name"]), e["name"]))
+    return out[:500]
 
 
 def _norm_tokens(text: str) -> list[str]:
@@ -593,6 +657,15 @@ _SAMPLE: dict[str, Any] = {
              "sources": ["mdm", "bq"]}]},
     ],
     "witness": {
+        "synapse://metric/c30_roll_rate": {
+            "ref": "synapse://metric/c30_roll_rate", "found": True,
+            "kind": "Metric",
+            "properties": {"name": "C-30 roll rate",
+                           "formula": "sum(bal_roll_c30) / "
+                                      "sum(bal_current_prior)"},
+            "provenance": {"tier": "grounded", "score": 0.85,
+                           "sources": ["skills", "corpus"]},
+            "edges": []},
         "synapse://table/sbs_new_accounts": {
             "ref": "synapse://table/sbs_new_accounts", "found": True,
             "kind": "Table",

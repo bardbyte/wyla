@@ -74,6 +74,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from synapse.loaders.mdm_digest import _truthy
 from synapse.loaders.types import LoadResult
 
 
@@ -313,7 +314,7 @@ def _build_mdm_blob(
         "bq_table": dataset.get("table_name") or table_name,
         "feed_type": dataset.get("feed_type") or "",
         "table_type": dataset.get("table_type") or "",
-        "is_decommissioned": bool(dataset.get("is_decommissioned")),
+        "is_decommissioned": _truthy(dataset.get("is_decommissioned")),
         "partition_field": partition_field,
         "row_count_estimate": _maybe_int(dataset.get("row_count")),
         "ownership": {
@@ -332,7 +333,13 @@ def _build_mdm_blob(
 
 def _normalize_mdm_column(c: dict[str, Any]) -> dict[str, Any]:
     """Handle two possible shapes: raw MDM API (attribute_details/sensitivity_details
-    nested) OR pre-flattened by lumi_final's MDM module."""
+    nested) OR pre-flattened by lumi_final's MDM module.
+
+    Flags run through ``_truthy`` — the real MDM API sends ``"Y"``/``"N"``
+    STRINGS, and ``bool("N")`` is True, so a raw read false-positives every
+    non-PII/non-CDE column. This is the same normalizer the MDM digest uses;
+    the two must agree or a lumi-fed build silently over-flags governance.
+    """
     # Already-flat shape — pass through
     if "name" in c and "attribute_details" not in c:
         return {
@@ -340,15 +347,18 @@ def _normalize_mdm_column(c: dict[str, Any]) -> dict[str, Any]:
             "type": c.get("type") or c.get("data_type") or "",
             "description": c.get("description") or c.get("attribute_desc") or "",
             "business_name": c.get("business_name") or "",
-            "is_primary": bool(c.get("is_primary") or c.get("is_pk")),
-            "is_dedupe_key": bool(c.get("is_dedupe_key")),
-            "is_partitioned": bool(c.get("is_partitioned")),
+            "is_primary": _truthy(c.get("is_primary")) or _truthy(c.get("is_pk")),
+            "is_dedupe_key": _truthy(c.get("is_dedupe_key")),
+            "is_partitioned": _truthy(c.get("is_partitioned")),
             "cluster_position": c.get("cluster_position"),
             "derived_logic": c.get("derived_logic"),
-            "is_pii": bool(c.get("is_pii")),
-            "is_critical_data_element": bool(c.get("is_critical_data_element")),
+            "external_references": c.get("external_references")
+            or c.get("external_reference_details") or [],
+            "is_pii": _truthy(c.get("is_pii")),
+            "is_critical_data_element": _truthy(c.get("is_critical_data_element")),
             "pii_role_id": c.get("pii_role_id") or c.get("pii_taxonomy") or "Internal",
-            "is_gdpr": bool(c.get("is_gdpr")),
+            "is_gdpr": _truthy(c.get("is_gdpr")),
+            "is_sensitive": _truthy(c.get("is_sensitive")),
         }
     # Raw API shape
     details = c.get("attribute_details") or {}
@@ -359,15 +369,19 @@ def _normalize_mdm_column(c: dict[str, Any]) -> dict[str, Any]:
         "type": details.get("attribute_type") or details.get("data_type") or "",
         "description": details.get("attribute_desc") or "",
         "business_name": details.get("business_name") or "",
-        "is_primary": bool(details.get("is_primary_key") or details.get("is_pk")),
-        "is_dedupe_key": bool(details.get("is_dedupe_key")),
-        "is_partitioned": bool(details.get("is_partitioned") or details.get("partition_role") in ("PARTITION", "PARTITION_KEY")),
+        "is_primary": _truthy(details.get("is_primary_key")) or _truthy(details.get("is_pk")),
+        "is_dedupe_key": _truthy(details.get("is_dedupe_key")),
+        "is_partitioned": _truthy(details.get("is_partitioned"))
+        or details.get("partition_role") in ("PARTITION", "PARTITION_KEY"),
         "cluster_position": details.get("clustering_ordinal_position"),
         "derived_logic": details.get("derived_logic"),
-        "is_pii": bool(sens.get("is_pii")),
-        "is_critical_data_element": bool(sens.get("is_critical_data_element")),
+        "external_references": details.get("external_reference_details")
+        or details.get("external_references") or [],
+        "is_pii": _truthy(sens.get("is_pii")),
+        "is_critical_data_element": _truthy(sens.get("is_critical_data_element")),
         "pii_role_id": sens.get("pii_role_id") or "Internal",
-        "is_gdpr": bool(sens.get("is_gdpr")),
+        "is_gdpr": _truthy(sens.get("is_gdpr")),
+        "is_sensitive": _truthy(sens.get("is_sensitive")),
     }
 
 

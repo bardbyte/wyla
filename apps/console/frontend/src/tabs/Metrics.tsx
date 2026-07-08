@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { WitnessDrawer } from "../components/WitnessDrawer";
 import { PreviewBadge, SourceBadge, Spinner, TierChip } from "../components/ui";
 import { api } from "../lib/api";
-import { METRICS } from "../lib/copy";
+import { ENTITY, METRICS } from "../lib/copy";
+import { useNav } from "../lib/nav";
 import type { Metric, Viability } from "../lib/types";
 
 export function MetricsTab() {
+  const nav = useNav();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Metric[] | null>(null);
   const [live, setLive] = useState(false);
@@ -89,6 +91,11 @@ export function MetricsTab() {
                       {m.sources.map((s) => <span key={s} className="tag">{s}</span>)}
                     </div>
                   )}
+                  <button type="button" className="btn quiet"
+                    style={{ alignSelf: "flex-start" }}
+                    onClick={() => nav.askAbout(ENTITY.askPrefix + m.name)}>
+                    {ENTITY.ask}
+                  </button>
                 </article>
               ))}
             </div>

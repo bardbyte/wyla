@@ -152,6 +152,77 @@ def apply_entities(
     return report
 
 
+def auto_materialize_entities(
+    store: GraphStore, proposals: list[Any],
+) -> dict[str, Any]:
+    """Auto-understand: materialize proposed entities as ``inferred`` Entity
+    nodes + Column—IDENTIFIES→Entity edges, with NO steward gate.
+
+    This is the original cardmember behavior: the LLM tags identifier
+    columns with a candidate entity, ``propose_entities`` reduces them, and
+    the entity appears automatically. A steward can later UPGRADE it to
+    ``human_asserted`` via ``apply_entities`` (entities.yaml) — but is not
+    required to CREATE it, unlike the review-queue path.
+
+    Tier: an entity is an inference OVER MDM-grounded identifier columns, so
+    it carries ``llm_generated`` (the inference) and — only when at least
+    one identifier column actually exists in the graph — ``mdm`` (the
+    columns are MDM facts), landing it at ``inferred`` rather than
+    ``guessed``. As more tables share the key, more IDENTIFIES edges accrue
+    and the entity strengthens on its own (why min_supporting_tables can be
+    1: a single-table entity today gets corroborated tomorrow).
+    """
+    report: dict[str, Any] = {
+        "entities_added": 0, "edges_added": 0,
+        "edges_skipped_missing_column": 0, "per_entity": {},
+    }
+    for p in proposals:
+        name = str(getattr(p, "proposed_name", "")).strip()
+        if not name:
+            continue
+        tables = list(getattr(p, "materialized_in_tables", []) or [])
+        e_uri = canonical_uri("entity", name)
+        store.upsert_node(
+            "Entity", e_uri,
+            properties={
+                "entity_name": name,
+                "description": (
+                    f"Auto-identified from {len(tables)} table(s): "
+                    f"{', '.join(tables)}"),
+                "identified_by_columns": list(
+                    getattr(p, "identified_by_columns", []) or []),
+                "materialized_in_tables": tables,
+                "entry_type": "Auto_Proposed",
+                "aggregate_self_confidence": getattr(
+                    p, "aggregate_self_confidence", None),
+            },
+            source="llm_generated",
+        )
+        report["entities_added"] += 1
+        added = skipped = 0
+        for ref in getattr(p, "evidence_packet_refs", []) or []:
+            if "::" not in str(ref):
+                continue
+            table, column = str(ref).split("::", 1)
+            c_uri = canonical_uri("column", table, column)
+            if c_uri not in store.nodes:
+                skipped += 1
+                continue
+            store.upsert_edge(
+                "IDENTIFIES", c_uri, e_uri,
+                properties={"entity_name": name, "role": "auto"},
+                source="llm_generated",
+            )
+            added += 1
+        if added:
+            # real MDM-grounded columns back this entity → lift it to inferred
+            store.upsert_node("Entity", e_uri, {}, source="mdm")
+        report["edges_added"] += added
+        report["edges_skipped_missing_column"] += skipped
+        report["per_entity"][name] = {"edges": added, "skipped": skipped}
+    return report
+
+
 def ingest_entities_file(store: GraphStore, path: Path) -> dict[str, Any]:
     """Builder hook — witness #6. No-op when the file is absent, so
     every compile stays runnable without approvals."""
