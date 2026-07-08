@@ -83,8 +83,11 @@ def build_graph_from_sources(
     # Lumi 100% signal coverage (no-op when the loader didn't produce these)
     _ingest_lumi_signals(store, sources_dir / "lumi_signals")
     _ingest_baseline_artifacts(store, sources_dir / "baseline_artifacts")
-    # Skills library — curated skill packages (no-op when absent)
-    _ingest_skills(store, sources_dir / "skills")
+    # Skills are NOT a graph source. Business logic (definitions, metric
+    # contracts, analytical SQL) and guardrails live in the SkillsRegistry
+    # (files) that the agent + the warehouse gate read directly — the data
+    # graph stays pure MDM + BQ + corpus + entities. (skills_loader still
+    # stages the bundles under sources/skills for the registry to load.)
     # Witness #6 — steward-approved business entities (no-op when absent).
     # Runs after every column-producing witness so IDENTIFIES edges ground.
     from synapse.graph.entities import ingest_entities_file

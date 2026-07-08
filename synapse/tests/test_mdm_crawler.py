@@ -126,13 +126,11 @@ def test_crawled_facts_land_and_fuse_with_skills(tmp_path):
     # ONE node for the table, despite skills saying common.roll_rate_calc
     node = store.get(canonical_uri("table", "common.roll_rate_calc"))
     assert node is not None
-    # MDM (the data authority) grounds the table; skills do NOT witness a
-    # table's data facts — they relate to it via an APPLIES_TO edge instead.
+    # MDM (the data authority) grounds the table; skills are OUT of the graph
+    # entirely — no skill-derived nodes or edges.
     assert "mdm" in node.provenance.sources
     assert "skills" not in node.provenance.sources
-    applies = [e for e in store.edges.values()
-               if e.edge_type == "APPLIES_TO" and e.to_uri == node.canonical_uri]
-    assert applies, "the skill should still declare it APPLIES_TO the table"
+    assert "Skill" not in store.stats()["nodes_by_type"]
 
     # spine + org-domain facts
     assert node.properties["company_domain"] == "Risk"
@@ -142,7 +140,9 @@ def test_crawled_facts_land_and_fuse_with_skills(tmp_path):
     assert node.properties["pipeline_name"] == "rollrate_monthly_load"
 
     # table lineage, both directions
-    svc = GraphService(store)
+    from synapse.mcp.skills_registry import SkillsRegistry
+    svc = GraphService(store,
+                       skills=SkillsRegistry.from_dir(sources / "skills"))
     lineage = svc.get_lineage("roll_rate_calc")["data"]
     up = {n["table"] for n in lineage["upstream"]}
     down = {n["table"] for n in lineage["downstream"]}

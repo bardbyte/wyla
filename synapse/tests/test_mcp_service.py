@@ -25,12 +25,52 @@ GROUP BY m
 
 @pytest.fixture(scope="module")
 def service(tmp_path_factory) -> GraphService:
+    """A realistic two-source service: a DATA graph (MDM tables/columns +
+    the metric REGISTRY + corpus) and a SkillsRegistry (business logic +
+    guardrails) — the post-refactor architecture. Skills feed the registry,
+    never the graph."""
+    import json
+
+    from synapse.mcp.skills_registry import SkillsRegistry
     out = tmp_path_factory.mktemp("sources")
-    load_skills_library(FIXTURE_LIBRARY, out_dir=out)
+    load_skills_library(FIXTURE_LIBRARY, out_dir=out)   # → registry, not graph
+
+    # tables + columns from MDM (the data spine)
+    mdm = out / "mdm_cache"
+    mdm.mkdir(parents=True, exist_ok=True)
+    (mdm / "sbs_new_accounts.json").write_text(json.dumps({
+        "table_name": "sbs_new_accounts",
+        "table_description": "New-account decisions.",
+        "columns": [{"name": c, "type": t} for c, t in [
+            ("decision_cd", "STRING"), ("na_pcn_no", "STRING"),
+            ("fraud_decline_in", "STRING")]]}))
+    (mdm / "roll_rate_calc.json").write_text(json.dumps({
+        "table_name": "common.roll_rate_calc",
+        "table_description": "Monthly roll-rate calc.",
+        "columns": [{"name": c, "type": t} for c, t in [
+            ("rpt_month", "DATE"), ("bal_lag1", "FLOAT64"),
+            ("cm11_encrypted", "STRING")]]}))
+
+    # metrics from the REGISTRY (data-defined; this stays in the graph)
+    reg = out / "registries" / "raw"
+    reg.mkdir(parents=True, exist_ok=True)
+    (reg / "metric_catalog.csv").write_text(
+        "technical_name,primary_data_product,business_name,calculation_logic,"
+        "metric_grain,associated_domain,business_synonyms\n"
+        "gross_approval_rate,sbs_new_accounts,Gross Approval Rate,"
+        "COUNT(DISTINCT CASE WHEN decision_cd = 'A' THEN na_pcn_no END)/"
+        "COUNT(DISTINCT na_pcn_no),decision_month,New Accounts,"
+        "approval rate;gross approval\n"
+        "credit_approval_rate,sbs_new_accounts,Credit Approval Rate,"
+        "COUNT(DISTINCT CASE WHEN decision_cd = 'A' THEN na_pcn_no END)/"
+        "COUNT(DISTINCT na_pcn_no),decision_month,New Accounts,credit approval\n")
+
+    # corpus (gold SQL) for observed filter values
     sql_dir = tmp_path_factory.mktemp("sql")
     (sql_dir / "G01.sql").write_text(GOLD_SQL, encoding="utf-8")
     load_gold_sql_corpus(sql_dir, out_dir=out)
-    return GraphService(build_graph_from_sources(out), tenant_id="test")
+    return GraphService(build_graph_from_sources(out), tenant_id="test",
+                        skills=SkillsRegistry.from_dir(out / "skills"))
 
 
 def test_every_registered_tool_exists(service):
@@ -60,7 +100,9 @@ def test_metric_resolution_by_synonym(service):
     metric = res["data"]["metric"]
     assert metric["technical_name"] == "gross_approval_rate"
     assert "COUNT(DISTINCT" in metric["formula"]
-    assert metric["defined_by_skill"] == ["demo_newaccountsapprovalrate"]
+    # metrics are data-defined (the registry), not skill-derived, so there is
+    # no DEFINED_BY-skill edge in the graph anymore
+    assert metric["defined_by_skill"] == []
 
 
 def test_skill_lookup_bundles_guardrails(service):

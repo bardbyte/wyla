@@ -62,25 +62,22 @@ def test_authored_guardrails_win_over_mined_duplicates(loaded):
     assert cm11_authored[0]["machine_checkable"] is True
 
 
-def test_graph_ingestion_mints_first_class_nodes(loaded, tmp_path: Path):
+def test_skills_load_into_registry_not_the_graph(loaded):
     _, out = loaded
+    # Skills are NOT a graph source — building from a skills-only dir mints
+    # ZERO nodes. Business logic + guardrails live in the file registry.
     store = build_graph_from_sources(out)
-    stats = store.stats()
-    assert stats["nodes_by_type"]["Skill"] == 2
-    assert stats["nodes_by_type"]["Guardrail"] >= 6
-    assert stats["nodes_by_type"]["Metric"] == 4
-    assert stats["edges_by_type"]["APPLIES_TO"] == 2
-    assert stats["edges_by_type"]["DEFINED_BY"] == 4
-    assert stats["edges_by_type"]["CONSTRAINS"] >= 6
-    # skills do NOT mint Table nodes — the data graph is sourced by the data
-    assert "Table" not in stats["nodes_by_type"]
-    # provenance: a skill is knowledge/guardrails, not a data authority, so an
-    # uncorroborated skill fact sits at guessed until data agrees. (get_skill
-    # and guardrail enforcement are unaffected — they don't grade on tier.)
-    skill = store.get(canonical_uri("skill", "DEMO_RollRates"))
-    assert skill is not None
-    assert skill.provenance.sources == ["skills"]
-    assert skill.provenance.confidence_tier == "guessed"
+    by_type = store.stats()["nodes_by_type"]
+    for absent in ("Skill", "Guardrail", "Metric", "Table"):
+        assert absent not in by_type, f"{absent} must not enter the data graph"
+
+    from synapse.mcp.skills_registry import SkillsRegistry
+    reg = SkillsRegistry.from_dir(out / "skills")
+    assert len(reg.skills) == 2
+    assert len(reg.guardrails) >= 6
+    # the security-critical guardrail is present and machine-checkable
+    cm11 = [g for g in reg.guardrails if "cm11_encrypted" in g["rule"]]
+    assert cm11 and cm11[0]["machine_checkable"] is True
 
 
 def test_missing_dir_is_error_not_crash(tmp_path: Path):
@@ -148,34 +145,30 @@ def test_data_specs_valid_values_and_bands_extracted(tmp_path):
     assert len(blob["knowledge_full"]) >= len(blob["knowledge_excerpt"])
 
 
-def test_data_specs_become_graph_facts(tmp_path):
-    from synapse.graph.builder import build_graph_from_sources
+def test_data_specs_available_to_agent_via_registry(tmp_path):
+    """A skill's business logic — valid values, code bands, chart contracts,
+    and the FULL knowledge — is read by the agent from the registry bundle,
+    not the graph. get_skill returns all of it."""
+    from synapse.graph.store import GraphStore
     from synapse.mcp.service import GraphService
+    from synapse.mcp.skills_registry import SkillsRegistry
 
     load_skills_library(FIXTURE_LIBRARY, out_dir=tmp_path)
-    # A skill's reference data (valid values / bands) attaches to a real
-    # table — skills no longer mint the table themselves, so stage its MDM
-    # row (the data authority) the way a real build would.
-    mdm = tmp_path / "mdm_cache"
-    mdm.mkdir(parents=True, exist_ok=True)
-    (mdm / "sbs_new_accounts.json").write_text(json.dumps({
-        "table_name": "sbs_new_accounts",
-        "columns": [{"name": "decision_cd", "type": "STRING"},
-                    {"name": "fico_band", "type": "STRING"}],
-    }))
-    svc = GraphService(build_graph_from_sources(tmp_path))
+    # pure agent side: an empty graph + the registry — proves the skill
+    # content needs no graph nodes at all
+    svc = GraphService(GraphStore(),
+                       skills=SkillsRegistry.from_dir(tmp_path / "skills"))
 
-    # valid values → curated FilterValue nodes (highest-trust source)
-    fv = svc.get_filter_values("sbs_new_accounts", "decision_cd")
-    assert {v["raw_value"] for v in fv["data"]["values"]} == {"A", "D", "P"}
-    assert fv["data"]["values"][0]["sources"] == ["skills"]
-
-    # bands → CodeMapping resolvable BOTH directions
-    assert svc.resolve_code("fico_band", "Exceptional"
-                            )["data"]["resolved"]["raw_value"] == "800+"
-    assert svc.resolve_code("fico_band", "800+"
-                            )["data"]["resolved"]["human_meaning"] == "Exceptional"
-
-    # chart contract rides on the Skill for the viz layer
-    skill = svc.get_skill("approval rate")
-    assert skill["data"]["skill"]["chart_contracts"]["charts"]
+    res = svc.get_skill("approval rate")
+    assert res["status"] == "ok"
+    bundle = res["data"]["skill"]
+    assert bundle["skill_id"] == "DEMO_NewAccountsApprovalRate"
+    # valid values + code bands ride in the bundle (business reference data)
+    vv = {v["column"]: v["values"] for v in bundle["valid_values"]}
+    assert vv["decision_cd"] == ["A", "D", "P"]
+    bands = {b["raw"]: b["label"] for b in bundle["bands"]}
+    assert bands["800+"] == "Exceptional"
+    # chart contract + the COMPLETE knowledge (not just an excerpt) — the agent
+    # uses all of it to answer well
+    assert bundle["chart_contracts"]["charts"]
+    assert len(bundle["knowledge_full"]) >= len(bundle["knowledge_excerpt"])
