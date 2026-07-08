@@ -218,14 +218,20 @@ def _build_bq_cache_blob(src: Path, table_id: str, warnings: list[str]) -> dict[
             except Exception:
                 pass
 
-    # 2.1 — size + freshness
+    # 2.1 — size + freshness. Header names vary across extractor versions
+    # (the manifest documents "logical/physical/billable byte sizes"), so
+    # match tolerantly rather than silently reading None.
     size_path = src / "2_1__size_freshness.csv"
     if size_path.exists():
         with size_path.open(encoding="utf-8-sig", newline="") as f:
             row = next(csv.DictReader(f), {})
-            blob["row_count"] = _maybe_int(row.get("row_count"))
-            blob["size_bytes"] = _maybe_int(row.get("size_bytes"))
-            blob["last_modified"] = row.get("last_modified_at")
+            blob["row_count"] = _maybe_int(
+                _first(row, "row_count", "total_rows"))
+            blob["size_bytes"] = _maybe_int(_first(
+                row, "size_bytes", "total_logical_bytes", "logical_bytes",
+                "total_physical_bytes", "total_billable_bytes"))
+            blob["last_modified"] = _first(
+                row, "last_modified_at", "last_modified_time", "last_modified")
 
     # 2.2 — partitions (count + freshness per partition)
     parts_path = src / "2_2__partitions.csv"
@@ -266,6 +272,12 @@ def _build_bq_cache_blob(src: Path, table_id: str, warnings: list[str]) -> dict[
                     blob["column_stats"][col]["approx_distinct"] = _maybe_int(v)
                 if metric == "null_frac":
                     blob["column_stats"][col]["null_fraction"] = _maybe_float(v)
+            # total_rows rides in this wide row too — recover row_count when
+            # 2.1 (size/freshness) was skipped for lack of JOBS permission
+            # (exactly the case in the observed real extract)
+            if not blob.get("row_count"):
+                blob["row_count"] = _maybe_int(
+                    _first(row, "total_rows", "row_count"))
 
     # 3.2 — per-column top values
     for top_path in src.glob("3_2__topcount__*.csv"):
@@ -275,7 +287,7 @@ def _build_bq_cache_blob(src: Path, table_id: str, warnings: list[str]) -> dict[
             for row in csv.DictReader(f):
                 values.append({
                     "value": row.get("value"),
-                    "count": _maybe_int(row.get("row_count")),
+                    "count": _maybe_int(_first(row, "row_count", "count")),
                 })
         blob["distinct_values"][col_name] = values
 
@@ -530,23 +542,28 @@ def _build_lineage_blob(
     if up_path.exists():
         with up_path.open(encoding="utf-8-sig", newline="") as f:
             for row in csv.DictReader(f):
-                fqn = row.get("upstream_table") or ""
+                fqn = _first(row, "upstream_table", "source_table",
+                             "upstream_table_name") or ""
                 short = fqn.rsplit(".", 1)[-1]
                 if short and short != table_id:
                     blob["lineage_upstream"].append(short)
     if down_path.exists():
         with down_path.open(encoding="utf-8-sig", newline="") as f:
             for row in csv.DictReader(f):
-                fqn = row.get("downstream_table") or ""
+                fqn = _first(row, "downstream_table", "target_table",
+                             "downstream_table_name") or ""
                 short = fqn.rsplit(".", 1)[-1]
                 if short and short != table_id:
                     blob["lineage_downstream"].append(short)
     if co_path.exists():
         with co_path.open(encoding="utf-8-sig", newline="") as f:
             for row in csv.DictReader(f):
-                fqn = row.get("co_referenced_table") or ""
+                fqn = _first(row, "co_referenced_table", "co_queried_table",
+                             "table") or ""
                 short = fqn.rsplit(".", 1)[-1]
-                cnt = _maybe_int(row.get("co_query_count")) or 0
+                cnt = _maybe_int(
+                    _first(row, "co_query_count", "query_count", "co_count")
+                ) or 0
                 if short and short != table_id:
                     blob["co_queried"].append({"table": short, "count": cnt})
     return blob
@@ -575,14 +592,23 @@ def _write_gold_queries(
     gold_dir.mkdir(parents=True, exist_ok=True)
     n = 0
     for i, row in enumerate(rows[:200]):
-        q = row.get("query")
+        # the SQL text key varies (query / sql / query_text) — match the
+        # same tolerance the enricher uses so real analyst SQL, the
+        # strongest grounding signal we own, is never silently dropped
+        q = _first(row, "query", "sql", "query_text", "text") if isinstance(
+            row, dict) else str(row)
         if not q:
             continue
         path = gold_dir / f"Q__{table_id}__{i:03d}.sql"
+        job = _first(row, "job_id", "jobId") if isinstance(row, dict) else None
+        user = (_first(row, "user_email", "user")
+                if isinstance(row, dict) else None)
+        created = (_first(row, "creation_time", "created_at", "start_time")
+                   if isinstance(row, dict) else None)
         path.write_text(
-            f"-- job_id: {row.get('job_id')}\n"
-            f"-- user: {row.get('user_email')}\n"
-            f"-- created_at: {row.get('creation_time')}\n"
+            f"-- job_id: {job}\n"
+            f"-- user: {user}\n"
+            f"-- created_at: {created}\n"
             f"{q.strip()}\n",
             encoding="utf-8",
         )

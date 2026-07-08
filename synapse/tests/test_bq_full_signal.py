@@ -120,6 +120,41 @@ def test_loader_parses_constraints_and_governance(tmp_path):
     assert blob["size_bytes"] == 20480000
 
 
+def test_row_count_recovered_from_3_1_when_2_1_skipped(tmp_path):
+    """The observed real extract SKIPPED 2_1 (JOBS perm); total_rows rides
+    in the wide 3_1 row and must still recover row_count."""
+    t = tmp_path / "bq" / "t"
+    _write(t / "1_1__columns.csv",
+           "column_name,data_type,is_nullable,is_partitioning_column,"
+           "clustering_ordinal_position\nc,STRING,YES,NO,\n")
+    # deliberately NO 2_1__size_freshness.csv
+    _write(t / "3_1__cardinality_nulls.csv",
+           "total_rows,c__distinct,c__null_frac\n7654321,100,0.0\n")
+    out = tmp_path / "out"
+    load_bq_for_table("t", source_dir=tmp_path / "bq", out_dir=out)
+    blob = json.loads((out / "bq_cache" / "t.json").read_text())
+    assert blob["row_count"] == 7654321
+
+
+def test_sample_queries_tolerate_sql_key(tmp_path):
+    """4_4 carries full SQL text; the key may be `sql`/`query_text`, not
+    `query`. That corpus is the strongest grounding signal we own — a key
+    mismatch must not silently drop it."""
+    t = tmp_path / "bq" / "t"
+    _write(t / "1_1__columns.csv",
+           "column_name,data_type,is_nullable,is_partitioning_column,"
+           "clustering_ordinal_position\nc,STRING,YES,NO,\n")
+    _write(t / "4_4__sample_queries.json", json.dumps([
+        {"job_id": "j1", "sql": "SELECT c FROM t WHERE c = 'A'"},
+        {"job_id": "j2", "query_text": "SELECT COUNT(*) FROM t"},
+    ]))
+    out = tmp_path / "out"
+    load_bq_for_table("t", source_dir=tmp_path / "bq", out_dir=out)
+    gold = sorted((out / "gold_queries").glob("Q__t__*.sql"))
+    assert len(gold) == 2
+    assert "SELECT c FROM t" in gold[0].read_text()
+
+
 def test_loader_captures_failed_queries_as_usage(tmp_path):
     root = tmp_path / "bq_extract"
     _make_extract(root)
