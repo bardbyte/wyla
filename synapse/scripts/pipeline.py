@@ -253,7 +253,8 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         _stage("LLM enrichment → llm_generated facts (batched)")
         try:
             from synapse.enrichment.enricher import (
-                collect_enrichment_failures, enrich_graph, propose_entities)
+                collect_enrichment_failures, enrich_graph, plan_enrichment,
+                propose_entities)
             from synapse.enrichment.vertex_client import (
                 TieredLLMClient, VertexLLMClient)
             if args.enrich_strategy == "tiered":
@@ -283,6 +284,23 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                     else (sorted(manifest_names) if manifest_names else None))
             out_root = Path(args.out).expanduser().parent
             grounding: dict[str, dict] = {}
+            # Pre-run work plan — the horizon before a single Gemini call
+            # (the top-up's UX: know how big the run is, and how far along
+            # you are, so a multi-hour laptop run never feels like a hang).
+            plan = plan_enrichment(
+                store, only_tables=only,
+                column_batch_size=args.enrich_batch_size,
+                max_calls=args.enrich_max_calls)
+            _note(f"enrichment plan — {len(plan['per_table'])} table(s), "
+                  f"{plan['total_columns']} column(s):")
+            _note(f"  {'table':38} {'cols':>6}  ~calls")
+            for tname in sorted(plan["per_table"]):
+                row = plan["per_table"][tname]
+                _note(f"  {tname[:38]:38} {row['columns']:>6}  ~{row['calls']}")
+            _note(f"  total: {plan['total_columns']} column(s) → "
+                  f"~{plan['total_calls']} call(s) "
+                  f"(budget {args.enrich_max_calls} → will spend "
+                  f"~{plan['budget_capped_calls']})")
             bundles = enrich_graph(
                 store, client,
                 only_tables=only,
@@ -295,6 +313,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                 evidence_dir=sources_dir / "mdm_cache",
                 demo_out=out_root / "demo_questions.json",
                 verbose=True,
+                planned_calls=plan["budget_capped_calls"],
             )
             n_obs = sum(len(b.column_observations) for b in bundles.values())
             n_syn = sum(len(b.candidate_synonyms) for b in bundles.values())

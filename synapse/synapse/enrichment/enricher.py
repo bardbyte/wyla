@@ -125,6 +125,16 @@ def enrich_graph(
             if str(n.properties.get("table_name", "")).lower() in wanted
         ]
 
+    # A verbose run with no caller-supplied plan still deserves an ETA —
+    # derive the call horizon from the same selection the loop will walk,
+    # so the per-chunk counter has a denominator and a time-left figure.
+    if verbose and planned_calls is None:
+        planned_calls = plan_enrichment(
+            store, only_tables=only_tables,
+            column_batch_size=column_batch_size,
+            max_calls=max_calls, skip_columns=skip_columns,
+        )["budget_capped_calls"]
+
     run_t0 = time.monotonic()
     call_durations: list[float] = []
     n_tables = len(table_nodes)
@@ -798,6 +808,64 @@ def compute_topup_plan(
         if remaining:
             plan[table_name] = sorted(remaining)
     return plan
+
+
+def plan_enrichment(
+    store: GraphStore,
+    *,
+    only_tables: list[str] | None = None,
+    column_batch_size: int = 40,
+    max_calls: int | None = None,
+    skip_columns: dict[str, set[str]] | None = None,
+) -> dict[str, Any]:
+    """The enrichment horizon, computed BEFORE a single LLM call.
+
+    Selects tables exactly as ``enrich_graph`` does (table_name match) and
+    chunks each table's columns by ``column_batch_size`` the same way, so
+    the totals here are the denominator the verbose per-chunk ETA counts
+    down against. Columns are counted from CONTAINS edges (minus any
+    ``skip_columns`` — the top-up path) — the same cheap count
+    ``compute_topup_plan`` trusts; no ``inspect_table``, no mutation, no
+    network.
+
+    Returns ``{per_table: {name: {columns, calls}}, total_columns,
+    total_calls, budget_capped_calls}`` — ``budget_capped_calls`` is what
+    the run will actually spend once ``max_calls`` clamps it, and the value
+    to hand ``enrich_graph(planned_calls=...)``.
+    """
+    wanted = {t.lower() for t in only_tables} if only_tables else None
+    per_table: dict[str, dict[str, int]] = {}
+    total_columns = 0
+    total_calls = 0
+    for node in store.nodes_by_type("Table"):
+        table_name = str(node.properties.get("table_name") or "")
+        if not table_name:
+            continue
+        if wanted is not None and table_name.lower() not in wanted:
+            continue
+        cols = [
+            e.to_uri.rsplit("/", 1)[-1]
+            for e in store.outgoing(node.canonical_uri, "CONTAINS")
+        ]
+        if skip_columns:
+            skip = {c.lower()
+                    for c in skip_columns.get(table_name.lower(), set())}
+            cols = [c for c in cols if c.lower() not in skip]
+        n_cols = len(cols)
+        if n_cols == 0:
+            continue    # fully covered — enrich_graph makes zero calls here
+        n_calls = -(-n_cols // column_batch_size) if column_batch_size else 1
+        per_table[table_name] = {"columns": n_cols, "calls": n_calls}
+        total_columns += n_cols
+        total_calls += n_calls
+    capped = (min(total_calls, max_calls)
+              if max_calls is not None else total_calls)
+    return {
+        "per_table": per_table,
+        "total_columns": total_columns,
+        "total_calls": total_calls,
+        "budget_capped_calls": capped,
+    }
 
 
 def merge_memories(

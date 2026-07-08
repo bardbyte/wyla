@@ -78,6 +78,14 @@ python synapse/scripts/pipeline.py \
   columns, which `propose_entities` reduces). Skip it and you get a grounded
   graph but no entity layer.
 
+The enrichment runs **verbose**, like the top-up: before the first Gemini
+call it prints the whole plan — per table `cols → ~calls`, then `total: N
+column(s) → ~M call(s) (budget … → will spend ~K)` — so you see the size up
+front. Then each call logs live as `[k/~M] chunk i/j · <secs>s · <n> obs ·
+avg <secs>s · ~<mins>m left`, every table closes with a `✓` gate summary,
+and memory is checkpointed after each table. You never lose track of how far
+along the run is or when it will finish.
+
 ### 4 · Verify
 
 ```bash
