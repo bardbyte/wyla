@@ -75,6 +75,40 @@ TIER_ORDER = ["human_asserted", "grounded", "inferred", "guessed", "deprecated"]
 TIER_RANK = {t: i for i, t in enumerate(TIER_ORDER)}
 # witnesses the real extraction stages that push a table toward grounded
 HIGH_VALUE = ["mdm", "bq", "usage", "dq_engine", "glossary", "metric_catalog"]
+# CTE aliases / template placeholders that SQL parsing mints as "tables"
+_JUNK_NAMES = {
+    "base", "the", "totals", "pivoted", "lagged", "segmented", "yoy",
+    "rates", "with_shares", "components", "final_calc", "full_result",
+    "base_data", "contribution_output", "contribution_a", "rate_mix_calc",
+    "segment_rates", "recovery_cohort", "seg_step1", "seg_step2",
+    "approval_pcn_lvl", "source_table", "prepared_table", "sbs_new_accts",
+}
+
+
+def _col_is_pii(col: dict) -> bool:
+    """PII if the flag is set OR the taxonomy is anything but Internal —
+    so it catches PII carried only under pii_taxonomy."""
+    p = col.get("properties", {})
+    if p.get("is_pii"):
+        return True
+    tax = (p.get("pii_taxonomy") or "").strip().lower()
+    return bool(tax) and tax not in ("internal", "public", "none")
+
+
+def _looks_junk(name: str, n_cols: int, witnesses: list) -> bool:
+    """Heuristic: a CTE/placeholder minted as a table. Conservative — used
+    to flag suspects on unscoped builds, never to delete."""
+    n = name.lower()
+    tail = n.rsplit(".", 1)[-1]
+    if "your_project" in n or "your_dataset" in n:
+        return True
+    if tail in _JUNK_NAMES:
+        return True
+    # a bare single-word alias (no dots, no underscores → CTE-shaped, unlike
+    # a real risk_pers_acct / axp-lumi.dw.x) with no columns and only soft
+    # SQL witnesses. Conservative: named tables never match.
+    return (n_cols == 0 and "." not in n and "_" not in n
+            and set(witnesses) <= {"skills", "corpus", "llm_generated"})
 
 
 # ── discovery ────────────────────────────────────────────────
@@ -154,7 +188,7 @@ def analyze(snap: dict, path: Path) -> dict:
         col_tiers = collections.Counter(
             _prov(c).get("confidence_tier", "guessed") for c in cols
         )
-        pii = sum(1 for c in cols if c["properties"].get("is_pii"))
+        pii = sum(1 for c in cols if _col_is_pii(c))
         # projection: what tier if the high-value witnesses were also present?
         projected_srcs = sorted(set(srcs) | set(HIGH_VALUE))
         proj_score, proj_tier = confidence_from_sources(projected_srcs)
@@ -172,8 +206,19 @@ def analyze(snap: dict, path: Path) -> dict:
             "missing_high_value": missing,
             "to_grounded": max(0, 4 - len(set(srcs))) if tier not in ("grounded", "human_asserted") else 0,
             "projected_tier_if_extracted": proj_tier,
+            "junk": _looks_junk(name, len(cols), srcs),
         })
     tables.sort(key=lambda t: (TIER_RANK.get(t["tier"], 9), -t["n_witnesses"]))
+
+    # coverage + quality rollups across the real (non-junk) tables
+    real = [t for t in tables if not t["junk"]]
+    bq_tables = [t for t in real if "bq" in t["witnesses"]]
+    all_cols = [c for n_ in nodes.values() if n_["node_type"] == "Column"
+                for c in [n_]]
+    col_grounded = sum(
+        _prov(c).get("confidence_tier") in ("grounded", "human_asserted")
+        for c in all_cols)
+    junk_suspects = [t["name"] for t in tables if t["junk"]]
 
     n = len(nodes) or 1
     return {
@@ -187,6 +232,9 @@ def analyze(snap: dict, path: Path) -> dict:
         "pct_grounded_or_better": round(
             100 * (by_tier.get("grounded", 0) + by_tier.get("human_asserted", 0)) / n, 1
         ),
+        "pct_columns_grounded": round(100 * col_grounded / (len(all_cols) or 1), 1),
+        "bq_coverage": f"{len(bq_tables)}/{len(real)} real tables profiled",
+        "junk_suspects": junk_suspects,
         "witness_footprint": dict(witness_footprint.most_common()),
         "conflicts": conflicts,
         "richness": {
@@ -259,7 +307,14 @@ def render(a: dict) -> None:
     print("=" * 78)
     print(f"  node types : {a['node_types']}")
     print(f"  tiers      : {a['tier_dist']}   "
-          f"→ {a['pct_grounded_or_better']}% grounded+")
+          f"→ {a['pct_grounded_or_better']}% grounded+  "
+          f"({a['pct_columns_grounded']}% of columns)")
+    print(f"  bq coverage: {a['bq_coverage']}")
+    if a["junk_suspects"]:
+        shown = ", ".join(a["junk_suspects"][:8])
+        more = f" (+{len(a['junk_suspects']) - 8} more)" if len(a["junk_suspects"]) > 8 else ""
+        print(f"  junk?      : {len(a['junk_suspects'])} CTE/placeholder "
+              f"suspects — {shown}{more}  [scope with a manifest to drop]")
     print(f"  witnesses  : " + ", ".join(
         f"{s}×{c}" for s, c in a["witness_footprint"].items()) or "(none)")
     r = a["richness"]
@@ -348,6 +403,8 @@ def main() -> None:
             "n_nodes": a["n_nodes"], "n_edges": a["n_edges"],
             "node_types": a["node_types"], "tier_dist": a["tier_dist"],
             "pct_grounded_or_better": a["pct_grounded_or_better"],
+            "pct_columns_grounded": a["pct_columns_grounded"],
+            "bq_coverage": a["bq_coverage"], "junk_suspects": a["junk_suspects"],
             "witness_footprint": a["witness_footprint"],
             "richness": a["richness"], "conflicts": a["conflicts"],
             "tables": [{k: t[k] for k in ("name", "witnesses", "tier", "score",
