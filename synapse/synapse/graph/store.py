@@ -172,6 +172,14 @@ class TableProperties(BaseModel):
     asset_kind: str = "Table"  # Table | View | MaterializedView | ExternalTable | BIDashboard
     tags: list[str] = Field(default_factory=list)
     lineage_upstream: list[str] = Field(default_factory=list)
+    # Physical footprint + exact definition (BQ owns these)
+    created_at: str | None = None
+    size_bytes: int | None = None
+    partition_grain: str = ""
+    ddl: str = ""                                   # the CREATE statement
+    bq_labels: list[str] = Field(default_factory=list)
+    has_row_access_policy: bool = False
+    has_streaming_buffer: bool = False
 
 
 class ColumnProperties(BaseModel):
@@ -190,6 +198,8 @@ class ColumnProperties(BaseModel):
     null_fraction: float | None = None
     min_value: Any = None
     max_value: Any = None
+    avg_value: Any = None
+    is_foreign_key: bool = False           # declared FK → walkable join edge
     distinct_sample: list[dict[str, Any]] = Field(default_factory=list)
     # PII / governance — MDM is the authority for all of these
     pii_taxonomy: str = "Internal"        # pii_role_id, e.g. Sensitive>Identifier>MemberID

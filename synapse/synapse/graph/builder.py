@@ -396,17 +396,29 @@ def _ingest_bq_profile(store: GraphStore, cache_dir: Path) -> None:
             continue
         name = blob.get("table_name") or path.stem
         t_uri = canonical_uri("table", name)
-        store.upsert_node(
-            "Table", t_uri,
-            properties={
-                "table_name": name,
-                "row_count": blob.get("row_count"),
-                "last_modified": blob.get("last_modified"),
-                "partition_field": blob.get("partition_field"),
-                "clustering_fields": blob.get("clustering_fields") or [],
-            },
-            source="bq",
-        )
+        # Every physical/governance fact BQ owns — promoted, not dropped.
+        # None/""/[] are skipped by the store's monotonic guard, so a sparse
+        # profile never clobbers a richer MDM value.
+        table_props = {
+            "table_name": name,
+            "row_count": blob.get("row_count"),
+            "last_modified": blob.get("last_modified"),
+            "partition_field": blob.get("partition_field"),
+            "clustering_fields": blob.get("clustering_fields") or [],
+            # asset abstraction + physical footprint
+            "asset_kind": blob.get("asset_kind"),      # View/Table/MatView…
+            "created_at": blob.get("created_at"),
+            "size_bytes": blob.get("size_bytes"),
+            "partition_grain": blob.get("partition_grain"),
+            # the exact table definition — ground truth for computed columns,
+            # defaults, the partition expression, OPTIONS
+            "ddl": blob.get("ddl_snapshot"),
+            "bq_labels": blob.get("tags") or [],
+            # governance surfaced by BQ (Dataplex parallel)
+            "has_row_access_policy": blob.get("has_row_access_policy") or False,
+            "has_streaming_buffer": blob.get("has_streaming_buffer") or False,
+        }
+        store.upsert_node("Table", t_uri, properties=table_props, source="bq")
         col_stats = blob.get("column_stats") or {}
         distinct_vals = blob.get("distinct_values") or {}
         policy_tags = blob.get("policy_tags_by_column") or {}
@@ -433,7 +445,22 @@ def _ingest_bq_profile(store: GraphStore, cache_dir: Path) -> None:
                 "null_fraction": null_frac,
                 "cardinality_bucket": bucket,
                 "distinct_sample": samples[:10],
+                # numeric/date range from profiling (kept raw upstream so a
+                # date/string range isn't nulled by float-coercion)
+                "min_value": stats.get("min"),
+                "max_value": stats.get("max"),
+                "avg_value": stats.get("avg"),
             }
+            # Declared PK/FK — set True ONLY (writing False here would clobber
+            # MDM's declared key). A primary key IS the grain; a foreign key
+            # IS a join.
+            if c.get("is_primary"):
+                props["is_primary"] = True
+            ref = c.get("references") if c.get("is_foreign_key") else None
+            has_fk = bool(ref and ref.get("table") and ref.get("column"))
+            if has_fk:
+                props["is_foreign_key"] = True
+                props["is_join_key"] = True
             # PII: BQ policy tags CONFIRM sensitivity but never deny it.
             # Only assert when a tag is present — otherwise an untagged BQ
             # profile would clobber MDM's (correct) is_pii/taxonomy with a
@@ -447,6 +474,21 @@ def _ingest_bq_profile(store: GraphStore, cache_dir: Path) -> None:
             store.upsert_edge(
                 "CONTAINS", t_uri, c_uri, properties={}, source="bq",
             )
+            # A declared FK is the strongest join signal we own — mint the
+            # EQUIVALENT_TO edge that get_join_path + related_tables traverse,
+            # so a BQ-declared foreign key becomes a real, walkable join.
+            if has_fk:
+                target_uri = canonical_uri(
+                    "column", ref["table"], ref["column"])
+                store.upsert_edge(
+                    "EQUIVALENT_TO", c_uri, target_uri,
+                    properties={
+                        "verb": "references",
+                        "constraint": "foreign_key",
+                        "constraint_name": ref.get("constraint_name") or "",
+                    },
+                    source="bq",
+                )
             # Distinct values → FilterValue nodes for low-cardinality cols
             if bucket in ("low", "medium") and samples:
                 for v in samples[:10]:

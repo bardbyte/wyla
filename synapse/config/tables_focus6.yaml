@@ -1,8 +1,9 @@
-# Focused manifest — the 5-table risk + cardmember domain.
+# Focused manifest — the 6-table risk + cardmember domain.
 #
-# These five tables join into one coherent story:
+# These six tables join into one coherent story:
 #   custins_customer_insights_cardmember  — the cardmember-day P&L fact
 #   fin_consumer_business_card_member_status — account status / lifecycle
+#   risk_new_acct                         — new-account risk (origination)
 #   risk_pers_acct                        — account-level risk (current)
 #   risk_pers_acct_history                — account-level risk (history)
 #   risk_indv_cust_hist                   — customer-level risk (history)
@@ -16,7 +17,7 @@
 #   • as the extraction/build manifest  (--manifest this-file)
 #   • as the builder ALLOWLIST — only these tables' nodes are minted;
 #     CTE aliases and template placeholders from corpus/skills SQL are
-#     dropped, so the graph is exactly these five and their real columns.
+#     dropped, so the graph is exactly these six and their real columns.
 
 version: 1
 
@@ -31,6 +32,7 @@ defaults:
 tables:
   - name: custins_customer_insights_cardmember
   - name: fin_consumer_business_card_member_status
+  - name: risk_new_acct
   - name: risk_pers_acct
   - name: risk_pers_acct_history
   - name: risk_indv_cust_hist
