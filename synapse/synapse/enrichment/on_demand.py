@@ -69,9 +69,26 @@ class OverlayStore:
         self._save()
         return entry
 
+    def record_assertion(
+        self, *, subject_type: str, subject_ref: str, statement: str,
+        actor: str, tier: str = "human_asserted", at: str | None = None,
+    ) -> dict[str, Any]:
+        """A trusted human's assertion — the top-tier twin of a fill. Also a
+        steward-review record (the bridge to policy B)."""
+        entry = {
+            "kind": "assertion", "subject_type": subject_type,
+            "subject_ref": subject_ref, "statement": statement,
+            "actor": actor, "tier": tier, "reviewed": False, "at": at,
+        }
+        self._data.setdefault("assertions", []).append(entry)
+        self._save()
+        return entry
+
     def apply(self, store: GraphStore) -> int:
-        """Replay fills onto a store (columns present only), at the capped
-        ``llm_generated`` provenance. Returns how many landed."""
+        """Replay the overlay onto a store: agent fills at the capped
+        ``llm_generated`` provenance, human assertions at ``human_approval``
+        (→ ``human_asserted``). Only touches subjects already present.
+        Returns how many landed."""
         n = 0
         for f in self._data.get("fills", []):
             c_uri = canonical_uri("column", f["table"], f["column"])
@@ -80,6 +97,17 @@ class OverlayStore:
                     "Column", c_uri,
                     {"ai_generated_description": f["description"]},
                     source="llm_generated")
+                n += 1
+        for a in self._data.get("assertions", []):
+            from synapse.graph.capture import resolve_subject_uri
+            uri, _ = resolve_subject_uri(
+                a.get("subject_type"), a.get("subject_ref"))
+            if uri and uri in store.nodes and a.get("statement"):
+                store.upsert_node(
+                    store.get(uri).node_type, uri,
+                    {"description": a["statement"],
+                     "asserted_by": a.get("actor")},
+                    source="human_approval")
                 n += 1
         return n
 

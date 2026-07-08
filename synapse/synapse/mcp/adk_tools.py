@@ -121,11 +121,29 @@ def build_adk_tools(service: GraphService) -> list[Callable[..., dict[str, Any]]
         when there isn't enough evidence to define the meaning."""
         return service.explain_column(table, column, question or None)
 
+    def check_data_trust(table: str) -> dict:
+        """Before you commit a number the user will rely on, check whether
+        the feeding table has a red flag — a recent breaking change, a
+        passed recertification, deprecated columns, or failing data-quality
+        rules — plus PII context. Surface a warning to the user only if one
+        fires; stay quiet when the table is clean."""
+        return service.check_data_trust(table)
+
+    def capture_knowledge(subject_type: str, subject_ref: str,
+                          statement: str, actor: str = "analyst") -> dict:
+        """When the user tells you what something MEANS in their world (a
+        definition or a correction), record it as authoritative and credited
+        to them — it outranks the machine's guess for everyone, immediately.
+        subject_type is table|column|entity; for a column, subject_ref is
+        'table.column'. Thank them; their knowledge is now part of the graph."""
+        return service.capture_knowledge(subject_type, subject_ref,
+                                         statement, actor)
+
     return [
         search_entities, list_tables_for_domain, inspect_table,
         find_columns_for_concept, get_filter_values, resolve_code,
         get_join_path, get_lineage, get_metric, get_skill, get_guardrails,
         get_dq_status, explain_confidence, disambiguate_term,
         validate_sql_plan, get_entity, get_steward_review_queue,
-        explain_column,
+        explain_column, check_data_trust, capture_knowledge,
     ]

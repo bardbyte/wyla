@@ -1004,6 +1004,43 @@ class GraphService:
         return self._ok("explain_column", started, res,
                         partial=(res.get("status") == "partial"))
 
+    def check_data_trust(self, table: str) -> dict[str, Any]:
+        """Should the user be warned before relying on a number from this
+        table? Bundles the governance/lifecycle/DQ facts into red flags — a
+        recent breaking change, a passed recertification, deprecated columns,
+        failing data-quality rules — plus PII context. Call it before
+        committing a relied-on figure; surface a warning only if one fires."""
+        started = time.monotonic()
+        from synapse.graph.trust import assess_trust
+        res = assess_trust(self.store, table)
+        if res.get("status") == "error":
+            return self._err(
+                "check_data_trust", started, "not_found",
+                res.get("reason", "table not found"),
+                suggestions=[f"resolve the table via inspect_table('{table}')"])
+        return self._ok("check_data_trust", started, res)
+
+    def capture_knowledge(self, subject_type: str, subject_ref: str,
+                          statement: str, actor: str = "analyst"
+                          ) -> dict[str, Any]:
+        """Record a trusted human's definition/correction as authoritative
+        (human_asserted, credited to them) — it outranks the machine's guess
+        for everyone, immediately. Use when the user asserts what a table,
+        column, or entity MEANS in their world. subject_type is
+        table|column|entity; for a column, subject_ref is 'table.column'."""
+        started = time.monotonic()
+        from synapse.graph.capture import capture_assertion
+        res = capture_assertion(
+            self.store, subject_type=subject_type, subject_ref=subject_ref,
+            statement=statement, actor=actor, overlay=self.overlay)
+        if res.get("status") == "error":
+            return self._err(
+                "capture_knowledge", started, "invalid_subject",
+                res.get("reason", "could not record the assertion"),
+                suggestions=["subject_type is table|column|entity; "
+                             "for a column use 'table.column'"])
+        return self._ok("capture_knowledge", started, res)
+
 
 # Ordered registry — single source of truth for both transports.
 TOOL_NAMES: tuple[str, ...] = (
@@ -1025,4 +1062,6 @@ TOOL_NAMES: tuple[str, ...] = (
     "get_entity",
     "get_steward_review_queue",
     "explain_column",
+    "check_data_trust",
+    "capture_knowledge",
 )
