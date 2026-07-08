@@ -211,11 +211,15 @@ def create_app(runner: Runner | None = None,
         app.state.gate_decisions[req.gate_id] = req.approved
         return {"gate_id": req.gate_id, "approved": req.approved}
 
-    # ── read-side API (graph-backed or labeled sample) ───────
+    # ── read-side API (graph-backed; honest-empty when no snapshot) ──
 
     @app.get("/api/products")
     def products(q: str = "") -> dict:
         return app.state.data.products(q)
+
+    @app.get("/api/products/by-unit")
+    def products_by_unit(q: str = "") -> dict:
+        return app.state.data.products_by_unit(q)
 
     @app.get("/api/metrics")
     def metrics(q: str = "") -> dict:
