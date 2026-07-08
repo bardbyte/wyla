@@ -345,8 +345,33 @@ def _ingest_mdm(store: GraphStore, cache_dir: Path) -> None:
                     "status") or "",
                 "pipeline_name": (blob.get("pipeline") or {}).get(
                     "pipeline_name") or "",
+                "pipeline_type": (blob.get("pipeline") or {}).get(
+                    "pipeline_type") or "",
                 "pipeline_governance": (blob.get("pipeline") or {}).get(
                     "governance") or {},
+                # ── governance + lifecycle TRUST signals ──
+                # "can I trust this number / is this table current?" — the
+                # defensibility side of the hallmark. Captured before, now
+                # on the node so the agent can read them.
+                "recertification_date": (blob.get("ownership") or {}).get(
+                    "recertification_date") or "",
+                "ownership_status": (blob.get("ownership") or {}).get(
+                    "status") or "",
+                "lifecycle_version": (blob.get("lifecycle") or {}).get(
+                    "lifecycle_version") or "",
+                "lifecycle_region": (blob.get("lifecycle") or {}).get(
+                    "region") or "",
+                "lifecycle_updated_date": (blob.get("lifecycle") or {}).get(
+                    "updated_date") or "",
+                "md_registration_activity": (blob.get("lifecycle") or {}).get(
+                    "md_registration_activity") or "",
+                "is_breaking_change": _flag(
+                    (blob.get("lifecycle") or {}).get("is_breaking_change")),
+                "is_purge": _flag(
+                    (blob.get("lifecycle") or {}).get("is_purge")),
+                # spine/versioning identity (parallels dataset_parent_id)
+                "dataset_id": blob.get("dataset_id") or "",
+                "ownership_id": blob.get("ownership_id") or "",
             },
             source="mdm",
         )

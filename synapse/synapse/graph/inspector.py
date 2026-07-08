@@ -139,7 +139,15 @@ def inspect_table(store: GraphStore, table_name: str) -> dict[str, Any]:
         "dataset_parent_id": props.get("dataset_parent_id", ""),
         "lifecycle_status": props.get("lifecycle_status", ""),
         "pipeline_name": props.get("pipeline_name", ""),
+        "pipeline_type": props.get("pipeline_type", ""),
         "is_decommissioned": props.get("is_decommissioned", False),
+        # lifecycle + recertification TRUST signals (defensibility)
+        "recertification_date": props.get("recertification_date", ""),
+        "ownership_status": props.get("ownership_status", ""),
+        "lifecycle_version": props.get("lifecycle_version", ""),
+        "lifecycle_updated_date": props.get("lifecycle_updated_date", ""),
+        "is_breaking_change": props.get("is_breaking_change", False),
+        "is_purge": props.get("is_purge", False),
     }
 
     # ── data quality (derived from profiling + DQ rules) ──
