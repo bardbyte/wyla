@@ -104,6 +104,27 @@ def inspect_table(store: GraphStore, table_name: str) -> dict[str, Any]:
         "peak_query_hours": props.get("peak_query_hours", []),
     }
 
+    # ── physical footprint + the exact definition (BQ owns these) ──
+    # DDL for a 4,000-column table is enormous, so surface an excerpt (the
+    # CREATE/partition/cluster head) here and keep the full text on the node
+    # for targeted retrieval — never dump it all into every context window.
+    ddl = str(props.get("ddl") or "")
+    physical = {
+        "asset_kind": props.get("asset_kind", "Table"),
+        "row_count": props.get("row_count"),
+        "size_bytes": props.get("size_bytes"),
+        "created_at": props.get("created_at"),
+        "last_modified": props.get("last_modified"),
+        "partition_field": props.get("partition_field"),
+        "partition_grain": props.get("partition_grain"),
+        "clustering_fields": props.get("clustering_fields", []),
+        "bq_labels": props.get("bq_labels", []),
+        "has_row_access_policy": props.get("has_row_access_policy", False),
+        "has_streaming_buffer": props.get("has_streaming_buffer", False),
+        "has_ddl": bool(ddl),
+        "ddl_excerpt": ddl[:600] if ddl else "",
+    }
+
     # ── governance ──
     pii_cols = [c for c in columns if c.get("is_pii")]
     governance = {
@@ -118,7 +139,15 @@ def inspect_table(store: GraphStore, table_name: str) -> dict[str, Any]:
         "dataset_parent_id": props.get("dataset_parent_id", ""),
         "lifecycle_status": props.get("lifecycle_status", ""),
         "pipeline_name": props.get("pipeline_name", ""),
+        "pipeline_type": props.get("pipeline_type", ""),
         "is_decommissioned": props.get("is_decommissioned", False),
+        # lifecycle + recertification TRUST signals (defensibility)
+        "recertification_date": props.get("recertification_date", ""),
+        "ownership_status": props.get("ownership_status", ""),
+        "lifecycle_version": props.get("lifecycle_version", ""),
+        "lifecycle_updated_date": props.get("lifecycle_updated_date", ""),
+        "is_breaking_change": props.get("is_breaking_change", False),
+        "is_purge": props.get("is_purge", False),
     }
 
     # ── data quality (derived from profiling + DQ rules) ──
@@ -140,6 +169,7 @@ def inspect_table(store: GraphStore, table_name: str) -> dict[str, Any]:
         "related_tables": related,
         "lineage": lineage,
         "usage": usage,
+        "physical": physical,
         "governance": governance,
         "data_quality": data_quality,
         "code_resolutions": code_resolutions,
@@ -286,7 +316,11 @@ def _columns_for_table(store: GraphStore, t_uri: str) -> list[dict[str, Any]]:
             "cardinality_bucket": cp.get("cardinality_bucket", "unknown"),
             "approx_distinct": cp.get("approx_distinct"),
             "null_fraction": cp.get("null_fraction"),
+            "min_value": cp.get("min_value"),
+            "max_value": cp.get("max_value"),
             "distinct_sample": cp.get("distinct_sample", [])[:5],
+            # declared foreign key (BQ constraint → walkable join)
+            "is_foreign_key": cp.get("is_foreign_key", False),
             # Usage
             "reference_count": cp.get("reference_count", 0),
             "is_filter": cp.get("is_filter", False),

@@ -218,14 +218,20 @@ def _build_bq_cache_blob(src: Path, table_id: str, warnings: list[str]) -> dict[
             except Exception:
                 pass
 
-    # 2.1 — size + freshness
+    # 2.1 — size + freshness. Header names vary across extractor versions
+    # (the manifest documents "logical/physical/billable byte sizes"), so
+    # match tolerantly rather than silently reading None.
     size_path = src / "2_1__size_freshness.csv"
     if size_path.exists():
         with size_path.open(encoding="utf-8-sig", newline="") as f:
             row = next(csv.DictReader(f), {})
-            blob["row_count"] = _maybe_int(row.get("row_count"))
-            blob["size_bytes"] = _maybe_int(row.get("size_bytes"))
-            blob["last_modified"] = row.get("last_modified_at")
+            blob["row_count"] = _maybe_int(
+                _first(row, "row_count", "total_rows"))
+            blob["size_bytes"] = _maybe_int(_first(
+                row, "size_bytes", "total_logical_bytes", "logical_bytes",
+                "total_physical_bytes", "total_billable_bytes"))
+            blob["last_modified"] = _first(
+                row, "last_modified_at", "last_modified_time", "last_modified")
 
     # 2.2 — partitions (count + freshness per partition)
     parts_path = src / "2_2__partitions.csv"
@@ -253,16 +259,25 @@ def _build_bq_cache_blob(src: Path, table_id: str, warnings: list[str]) -> dict[
                 if "__" not in k:
                     continue
                 col, metric = k.rsplit("__", 1)
+                # min/max kept RAW — a date or string range is a real signal
+                # that float-coercion would silently null out; avg/null_frac
+                # numeric; distinct integral.
                 blob["column_stats"].setdefault(col, {})[metric] = (
-                    _maybe_float(v) if metric in ("null_frac", "avg", "min", "max")
+                    _maybe_float(v) if metric in ("null_frac", "avg")
                     else _maybe_int(v) if metric == "distinct"
-                    else v
+                    else (v if v not in ("", None) else None)
                 )
                 # Also write the canonical key our synthetic uses
                 if metric == "distinct":
                     blob["column_stats"][col]["approx_distinct"] = _maybe_int(v)
                 if metric == "null_frac":
                     blob["column_stats"][col]["null_fraction"] = _maybe_float(v)
+            # total_rows rides in this wide row too — recover row_count when
+            # 2.1 (size/freshness) was skipped for lack of JOBS permission
+            # (exactly the case in the observed real extract)
+            if not blob.get("row_count"):
+                blob["row_count"] = _maybe_int(
+                    _first(row, "total_rows", "row_count"))
 
     # 3.2 — per-column top values
     for top_path in src.glob("3_2__topcount__*.csv"):
@@ -272,7 +287,7 @@ def _build_bq_cache_blob(src: Path, table_id: str, warnings: list[str]) -> dict[
             for row in csv.DictReader(f):
                 values.append({
                     "value": row.get("value"),
-                    "count": _maybe_int(row.get("row_count")),
+                    "count": _maybe_int(_first(row, "row_count", "count")),
                 })
         blob["distinct_values"][col_name] = values
 
@@ -286,16 +301,118 @@ def _build_bq_cache_blob(src: Path, table_id: str, warnings: list[str]) -> dict[
                 if col and tag:
                     blob["policy_tags_by_column"].setdefault(col, []).append(tag)
 
+    # 1.5 — constraints (PK/FK). The strongest structural signal BQ owns:
+    # a declared primary key IS the grain, a declared foreign key IS a join.
+    constraints = _parse_constraints(src)
+    blob["constraints"] = constraints
+    pk_set = {c.lower() for c in constraints["primary_key"]}
+    fk_by_col = {fk["column"].lower(): fk
+                 for fk in constraints["foreign_keys"] if fk.get("column")}
+    for c in blob["columns"]:
+        cn = (c.get("name") or "").lower()
+        if cn in pk_set:
+            c["is_primary"] = True
+        if cn in fk_by_col:
+            c["is_foreign_key"] = True
+            c["references"] = {
+                "table": fk_by_col[cn].get("references_table"),
+                "column": fk_by_col[cn].get("references_column"),
+                "constraint_name": fk_by_col[cn].get("constraint_name"),
+            }
+
+    # 3.3 — null co-occurrence (columns that go null together → correlated
+    # or co-derived; a genuine relationship hint for the enricher)
+    blob["null_cooccurrence"] = _read_rows(
+        src / "3_3__null_cooccurrence.csv", limit=100)
+
+    # 5.3 — row-level access policies (governance: the table is row-filtered)
+    row_pol = _read_rows(src / "5_3__row_policies.csv", limit=50)
+    blob["row_access_policies"] = row_pol
+    blob["has_row_access_policy"] = bool(row_pol)
+
+    # 5.2 — access grants (who can read it — governance surface)
+    blob["access_grants"] = _read_rows(src / "5_2__access_grants.csv", limit=100)
+
+    # 2.3 — streaming buffer present → the table has un-flushed recent writes
+    sbuf = _read_rows(src / "2_3__streaming_buffer.csv", limit=1)
+    blob["has_streaming_buffer"] = bool(sbuf)
+
     return blob
+
+
+def _parse_constraints(src: Path) -> dict[str, Any]:
+    """1.5 — TABLE_CONSTRAINTS ⋈ KEY_COLUMN_USAGE (+ CONSTRAINT_COLUMN_USAGE
+    for FK targets), flattened by the extractor into one CSV.
+
+    Tolerant of column-name variants across extractor versions — a PK row
+    contributes its column; an FK row contributes column → referenced
+    table.column. Empty/missing file → empty constraints (the common case)."""
+    path = src / "1_5__constraints.csv"
+    out: dict[str, Any] = {"primary_key": [], "foreign_keys": []}
+    if not path.exists():
+        return out
+    with path.open(encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            ctype = (_first(row, "constraint_type", "type") or "").upper()
+            col = _first(row, "column_name", "key_column", "column")
+            if not col:
+                continue
+            if "PRIMARY" in ctype:
+                if col not in out["primary_key"]:
+                    out["primary_key"].append(col)
+            elif "FOREIGN" in ctype:
+                out["foreign_keys"].append({
+                    "column": col,
+                    "references_table": _short(_first(
+                        row, "referenced_table", "referenced_table_name",
+                        "ref_table", "pk_table_name", "referenced_table_id")),
+                    "references_column": _first(
+                        row, "referenced_column", "referenced_column_name",
+                        "ref_column", "pk_column_name"),
+                    "constraint_name": _first(row, "constraint_name", "name"),
+                })
+    return out
+
+
+def _read_rows(path: Path, *, limit: int) -> list[dict[str, Any]]:
+    """A capped list of a CSV's rows as dicts — for the sections we carry
+    as evidence (null co-occurrence, row policies, access grants) without a
+    bespoke schema. Missing/empty file → []."""
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    try:
+        with path.open(encoding="utf-8-sig", newline="") as f:
+            for row in csv.DictReader(f):
+                rows.append({k: v for k, v in row.items() if k})
+                if len(rows) >= limit:
+                    break
+    except OSError:
+        return []
+    return rows
+
+
+def _first(row: dict[str, Any], *keys: str) -> str | None:
+    for k in keys:
+        v = row.get(k)
+        if v not in (None, ""):
+            return str(v)
+    return None
+
+
+def _short(fqn: str | None) -> str | None:
+    """`proj.dataset.table` → `table` (join targets are matched bare)."""
+    return fqn.rsplit(".", 1)[-1] if fqn else None
 
 
 def _build_usage_blob(
     src: Path, table_id: str, warnings: list[str],
 ) -> dict[str, Any] | None:
-    """Section 4.1, 4.2, 4.4 → usage_history/<t>.json (matches synthetic shape)."""
+    """Section 4.1, 4.2, 4.4, 4.5 → usage_history/<t>.json (synthetic shape)."""
     top_path  = src / "4_1__top_users.csv"
     peak_path = src / "4_2__peak_hours.csv"
-    if not (top_path.exists() or peak_path.exists()):
+    failed_path = src / "4_5__failed_queries.csv"
+    if not (top_path.exists() or peak_path.exists() or failed_path.exists()):
         return None
 
     blob: dict[str, Any] = {
@@ -304,7 +421,15 @@ def _build_usage_blob(
         "top_users": [],
         "peak_query_hours": [],
         "per_column_reference_count": {},
+        # queries that ERRORED against this table — real anti-patterns the
+        # enricher can learn from (what NOT to write), never graph facts
+        "failed_queries": [],
+        "failed_query_count": 0,
     }
+    if failed_path.exists():
+        failed = _read_rows(failed_path, limit=25)
+        blob["failed_queries"] = failed
+        blob["failed_query_count"] = len(failed)
     if top_path.exists():
         with top_path.open(encoding="utf-8-sig", newline="") as f:
             for row in csv.DictReader(f):
@@ -417,23 +542,28 @@ def _build_lineage_blob(
     if up_path.exists():
         with up_path.open(encoding="utf-8-sig", newline="") as f:
             for row in csv.DictReader(f):
-                fqn = row.get("upstream_table") or ""
+                fqn = _first(row, "upstream_table", "source_table",
+                             "upstream_table_name") or ""
                 short = fqn.rsplit(".", 1)[-1]
                 if short and short != table_id:
                     blob["lineage_upstream"].append(short)
     if down_path.exists():
         with down_path.open(encoding="utf-8-sig", newline="") as f:
             for row in csv.DictReader(f):
-                fqn = row.get("downstream_table") or ""
+                fqn = _first(row, "downstream_table", "target_table",
+                             "downstream_table_name") or ""
                 short = fqn.rsplit(".", 1)[-1]
                 if short and short != table_id:
                     blob["lineage_downstream"].append(short)
     if co_path.exists():
         with co_path.open(encoding="utf-8-sig", newline="") as f:
             for row in csv.DictReader(f):
-                fqn = row.get("co_referenced_table") or ""
+                fqn = _first(row, "co_referenced_table", "co_queried_table",
+                             "table") or ""
                 short = fqn.rsplit(".", 1)[-1]
-                cnt = _maybe_int(row.get("co_query_count")) or 0
+                cnt = _maybe_int(
+                    _first(row, "co_query_count", "query_count", "co_count")
+                ) or 0
                 if short and short != table_id:
                     blob["co_queried"].append({"table": short, "count": cnt})
     return blob
@@ -462,14 +592,23 @@ def _write_gold_queries(
     gold_dir.mkdir(parents=True, exist_ok=True)
     n = 0
     for i, row in enumerate(rows[:200]):
-        q = row.get("query")
+        # the SQL text key varies (query / sql / query_text) — match the
+        # same tolerance the enricher uses so real analyst SQL, the
+        # strongest grounding signal we own, is never silently dropped
+        q = _first(row, "query", "sql", "query_text", "text") if isinstance(
+            row, dict) else str(row)
         if not q:
             continue
         path = gold_dir / f"Q__{table_id}__{i:03d}.sql"
+        job = _first(row, "job_id", "jobId") if isinstance(row, dict) else None
+        user = (_first(row, "user_email", "user")
+                if isinstance(row, dict) else None)
+        created = (_first(row, "creation_time", "created_at", "start_time")
+                   if isinstance(row, dict) else None)
         path.write_text(
-            f"-- job_id: {row.get('job_id')}\n"
-            f"-- user: {row.get('user_email')}\n"
-            f"-- created_at: {row.get('creation_time')}\n"
+            f"-- job_id: {job}\n"
+            f"-- user: {user}\n"
+            f"-- created_at: {created}\n"
             f"{q.strip()}\n",
             encoding="utf-8",
         )

@@ -12,7 +12,11 @@ the fixes so the spine holds:
 
 from __future__ import annotations
 
-from synapse.graph.builder import _flag, _mdm_governance
+import json
+
+from synapse.graph.builder import (
+    _flag, _mdm_governance, build_graph_from_sources)
+from synapse.graph.inspector import inspect_table
 from synapse.graph.store import GraphStore, canonical_uri
 
 
@@ -81,3 +85,42 @@ def test_non_sensitivity_flag_can_still_be_updated():
     # is_nullable is BQ-owned and must be correctable True -> False
     store.upsert_node("Column", uri, {"is_nullable": False}, source="bq")
     assert store.get(uri).properties["is_nullable"] is False
+
+
+# ─── lifecycle + recertification trust signals reach the graph ───
+
+
+def test_mdm_trust_signals_land_and_surface(tmp_path):
+    """recertification, lifecycle version, and the breaking-change/purge
+    flags — the defensibility signals — must ride on the table node and be
+    visible to the agent through inspect_table's governance block."""
+    mdm = tmp_path / "mdm_cache"
+    mdm.mkdir(parents=True)
+    (mdm / "risk_pers_acct.json").write_text(json.dumps({
+        "table_name": "risk_pers_acct",
+        "table_description": "Account-level risk.",
+        "columns": [{"name": "acct_id", "type": "STRING"}],
+        "dataset_id": "ds-1", "ownership_id": "own-1",
+        "ownership": {"recertification_date": "2026-03-01",
+                      "status": "CERTIFIED"},
+        "pipeline": {"pipeline_name": "risk_load", "pipeline_type": "BATCH"},
+        "lifecycle": {"status": "COMPLETED", "lifecycle_version": "3",
+                      "region": "US", "updated_date": "2026-06-30",
+                      "is_breaking_change": "Y", "is_purge": "N"},
+    }), encoding="utf-8")
+
+    store = build_graph_from_sources(tmp_path)
+    p = store.get(canonical_uri("table", "risk_pers_acct")).properties
+    assert p["recertification_date"] == "2026-03-01"
+    assert p["ownership_status"] == "CERTIFIED"
+    assert p["lifecycle_version"] == "3"
+    assert p["pipeline_type"] == "BATCH"
+    assert p["is_breaking_change"] is True      # "Y" read correctly
+    assert p["is_purge"] is False               # "N" is NOT truthy
+    assert p["dataset_id"] == "ds-1"
+
+    gov = inspect_table(store, "risk_pers_acct")["governance"]
+    assert gov["recertification_date"] == "2026-03-01"
+    assert gov["is_breaking_change"] is True
+    assert gov["lifecycle_version"] == "3"
+    assert gov["pipeline_type"] == "BATCH"
