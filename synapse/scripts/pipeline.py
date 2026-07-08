@@ -357,15 +357,23 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             run_report["enrichment_failures"] = failures
             run_report["enrichment_grounding"] = {
                 "totals": totals, "per_table": grounding}
-            proposals = propose_entities(bundles)
+            # Auto-understand entities the cardmember way: a single table is
+            # enough to surface one (min_supporting_tables=1) — it strengthens
+            # as more tables share the key.
+            proposals = propose_entities(
+                bundles, min_supporting_tables=1, min_aggregate_confidence=0.6)
             (out_root / "entity_proposals.json").write_text(
                 json.dumps([p.model_dump() for p in proposals], indent=2),
                 encoding="utf-8")
-            _note(f"{len(proposals)} entity proposal(s) → "
-                  f"{out_root / 'entity_proposals.json'} (steward review)")
+            from synapse.graph.entities import auto_materialize_entities
+            ent_report = auto_materialize_entities(store, proposals)
+            _note(f"{ent_report['entities_added']} entit(y/ies) auto-materialized "
+                  f"(inferred) + {ent_report['edges_added']} IDENTIFIES edge(s); "
+                  f"a steward may upgrade to human_asserted")
             run_report["enrichment"] = {
                 "tables": sorted(bundles), "column_observations": n_obs,
                 "entity_proposals": len(proposals),
+                "entities_materialized": ent_report["entities_added"],
             }
             stats = store.stats()
             _note(f"post-enrichment tiers: "
