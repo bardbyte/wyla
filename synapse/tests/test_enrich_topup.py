@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from synapse.enrichment.enricher import (
-    compute_topup_plan, enrich_graph, merge_memories,
+    compute_topup_plan, enrich_graph, merge_memories, plan_enrichment,
 )
 from synapse.enrichment.schemas import (
     ColumnObservation, EnrichmentBundle, SelfAssessment,
@@ -87,6 +87,47 @@ def test_plan_finds_exactly_the_unobserved_remainder():
     assert set(plan) == {"partial", "untouched"}      # covered absent
     assert plan["partial"] == ["p3", "p4"]
     assert plan["untouched"] == ["x", "y", "z"]
+
+
+# ─── enrichment horizon: the pre-run plan + ETA denominator ──────
+
+
+def test_plan_enrichment_counts_calls_before_any_llm_call():
+    # 3 tables, 9 columns; a wide batch → one call per table
+    plan = plan_enrichment(_store(), column_batch_size=40)
+    assert plan["total_columns"] == 9
+    assert plan["total_calls"] == 3
+    assert plan["budget_capped_calls"] == 3
+    assert plan["per_table"]["partial"] == {"columns": 4, "calls": 1}
+
+
+def test_plan_enrichment_chunks_wide_tables_by_batch():
+    # batch 2 splits partial's 4 columns into 2 calls; covered 1, untouched 2
+    plan = plan_enrichment(_store(), column_batch_size=2)
+    assert plan["per_table"]["partial"]["calls"] == 2
+    assert plan["per_table"]["untouched"]["calls"] == 2
+    assert plan["total_calls"] == 1 + 2 + 2
+
+
+def test_plan_enrichment_scopes_to_only_tables():
+    plan = plan_enrichment(_store(), only_tables=["partial"],
+                           column_batch_size=40)
+    assert set(plan["per_table"]) == {"partial"}
+    assert plan["total_columns"] == 4
+
+
+def test_plan_enrichment_caps_at_budget_but_keeps_true_total():
+    plan = plan_enrichment(_store(), column_batch_size=2, max_calls=3)
+    assert plan["total_calls"] == 5            # the honest size
+    assert plan["budget_capped_calls"] == 3    # what will actually be spent
+
+
+def test_plan_enrichment_drops_fully_skipped_tables():
+    # the top-up's skip set: covered is fully observed → absent, zero calls
+    skip = {"covered": {"a", "b"}}
+    plan = plan_enrichment(_store(), column_batch_size=40, skip_columns=skip)
+    assert "covered" not in plan["per_table"]
+    assert plan["total_calls"] == 2            # partial + untouched only
 
 
 def test_topup_enriches_only_remaining_columns():
@@ -238,6 +279,18 @@ def test_verbose_progress_prints_tables_and_calls(capsys):
     assert "▶ [1/1] covered: 2 column(s) in 1 call(s)" in out
     assert "[1/~1] chunk 1/1" in out and "2 obs" in out
     assert "✓ covered:" in out                 # gate one-liner
+
+
+def test_verbose_eta_self_computes_when_plan_not_supplied(capsys):
+    """A verbose caller that omits planned_calls still gets the horizon —
+    enrich_graph derives it from the same selection the loop walks, so the
+    per-chunk counter keeps its denominator (the pipeline relied on this)."""
+    store = _store()
+    enrich_graph(store, RecordingClient(), only_tables=["untouched"],
+                 verbose=True)                 # no planned_calls
+    out = capsys.readouterr().out
+    assert "planned ~1 call(s)" in out         # header shows the horizon
+    assert "[1/~1] chunk 1/1" in out           # denominator, not a bare [1]
 
 
 def test_cli_resumes_interrupted_run_without_respending_calls(tmp_path):
