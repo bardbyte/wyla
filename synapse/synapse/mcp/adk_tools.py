@@ -112,10 +112,20 @@ def build_adk_tools(service: GraphService) -> list[Callable[..., dict[str, Any]]
         review/curation?" or to qualify how settled an area is."""
         return service.get_steward_review_queue(limit)
 
+    def explain_column(table: str, column: str, question: str = "") -> dict:
+        """Explain what a specific column MEANS when inspect_table doesn't
+        already make it clear. Read-through: returns the grounded
+        description if the graph has one; otherwise fills it on demand with
+        one gated LLM call at capped provenance and remembers it. Always
+        returns the grounded profile (type, range, nulls); says so honestly
+        when there isn't enough evidence to define the meaning."""
+        return service.explain_column(table, column, question or None)
+
     return [
         search_entities, list_tables_for_domain, inspect_table,
         find_columns_for_concept, get_filter_values, resolve_code,
         get_join_path, get_lineage, get_metric, get_skill, get_guardrails,
         get_dq_status, explain_confidence, disambiguate_term,
         validate_sql_plan, get_entity, get_steward_review_queue,
+        explain_column,
     ]

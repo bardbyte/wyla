@@ -39,6 +39,8 @@ class GraphService:
         tenant_id: str = "default",
         cache: TTLCache | None = None,
         skills: "Any | None" = None,
+        llm_client: "Any | None" = None,
+        overlay: "Any | None" = None,
     ) -> None:
         self.store = store
         self.tenant_id = tenant_id
@@ -49,6 +51,12 @@ class GraphService:
         # carries no skill-derived nodes. Absent → fall back to graph nodes
         # (transition/back-compat).
         self.skills = skills
+        # On-demand enrichment (the lazy layer): explain_column fills a
+        # column with no grounded meaning using llm_client, persisting into
+        # overlay. Both optional — absent, explain_column serves the
+        # grounded profile and read-through cache without an LLM.
+        self.llm_client = llm_client
+        self.overlay = overlay
 
     # ─── envelope helpers ────────────────────────────────────
 
@@ -972,6 +980,30 @@ class GraphService:
             "items": items,
         })
 
+    def explain_column(self, table: str, column: str,
+                       question: str | None = None) -> dict[str, Any]:
+        """Explain what a column means. Read-through: returns the graph's
+        grounded description when it has one; otherwise, if on-demand
+        enrichment is available, fills it with ONE gated LLM call at capped
+        (inferred) provenance and persists it so the next caller gets it
+        free. No evidence → an honest 'not enough to define this', never
+        invention. Use when a column's meaning isn't already clear from
+        inspect_table. Always returns the grounded profile (type, range,
+        nulls) even when no description can be grounded."""
+        started = time.monotonic()
+        from synapse.enrichment.on_demand import explain_column as _fill
+        res = _fill(self.store, table, column,
+                    llm_client=self.llm_client, overlay=self.overlay,
+                    question=question)
+        if res.get("status") == "error":
+            return self._err(
+                "explain_column", started, "not_found",
+                res.get("reason", "column not found"),
+                suggestions=[f"check the column name via "
+                             f"inspect_table('{table}')"])
+        return self._ok("explain_column", started, res,
+                        partial=(res.get("status") == "partial"))
+
 
 # Ordered registry — single source of truth for both transports.
 TOOL_NAMES: tuple[str, ...] = (
@@ -992,4 +1024,5 @@ TOOL_NAMES: tuple[str, ...] = (
     "validate_sql_plan",
     "get_entity",
     "get_steward_review_queue",
+    "explain_column",
 )

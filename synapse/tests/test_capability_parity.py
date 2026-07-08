@@ -130,5 +130,5 @@ def test_registry_and_adk_roster_carry_the_new_tools():
     assert "get_entity" in TOOL_NAMES
     assert "get_steward_review_queue" in TOOL_NAMES
     names = {t.__name__ for t in build_adk_tools(_world())}
-    assert {"get_entity", "get_steward_review_queue"} <= names
-    assert len(names) == 17                        # 15 + the 2 ports
+    assert {"get_entity", "get_steward_review_queue", "explain_column"} <= names
+    assert len(names) == 18                        # 16 + the 2 ports
