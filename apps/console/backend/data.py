@@ -1,13 +1,12 @@
-"""Read-side data for the console API — graph-backed, sample-backed,
-always labeled.
+"""Read-side data for the console API — graph-only, always labeled.
 
-One rule, applied everywhere (the truth-of-state rule from the design
-research): every payload carries `"live": bool` so the frontend can
-label real data as live and sample data as sample. When a compiled
-snapshot exists (SYNAPSE_GRAPH_PATH, or the pipeline's default cache
-path), reads come from the graph; otherwise a coherent sample world —
-the same five-table shape the pipeline builds — keeps every surface
-functional. The frontend never has to guess which world it is in.
+One rule, applied everywhere (the truth-of-state rule): every payload
+carries `"live": bool` and a `"source"`. When a compiled snapshot exists
+(SYNAPSE_GRAPH_PATH, or the pipeline's default cache path), reads come
+from the graph (`source: "graph"`). When none is loaded, every surface
+returns an HONEST EMPTY payload (`source: "empty"`) — never fabricated
+data. A VP is never shown an invented number; the frontend renders a
+"no graph loaded" state instead.
 
 Nothing here mutates the graph. Writes (metric canonicalization,
 entity approval) stay on their steward-gated CLI paths.
@@ -67,15 +66,16 @@ class ConsoleData:
         return self.store is not None
 
     def _wrap(self, key: str, value: Any) -> dict[str, Any]:
+        # graph-only: no snapshot → an honest empty payload, never invented
+        # data. A VP never sees a fabricated number.
         return {"live": self.live,
-                "source": "graph" if self.live else "sample",
+                "source": "graph" if self.live else "empty",
                 key: value}
 
     # ── data products ────────────────────────────────────────
 
     def products(self, q: str = "") -> dict[str, Any]:
-        rows = (self._products_from_graph() if self.live
-                else _SAMPLE["products"])
+        rows = self._products_from_graph() if self.live else []
         if q:
             needle = _norm(q)
             rows = [r for r in rows
@@ -123,7 +123,7 @@ class ConsoleData:
 
     def graph_summary(self) -> dict[str, Any]:
         if not self.live:
-            return self._wrap("summary", _SAMPLE["summary"])
+            return self._wrap("summary", {})
         stats = self.store.stats()
         sources: dict[str, int] = {}
         for n in self.store.nodes.values():
@@ -146,16 +146,13 @@ class ConsoleData:
         evidence → metric → skill. With `table`, the thread anchors on
         that table and explores ITS connections. Falls back hop-by-hop —
         a thin graph still yields a partial, honest thread. A graph that
-        yields NO hops falls back to the sample thread but is labeled
-        sample — live data and live labels never diverge. An anchored
-        request never silently swaps in the sample storyline."""
+        yields NO hops returns an empty thread (honest empty state) — never
+        a fabricated storyline."""
         if self.live:
             thread = (self._table_thread(table) if table
                       else self._thread_from_graph())
-            if thread["hops"] or table:
-                return self._wrap("thread", thread)
-        return {"live": False, "source": "sample",
-                "thread": _SAMPLE["thread"]}
+            return self._wrap("thread", thread)
+        return self._wrap("thread", {"hops": []})
 
     def _find_table_node(self, table: str):
         """Resolve a table by canonical URI, then by normalized name —
@@ -319,8 +316,7 @@ class ConsoleData:
     # ── metrics ──────────────────────────────────────────────
 
     def metrics(self, q: str = "") -> dict[str, Any]:
-        rows = (self._metrics_from_graph() if self.live
-                else _SAMPLE["metrics"])
+        rows = self._metrics_from_graph() if self.live else []
         if q:
             needle = _norm(q)
             rows = [r for r in rows if needle in _norm(r["name"])]
@@ -347,8 +343,7 @@ class ConsoleData:
         """Canon-first check: exact match / near duplicates / clear.
         The copilot MUST run this before drafting — structurally, not by
         prompt discipline."""
-        canon = (self._metrics_from_graph() if self.live
-                 else _SAMPLE["metrics"])
+        canon = self._metrics_from_graph() if self.live else []
         needle = _norm(name)
         tokens = {t for t in _norm_tokens(name + " " + description)}
         exact = [m for m in canon if _norm(m["name"]) == needle]
@@ -376,9 +371,7 @@ class ConsoleData:
 
     def resolve_term(self, term: str) -> dict[str, Any]:
         if not self.live:
-            hit = next((t for t in _SAMPLE["terms"]
-                        if _norm(t["term"]) == _norm(term)), None)
-            return self._wrap("resolution", hit or {
+            return self._wrap("resolution", {
                 "term": term, "canonical": None, "matches": []})
         return self._wrap("resolution", self._resolve_from_graph(term))
 
@@ -411,8 +404,7 @@ class ConsoleData:
         """Everything behind one chip: the node, its provenance, and its
         neighborhood — the panel a reviewer opens before citing."""
         if not self.live:
-            return self._wrap("witness", _SAMPLE["witness"].get(
-                ref, {"ref": ref, "found": False}))
+            return self._wrap("witness", {"ref": ref, "found": False})
         node = self.store.get(ref)
         if node is None:
             return self._wrap("witness", {"ref": ref, "found": False})
@@ -440,8 +432,7 @@ class ConsoleData:
         """The current confidence tier at a ref — the pin store's
         resolver, so pinned citations stay honest as the graph moves."""
         if not self.live:
-            w = _SAMPLE["witness"].get(ref)
-            return (w or {}).get("provenance", {}).get("tier")
+            return None
         node = self.store.get(ref)
         return node.provenance.confidence_tier if node else None
 
@@ -451,17 +442,7 @@ class ConsoleData:
         under 4 chars dropped, case-insensitive dedupe with tables
         outranking metrics outranking entities, capped at 500."""
         if not self.live:
-            entries = []
-            for p in _SAMPLE["products"]:
-                entries.append({"name": p["name"], "kind": "table",
-                                "ref": p["ref"]})
-            for m in _SAMPLE["metrics"]:
-                entries.append({"name": m["name"], "kind": "metric",
-                                "ref": m["ref"]})
-            entries.append({"name": "Account", "kind": "entity",
-                            "ref": "synapse://entity/account"})
-            return {"live": False, "source": "sample",
-                    "lexicon": _dedupe_lexicon(entries)}
+            return self._wrap("lexicon", [])
         entries = []
         for node in self.store.nodes_by_type("Table"):
             name = str(node.properties.get("table_name", "")).strip()
@@ -503,8 +484,7 @@ class ConsoleData:
                             } for q in verified[:12]]}
             except Exception:
                 pass
-        return {"live": False, "source": "sample",
-                "questions": _SAMPLE["questions"]}
+        return self._wrap("questions", [])
 
 
 def _dedupe_lexicon(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -533,163 +513,3 @@ def _norm_tokens(text: str) -> list[str]:
         out.append("".join(cur))
     stop = {"the", "of", "a", "an", "by", "per", "for", "and", "or", "in"}
     return [t for t in out if t not in stop and len(t) > 1]
-
-
-# ─── the sample world ────────────────────────────────────────
-# Mirrors the shape the pipeline compiles for the five onboarded tables,
-# so the UI exercised against samples behaves identically against the
-# graph. Sample data is always labeled as such by the `live` flag.
-
-_SAMPLE: dict[str, Any] = {
-    "products": [
-        {"name": "sbs_new_accounts", "ref": "synapse://table/sbs_new_accounts",
-         "description": "New account originations with approval outcome, "
-                        "product, and channel.",
-         "owner": "New Accounts", "domain": "originations",
-         "lifecycle": "active", "tier": "grounded",
-         "readiness": {"columns": 48, "meaning_pct": 100,
-                       "related_tables": 3, "metrics": 12,
-                       "governance": True, "lineage": True}},
-        {"name": "us_daily_rr_smry_data",
-         "ref": "synapse://table/us_daily_rr_smry_data",
-         "description": "Daily delinquency roll-rate summary at portfolio "
-                        "grain.",
-         "owner": "Portfolio Risk", "domain": "risk",
-         "lifecycle": "active", "tier": "grounded",
-         "readiness": {"columns": 61, "meaning_pct": 99,
-                       "related_tables": 2, "metrics": 18,
-                       "governance": True, "lineage": False}},
-        {"name": "roll_rate_calc", "ref": "synapse://table/roll_rate_calc",
-         "description": "Account-level delinquency stage transitions used "
-                        "by the roll-rate playbook.",
-         "owner": "Portfolio Risk", "domain": "risk",
-         "lifecycle": "active", "tier": "grounded",
-         "readiness": {"columns": 35, "meaning_pct": 97,
-                       "related_tables": 2, "metrics": 9,
-                       "governance": True, "lineage": True}},
-        {"name": "customer_insights_cardmember",
-         "ref": "synapse://table/customer_insights_cardmember",
-         "description": "Cardmember profile and engagement attributes.",
-         "owner": "Customer Insights", "domain": "customer",
-         "lifecycle": "active", "tier": "inferred",
-         "readiness": {"columns": 214, "meaning_pct": 92,
-                       "related_tables": 1, "metrics": 6,
-                       "governance": True, "lineage": False}},
-        {"name": "raw_accounts", "ref": "synapse://table/raw_accounts",
-         "description": "Account master extract; feeds the summary tables.",
-         "owner": "Data Platform", "domain": "core",
-         "lifecycle": "active", "tier": "inferred",
-         "readiness": {"columns": 72, "meaning_pct": 88,
-                       "related_tables": 4, "metrics": 2,
-                       "governance": False, "lineage": True}},
-    ],
-    "summary": {
-        "nodes": 14210, "edges": 20964,
-        "nodes_by_type": {"Table": 29, "Column": 3184, "Metric": 165,
-                          "Synonym": 812, "Skill": 11, "Guardrail": 23,
-                          "Entity": 4, "CodeMapping": 96,
-                          "FilterValue": 240, "DataQualityRule": 31,
-                          "User": 118},
-        "edges_by_type": {"CONTAINS": 3184, "RELATES_TO": 402,
-                          "EQUIVALENT_TO": 57, "HAS_SYNONYM": 812,
-                          "QUERIED_BY": 1240, "IDENTIFIES": 9,
-                          "COMPUTED_FROM": 310, "UPSTREAM_OF": 18},
-        "tiers": {"human_asserted": 13, "grounded": 211,
-                  "inferred": 6728, "guessed": 7258},
-        "witnesses": {"mdm": 3120, "bq": 2988, "corpus": 2140,
-                      "skills": 690, "llm": 6400, "human_approval": 13},
-        "snapshot_version": None,
-    },
-    "thread": {"hops": [
-        {"kind": "entity", "label": "Account",
-         "ref": "synapse://entity/account", "tier": "human_asserted",
-         "detail": "identified by 2 columns"},
-        {"kind": "column", "label": "sbs_new_accounts.acct_id",
-         "ref": "synapse://column/sbs_new_accounts/acct_id",
-         "tier": "grounded", "detail": "identifying column"},
-        {"kind": "column", "label": "roll_rate_calc.acct_id",
-         "ref": "synapse://column/roll_rate_calc/acct_id",
-         "tier": "grounded", "detail": "identifying column"},
-        {"kind": "join", "label": "join evidence",
-         "ref": "synapse://edge/equiv", "tier": "grounded",
-         "detail": "acct_id ≍ acct_id · observed in 41 analyst queries"},
-        {"kind": "metric", "label": "C-30 roll rate",
-         "ref": "synapse://metric/c30_roll_rate", "tier": "grounded",
-         "detail": "balances rolling current→30+ ÷ prior current balances"},
-        {"kind": "skill", "label": "RollRates playbook",
-         "ref": "synapse://skill/sbs_rollrates", "tier": "human_asserted",
-         "detail": "expert playbook"},
-    ]},
-    "metrics": [
-        {"name": "C-30 roll rate", "ref": "synapse://metric/c30_roll_rate",
-         "formula": "sum(bal_roll_c30) / sum(bal_current_prior)",
-         "description": "Balances rolling from current to 30+ days past "
-                        "due, over prior current balances.",
-         "tier": "grounded", "sources": ["skills", "corpus"]},
-        {"name": "Approval rate", "ref": "synapse://metric/approval_rate",
-         "formula": "count(decision = 'approved') / count(decisioned)",
-         "description": "Approved applications over all decisioned "
-                        "applications.",
-         "tier": "grounded", "sources": ["skills", "corpus", "bq"]},
-        {"name": "Net write-off rate",
-         "ref": "synapse://metric/net_write_off_rate",
-         "formula": "(gross_write_offs - recoveries) / avg_receivables",
-         "description": "Write-offs net of recoveries over average "
-                        "receivables.",
-         "tier": "grounded", "sources": ["skills"]},
-        {"name": "Average new-account line",
-         "ref": "synapse://metric/avg_new_account_line",
-         "formula": "avg(initial_credit_line)",
-         "description": "Mean initial line assignment on booked accounts.",
-         "tier": "inferred", "sources": ["corpus"]},
-    ],
-    "terms": [
-        {"term": "roll rate", "canonical": {
-            "name": "C-30 roll rate", "kind": "Metric",
-            "ref": "synapse://metric/c30_roll_rate", "tier": "grounded",
-            "sources": ["skills", "corpus"]},
-         "matches": [
-            {"name": "C-30 roll rate", "kind": "Metric",
-             "ref": "synapse://metric/c30_roll_rate", "tier": "grounded",
-             "sources": ["skills", "corpus"]},
-            {"name": "roll_rate_calc", "kind": "Table",
-             "ref": "synapse://table/roll_rate_calc", "tier": "grounded",
-             "sources": ["mdm", "bq"]}]},
-    ],
-    "witness": {
-        "synapse://metric/c30_roll_rate": {
-            "ref": "synapse://metric/c30_roll_rate", "found": True,
-            "kind": "Metric",
-            "properties": {"name": "C-30 roll rate",
-                           "formula": "sum(bal_roll_c30) / "
-                                      "sum(bal_current_prior)"},
-            "provenance": {"tier": "grounded", "score": 0.85,
-                           "sources": ["skills", "corpus"]},
-            "edges": []},
-        "synapse://table/sbs_new_accounts": {
-            "ref": "synapse://table/sbs_new_accounts", "found": True,
-            "kind": "Table",
-            "properties": {"table_name": "sbs_new_accounts",
-                           "owner": "New Accounts",
-                           "lifecycle_status": "active"},
-            "provenance": {"tier": "grounded", "score": 0.9,
-                           "sources": ["mdm", "bq", "corpus", "skills"]},
-            "edges": [{"type": "CONTAINS",
-                       "other": "synapse://column/sbs_new_accounts/acct_id",
-                       "direction": "out", "tier": "grounded"}]},
-    },
-    "questions": [
-        {"question": "Who owns sbs_new_accounts, and which pipeline feeds "
-                     "it?", "archetype": "governance"},
-        {"question": "How are new accounts trending month over month?",
-         "archetype": "trend"},
-        {"question": "What is the C-30 roll rate, and how is it defined?",
-         "archetype": "metric"},
-        {"question": "Which tables can join to roll_rate_calc, and on what "
-                     "keys?", "archetype": "join"},
-        {"question": "Show delinquency stage transitions for the latest "
-                     "month.", "archetype": "warehouse"},
-        {"question": "Why should I trust the approval-rate definition?",
-         "archetype": "confidence"},
-    ],
-}

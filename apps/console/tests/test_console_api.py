@@ -52,15 +52,18 @@ def _live_data(tmp_path) -> ConsoleData:
 # ─── the two worlds share one shape ──────────────────────────
 
 
-def test_sample_world_is_labeled_and_coherent():
+def test_empty_world_is_honest_when_no_graph():
+    # graph-only: no snapshot → honest empty payloads, never fabricated data
     data = ConsoleData(snapshot_path="/nonexistent/graph.json")
     assert data.live is False
     for payload in (data.products(), data.metrics(), data.graph_summary(),
-                    data.graph_thread(), data.resolve_term("roll rate")):
+                    data.graph_thread(), data.resolve_term("roll rate"),
+                    data.lexicon()):
         assert payload["live"] is False
-        assert payload["source"] == "sample"
-    assert len(data.products()["products"]) == 5
-    assert data.graph_thread()["thread"]["hops"][0]["kind"] == "entity"
+        assert payload["source"] == "empty"       # never "sample"
+    assert data.products()["products"] == []
+    assert data.metrics()["metrics"] == []
+    assert data.graph_thread()["thread"]["hops"] == []
 
 
 def test_live_world_reads_the_graph(tmp_path):
@@ -89,10 +92,9 @@ def test_witness_panel_says_not_found_honestly(tmp_path):
     assert data.witness("synapse://table/ghost")["witness"]["found"] is False
 
 
-def test_threadless_live_graph_serves_sample_labeled_sample(tmp_path):
-    """A live snapshot with no thread-worthy nodes falls back to the
-    sample storyline — and says so. live:true + sample content is the
-    one combination that must never ship."""
+def test_threadless_live_graph_returns_empty_thread(tmp_path):
+    """A live snapshot with no thread-worthy nodes returns an EMPTY thread
+    (honest empty state) — never a fabricated storyline."""
     from synapse.graph.store import GraphStore, canonical_uri
     store = GraphStore()
     t = canonical_uri("table", "bare")
@@ -102,8 +104,8 @@ def test_threadless_live_graph_serves_sample_labeled_sample(tmp_path):
     data = ConsoleData(snapshot_path=snap)
     assert data.live is True                   # snapshot loaded fine
     thread = data.graph_thread()
-    assert thread["live"] is False             # …but the thread is sample
-    assert thread["source"] == "sample"
+    assert thread["live"] is True and thread["source"] == "graph"
+    assert thread["thread"]["hops"] == []      # empty, not sample
 
 
 def test_relative_snapshot_path_falls_back_to_repo_root(tmp_path, monkeypatch):
@@ -190,7 +192,7 @@ def test_viability_exact_near_and_clear(tmp_path):
         "verdict"] == "clear"
 
 
-def test_lexicon_live_and_sample(tmp_path):
+def test_lexicon_live_and_empty(tmp_path):
     live = _live_data(tmp_path).lexicon()
     assert live["live"] is True
     names = {(e["name"], e["kind"]) for e in live["lexicon"]}
@@ -198,10 +200,9 @@ def test_lexicon_live_and_sample(tmp_path):
     assert ("Approval rate", "metric") in names
     assert all(len(e["name"]) >= 4 for e in live["lexicon"])
 
-    sample = ConsoleData(snapshot_path="/nonexistent/g.json").lexicon()
-    assert sample["live"] is False
-    assert any(e["name"] == "sbs_new_accounts"
-               for e in sample["lexicon"])
+    empty = ConsoleData(snapshot_path="/nonexistent/g.json").lexicon()
+    assert empty["live"] is False and empty["source"] == "empty"
+    assert empty["lexicon"] == []
 
 
 # ─── the classic chat surface ────────────────────────────────
@@ -263,7 +264,9 @@ def test_api_surface_round_trips():
     assert client.get("/api/metrics").json()["metrics"]
     assert client.get("/api/graph/summary").json()["summary"]["nodes"] > 0
     assert client.get("/api/graph/thread").json()["thread"]["hops"]
-    assert client.get("/api/questions").json()["questions"]
+    # questions come from the demo-questions FILE, not the graph — the
+    # endpoint round-trips a list (possibly empty when no file is staged)
+    assert isinstance(client.get("/api/questions").json()["questions"], list)
     v = client.post("/api/metrics/viability",
                     json={"name": "approval rate"}).json()
     assert v["viability"]["verdict"] in ("exact", "near_duplicate", "clear")
