@@ -284,13 +284,52 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                     else (sorted(manifest_names) if manifest_names else None))
             out_root = Path(args.out).expanduser().parent
             grounding: dict[str, dict] = {}
+            # Prioritize: spend LLM calls on the high-value head of each
+            # table (identifiers → analyst-salient → coded → MDM-gap) and
+            # leave the numeric tail grounded-by-BQ, not LLM-narrated. Runs
+            # as the enricher's skip_columns complement; --enrich-all-columns
+            # restores the exhaustive sweep.
+            skip_columns: dict[str, set[str]] | None = None
+            if not args.enrich_all_columns:
+                from collections import Counter
+                from synapse.enrichment.prioritize import (
+                    prioritize_columns, select_for_enrichment)
+                from synapse.enrichment.signals import (
+                    cross_table_column_counts)
+                cap = args.enrich_max_columns or None
+                cross = cross_table_column_counts(store)
+                targets = only or [
+                    str(n.properties.get("table_name"))
+                    for n in store.nodes_by_type("Table")
+                    if n.properties.get("table_name")]
+                skip_columns = {}
+                _note("prioritization — LLM spent on the high-value head "
+                      "(tail stays grounded-by-BQ):")
+                for tbl in sorted(set(targets)):
+                    ranked = prioritize_columns(store, tbl, cross_counts=cross)
+                    if not ranked:
+                        continue
+                    keep = select_for_enrichment(ranked, max_columns=cap)
+                    if not keep:            # guarantee a table-identity pass
+                        keep = [p.column for p in ranked[:12]]
+                    keep_l = {c.lower() for c in keep}
+                    all_l = {p.column.lower() for p in ranked}
+                    skip = all_l - keep_l
+                    if skip:
+                        skip_columns[tbl.lower()] = skip
+                    tiers = Counter(
+                        p.tier for p in ranked if p.column.lower() in keep_l)
+                    _note(f"  {tbl[:34]:34} {len(keep):>4}/{len(all_l):<6} "
+                          + ", ".join(f"{k}:{v}"
+                                      for k, v in tiers.most_common()))
             # Pre-run work plan — the horizon before a single Gemini call
             # (the top-up's UX: know how big the run is, and how far along
             # you are, so a multi-hour laptop run never feels like a hang).
             plan = plan_enrichment(
                 store, only_tables=only,
                 column_batch_size=args.enrich_batch_size,
-                max_calls=args.enrich_max_calls)
+                max_calls=args.enrich_max_calls,
+                skip_columns=skip_columns)
             _note(f"enrichment plan — {len(plan['per_table'])} table(s), "
                   f"{plan['total_columns']} column(s):")
             _note(f"  {'table':38} {'cols':>6}  ~calls")
@@ -314,6 +353,7 @@ def run_pipeline(args: argparse.Namespace) -> Path:
                 demo_out=out_root / "demo_questions.json",
                 verbose=True,
                 planned_calls=plan["budget_capped_calls"],
+                skip_columns=skip_columns,
             )
             n_obs = sum(len(b.column_observations) for b in bundles.values())
             n_syn = sum(len(b.candidate_synonyms) for b in bundles.values())
@@ -488,6 +528,13 @@ def main() -> None:
                         help="hard LLM-call budget for the whole run; "
                              "tables that don't fit are reported, not "
                              "silently dropped")
+    parser.add_argument("--enrich-all-columns", action="store_true",
+                        help="enrich EVERY column (disable prioritization — "
+                             "the exhaustive, expensive sweep). Default is "
+                             "the prioritized head only.")
+    parser.add_argument("--enrich-max-columns", type=int, default=0,
+                        help="per-table cap on prioritized columns sent to "
+                             "the LLM (0 = no cap; identifiers always kept)")
     parser.add_argument("--enrich-tables", default="",
                         help="comma list to enrich (default: manifest "
                              "tables, else every table in the graph)")
