@@ -44,15 +44,22 @@ ConfidenceTier = Literal[
 
 
 SOURCE_WEIGHTS: dict[SourceName, int] = {
-    "human_approval":  10,
-    "skills":           7,  # human-curated skill packages — expert testimony
-    "metric_catalog":   5,
-    "glossary":         5,
-    "bq":               4,
+    "human_approval":  10,  # steward sign-off — the human ceiling
+    # MDM is the metadata spine: it carries the business names, ownership,
+    # sensitivity, and taxonomy for every column, so it is the highest DATA
+    # authority. BQ is the physical truth (schema + profile) — second. With
+    # both agreeing a fact reaches grounded; MDM alone is inferred.
+    "mdm":              8,
+    "bq":               6,
+    "metric_catalog":   5,  # curated metric registry
+    "glossary":         5,  # curated term registry
     "dq_engine":        4,  # rule-based DQ checks — system-attested
-    "mdm":              3,
     "baseline_lookml":  3,
     "table_catalog":    3,
+    # Skills are guardrails + agent knowledge, NOT a data-grounding witness:
+    # a skill "applying to" a table says nothing about the table's data
+    # quality, so skills no longer witness Table/Column tiers (see builder).
+    "skills":           2,
     "corpus":           1,  # per observation
     "usage":            1,  # per observation
     "llm_generated":    1,  # AI-suggested; trust low until corroborated

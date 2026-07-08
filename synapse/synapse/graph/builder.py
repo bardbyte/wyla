@@ -1376,10 +1376,11 @@ def _ingest_skills(store: GraphStore, skills_dir: Path) -> None:
         for table in blob.get("tables_used") or []:
             t_uri = canonical_uri("table", table)
             table_uris[str(table).lower()] = t_uri
-            store.upsert_node(
-                "Table", t_uri,
-                properties={"table_name": table}, source="skills",
-            )
+            # Skills declare applicability but NEVER mint or witness a Table
+            # node — the data graph is sourced by the data (mdm/bq/…). The
+            # APPLIES_TO edge references the canonical URI: it connects when a
+            # data witness minted the table, and prunes as a dangling edge
+            # under the allowlist otherwise. (upsert_edge never creates nodes.)
             store.upsert_edge(
                 "APPLIES_TO", s_uri, t_uri,
                 properties={"skill_id": skill_id}, source="skills",

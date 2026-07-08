@@ -72,11 +72,15 @@ def test_graph_ingestion_mints_first_class_nodes(loaded, tmp_path: Path):
     assert stats["edges_by_type"]["APPLIES_TO"] == 2
     assert stats["edges_by_type"]["DEFINED_BY"] == 4
     assert stats["edges_by_type"]["CONSTRAINS"] >= 6
-    # provenance: skills facts start life at inferred (single curated source)
+    # skills do NOT mint Table nodes — the data graph is sourced by the data
+    assert "Table" not in stats["nodes_by_type"]
+    # provenance: a skill is knowledge/guardrails, not a data authority, so an
+    # uncorroborated skill fact sits at guessed until data agrees. (get_skill
+    # and guardrail enforcement are unaffected — they don't grade on tier.)
     skill = store.get(canonical_uri("skill", "DEMO_RollRates"))
     assert skill is not None
     assert skill.provenance.sources == ["skills"]
-    assert skill.provenance.confidence_tier == "inferred"
+    assert skill.provenance.confidence_tier == "guessed"
 
 
 def test_missing_dir_is_error_not_crash(tmp_path: Path):
@@ -149,6 +153,16 @@ def test_data_specs_become_graph_facts(tmp_path):
     from synapse.mcp.service import GraphService
 
     load_skills_library(FIXTURE_LIBRARY, out_dir=tmp_path)
+    # A skill's reference data (valid values / bands) attaches to a real
+    # table — skills no longer mint the table themselves, so stage its MDM
+    # row (the data authority) the way a real build would.
+    mdm = tmp_path / "mdm_cache"
+    mdm.mkdir(parents=True, exist_ok=True)
+    (mdm / "sbs_new_accounts.json").write_text(json.dumps({
+        "table_name": "sbs_new_accounts",
+        "columns": [{"name": "decision_cd", "type": "STRING"},
+                    {"name": "fico_band", "type": "STRING"}],
+    }))
     svc = GraphService(build_graph_from_sources(tmp_path))
 
     # valid values → curated FilterValue nodes (highest-trust source)

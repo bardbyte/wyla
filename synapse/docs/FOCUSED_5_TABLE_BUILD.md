@@ -21,24 +21,36 @@ shared entities, cross-table join paths, and lineage a single table can't.
 
 ## Why this grounds (the arithmetic)
 
-Tier is a function of witness breadth, not model quality:
+**MDM is the top data authority** (weight 8 — it carries the business
+names, ownership, and sensitivity for every column), **BQ second**
+(weight 6 — the physical truth). With the new weighting the two sources
+that "have all the data" ground a fact together:
 
 | witnesses on a fact | tier |
 |---|---|
-| `mdm` + `bq` | inferred (0.47) |
-| `mdm` + `bq` + `dq_engine` | **grounded (0.73)** |
-| `mdm` + `bq` + `usage` + `corpus` | **grounded** |
+| `mdm` alone | inferred |
+| **`mdm` + `bq`** | **grounded (0.93)** |
+| `bq` + `corpus` | inferred → + `dq_engine` = grounded |
+| `llm_generated` alone | guessed (capped — never grounds on its own) |
 
-Two mechanical changes do the work, both already in the builder:
+Four mechanical changes do the work, all in the builder:
 
-1. **Allowlist** (`build_graph_from_sources(..., allowlist=…)`, wired to
+1. **MDM-first weighting** — MDM highest, BQ second; a column both
+   witness means grounds. This mirrors the original cardmember build,
+   where MDM + BQ + corpus fused to grounded.
+2. **Skills are out of the data graph** — a skill "applying to" a table
+   no longer witnesses that table's tier (it used to, at weight 7,
+   *outranking* MDM). Skills remain as **guardrails** (security) and
+   **agent knowledge** (`get_skill`); guardrail enforcement is name-based
+   so it needs no Table node.
+3. **Allowlist** (`build_graph_from_sources(..., allowlist=…)`, wired to
    `--manifest`) prunes everything outside the five — including the CTE
-   aliases / template placeholders (`base`, `the`,
-   `your_project.your_dataset.source_table`) that SQL parsing otherwise
-   mints as tables. The 5-table graph is exactly the five.
-2. **Auto-DQ** (`_synthesize_dq_from_profile`) derives DQ rules from the
-   BQ profile and records `dq_engine` as a witness on each profiled
-   column — the third witness that flips `inferred → grounded`. No BQ
+   aliases / placeholders (`base`, `the`,
+   `your_project.your_dataset.source_table`) SQL parsing would mint as
+   tables. The 5-table graph is exactly the five.
+4. **Auto-DQ** (`_synthesize_dq_from_profile`) derives DQ rules from the
+   BQ profile and records `dq_engine` as a witness — it lifts any column
+   BQ profiled but MDM missed, and adds the DQ-quality signal. No BQ
    profile, no rule; nothing invented.
 
 Plus the **PII fix**: BQ policy tags now only *confirm* PII, never

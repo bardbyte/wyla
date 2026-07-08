@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from synapse.graph.builder import build_graph_from_sources
-from synapse.graph.store import GraphStore
+from synapse.graph.store import GraphStore, canonical_uri
 from synapse.loaders.gold_sql_loader import load_gold_sql_corpus
 from synapse.loaders.skills_loader import load_skills_library
 from synapse.mcp.service import TOOL_NAMES, GraphService
@@ -141,8 +141,14 @@ def test_disambiguate_surfaces_ambiguity_instead_of_coinflip(service):
     assert data["ambiguity_reason"] is not None or data["chosen"] is not None
 
 
-def test_join_path_absence_is_error_with_guidance(service):
-    res = service.get_join_path("sbs_new_accounts", "common.roll_rate_calc")
+def test_join_path_absence_is_error_with_guidance():
+    # two real (mdm-grounded) tables with no observed join between them —
+    # the agent must be told not to invent a path, not handed a guess
+    store = GraphStore()
+    for t in ("alpha_tbl", "beta_tbl"):
+        store.upsert_node("Table", canonical_uri("table", t),
+                          {"table_name": t}, source="mdm")
+    res = GraphService(store).get_join_path("alpha_tbl", "beta_tbl")
     assert res["status"] == "error"
     assert "invent" in " ".join(res["error"]["suggestions"]).lower()
 

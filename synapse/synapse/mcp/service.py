@@ -550,6 +550,7 @@ class GraphService:
         uris: set[str] = set()
         prefixes: set[str] = set()
         node = self._resolve_table(target)
+        table_name = target
         if node is not None:
             table_name = str(node.properties.get("table_name"))
             uris.add(node.canonical_uri)
@@ -558,9 +559,14 @@ class GraphService:
                 uris.add(edge.to_uri)
             for edge in self.store.incoming(node.canonical_uri, "COMPUTED_FROM"):
                 uris.add(edge.from_uri)
-            uris.add(canonical_uri("table", table_name))
-            # any column-scoped guardrail of this table, CONTAINS edge or not
-            prefixes.add(canonical_uri("column", table_name) + "/")
+        # Match guardrails by the NAME-derived canonical URI so enforcement
+        # never depends on the target Table node existing in the graph — a
+        # guardrail-only table (no data witness) must still be protected.
+        # Canonical URIs are computed from names at ingest time, so a
+        # CONSTRAINS edge to synapse://table/<name> (or a column under it)
+        # is found whether or not the node was minted.
+        uris.add(canonical_uri("table", table_name))
+        prefixes.add(canonical_uri("column", table_name) + "/")
         if "." in target:
             head, _, col = target.rpartition(".")
             uris.add(canonical_uri("column", head, col))

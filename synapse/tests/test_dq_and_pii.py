@@ -15,15 +15,18 @@ from synapse.graph.store import GraphStore, canonical_uri
 def test_dq_synth_lifts_profiled_column_to_grounded():
     store = GraphStore()
     uri = canonical_uri("column", "risk_pers_acct", "acct_bal")
-    # a column witnessed by mdm + bq, carrying a BQ profile
+    # a column witnessed by corpus + bq, carrying a BQ profile. (mdm + bq
+    # alone already grounds under the new weighting — this uses the weaker
+    # corpus+bq pair, which sits at inferred, to show DQ do the lifting.)
     store.upsert_node("Column", uri,
-                      {"table_name": "risk_pers_acct", "name": "acct_bal"},
-                      source="mdm")
+                      {"table_name": "risk_pers_acct", "name": "acct_bal",
+                       "is_join_key": True},
+                      source="corpus")
     store.upsert_node("Column", uri,
                       {"null_fraction": 0.0, "approx_distinct": 900,
                        "cardinality_bucket": "high"},
                       source="bq")
-    assert store.get(uri).provenance.confidence_tier == "inferred"  # 2 witnesses
+    assert store.get(uri).provenance.confidence_tier == "inferred"  # corpus+bq
 
     made = _synthesize_dq_from_profile(store)
 

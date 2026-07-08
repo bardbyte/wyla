@@ -126,7 +126,13 @@ def test_crawled_facts_land_and_fuse_with_skills(tmp_path):
     # ONE node for the table, despite skills saying common.roll_rate_calc
     node = store.get(canonical_uri("table", "common.roll_rate_calc"))
     assert node is not None
-    assert set(node.provenance.sources) >= {"mdm", "skills"}   # fused!
+    # MDM (the data authority) grounds the table; skills do NOT witness a
+    # table's data facts — they relate to it via an APPLIES_TO edge instead.
+    assert "mdm" in node.provenance.sources
+    assert "skills" not in node.provenance.sources
+    applies = [e for e in store.edges.values()
+               if e.edge_type == "APPLIES_TO" and e.to_uri == node.canonical_uri]
+    assert applies, "the skill should still declare it APPLIES_TO the table"
 
     # spine + org-domain facts
     assert node.properties["company_domain"] == "Risk"
