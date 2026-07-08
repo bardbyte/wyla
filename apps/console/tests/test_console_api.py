@@ -217,10 +217,9 @@ def test_classic_roster_is_the_user_selected_bound():
         "find_columns_for_concept", "get_join_path", "get_lineage",
         "get_metric", "get_skill", "get_dq_status", "disambiguate_term",
         "validate_sql_plan", "get_entity", "get_steward_review_queue",
-        "get_failed_query_corrections",
         "dry_run_sql", "execute_sql",
     }
-    assert len(names) == 16
+    assert len(names) == 15
 
 
 def test_classic_instruction_keeps_the_output_contract():

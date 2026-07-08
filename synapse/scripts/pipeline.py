@@ -230,23 +230,6 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         sources_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy(entities_src, sources_dir / "entities.yaml")
         _note(f"entities: staged steward approvals from {entities_src}")
-    # Witness #7 — steward briefings + failed-query corrections: stage
-    # repo-config curation into the compile (both no-ops when absent)
-    briefings_src = REPO_ROOT / "semantic-graph" / "config" / "briefings"
-    if briefings_src.exists():
-        import shutil
-        sources_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(briefings_src, sources_dir / "briefings",
-                        dirs_exist_ok=True)
-        n_briefs = len(list(briefings_src.glob("*.md")))
-        _note(f"briefings: staged {n_briefs} steward capsule(s)")
-    corrections_src = (REPO_ROOT / "semantic-graph" / "config"
-                       / "corrections.json")
-    if corrections_src.exists():
-        import shutil
-        sources_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy(corrections_src, sources_dir / "corrections.json")
-        _note("corrections: staged failed-query corrections")
     store = build_graph_from_sources(sources_dir)
     stats = store.stats()
     _note(f"nodes: {stats['n_nodes']}  edges: {stats['n_edges']}")

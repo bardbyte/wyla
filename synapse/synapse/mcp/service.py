@@ -255,10 +255,6 @@ class GraphService:
             {node.canonical_uri},
             prefixes={canonical_uri("column", table_name) + "/"},
         )
-        # so does the steward briefing — human-authored table context
-        # (grain, gotchas, known mistakes) must not need asking either
-        if node.properties.get("briefing"):
-            trimmed["briefing"] = node.properties["briefing"]
         self.cache.set(cache_key, trimmed, ttl_seconds=300)
         return self._ok("inspect_table", started, trimmed)
 
@@ -893,44 +889,6 @@ class GraphService:
                                         for c in identified_by}),
         })
 
-    def get_failed_query_corrections(self,
-                                     column_name: str = "") -> dict[str, Any]:
-        """Known column misnamings captured from failed queries
-        ("fico" → fico_score). Check BEFORE naming a column in SQL or
-        an answer; surface a match educationally. Empty column_name
-        returns every correction in the graph."""
-        started = time.monotonic()
-        target = column_name.strip().lower()
-        out: list[dict[str, Any]] = []
-        for col in self.store.nodes_by_type("Column"):
-            corrections = col.properties.get("naming_corrections") or []
-            if not corrections:
-                continue
-            correct = str(col.properties.get(
-                "name", col.canonical_uri.rsplit("/", 1)[-1]))
-            table = str(col.properties.get(
-                "table_name", col.canonical_uri.rsplit("/", 2)[-2]))
-            for c in corrections:
-                if not isinstance(c, dict):
-                    continue
-                wrong = str(c.get("wrong_name", ""))
-                if target and target not in wrong.lower() \
-                        and target not in correct.lower():
-                    continue
-                out.append({
-                    "wrong_name": wrong,
-                    "correct_name": correct,
-                    "table": table,
-                    "uri": col.canonical_uri,
-                    "evidence_count": int(c.get("evidence_count", 1) or 1),
-                    "last_seen": c.get("last_seen"),
-                })
-        out.sort(key=lambda c: (-c["evidence_count"], c["wrong_name"]))
-        return self._ok("get_failed_query_corrections", started, {
-            "corrections": out[:50],
-            "count": len(out),
-        })
-
     def get_steward_review_queue(self, limit: int = 20) -> dict[str, Any]:
         """The facts most in need of a human: lowest-confidence,
         fewest-witness assertions, ranked weakest first. Use when asked
@@ -988,5 +946,4 @@ TOOL_NAMES: tuple[str, ...] = (
     "validate_sql_plan",
     "get_entity",
     "get_steward_review_queue",
-    "get_failed_query_corrections",
 )

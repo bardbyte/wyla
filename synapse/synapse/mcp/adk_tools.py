@@ -112,18 +112,10 @@ def build_adk_tools(service: GraphService) -> list[Callable[..., dict[str, Any]]
         review/curation?" or to qualify how settled an area is."""
         return service.get_steward_review_queue(limit)
 
-    def get_failed_query_corrections(column_name: str = "") -> dict:
-        """Known column misnamings captured from failed queries
-        ("fico" → fico_score). Check BEFORE naming a column in SQL or
-        an answer; surface matches educationally. Empty argument
-        returns every correction in the graph."""
-        return service.get_failed_query_corrections(column_name)
-
     return [
         search_entities, list_tables_for_domain, inspect_table,
         find_columns_for_concept, get_filter_values, resolve_code,
         get_join_path, get_lineage, get_metric, get_skill, get_guardrails,
         get_dq_status, explain_confidence, disambiguate_term,
         validate_sql_plan, get_entity, get_steward_review_queue,
-        get_failed_query_corrections,
     ]

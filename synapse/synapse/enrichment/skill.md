@@ -295,12 +295,6 @@ A JSON document containing:
 - `skills_evidence` — curated credit-risk skill packages that apply to
   this table (domain, knowledge excerpt, metrics defined). Steward-grade
   authority: treat as high-trust evidence, cite as `["skills"]`.
-- `table_briefing` — OPTIONAL steward-written capsule for THIS table:
-  the grain, gotchas (view vs base table), key distinctions
-  (account-level vs customer-level identifiers), and known analyst
-  mistakes. Human-authored primary context — the HIGHEST-authority
-  narrative evidence. Never contradict it; prefer its terminology in
-  your descriptions; cite it as `["human_approval"]`.
 - `tables_in_scope` — every sibling table in the graph with its column
   names. The ONLY legal targets for `relates_to` and for
   cross-table claims of any kind.

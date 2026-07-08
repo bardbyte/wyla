@@ -143,11 +143,6 @@ def enrich_graph(
         context = _build_context_for_table(
             store, table_name,
             evidence_dir=evidence_dir, scope_digest=scope_digest)
-        # steward briefing rides into every call for this table — the
-        # one-table build's quality secret, now a per-table witness
-        briefing = node.properties.get("briefing")
-        if briefing:
-            context["table_briefing"] = briefing
         all_columns = (context.get("inspection") or {}).get("columns") or []
         if skip_columns:
             skip = {c.lower()

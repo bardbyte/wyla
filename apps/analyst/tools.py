@@ -180,7 +180,6 @@ _CLASSIC_GRAPH_TOOLS = (
     "find_columns_for_concept", "get_join_path", "get_lineage",
     "get_metric", "get_skill", "get_dq_status", "disambiguate_term",
     "validate_sql_plan", "get_entity", "get_steward_review_queue",
-    "get_failed_query_corrections",
 )
 
 
