@@ -230,7 +230,14 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         sources_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy(entities_src, sources_dir / "entities.yaml")
         _note(f"entities: staged steward approvals from {entities_src}")
-    store = build_graph_from_sources(sources_dir)
+    # When a manifest scopes the run, use it as the builder allowlist too —
+    # only these tables' nodes survive; CTE aliases and template
+    # placeholders from corpus/skills SQL are pruned instead of minted.
+    build_allowlist = manifest_names or None
+    if build_allowlist:
+        _note(f"allowlist: graph scoped to {len(build_allowlist)} manifest "
+              f"table(s); out-of-scope + CTE-noise nodes pruned")
+    store = build_graph_from_sources(sources_dir, allowlist=build_allowlist)
     stats = store.stats()
     _note(f"nodes: {stats['n_nodes']}  edges: {stats['n_edges']}")
     _note(f"by type: {stats['nodes_by_type']}")

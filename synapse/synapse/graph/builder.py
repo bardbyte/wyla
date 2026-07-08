@@ -28,14 +28,18 @@ from pathlib import Path
 
 from synapse.graph.store import (
     GraphStore,
+    Node,
     canonical_uri,
+    normalize_table_name,
 )
 
 
 # ─── Pass orchestrator ───────────────────────────────────────
 
 
-def build_graph_from_sources(sources_dir: Path) -> GraphStore:
+def build_graph_from_sources(
+    sources_dir: Path, allowlist: "set[str] | None" = None,
+) -> GraphStore:
     """One-shot graph build from synthetic / real source artifacts.
 
     Expected layout under sources_dir:
@@ -47,6 +51,15 @@ def build_graph_from_sources(sources_dir: Path) -> GraphStore:
         gold_queries/Q*.sql
         usage_history/<table>.json
         baseline_views/<table>.view.lkml
+
+    ``allowlist`` scopes the graph to a chosen set of tables (any name
+    form — normalized internally). When set, every table-scoped node
+    whose table is NOT in the set is pruned after the build, along with
+    its dangling edges. This is how a focused build stays exactly its
+    manifest: CTE aliases and template placeholders (``base``, ``the``,
+    ``your_project.your_dataset.source_table``) that corpus/skills SQL
+    parsing would otherwise mint as Table nodes are dropped. Cross-cutting
+    nodes (Synonym, Entity, Skill, Guardrail, User) are always kept.
     """
     store = GraphStore()
 
@@ -80,7 +93,131 @@ def build_graph_from_sources(sources_dir: Path) -> GraphStore:
     # Code-resolution pass — runs after corpus to mine CASE WHENs
     _resolve_codes_from_lookup_tables(store)
 
+    # Dataplex Auto-DQ parallel — derive DQ rules from the BQ profile already
+    # on the nodes, and record dq_engine as a witness on what they validate.
+    # This is the column-grounding lever: a profiled column that also carries
+    # mdm + bq gains a 3rd, system-attested witness → tier climbs to grounded.
+    _synthesize_dq_from_profile(store)
+
+    if allowlist is not None:
+        _prune_to_allowlist(store, allowlist)
+
     return store
+
+
+def _synthesize_dq_from_profile(store: GraphStore) -> int:
+    """Emit DataQualityRule nodes from BQ profiling and attest the witness.
+
+    Real signal only: a column is processed only when it carries BQ
+    profile stats (``null_fraction`` / ``approx_distinct``); a table only
+    when it has a ``row_count``. Each rule is ``auto_suggested`` (the
+    honest ``is it AI-suggested vs human-authored`` flag), gets a
+    VALIDATED_BY edge, and — crucially — records ``dq_engine`` as a source
+    on the validated node so its confidence tier reflects the attestation.
+    No profile → no rule; nothing is invented.
+    """
+    made = 0
+    for node in list(store.nodes.values()):
+        p = node.properties
+        if node.node_type == "Column":
+            nf = p.get("null_fraction")
+            if nf is None and p.get("approx_distinct") is None:
+                continue  # no BQ profile on this column → attest nothing
+            tbl = p.get("table_name") or ""
+            col = p.get("name") or node.canonical_uri.rsplit("/", 1)[-1]
+            status = ("pass" if (nf is not None and nf < 0.01)
+                      else "warning" if nf is not None else "unknown")
+            nn = canonical_uri("dqrule", tbl, col, "not_null")
+            store.upsert_node(
+                "DataQualityRule", nn,
+                {"target_table": tbl, "target_column": col,
+                 "rule_kind": "not_null", "threshold": "null_pct < 0.01",
+                 "last_run_status": status,
+                 "last_run_value": ("" if nf is None else f"null_fraction={nf}"),
+                 "severity": "warning", "auto_suggested": True},
+                source="dq_engine")
+            store.upsert_edge("VALIDATED_BY", node.canonical_uri, nn, {},
+                              source="dq_engine")
+            store.upsert_node("Column", node.canonical_uri, {},
+                              source="dq_engine")  # the witness on the column
+            made += 1
+            # low-cardinality columns with observed values → a set/enum rule
+            if p.get("cardinality_bucket") in ("low", "medium") and \
+                    p.get("distinct_sample"):
+                en = canonical_uri("dqrule", tbl, col, "enum")
+                store.upsert_node(
+                    "DataQualityRule", en,
+                    {"target_table": tbl, "target_column": col,
+                     "rule_kind": "enum", "threshold": "value in observed set",
+                     "last_run_status": "pass", "severity": "info",
+                     "auto_suggested": True},
+                    source="dq_engine")
+                store.upsert_edge("VALIDATED_BY", node.canonical_uri, en, {},
+                                  source="dq_engine")
+        elif node.node_type == "Table":
+            rc = p.get("row_count")
+            if not rc:
+                continue
+            tbl = p.get("table_name") or ""
+            rr = canonical_uri("dqrule", tbl, "row_count")
+            store.upsert_node(
+                "DataQualityRule", rr,
+                {"target_table": tbl, "target_column": None,
+                 "rule_kind": "row_count", "threshold": "row_count > 0",
+                 "last_run_status": "pass", "last_run_value": f"row_count={rc}",
+                 "severity": "warning", "auto_suggested": True},
+                source="dq_engine")
+            store.upsert_edge("VALIDATED_BY", node.canonical_uri, rr, {},
+                              source="dq_engine")
+            store.upsert_node("Table", node.canonical_uri, {},
+                              source="dq_engine")
+            made += 1
+    return made
+
+
+# Node types whose scope is a single table (pruned when out of the
+# allowlist). Everything else — Synonym, Entity, Skill, Guardrail, User —
+# is cross-cutting and always kept.
+_TABLE_SCOPED = {"Table", "Column", "Metric", "FilterValue",
+                 "DataQualityRule", "CodeMapping"}
+
+
+def _node_table(node: "Node") -> str | None:
+    """The table a node belongs to, or None if it isn't table-scoped."""
+    p = node.properties
+    if node.node_type == "Table":
+        return p.get("table_name") or node.canonical_uri.rsplit("/", 1)[-1]
+    if node.node_type in ("Column", "FilterValue"):
+        return p.get("table_name")
+    if node.node_type == "Metric":
+        return p.get("sourced_from_table")
+    if node.node_type == "DataQualityRule":
+        return p.get("target_table")
+    return None  # CodeMapping (column-only) + cross-cutting types
+
+
+def _prune_to_allowlist(store: GraphStore, allowlist: "set[str]") -> None:
+    """Drop table-scoped nodes outside the allowlist + their dangling edges.
+
+    A node with no resolvable table (a cross-cutting type, or a scoped
+    node missing its table property) is KEPT — we only remove nodes we can
+    positively place outside the scope, so nothing is lost by accident.
+    """
+    allow = {normalize_table_name(t) for t in allowlist}
+    drop: set[str] = set()
+    for uri, node in store.nodes.items():
+        if node.node_type not in _TABLE_SCOPED:
+            continue
+        tbl = _node_table(node)
+        if tbl and normalize_table_name(tbl) not in allow:
+            drop.add(uri)
+    for uri in drop:
+        del store.nodes[uri]
+    if drop:
+        store.edges = {
+            euri: e for euri, e in store.edges.items()
+            if e.from_uri not in drop and e.to_uri not in drop
+        }
 
 
 # ─── Per-source ingesters ────────────────────────────────────
@@ -109,6 +246,29 @@ def _ingest_table_catalog(store: GraphStore, csv_path: Path) -> None:
                 },
                 source="table_catalog",
             )
+
+
+def _mdm_pii(c: dict) -> tuple[str, bool]:
+    """Resolve (pii_taxonomy, is_pii) from an MDM column blob, robust to
+    shape drift. The flag lives in one of three places across MDM
+    versions/loaders: a flat ``is_pii``, a nested
+    ``sensitivity_details.is_pii``, or implied by a sensitive
+    ``pii_role_id`` (anything but ``Internal``/empty). A build that reads
+    only the flat key silently reports zero PII when the real blob nests
+    it — so check all three and let any positive win.
+    """
+    sens = c.get("sensitivity_details")
+    if isinstance(sens, list):  # array shape → pick this column's row
+        sens = next((s for s in sens
+                     if s.get("attribute_name") == c.get("name")), {})
+    elif not isinstance(sens, dict):
+        sens = {}
+    role = (c.get("pii_role_id") or c.get("pii_taxonomy")
+            or sens.get("pii_role_id") or "Internal")
+    role_is_sensitive = bool(role) and role.strip().lower() not in (
+        "internal", "public", "none", "")
+    is_pii = bool(c.get("is_pii") or sens.get("is_pii") or role_is_sensitive)
+    return role or "Internal", is_pii
 
 
 def _ingest_mdm(store: GraphStore, cache_dir: Path) -> None:
@@ -171,6 +331,7 @@ def _ingest_mdm(store: GraphStore, cache_dir: Path) -> None:
             if not isinstance(c, dict) or not c.get("name"):
                 continue
             c_uri = canonical_uri("column", name, c["name"])
+            pii_role, is_pii = _mdm_pii(c)
             store.upsert_node(
                 "Column", c_uri,
                 properties={
@@ -183,8 +344,8 @@ def _ingest_mdm(store: GraphStore, cache_dir: Path) -> None:
                     "is_dedupe_key": bool(c.get("is_dedupe_key")),
                     "is_partitioning": bool(c.get("is_partitioned")),
                     "cluster_position": c.get("cluster_position"),
-                    "pii_taxonomy": c.get("pii_role_id") or "Internal",
-                    "is_pii": bool(c.get("is_pii")),
+                    "pii_taxonomy": pii_role,
+                    "is_pii": is_pii,
                     "is_critical_data_element": bool(c.get("is_critical_data_element")),
                 },
                 source="mdm",
@@ -231,24 +392,28 @@ def _ingest_bq_profile(store: GraphStore, cache_dir: Path) -> None:
             null_frac = stats.get("null_fraction")
             bucket = _cardinality_bucket(approx)
             samples = distinct_vals.get(cname, [])
-            store.upsert_node(
-                "Column", c_uri,
-                properties={
-                    "table_name": name,
-                    "data_type": c.get("data_type") or "",
-                    "is_nullable": c.get("is_nullable", True),
-                    "description": c.get("description_bq") or "",
-                    "is_partitioning": bool(c.get("is_partitioning_column")),
-                    "cluster_position": c.get("clustering_ordinal"),
-                    "approx_distinct": approx,
-                    "null_fraction": null_frac,
-                    "cardinality_bucket": bucket,
-                    "distinct_sample": samples[:10],
-                    "pii_taxonomy": (policy_tags.get(cname) or ["Internal"])[0],
-                    "is_pii": bool(policy_tags.get(cname)),
-                },
-                source="bq",
-            )
+            props = {
+                "table_name": name,
+                "data_type": c.get("data_type") or "",
+                "is_nullable": c.get("is_nullable", True),
+                "description": c.get("description_bq") or "",
+                "is_partitioning": bool(c.get("is_partitioning_column")),
+                "cluster_position": c.get("clustering_ordinal"),
+                "approx_distinct": approx,
+                "null_fraction": null_frac,
+                "cardinality_bucket": bucket,
+                "distinct_sample": samples[:10],
+            }
+            # PII: BQ policy tags CONFIRM sensitivity but never deny it.
+            # Only assert when a tag is present — otherwise an untagged BQ
+            # profile would clobber MDM's (correct) is_pii/taxonomy with a
+            # spurious False/Internal, which is exactly how the manifest
+            # build reported zero PII.
+            tags = policy_tags.get(cname)
+            if tags:
+                props["pii_taxonomy"] = tags[0]
+                props["is_pii"] = True
+            store.upsert_node("Column", c_uri, properties=props, source="bq")
             store.upsert_edge(
                 "CONTAINS", t_uri, c_uri, properties={}, source="bq",
             )
