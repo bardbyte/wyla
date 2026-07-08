@@ -191,10 +191,16 @@ class ColumnProperties(BaseModel):
     min_value: Any = None
     max_value: Any = None
     distinct_sample: list[dict[str, Any]] = Field(default_factory=list)
-    # PII / governance
-    pii_taxonomy: str = "Internal"
+    # PII / governance — MDM is the authority for all of these
+    pii_taxonomy: str = "Internal"        # pii_role_id, e.g. Sensitive>Identifier>MemberID
     is_pii: bool = False
+    is_sensitive: bool = False
+    is_gdpr: bool = False
     is_critical_data_element: bool = False
+    # MDM attribute-derivation logic (present → column is computed, not raw;
+    # the enrichment skill uses this to abstain from entity-tagging it)
+    derived_logic: str = ""
+    external_references: list[Any] = Field(default_factory=list)
     # Usage
     reference_count: int = 0
     is_filter: bool = False
@@ -349,6 +355,14 @@ class Edge(BaseModel):
 # ─── The store ───────────────────────────────────────────────
 
 
+# Safety-critical governance flags. Once ANY witness asserts one True, a
+# later witness's default False must not silently downgrade it — over-
+# flagging sensitivity is safe, under-flagging is a governance breach. This
+# closes the whole clobber class at the store (the BQ is_pii clobber was one
+# instance): sensitivity set by MDM survives a profile pass that omits it.
+_STICKY_TRUE = frozenset({"is_pii", "is_sensitive", "is_gdpr"})
+
+
 class GraphStore(BaseModel):
     """In-memory typed graph. Nodes keyed by canonical_uri."""
 
@@ -374,9 +388,12 @@ class GraphStore(BaseModel):
         if canonical_uri in self.nodes:
             node = self.nodes[canonical_uri]
             # Merge properties (new keys win; existing keys keep first value
-            # unless the new value is non-empty)
+            # unless the new value is non-empty). Safety-critical sensitivity
+            # flags are monotonic — a later False never downgrades a True.
             for k, v in properties.items():
                 if v is None or v == "" or v == []:
+                    continue
+                if k in _STICKY_TRUE and not v and node.properties.get(k):
                     continue
                 node.properties[k] = v
         else:

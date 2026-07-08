@@ -248,14 +248,27 @@ def _ingest_table_catalog(store: GraphStore, csv_path: Path) -> None:
             )
 
 
-def _mdm_pii(c: dict) -> tuple[str, bool]:
-    """Resolve (pii_taxonomy, is_pii) from an MDM column blob, robust to
-    shape drift. The flag lives in one of three places across MDM
-    versions/loaders: a flat ``is_pii``, a nested
-    ``sensitivity_details.is_pii``, or implied by a sensitive
-    ``pii_role_id`` (anything but ``Internal``/empty). A build that reads
-    only the flat key silently reports zero PII when the real blob nests
-    it — so check all three and let any positive win.
+_FALSY = frozenset({"", "n", "no", "false", "0", "none", "null"})
+
+
+def _flag(v: Any) -> bool:
+    """Interpret an MDM flag robustly. The real MDM API sends ``"Y"``/``"N"``
+    STRINGS, and ``bool("N")`` is True — so a naive read false-positives
+    every non-PII column. Strings resolve against a falsy set; everything
+    else falls back to ``bool``.
+    """
+    if isinstance(v, str):
+        return v.strip().lower() not in _FALSY
+    return bool(v)
+
+
+def _mdm_governance(c: dict) -> dict[str, Any]:
+    """Resolve PII + sensitivity from an MDM column blob — the spine of
+    governance. Robust to shape (flat ``is_pii``, nested
+    ``sensitivity_details`` dict, or an attribute-keyed array) AND to the
+    ``"Y"/"N"`` string encoding. A sensitive ``pii_role_id`` (anything but
+    Internal/Public) implies PII even when the flag is absent, so
+    ``Sensitive>FinancialAmount`` columns are protected too.
     """
     sens = c.get("sensitivity_details")
     if isinstance(sens, list):  # array shape → pick this column's row
@@ -267,8 +280,14 @@ def _mdm_pii(c: dict) -> tuple[str, bool]:
             or sens.get("pii_role_id") or "Internal")
     role_is_sensitive = bool(role) and role.strip().lower() not in (
         "internal", "public", "none", "")
-    is_pii = bool(c.get("is_pii") or sens.get("is_pii") or role_is_sensitive)
-    return role or "Internal", is_pii
+    return {
+        "pii_taxonomy": role or "Internal",
+        "is_pii": _flag(c.get("is_pii")) or _flag(sens.get("is_pii"))
+        or role_is_sensitive,
+        "is_sensitive": _flag(c.get("is_sensitive"))
+        or _flag(sens.get("is_sensitive")) or role_is_sensitive,
+        "is_gdpr": _flag(c.get("is_gdpr")) or _flag(sens.get("is_gdpr")),
+    }
 
 
 def _ingest_mdm(store: GraphStore, cache_dir: Path) -> None:
@@ -308,6 +327,7 @@ def _ingest_mdm(store: GraphStore, cache_dir: Path) -> None:
                     else ""
                 ),
                 "row_count": blob.get("row_count_estimate"),
+                "mdm_coverage_pct": blob.get("mdm_coverage_pct"),
                 "partition_field": blob.get("partition_field"),
                 "asset_kind": blob.get("asset_kind") or "Table",
                 "tags": blob.get("tags") or [],
@@ -331,22 +351,27 @@ def _ingest_mdm(store: GraphStore, cache_dir: Path) -> None:
             if not isinstance(c, dict) or not c.get("name"):
                 continue
             c_uri = canonical_uri("column", name, c["name"])
-            pii_role, is_pii = _mdm_pii(c)
+            gov = _mdm_governance(c)
             store.upsert_node(
                 "Column", c_uri,
                 properties={
                     "table_name": name,
                     "data_type": c.get("type") or "",
-                    "is_nullable": True,
+                    # is_nullable is BQ's to own (real NOT NULL constraint);
+                    # MDM must not assert a default True that BQ can't undo.
                     "description": c.get("description") or "",
                     "business_name": c.get("business_name") or "",
-                    "is_primary": bool(c.get("is_primary")),
-                    "is_dedupe_key": bool(c.get("is_dedupe_key")),
-                    "is_partitioning": bool(c.get("is_partitioned")),
+                    "is_primary": _flag(c.get("is_primary")),
+                    "is_dedupe_key": _flag(c.get("is_dedupe_key")),
+                    "is_partitioning": _flag(c.get("is_partitioned")),
                     "cluster_position": c.get("cluster_position"),
-                    "pii_taxonomy": pii_role,
-                    "is_pii": is_pii,
-                    "is_critical_data_element": bool(c.get("is_critical_data_element")),
+                    "is_critical_data_element": _flag(
+                        c.get("is_critical_data_element")),
+                    # governance spine — PII + sensitivity + GDPR
+                    **gov,
+                    # derivation logic + cross-refs (were dropped before)
+                    "derived_logic": c.get("derived_logic") or "",
+                    "external_references": c.get("external_references") or [],
                 },
                 source="mdm",
             )
@@ -395,8 +420,10 @@ def _ingest_bq_profile(store: GraphStore, cache_dir: Path) -> None:
             props = {
                 "table_name": name,
                 "data_type": c.get("data_type") or "",
-                "is_nullable": c.get("is_nullable", True),
-                "description": c.get("description_bq") or "",
+                "is_nullable": c.get("is_nullable", True),   # BQ owns nullability
+                # BQ description is supplementary — it must NOT overwrite MDM's
+                # (MDM owns the business description); keep it under its own key.
+                "bq_description": c.get("description_bq") or "",
                 "is_partitioning": bool(c.get("is_partitioning_column")),
                 "cluster_position": c.get("clustering_ordinal"),
                 "approx_distinct": approx,

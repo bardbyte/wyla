@@ -1,14 +1,14 @@
-"""Phase-B grounding levers: DQ synthesis + robust PII resolution.
+"""Phase-B grounding lever: DQ synthesis from the BQ profile.
 
-The column-grounding arithmetic: mdm(3) + bq(4) = 2 witnesses → inferred.
 Add the system-attested dq_engine witness (a rule synthesized from the BQ
-profile) → 3 witnesses, score 0.73 → grounded. This is how the focused
-build lifts profiled columns without touching the calibrator.
+profile) to a corpus+bq column → 3 witnesses, score 0.73 → grounded. This
+is how the focused build lifts profiled columns without touching the
+calibrator. (PII/governance resolution is pinned in test_mdm_spine.py.)
 """
 
 from __future__ import annotations
 
-from synapse.graph.builder import _mdm_pii, _synthesize_dq_from_profile
+from synapse.graph.builder import _synthesize_dq_from_profile
 from synapse.graph.store import GraphStore, canonical_uri
 
 
@@ -62,22 +62,3 @@ def test_dq_synth_row_count_rule_on_table():
     assert "dq_engine" in store.get(turi).provenance.sources
     assert any(r.properties["rule_kind"] == "row_count"
                for r in store.nodes_by_type("DataQualityRule"))
-
-
-def test_pii_resolves_from_flat_nested_and_role():
-    # flat is_pii
-    assert _mdm_pii({"name": "a", "is_pii": True})[1] is True
-    # nested sensitivity_details dict
-    assert _mdm_pii({"name": "b", "sensitivity_details": {"is_pii": True}})[1]
-    # nested array keyed by attribute_name
-    role, flag = _mdm_pii({"name": "fico_score", "sensitivity_details": [
-        {"attribute_name": "fico_score", "is_pii": True,
-         "pii_role_id": "Sensitive>FinancialAmount"}]})
-    assert flag is True and role == "Sensitive>FinancialAmount"
-    # role-derived: a sensitive pii_role_id implies PII even without a flag
-    role, flag = _mdm_pii({"name": "cm11",
-                           "pii_role_id": "Sensitive>Identifier>MemberID"})
-    assert flag is True
-    # a plain Internal column is not PII
-    assert _mdm_pii({"name": "x", "pii_role_id": "Internal"})[1] is False
-    assert _mdm_pii({"name": "y"})[1] is False
