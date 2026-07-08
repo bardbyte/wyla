@@ -119,6 +119,57 @@ class ConsoleData:
         rows.sort(key=lambda r: (-r["readiness"]["meaning_pct"], r["name"]))
         return rows
 
+    def products_by_unit(self, q: str = "") -> dict[str, Any]:
+        """Data products grouped by MDM business unit — the "we know your
+        business" view. Each unit carries its tables plus readiness and
+        governance rollups. Graph-only; empty when no snapshot is loaded."""
+        if not self.live:
+            return self._wrap("units", [])
+        rows = self._products_from_graph()
+        if q:
+            needle = _norm(q)
+            rows = [r for r in rows
+                    if needle in _norm(r["name"])
+                    or needle in _norm(r.get("description", ""))]
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            node = self.store.get(r["ref"])
+            bu = ""
+            if node is not None:
+                bu = (str(node.properties.get("business_unit") or "").strip()
+                      or str(node.properties.get("company_domain") or "").strip())
+            groups.setdefault(bu or "Unassigned", []).append(r)
+
+        units: list[dict[str, Any]] = []
+        for unit, prod in sorted(groups.items()):
+            n = len(prod)
+            total_cols = sum(p["readiness"]["columns"] for p in prod)
+            mean_meaning = round(
+                sum(p["readiness"]["meaning_pct"] for p in prod) / n) if n else 0
+            grounded = sum(1 for p in prod
+                           if p["tier"] in ("grounded", "human_asserted"))
+            pii_tables = sum(1 for p in prod if self._table_has_pii(p["ref"]))
+            governed = sum(1 for p in prod if p["readiness"]["governance"])
+            units.append({
+                "unit": unit,
+                "table_count": n,
+                "total_columns": total_cols,
+                "mean_meaning_pct": mean_meaning,
+                "grounded_tables": grounded,
+                "pii_tables": pii_tables,
+                "governed_tables": governed,
+                "products": prod,
+            })
+        units.sort(key=lambda u: (-u["table_count"], u["unit"]))
+        return self._wrap("units", units)
+
+    def _table_has_pii(self, table_ref: str) -> bool:
+        for e in self.store.outgoing(table_ref, "CONTAINS"):
+            c = self.store.get(e.to_uri)
+            if c is not None and bool(c.properties.get("is_pii")):
+                return True
+        return False
+
     # ── knowledge graph ──────────────────────────────────────
 
     def graph_summary(self) -> dict[str, Any]:

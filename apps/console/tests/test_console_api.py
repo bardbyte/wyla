@@ -77,6 +77,39 @@ def test_live_world_reads_the_graph(tmp_path):
     assert metrics["metrics"][0]["name"] == "Approval rate"
 
 
+def test_products_grouped_by_business_unit(tmp_path):
+    """The "we know your business" view: tables grouped by MDM business
+    unit, with governance rollups (PII table count)."""
+    from synapse.graph.store import GraphStore, canonical_uri
+    store = GraphStore()
+    for name, bu, pii in [("risk_pers_acct", "Credit and Risk", True),
+                          ("risk_new_acct", "CFR", False),
+                          ("custins_cardmember", "Finance", False)]:
+        t = canonical_uri("table", name)
+        store.upsert_node("Table", t, {"table_name": name, "business_unit": bu,
+                                       "description": f"{name} desc"},
+                          source="mdm")
+        c = canonical_uri("column", name, "acct_id")
+        store.upsert_node("Column", c, {"table_name": name,
+                                        "description": "account key",
+                                        "is_pii": pii}, source="mdm")
+        store.upsert_edge("CONTAINS", t, c, {}, source="mdm")
+    snap = tmp_path / "byunit.json"
+    store.save_json(snap)
+
+    out = ConsoleData(snapshot_path=snap).products_by_unit()
+    assert out["live"] is True and out["source"] == "graph"
+    by_unit = {u["unit"]: u for u in out["units"]}
+    assert set(by_unit) == {"Credit and Risk", "CFR", "Finance"}
+    assert by_unit["Credit and Risk"]["pii_tables"] == 1   # governance rollup
+    assert by_unit["CFR"]["pii_tables"] == 0
+    assert by_unit["Finance"]["table_count"] == 1
+    assert by_unit["Credit and Risk"]["products"][0]["name"] == "risk_pers_acct"
+
+    empty = ConsoleData(snapshot_path="/none/g.json").products_by_unit()
+    assert empty["source"] == "empty" and empty["units"] == []
+
+
 def test_witness_panel_strips_value_like_keys(tmp_path):
     data = _live_data(tmp_path)
     from synapse.graph.store import canonical_uri
