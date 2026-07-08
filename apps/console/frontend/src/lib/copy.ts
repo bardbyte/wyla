@@ -17,6 +17,7 @@ export const BRAND = {
 };
 
 export const TABS = [
+  { id: "briefing", label: "Briefing", preview: false },
   { id: "inquiries", label: "Inquiries", preview: false },
   { id: "products", label: "Data products", preview: false },
   { id: "metrics", label: "Metrics", preview: false },
@@ -37,6 +38,46 @@ export const TIERS: Record<
   guessed: { word: "Unverified", fill: "●○○○", cls: "" },
   deprecated: { word: "Retired", fill: "○○○○", cls: "" },
   blocked: { word: "Declined", fill: "◼", cls: "t-block" },
+};
+
+export const BRIEFING = {
+  title: "Your briefing",
+  sub:
+    "Answers your team decided to keep. Each one re-runs the exact " +
+    "query it was born from — through every gate, onto the audit " +
+    "ledger — so the numbers stay fresh and stay defensible.",
+  empty:
+    "Nothing pinned yet. Ask a question in Inquiries and pin the " +
+    "answer — Radix will keep it fresh here.",
+  emptyCta: "Ask a question",
+  rerun: "Re-run",
+  rerunning: "Running…",
+  rerunSeed: "Sample tiles don't re-run — pin a real answer.",
+  rerunNoSql: "This answer has no query behind it — nothing to re-run.",
+  unreachable: "The warehouse isn't reachable from here",
+  refusedPrefix: "Held by the gate",
+  evidence: "Evidence",
+  followUp: "Ask a follow-up",
+  verifyHold: "Hold to verify",
+  verifyHint: "A steward's hold is a signature.",
+  verifiedBadge: "Steward-verified",
+  unpinHold: "Hold to unpin",
+  asOf: "as of",
+  vsPrevious: "vs previous run",
+  viewTable: "View table",
+  hideTable: "Hide table",
+  shapeChanged: "Result shape changed — delta suppressed.",
+  suggestTitle: "Verified questions you could keep",
+  answerAndPin: "Answer & pin",
+  seedBadge: "Sample",
+  rowsWord: "rows",
+};
+
+export const ENTITY = {
+  evidence: "Evidence",
+  explore: "Explore in graph",
+  ask: "Ask about this",
+  askPrefix: "Tell me about ",
 };
 
 export const COMMON = {
@@ -71,6 +112,8 @@ export const INQUIRIES = {
   howTitle: "How this was produced",
   errorTitle: "That didn't go through",
   suggestTitle: "Verified questions you can ask now",
+  pin: "Pin this",
+  pinned: "Pinned — it's on your briefing now.",
   demoBanner:
     "Demo mode — scripted transcripts, not the live agent. Unset " +
     "SYNAPSE_CONSOLE_RUNNER (or set it to adk) and restart the server " +

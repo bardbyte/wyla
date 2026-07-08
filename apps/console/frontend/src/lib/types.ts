@@ -89,6 +89,38 @@ export interface Witness {
   edges?: { type: string; other: string; direction: string; tier: Tier }[];
 }
 
+export interface LexiconEntry {
+  name: string; kind: "table" | "metric" | "entity"; ref: string;
+}
+
+export interface PinCitation { label: string; ref: string; tier: Tier | null }
+
+export interface PinRun {
+  kind: "capture" | "rerun"; ts: string; actor: string;
+  status: "ok" | "refused"; code: string | null;
+  value?: number | null; n_rows?: number;
+  ledger_id?: string | null; reason?: string; locator_missed?: boolean;
+}
+
+export interface Headline {
+  kind: "scalar" | "series_last" | "rows" | "none";
+  column?: string; value?: number; n_rows?: number;
+  locator_missed?: boolean;
+}
+
+export interface Pin {
+  id: string; question: string; answer: string;
+  sql: string | null; sql_sha256: string | null;
+  citations: PinCitation[]; tier: Tier;
+  locator: { row: string; column: string } | null;
+  headline: Headline;
+  rows: Record<string, unknown>[];
+  created_at: string; actor: string;
+  source: "live" | "scripted" | "seed";
+  verified: { by: string; at: string } | null;
+  history: PinRun[];
+}
+
 export interface AppConfig {
   runner: string; model: string; thinking_budget: string;
   vertexai: boolean; project_set: boolean; credentials_set: boolean;

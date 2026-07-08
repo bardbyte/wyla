@@ -1,6 +1,8 @@
-import { useState } from "react";
-import { BRAND, TABS, type TabId } from "./lib/copy";
+import { WitnessDrawer } from "./components/WitnessDrawer";
+import { BRAND, TABS } from "./lib/copy";
+import { NavProvider, useNav } from "./lib/nav";
 import { useTheme } from "./lib/theme";
+import { BriefingTab } from "./tabs/Briefing";
 import { GraphTab } from "./tabs/Graph";
 import { InquiriesTab } from "./tabs/Inquiries";
 import { KnowledgeTab } from "./tabs/Knowledge";
@@ -8,7 +10,15 @@ import { MetricsTab } from "./tabs/Metrics";
 import { ProductsTab } from "./tabs/Products";
 
 export default function App() {
-  const [tab, setTab] = useState<TabId>("inquiries");
+  return (
+    <NavProvider>
+      <Shell />
+    </NavProvider>
+  );
+}
+
+function Shell() {
+  const nav = useNav();
   const [theme, toggleTheme] = useTheme();
 
   return (
@@ -23,8 +33,8 @@ export default function App() {
               key={t.id}
               role="tab"
               className="tab"
-              aria-selected={tab === t.id}
-              onClick={() => setTab(t.id)}
+              aria-selected={nav.tab === t.id}
+              onClick={() => nav.go(t.id)}
             >
               {t.label}
               {t.preview && <sup className="nav-preview">Preview</sup>}
@@ -45,12 +55,23 @@ export default function App() {
       </header>
 
       <main className="main">
-        {tab === "inquiries" && <InquiriesTab />}
-        {tab === "products" && <ProductsTab />}
-        {tab === "metrics" && <MetricsTab />}
-        {tab === "graph" && <GraphTab />}
-        {tab === "knowledge" && <KnowledgeTab />}
+        {/* the chat stays mounted so conversations and in-flight
+            streams survive Briefing ↔ Inquiries handoffs */}
+        <div className="tab-panel"
+          style={{ display: nav.tab === "inquiries" ? "flex" : "none" }}>
+          <InquiriesTab />
+        </div>
+        {nav.tab === "briefing" && <BriefingTab />}
+        {nav.tab === "products" && <ProductsTab />}
+        {nav.tab === "metrics" && <MetricsTab />}
+        {nav.tab === "graph" && <GraphTab />}
+        {nav.tab === "knowledge" && <KnowledgeTab />}
       </main>
+
+      {nav.evidenceRef && (
+        <WitnessDrawer refUri={nav.evidenceRef}
+          onClose={nav.closeEvidence} />
+      )}
     </div>
   );
 }

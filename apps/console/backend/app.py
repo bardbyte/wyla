@@ -37,11 +37,14 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from apps.console.backend.data import ConsoleData
 from apps.console.backend.events import to_sse
+from apps.console.backend.pins import (
+    NoSqlError, PinStore, SeedPinError,
+)
 from apps.console.backend.runner import ADKRunner, Runner, ScriptedRunner
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
@@ -61,6 +64,37 @@ class ApproveRequest(BaseModel):
 class ViabilityRequest(BaseModel):
     name: str
     description: str = ""
+
+
+class PinCreateRequest(BaseModel):
+    question: str
+    answer: str = ""
+    citations: list[dict] = []
+    sql: str | None = None
+    rows: list[dict] | None = None
+    ledger_id: str | None = None
+    actor: str = "user"
+    source: str = "live"
+
+
+class PinActorRequest(BaseModel):
+    actor: str = "user"
+
+
+class PinVerifyRequest(BaseModel):
+    verified: bool = True
+    actor: str = "steward"
+
+
+def _default_warehouse_factory():
+    """The gated warehouse runner the agent itself uses — pins replay
+    through the SAME chain. Missing snapshot/import → None, and reruns
+    return a structured no_graph refusal instead of skipping gates."""
+    try:
+        from apps.analyst.tools import _runner
+        return _runner()
+    except Exception:
+        return None
 
 
 def _make_runner() -> Runner:
@@ -90,13 +124,19 @@ def _configure_tls() -> dict:
 
 
 def create_app(runner: Runner | None = None,
-               data: ConsoleData | None = None) -> FastAPI:
+               data: ConsoleData | None = None, *,
+               pins: PinStore | None = None,
+               warehouse_factory=None) -> FastAPI:
     app = FastAPI(title="Radix Console", version="0.3.0")
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
         allow_headers=["*"])
     app.state.runner = runner or _make_runner()
     app.state.data = data or ConsoleData()
+    app.state.pins = pins or PinStore(
+        tier_resolver=app.state.data.tier_for)
+    app.state.warehouse_factory = (warehouse_factory
+                                   or _default_warehouse_factory)
     app.state.tls = (_configure_tls()
                      if isinstance(app.state.runner, ADKRunner)
                      else {"mode": "n/a (scripted)"})
@@ -204,6 +244,59 @@ def create_app(runner: Runner | None = None,
     @app.get("/api/witness")
     def witness(ref: str) -> dict:
         return app.state.data.witness(ref)
+
+    @app.get("/api/lexicon")
+    def lexicon() -> dict:
+        return app.state.data.lexicon()
+
+    # ── pins: the verified-query escrow ──────────────────────
+
+    @app.get("/api/pins")
+    def pins_list() -> dict:
+        return {"live": app.state.data.live,
+                "source": "graph" if app.state.data.live else "sample",
+                "seeded": app.state.pins.seeded,
+                "pins": app.state.pins.list()}
+
+    @app.post("/api/pins", status_code=201)
+    def pin_create(req: PinCreateRequest) -> dict:
+        return {"pin": app.state.pins.create(
+            question=req.question, answer=req.answer,
+            citations=req.citations, sql=req.sql, rows=req.rows,
+            ledger_id=req.ledger_id, actor=req.actor,
+            source=req.source)}
+
+    @app.post("/api/pins/{pin_id}/rerun")
+    def pin_rerun(pin_id: str, req: PinActorRequest) -> object:
+        try:
+            return app.state.pins.rerun(
+                pin_id, app.state.warehouse_factory(), actor=req.actor)
+        except KeyError:
+            return JSONResponse({"code": "not_found"}, status_code=404)
+        except SeedPinError:
+            return JSONResponse({"code": "seed_pin"}, status_code=409)
+        except NoSqlError:
+            return JSONResponse({"code": "no_sql"}, status_code=409)
+
+    @app.post("/api/pins/{pin_id}/verify")
+    def pin_verify(pin_id: str, req: PinVerifyRequest) -> object:
+        try:
+            return {"pin": app.state.pins.verify(
+                pin_id, verified=req.verified, actor=req.actor)}
+        except KeyError:
+            return JSONResponse({"code": "not_found"}, status_code=404)
+        except SeedPinError:
+            return JSONResponse({"code": "seed_pin"}, status_code=409)
+
+    @app.delete("/api/pins/{pin_id}")
+    def pin_delete(pin_id: str) -> object:
+        try:
+            app.state.pins.delete(pin_id)
+            return {"deleted": pin_id}
+        except KeyError:
+            return JSONResponse({"code": "not_found"}, status_code=404)
+        except SeedPinError:
+            return JSONResponse({"code": "seed_pin"}, status_code=409)
 
     # ── the SPA (after API routes, so /api wins) ─────────────
 

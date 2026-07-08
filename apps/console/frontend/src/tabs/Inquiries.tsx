@@ -2,19 +2,22 @@
  *
  * Each turn renders: the question, the live work log (thinking, tool
  * calls with provenance chips, the SQL gate, query results as a
- * table), then the answer. Scripted turns end with a structured
- * `answer` card; live agent turns end with the model's markdown
- * (the five-section contract), rendered by the small renderer below.
- * The gate still buffers the stream and requires hold-to-run.
+ * table), then the answer with "Pin this" — the door to the Briefing.
+ * Turns capture the exact SQL that ran (gate SQL in scripted mode,
+ * execute_sql tool-call args in live mode), the returned rows, and the
+ * ledger id, so a pin carries everything the escrow needs. Known graph
+ * objects in answers are live tokens (Evidence · Explore · Ask).
  */
 
 import { useEffect, useRef, useState } from "react";
-import { WitnessDrawer } from "../components/WitnessDrawer";
+import { RefText } from "../components/EntityRef";
 import {
-  formatBytes, HoldButton, RichText, Spinner, TierChip,
+  ResultsTable, extractRows, formatBytes, HoldButton, RichText,
+  Spinner, TierChip,
 } from "../components/ui";
 import { api } from "../lib/api";
 import { INQUIRIES as C } from "../lib/copy";
+import { useNav } from "../lib/nav";
 import { streamChat } from "../lib/sse";
 import type { AnswerSections, ConsoleEvent } from "../lib/types";
 
@@ -26,20 +29,51 @@ interface Turn {
   gate: Extract<ConsoleEvent, { type: "sql_gate" }> | null;
   heldNote: string | null;
   done: boolean;
+  sql: string | null;
+  rows: Record<string, unknown>[] | null;
+  ledgerId: string | null;
+  pinned: boolean;
 }
 
 const newTurn = (question: string): Turn => ({
   question, log: [], liveText: "", answer: null,
   gate: null, heldNote: null, done: false,
+  sql: null, rows: null, ledgerId: null, pinned: false,
 });
 
+const URI_RX = /synapse:\/\/[\w./#:-]+/g;
+const LEDGER_RX = /ledger:#[\w-]+/g;
+
+function harvestCitations(turn: Turn): { label: string; ref: string }[] {
+  if (turn.answer) {
+    return turn.answer.citations.map((c) => ({
+      label: c.label, ref: c.ref,
+    }));
+  }
+  const refs = new Set<string>([
+    ...(turn.liveText.match(URI_RX) ?? []),
+    ...(turn.liveText.match(LEDGER_RX) ?? []),
+  ]);
+  return [...refs].slice(0, 8).map((ref) => ({
+    label: ref.startsWith("ledger:")
+      ? ref.replace("ledger:", "ledger")
+      : ref.split("/").slice(-2).join("/"),
+    ref,
+  }));
+}
+
 export function InquiriesTab() {
+  const nav = useNav();
   const conversationId = useRef<string>(
     globalThis.crypto?.randomUUID?.() ?? `c${Date.now()}`);
   const pending = useRef<ConsoleEvent[]>([]);
   const gated = useRef(false);
+  const execSql = useRef<Map<string, string>>(new Map());
 
   const [turns, setTurns] = useState<Turn[]>([]);
+  const turnsRef = useRef<Turn[]>(turns);
+  useEffect(() => { turnsRef.current = turns; }, [turns]);
+
   const [busy, setBusy] = useState(false);
   const [question, setQuestion] = useState("");
   const [suggestions, setSuggestions] = useState<
@@ -69,11 +103,32 @@ export function InquiriesTab() {
     switch (ev.type) {
       case "turn_start":
         break;
-      case "thinking":
       case "tool_call":
-      case "tool_result":
-      case "sandbox":
+        if (ev.tool === "execute_sql" &&
+            typeof ev.args?.sql === "string") {
+          execSql.current.set(ev.call_id, ev.args.sql as string);
+        }
+        patchLast((t) => ({ ...t, log: [...t.log, ev] }));
+        break;
+      case "tool_result": {
+        const sql = execSql.current.get(ev.call_id);
+        const rows = extractRows(ev.payload);
+        patchLast((t) => ({
+          ...t,
+          log: [...t.log, ev],
+          ...(sql && ev.ok && rows ? { sql, rows } : {}),
+        }));
+        break;
+      }
       case "gate_resolved":
+        patchLast((t) => ({
+          ...t,
+          log: [...t.log, ev],
+          ...(ev.ledger_id ? { ledgerId: ev.ledger_id } : {}),
+        }));
+        break;
+      case "thinking":
+      case "sandbox":
       case "artifact":
       case "error":
         patchLast((t) => ({ ...t, log: [...t.log, ev] }));
@@ -96,12 +151,35 @@ export function InquiriesTab() {
     }
   };
 
-  const ask = async (text: string) => {
+  const pinTurn = async (index: number) => {
+    const turn = turnsRef.current[index];
+    if (!turn || turn.pinned) return;
+    const body = {
+      question: turn.question,
+      answer: turn.answer?.answer ?? turn.liveText,
+      citations: harvestCitations(turn),
+      sql: turn.sql,
+      rows: turn.rows ?? undefined,
+      ledger_id: turn.ledgerId,
+      source: demoMode ? "scripted" : "live",
+    };
+    try {
+      await api.createPin(body);
+      setTurns((ts) => ts.map((t, i) =>
+        i === index ? { ...t, pinned: true } : t));
+    } catch {
+      /* the pin API being down is not a chat failure */
+    }
+  };
+
+  const ask = async (text: string, opts?: { autoPin?: boolean }) => {
     const q = text.trim();
     if (!q || busy) return;
     setQuestion("");
     gated.current = false;
     pending.current = [];
+    execSql.current.clear();
+    const index = turnsRef.current.length;
     setTurns((ts) => [...ts, newTurn(q)]);
     setBusy(true);
     try {
@@ -109,8 +187,12 @@ export function InquiriesTab() {
         if (gated.current) pending.current.push(ev);
         else handleEvent(ev);
       }
-      // stream closed while gated (live mode): keep the gate visible
       if (!gated.current && pending.current.length === 0) setBusy(false);
+      if (opts?.autoPin && !gated.current) {
+        // state flushes before the await chain resumes rendering; give
+        // React one frame, then pin from the ref mirror
+        setTimeout(() => void pinTurn(index), 50);
+      }
     } catch (e) {
       handleEvent({
         type: "error",
@@ -122,10 +204,22 @@ export function InquiriesTab() {
     }
   };
 
+  // the interconnection spine hands questions in from other tabs
+  const askRef = useRef(ask);
+  askRef.current = ask;
+  useEffect(() => {
+    if (!nav.handoff || nav.tab !== "inquiries") return;
+    const { text, send, autoPin } = nav.handoff;
+    nav.clearHandoff();
+    if (send) void askRef.current(text, { autoPin });
+    else setQuestion(text);
+  }, [nav, nav.handoff, nav.tab]);
+
   const approveGate = async (gateId: string) => {
     await api.approve(gateId, true).catch(() => undefined);
     gated.current = false;
-    patchLast((t) => ({ ...t, gate: null }));
+    // keep the gate's SQL — it IS the query of record for this turn
+    patchLast((t) => ({ ...t, sql: t.gate?.sql ?? t.sql, gate: null }));
     const queued = pending.current;
     pending.current = [];
     queued.forEach(handleEvent);
@@ -187,6 +281,18 @@ export function InquiriesTab() {
                 <Markdown text={t.liveText} />
               </div>
             )}
+            {t.done && (t.answer || t.liveText) && !t.heldNote && (
+              <div className="pin-row">
+                {t.pinned ? (
+                  <span className="tag">{C.pinned}</span>
+                ) : (
+                  <button type="button" className="btn quiet"
+                    onClick={() => void pinTurn(i)}>
+                    ⌖ {C.pin}
+                  </button>
+                )}
+              </div>
+            )}
           </section>
         ))}
 
@@ -202,7 +308,7 @@ export function InquiriesTab() {
           <div className="suggest" aria-label={C.suggestTitle}>
             {suggestions.slice(0, 4).map((s) => (
               <button key={s.question} type="button"
-                onClick={() => ask(s.question)}>
+                onClick={() => void ask(s.question)}>
                 {s.question}
               </button>
             ))}
@@ -218,13 +324,13 @@ export function InquiriesTab() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                ask(question);
+                void ask(question);
               }
             }}
             aria-label={C.placeholder}
           />
           <button type="button" className="btn primary"
-            onClick={() => ask(question)}
+            onClick={() => void ask(question)}
             disabled={!question.trim() || busy}>
             {C.send}
           </button>
@@ -232,10 +338,20 @@ export function InquiriesTab() {
       </div>
 
       {inspect && (
-        <WitnessDrawer refUri={inspect} onClose={() => setInspect(null)} />
+        <LocalDrawer refUri={inspect} onClose={() => setInspect(null)} />
       )}
     </div>
   );
+}
+
+/* the app-level drawer lives in App; this local one serves clicks from
+ * the work log while keeping the import local to avoid cycles */
+import { WitnessDrawer } from "../components/WitnessDrawer";
+
+function LocalDrawer({ refUri, onClose }: {
+  refUri: string; onClose: () => void;
+}) {
+  return <WitnessDrawer refUri={refUri} onClose={onClose} />;
 }
 
 /* ── pieces ── */
@@ -345,7 +461,7 @@ function AnswerCard({
   return (
     <div className="answer-card card card-pad">
       <p className="brief-answer">
-        <RichText text={sections.answer} />
+        <RefText text={sections.answer} />
       </p>
       {sections.citations.length > 0 && (
         <div className="ac-block">
@@ -375,46 +491,6 @@ function AnswerCard({
         <div className="ac-foot">
           {sections.governance && <span>{sections.governance}</span>}
           {sections.status && <span className="tag">{sections.status}</span>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Query rows out of a tool payload, wherever the runner put them. */
-function extractRows(
-  payload: Record<string, unknown> | null,
-): Record<string, unknown>[] | null {
-  if (!payload) return null;
-  const data = (payload.data ?? payload) as Record<string, unknown>;
-  const rows = data?.rows;
-  if (Array.isArray(rows) && rows.length &&
-      typeof rows[0] === "object" && rows[0] !== null) {
-    return rows as Record<string, unknown>[];
-  }
-  return null;
-}
-
-function ResultsTable({ rows }: { rows: Record<string, unknown>[] }) {
-  const cols = Object.keys(rows[0]).slice(0, 8);
-  const shown = rows.slice(0, 20);
-  return (
-    <div className="results-wrap">
-      <table className="results-table">
-        <thead>
-          <tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr>
-        </thead>
-        <tbody>
-          {shown.map((r, i) => (
-            <tr key={i}>
-              {cols.map((c) => <td key={c}>{String(r[c] ?? "")}</td>)}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {rows.length > shown.length && (
-        <div className="results-more">
-          …and {rows.length - shown.length} more row(s)
         </div>
       )}
     </div>
@@ -463,7 +539,8 @@ function GateCard({
 }
 
 /** Minimal markdown for the live agent's five-section answers:
- * ## headings, **bold**, `code`, - lists, | tables. No HTML input. */
+ * ## headings, **bold**, `code`, - lists, | tables. No HTML input.
+ * Paragraphs and list items linkify known graph objects. */
 function Markdown({ text }: { text: string }) {
   const blocks: JSX.Element[] = [];
   const lines = text.split("\n");
@@ -515,7 +592,7 @@ function Markdown({ text }: { text: string }) {
       blocks.push(
         <ul key={k++} className="md-list">
           {items.map((it, j) => (
-            <li key={j}><RichText text={it} /></li>
+            <li key={j}><RefText text={it} /></li>
           ))}
         </ul>,
       );
@@ -533,7 +610,7 @@ function Markdown({ text }: { text: string }) {
       }
       blocks.push(
         <p key={k++} className="md-p">
-          <RichText text={para.join(" ")} />
+          <RefText text={para.join(" ")} />
         </p>,
       );
     }

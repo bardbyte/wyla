@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { WitnessDrawer } from "../components/WitnessDrawer";
 import { SourceBadge, Spinner, TierChip } from "../components/ui";
 import { api } from "../lib/api";
-import { GRAPH } from "../lib/copy";
+import { ENTITY, GRAPH } from "../lib/copy";
+import { useNav } from "../lib/nav";
 import type { GraphSummary, ThreadHop, Tier } from "../lib/types";
 
 const HOP_ICON: Record<string, string> = {
@@ -10,12 +11,20 @@ const HOP_ICON: Record<string, string> = {
 };
 
 export function GraphTab() {
+  const nav = useNav();
   const [summary, setSummary] = useState<GraphSummary | null>(null);
   const [hops, setHops] = useState<ThreadHop[] | null>(null);
   const [live, setLive] = useState(false);
   const [inspect, setInspect] = useState<string | null>(null);
   const [tables, setTables] = useState<string[]>([]);
   const [anchor, setAnchor] = useState("");
+
+  useEffect(() => {
+    if (nav.graphAnchor) {
+      setAnchor(nav.graphAnchor);
+      nav.clearGraphAnchor();
+    }
+  }, [nav, nav.graphAnchor]);
 
   useEffect(() => {
     api.graphSummary().then((d) => {
@@ -83,8 +92,16 @@ export function GraphTab() {
                   <div className="hop-kind">{HOP_ICON[h.kind] ?? "•"} {h.kind}</div>
                   <div className="hop-label">{h.label}</div>
                   {h.detail && <div className="hop-detail">{h.detail}</div>}
-                  <div style={{ marginTop: "var(--s-2)" }}>
+                  <div style={{ marginTop: "var(--s-2)", display: "flex", gap: "var(--s-2)", alignItems: "center", flexWrap: "wrap" }}>
                     <TierChip tier={h.tier} onClick={() => setInspect(h.ref)} />
+                    {["table", "metric", "entity"].includes(h.kind) && (
+                      <button type="button" className="btn quiet"
+                        style={{ padding: "2px 8px", fontSize: "var(--fs-11)" }}
+                        onClick={() => nav.askAbout(
+                          ENTITY.askPrefix + h.label)}>
+                        {ENTITY.ask}
+                      </button>
+                    )}
                   </div>
                 </div>
               </span>

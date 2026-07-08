@@ -190,6 +190,20 @@ def test_viability_exact_near_and_clear(tmp_path):
         "verdict"] == "clear"
 
 
+def test_lexicon_live_and_sample(tmp_path):
+    live = _live_data(tmp_path).lexicon()
+    assert live["live"] is True
+    names = {(e["name"], e["kind"]) for e in live["lexicon"]}
+    assert ("accounts", "table") in names
+    assert ("Approval rate", "metric") in names
+    assert all(len(e["name"]) >= 4 for e in live["lexicon"])
+
+    sample = ConsoleData(snapshot_path="/nonexistent/g.json").lexicon()
+    assert sample["live"] is False
+    assert any(e["name"] == "sbs_new_accounts"
+               for e in sample["lexicon"])
+
+
 # ─── the classic chat surface ────────────────────────────────
 
 
@@ -255,6 +269,8 @@ def test_api_surface_round_trips():
     assert v["viability"]["verdict"] in ("exact", "near_duplicate", "clear")
     r = client.get("/api/terms/resolve", params={"term": "roll rate"}).json()
     assert r["resolution"]["canonical"]["name"]
+    assert client.get("/api/lexicon").json()["lexicon"]
+    assert client.get("/api/pins").json()["pins"]
 
 
 # ─── failures name the fix ───────────────────────────────────

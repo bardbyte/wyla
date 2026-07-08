@@ -135,6 +135,60 @@ export function formatBytes(n: number | null): string {
   return `${Math.round(n / 1e3)} KB`;
 }
 
+export function formatRelative(iso: string): string {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (mins < 2) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
+}
+
+/** Query rows out of a tool payload, wherever the runner put them. */
+export function extractRows(
+  payload: Record<string, unknown> | null,
+): Record<string, unknown>[] | null {
+  if (!payload) return null;
+  const data = (payload.data ?? payload) as Record<string, unknown>;
+  const rows = data?.rows;
+  if (Array.isArray(rows) && rows.length &&
+      typeof rows[0] === "object" && rows[0] !== null) {
+    return rows as Record<string, unknown>[];
+  }
+  return null;
+}
+
+export function ResultsTable({ rows }: {
+  rows: Record<string, unknown>[];
+}) {
+  const cols = Object.keys(rows[0]).slice(0, 8);
+  const shown = rows.slice(0, 20);
+  return (
+    <div className="results-wrap">
+      <table className="results-table">
+        <thead>
+          <tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr>
+        </thead>
+        <tbody>
+          {shown.map((r, i) => (
+            <tr key={i}>
+              {cols.map((c) => <td key={c}>{String(r[c] ?? "")}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length > shown.length && (
+        <div className="results-more">
+          …and {rows.length - shown.length} more row(s)
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function formatWhen(iso: string): string {
   if (!iso) return "";
   const d = new Date(iso);
