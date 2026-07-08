@@ -31,7 +31,7 @@ interface Nav {
 const NavContext = createContext<Nav | null>(null);
 
 export function NavProvider({ children }: { children: ReactNode }) {
-  const [tab, setTab] = useState<TabId>("briefing");
+  const [tab, setTab] = useState<TabId>("ask");
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const [graphAnchor, setGraphAnchor] = useState<string | null>(null);
   const [evidenceRef, setEvidenceRef] = useState<string | null>(null);
@@ -40,7 +40,7 @@ export function NavProvider({ children }: { children: ReactNode }) {
   const askAbout = useCallback(
     (text: string, opts?: { send?: boolean; autoPin?: boolean }) => {
       setHandoff({ text, send: opts?.send, autoPin: opts?.autoPin });
-      setTab("inquiries");
+      setTab("ask");
     }, []);
   const goToGraph = useCallback((table: string) => {
     setGraphAnchor(table);

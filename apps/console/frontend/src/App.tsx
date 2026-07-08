@@ -2,11 +2,9 @@ import { WitnessDrawer } from "./components/WitnessDrawer";
 import { BRAND, TABS } from "./lib/copy";
 import { NavProvider, useNav } from "./lib/nav";
 import { useTheme } from "./lib/theme";
-import { BriefingTab } from "./tabs/Briefing";
+import { AskTab } from "./tabs/Ask";
 import { GraphTab } from "./tabs/Graph";
-import { InquiriesTab } from "./tabs/Inquiries";
 import { KnowledgeTab } from "./tabs/Knowledge";
-import { MetricsTab } from "./tabs/Metrics";
 import { ProductsTab } from "./tabs/Products";
 
 export default function App() {
@@ -55,15 +53,13 @@ function Shell() {
       </header>
 
       <main className="main">
-        {/* the chat stays mounted so conversations and in-flight
-            streams survive Briefing ↔ Inquiries handoffs */}
+        {/* Ask stays mounted so a conversation and any in-flight stream
+            survive tab hops to Data products / Graph / Knowledge */}
         <div className="tab-panel"
-          style={{ display: nav.tab === "inquiries" ? "flex" : "none" }}>
-          <InquiriesTab />
+          style={{ display: nav.tab === "ask" ? "flex" : "none" }}>
+          <AskTab />
         </div>
-        {nav.tab === "briefing" && <BriefingTab />}
         {nav.tab === "products" && <ProductsTab />}
-        {nav.tab === "metrics" && <MetricsTab />}
         {nav.tab === "graph" && <GraphTab />}
         {nav.tab === "knowledge" && <KnowledgeTab />}
       </main>

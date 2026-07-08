@@ -110,6 +110,50 @@ def test_products_grouped_by_business_unit(tmp_path):
     assert empty["source"] == "empty" and empty["units"] == []
 
 
+def test_graph_map_is_the_spine_with_rolled_up_edges(tmp_path):
+    """Whole-graph viz: tables/metrics/entities are nodes, columns are
+    NOT — a leader sees the shape of the business. Column-level structural
+    edges (joins, computation) roll up to their owning table."""
+    from synapse.graph.store import GraphStore, canonical_uri
+    store = GraphStore()
+    for name in ("accounts", "txns"):
+        t = canonical_uri("table", name)
+        store.upsert_node("Table", t, {"table_name": name}, source="mdm")
+        c = canonical_uri("column", name, "acct_key")
+        store.upsert_node("Column", c, {"table_name": name}, source="mdm")
+        store.upsert_edge("CONTAINS", t, c, {}, source="mdm")
+    # a join between the two tables' columns → one table↔table edge
+    store.upsert_edge("EQUIVALENT_TO",
+                      canonical_uri("column", "accounts", "acct_key"),
+                      canonical_uri("column", "txns", "acct_key"),
+                      {}, source="bq")
+    # a metric computed from a column → one table↔metric edge
+    m = canonical_uri("metric", "approval rate")
+    store.upsert_node("Metric", m, {"name": "Approval rate",
+                                    "formula": "a / d"}, source="skills")
+    store.upsert_edge("COMPUTED_FROM", m,
+                      canonical_uri("column", "accounts", "acct_key"),
+                      {}, source="skills")
+    snap = tmp_path / "map.json"
+    store.save_json(snap)
+
+    out = ConsoleData(snapshot_path=snap).graph_map()
+    assert out["live"] is True and out["source"] == "graph"
+    kinds = {n["kind"] for n in out["map"]["nodes"]}
+    assert kinds == {"table", "metric"}            # no column nodes
+    tables = [n for n in out["map"]["nodes"] if n["kind"] == "table"]
+    assert all(n["columns"] == 1 for n in tables)  # columns summarized
+    edge_kinds = sorted(e["kind"] for e in out["map"]["edges"])
+    assert edge_kinds == ["computed_from", "equivalent_to"]
+    # the join rolled up to connect the two TABLES, not the columns
+    join = next(e for e in out["map"]["edges"] if e["kind"] == "equivalent_to")
+    ids = {n["id"] for n in tables}
+    assert join["source"] in ids and join["target"] in ids
+
+    empty = ConsoleData(snapshot_path="/none/g.json").graph_map()
+    assert empty["source"] == "empty" and empty["map"]["nodes"] == []
+
+
 def test_witness_panel_strips_value_like_keys(tmp_path):
     data = _live_data(tmp_path)
     from synapse.graph.store import canonical_uri
@@ -296,6 +340,7 @@ def test_api_surface_round_trips():
     assert client.get("/api/products").json()["products"]
     assert client.get("/api/metrics").json()["metrics"]
     assert client.get("/api/graph/summary").json()["summary"]["nodes"] > 0
+    assert client.get("/api/graph/map").json()["map"]["nodes"]
     assert client.get("/api/graph/thread").json()["thread"]["hops"]
     # questions come from the demo-questions FILE, not the graph — the
     # endpoint round-trips a list (possibly empty when no file is staged)

@@ -43,9 +43,9 @@ export function SourceBadge({ live }: { live: boolean }) {
   return (
     <span className="env-badge" title={live
       ? "Reading from the compiled knowledge graph"
-      : "Illustrative data — connect a graph snapshot to go live"}>
+      : "No snapshot loaded — nothing is shown that can't be stood behind"}>
       <span className={`live-dot ${live ? "" : "sample"}`} aria-hidden />
-      {live ? COMMON.liveGraph : COMMON.sampleData}
+      {live ? COMMON.liveGraph : COMMON.noGraph}
     </span>
   );
 }

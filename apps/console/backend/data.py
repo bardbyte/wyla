@@ -364,6 +364,87 @@ class ConsoleData:
             })
         return {"hops": hops}
 
+    def graph_map(self, limit: int = 80) -> dict[str, Any]:
+        """The spine of the graph for whole-graph visualization: the
+        business-legible nodes (tables, entities, metrics, skills) and the
+        structural relationships between them (joins, identification,
+        computation, governance). Columns are NOT drawn — each table
+        carries its column count instead, so a leader sees the shape of
+        the business and drills into a table for detail. Column-level
+        edges are rolled up to their owning table. Graph-only; the honest
+        empty payload when no snapshot is loaded."""
+        empty = {"nodes": [], "edges": [], "truncated": False}
+        if not self.live:
+            return self._wrap("map", empty)
+
+        spine = ("Table", "Entity", "Metric", "Skill")
+        # column URI → owning table URI (roll column edges up to the table)
+        col_table: dict[str, str] = {}
+        for t in self.store.nodes_by_type("Table"):
+            for e in self.store.outgoing(t.canonical_uri, "CONTAINS"):
+                col_table[e.to_uri] = t.canonical_uri
+
+        nodes: list[dict[str, Any]] = []
+        keep: set[str] = set()
+        for kind in spine:
+            for n in self.store.nodes_by_type(kind):
+                label = (n.properties.get("table_name")
+                         or n.properties.get("name")
+                         or n.canonical_uri.rsplit("/", 1)[-1])
+                node: dict[str, Any] = {
+                    "id": n.canonical_uri,
+                    "label": str(label),
+                    "kind": kind.lower(),
+                    "tier": n.provenance.confidence_tier,
+                }
+                if kind == "Table":
+                    node["columns"] = len(
+                        self.store.outgoing(n.canonical_uri, "CONTAINS"))
+                    node["business_unit"] = (
+                        n.properties.get("business_unit")
+                        or n.properties.get("company_domain") or "")
+                    node["pii"] = self._table_has_pii(n.canonical_uri)
+                elif kind == "Metric":
+                    node["subtitle"] = str(
+                        n.properties.get("formula", ""))[:60]
+                nodes.append(node)
+                keep.add(n.canonical_uri)
+
+        # roll column-level structural edges up to their spine endpoints
+        structural = {"EQUIVALENT_TO", "IDENTIFIES", "COMPUTED_FROM",
+                      "APPLIES_TO"}
+        seen: set[tuple[str, str, str]] = set()
+        edges: list[dict[str, Any]] = []
+        for e in self.store.edges.values():
+            if e.edge_type not in structural:
+                continue
+            a = col_table.get(e.from_uri, e.from_uri)
+            b = col_table.get(e.to_uri, e.to_uri)
+            if a == b or a not in keep or b not in keep:
+                continue
+            lo, hi = sorted((a, b))
+            key = (e.edge_type, lo, hi)
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append({"source": a, "target": b,
+                          "kind": e.edge_type.lower(),
+                          "tier": e.provenance.confidence_tier})
+
+        truncated = len(nodes) > limit
+        if truncated:
+            deg: dict[str, int] = {}
+            for ed in edges:
+                deg[ed["source"]] = deg.get(ed["source"], 0) + 1
+                deg[ed["target"]] = deg.get(ed["target"], 0) + 1
+            nodes.sort(key=lambda n: -deg.get(n["id"], 0))
+            nodes = nodes[:limit]
+            kept = {n["id"] for n in nodes}
+            edges = [e for e in edges
+                     if e["source"] in kept and e["target"] in kept]
+        return self._wrap("map", {"nodes": nodes, "edges": edges,
+                                  "truncated": truncated})
+
     # ── metrics ──────────────────────────────────────────────
 
     def metrics(self, q: str = "") -> dict[str, Any]:

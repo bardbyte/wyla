@@ -1,22 +1,28 @@
-/** The chat — one column, no document workspace.
+/** Ask — the agentic centerpiece.
  *
- * Each turn renders: the question, the live work log (thinking, tool
- * calls with provenance chips, the SQL gate, query results as a
- * table), then the answer with "Pin this" — the door to the Briefing.
- * Turns capture the exact SQL that ran (gate SQL in scripted mode,
- * execute_sql tool-call args in live mode), the returned rows, and the
- * ledger id, so a pin carries everything the escrow needs. Known graph
- * objects in answers are live tokens (Evidence · Explore · Ask).
+ * One column, one conversation. Each turn renders the question, the
+ * live work log (the agent thinking; tool calls with provenance chips;
+ * the SQL gate; query results as a table), then the answer — sources,
+ * confidence, and the trail that produced them. Known graph objects in
+ * an answer are live tokens (Evidence · Explore · Ask about this), so a
+ * conversation is a door into every other surface.
+ *
+ * This is where P1–P4 close in one place: find the data, trust it, get
+ * the number safely (nothing runs without a held approval), and defend
+ * it later (citations, ledger ids, tier chips). Keeping what was learned
+ * — P5 — is a signed assertion, made through the agent and surfaced in
+ * Bring your knowledge.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { RefText } from "../components/EntityRef";
+import { WitnessDrawer } from "../components/WitnessDrawer";
 import {
   ResultsTable, extractRows, formatBytes, HoldButton, RichText,
   Spinner, TierChip,
 } from "../components/ui";
 import { api } from "../lib/api";
-import { INQUIRIES as C } from "../lib/copy";
+import { ASK as C } from "../lib/copy";
 import { useNav } from "../lib/nav";
 import { streamChat } from "../lib/sse";
 import type { AnswerSections, ConsoleEvent } from "../lib/types";
@@ -29,46 +35,19 @@ interface Turn {
   gate: Extract<ConsoleEvent, { type: "sql_gate" }> | null;
   heldNote: string | null;
   done: boolean;
-  sql: string | null;
-  rows: Record<string, unknown>[] | null;
-  ledgerId: string | null;
-  pinned: boolean;
 }
 
 const newTurn = (question: string): Turn => ({
   question, log: [], liveText: "", answer: null,
   gate: null, heldNote: null, done: false,
-  sql: null, rows: null, ledgerId: null, pinned: false,
 });
 
-const URI_RX = /synapse:\/\/[\w./#:-]+/g;
-const LEDGER_RX = /ledger:#[\w-]+/g;
-
-function harvestCitations(turn: Turn): { label: string; ref: string }[] {
-  if (turn.answer) {
-    return turn.answer.citations.map((c) => ({
-      label: c.label, ref: c.ref,
-    }));
-  }
-  const refs = new Set<string>([
-    ...(turn.liveText.match(URI_RX) ?? []),
-    ...(turn.liveText.match(LEDGER_RX) ?? []),
-  ]);
-  return [...refs].slice(0, 8).map((ref) => ({
-    label: ref.startsWith("ledger:")
-      ? ref.replace("ledger:", "ledger")
-      : ref.split("/").slice(-2).join("/"),
-    ref,
-  }));
-}
-
-export function InquiriesTab() {
+export function AskTab() {
   const nav = useNav();
   const conversationId = useRef<string>(
     globalThis.crypto?.randomUUID?.() ?? `c${Date.now()}`);
   const pending = useRef<ConsoleEvent[]>([]);
   const gated = useRef(false);
-  const execSql = useRef<Map<string, string>>(new Map());
 
   const [turns, setTurns] = useState<Turn[]>([]);
   const turnsRef = useRef<Turn[]>(turns);
@@ -104,29 +83,8 @@ export function InquiriesTab() {
       case "turn_start":
         break;
       case "tool_call":
-        if (ev.tool === "execute_sql" &&
-            typeof ev.args?.sql === "string") {
-          execSql.current.set(ev.call_id, ev.args.sql as string);
-        }
-        patchLast((t) => ({ ...t, log: [...t.log, ev] }));
-        break;
-      case "tool_result": {
-        const sql = execSql.current.get(ev.call_id);
-        const rows = extractRows(ev.payload);
-        patchLast((t) => ({
-          ...t,
-          log: [...t.log, ev],
-          ...(sql && ev.ok && rows ? { sql, rows } : {}),
-        }));
-        break;
-      }
+      case "tool_result":
       case "gate_resolved":
-        patchLast((t) => ({
-          ...t,
-          log: [...t.log, ev],
-          ...(ev.ledger_id ? { ledgerId: ev.ledger_id } : {}),
-        }));
-        break;
       case "thinking":
       case "sandbox":
       case "artifact":
@@ -151,35 +109,12 @@ export function InquiriesTab() {
     }
   };
 
-  const pinTurn = async (index: number) => {
-    const turn = turnsRef.current[index];
-    if (!turn || turn.pinned) return;
-    const body = {
-      question: turn.question,
-      answer: turn.answer?.answer ?? turn.liveText,
-      citations: harvestCitations(turn),
-      sql: turn.sql,
-      rows: turn.rows ?? undefined,
-      ledger_id: turn.ledgerId,
-      source: demoMode ? "scripted" : "live",
-    };
-    try {
-      await api.createPin(body);
-      setTurns((ts) => ts.map((t, i) =>
-        i === index ? { ...t, pinned: true } : t));
-    } catch {
-      /* the pin API being down is not a chat failure */
-    }
-  };
-
-  const ask = async (text: string, opts?: { autoPin?: boolean }) => {
+  const ask = async (text: string) => {
     const q = text.trim();
     if (!q || busy) return;
     setQuestion("");
     gated.current = false;
     pending.current = [];
-    execSql.current.clear();
-    const index = turnsRef.current.length;
     setTurns((ts) => [...ts, newTurn(q)]);
     setBusy(true);
     try {
@@ -188,11 +123,6 @@ export function InquiriesTab() {
         else handleEvent(ev);
       }
       if (!gated.current && pending.current.length === 0) setBusy(false);
-      if (opts?.autoPin && !gated.current) {
-        // state flushes before the await chain resumes rendering; give
-        // React one frame, then pin from the ref mirror
-        setTimeout(() => void pinTurn(index), 50);
-      }
     } catch (e) {
       handleEvent({
         type: "error",
@@ -208,18 +138,17 @@ export function InquiriesTab() {
   const askRef = useRef(ask);
   askRef.current = ask;
   useEffect(() => {
-    if (!nav.handoff || nav.tab !== "inquiries") return;
-    const { text, send, autoPin } = nav.handoff;
+    if (!nav.handoff || nav.tab !== "ask") return;
+    const { text, send } = nav.handoff;
     nav.clearHandoff();
-    if (send) void askRef.current(text, { autoPin });
+    if (send) void askRef.current(text);
     else setQuestion(text);
   }, [nav, nav.handoff, nav.tab]);
 
   const approveGate = async (gateId: string) => {
     await api.approve(gateId, true).catch(() => undefined);
     gated.current = false;
-    // keep the gate's SQL — it IS the query of record for this turn
-    patchLast((t) => ({ ...t, sql: t.gate?.sql ?? t.sql, gate: null }));
+    patchLast((t) => ({ ...t, gate: null }));
     const queued = pending.current;
     pending.current = [];
     queued.forEach(handleEvent);
@@ -244,13 +173,9 @@ export function InquiriesTab() {
       )}
       <div className="chat-scroll" ref={scrollRef}>
         {turns.length === 0 && (
-          <div className="empty" style={{ margin: "auto", maxWidth: 480 }}>
-            <h1 className="h-page" style={{ color: "var(--ink)" }}>
-              {C.emptyTitle}
-            </h1>
-            <p className="h-sub" style={{ margin: "var(--s-3) auto 0" }}>
-              {C.emptySub}
-            </p>
+          <div className="ask-hero">
+            <h1 className="h-page">{C.emptyTitle}</h1>
+            <p className="h-sub">{C.emptySub}</p>
           </div>
         )}
 
@@ -279,18 +204,6 @@ export function InquiriesTab() {
             {!t.answer && t.liveText && (
               <div className="answer-card card card-pad">
                 <Markdown text={t.liveText} />
-              </div>
-            )}
-            {t.done && (t.answer || t.liveText) && !t.heldNote && (
-              <div className="pin-row">
-                {t.pinned ? (
-                  <span className="tag">{C.pinned}</span>
-                ) : (
-                  <button type="button" className="btn quiet"
-                    onClick={() => void pinTurn(i)}>
-                    ⌖ {C.pin}
-                  </button>
-                )}
               </div>
             )}
           </section>
@@ -338,20 +251,10 @@ export function InquiriesTab() {
       </div>
 
       {inspect && (
-        <LocalDrawer refUri={inspect} onClose={() => setInspect(null)} />
+        <WitnessDrawer refUri={inspect} onClose={() => setInspect(null)} />
       )}
     </div>
   );
-}
-
-/* the app-level drawer lives in App; this local one serves clicks from
- * the work log while keeping the import local to avoid cycles */
-import { WitnessDrawer } from "../components/WitnessDrawer";
-
-function LocalDrawer({ refUri, onClose }: {
-  refUri: string; onClose: () => void;
-}) {
-  return <WitnessDrawer refUri={refUri} onClose={onClose} />;
 }
 
 /* ── pieces ── */
