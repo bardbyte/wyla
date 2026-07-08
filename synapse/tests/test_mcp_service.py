@@ -195,6 +195,63 @@ def test_join_path_absence_is_error_with_guidance():
     assert "invent" in " ".join(res["error"]["suggestions"]).lower()
 
 
+def test_explain_column_fills_on_demand_and_caches(tmp_path):
+    """The on-demand tool through the service: envelope-wrapped, fills a
+    gap once, then serves it read-through."""
+    from synapse.enrichment.on_demand import OverlayStore
+    from synapse.enrichment.schemas import (
+        ColumnObservation, EnrichmentBundle, SelfAssessment)
+
+    store = GraphStore()
+    t = canonical_uri("table", "t")
+    store.upsert_node("Table", t, {"table_name": "t",
+                                   "description": "T"}, source="mdm")
+    c = canonical_uri("column", "t", "x")
+    store.upsert_node("Column", c, {"table_name": "t",
+                                    "data_type": "STRING"}, source="mdm")
+    store.upsert_edge("CONTAINS", t, c, {}, source="mdm")
+
+    class _Client:
+        calls = 0
+
+        def enrich(self, *, skill_md, context, table_name):
+            _Client.calls += 1
+            name = context["inspection"]["columns"][0]["name"]
+            return EnrichmentBundle(
+                table_name=table_name, column_observations=[ColumnObservation(
+                    column_name=name, proposed_description="what x means",
+                    candidate_role="attribute", self_confidence=0.8,
+                    evidence_used=["bq"])],
+                self_assessment=SelfAssessment(
+                    tables_skipped_for_lack_of_signal=[],
+                    columns_marked_ambiguous=0,
+                    proposed_entities_with_low_evidence=[],
+                    requires_steward_attention=[]))
+
+    svc = GraphService(store, llm_client=_Client(),
+                       overlay=OverlayStore(tmp_path / "ov.json"))
+    res = svc.explain_column("t", "x")
+    assert res["status"] == "ok"
+    assert res["meta"]["tool_name"] == "explain_column"
+    assert "what x means" in res["data"]["description"]
+    # re-ask is a read-through cache hit — no second model call
+    again = svc.explain_column("t", "x")
+    assert again["data"]["cached"] is True and _Client.calls == 1
+
+
+def test_explain_column_without_client_serves_grounded_profile():
+    store = GraphStore()
+    t = canonical_uri("table", "t")
+    store.upsert_node("Table", t, {"table_name": "t"}, source="mdm")
+    c = canonical_uri("column", "t", "x")
+    store.upsert_node("Column", c, {"table_name": "t", "data_type": "STRING",
+                                    "max_value": "9"}, source="mdm")
+    store.upsert_edge("CONTAINS", t, c, {}, source="mdm")
+    res = GraphService(store).explain_column("t", "x")
+    assert res["status"] == "partial"
+    assert res["data"]["grounded_facts"]["data_type"] == "STRING"
+
+
 def test_snapshot_version_round_trips(service, tmp_path):
     path = tmp_path / "snap.json"
     service.store.save_json(path)

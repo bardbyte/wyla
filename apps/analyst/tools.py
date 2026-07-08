@@ -44,6 +44,19 @@ def snapshot_path() -> Path:
     return Path(os.environ.get("SYNAPSE_GRAPH_PATH", str(_DEFAULT_SNAPSHOT)))
 
 
+def _enrichment_client():
+    """A Vertex client for on-demand column enrichment attaches only when
+    credentials exist (work laptop); otherwise explain_column serves the
+    grounded profile + read-through cache without an LLM."""
+    if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+        return None
+    try:
+        from synapse.enrichment.vertex_client import VertexLLMClient
+        return VertexLLMClient()
+    except Exception:      # noqa: BLE001 — no creds/network → graceful None
+        return None
+
+
 @lru_cache(maxsize=1)
 def _service() -> GraphService:
     path = snapshot_path()
@@ -53,11 +66,22 @@ def _service() -> GraphService:
             "  python synapse/scripts/pipeline.py --demo\n"
             "or point SYNAPSE_GRAPH_PATH at an existing snapshot."
         )
+    from synapse.enrichment.on_demand import OverlayStore
     from synapse.mcp.skills_registry import load_registry
+    store = GraphStore.load_json(path)
+    # the durable agent-fill layer — replay prior on-demand fills so the
+    # graph the agent sees already carries them (the flywheel across
+    # restarts); the canonical snapshot on disk is never mutated
+    overlay = OverlayStore(os.environ.get(
+        "SYNAPSE_ENRICHMENT_OVERLAY",
+        str(path.with_name("enrichment_overlay.json"))))
+    overlay.apply(store)
     return GraphService(
-        GraphStore.load_json(path),
+        store,
         tenant_id=os.environ.get("SYNAPSE_TENANT_ID", "default"),
         skills=load_registry(path),   # guardrails enforced from files, not the graph
+        llm_client=_enrichment_client(),
+        overlay=overlay,
     )
 
 
@@ -182,6 +206,7 @@ _CLASSIC_GRAPH_TOOLS = (
     "find_columns_for_concept", "get_join_path", "get_lineage",
     "get_metric", "get_skill", "get_dq_status", "disambiguate_term",
     "validate_sql_plan", "get_entity", "get_steward_review_queue",
+    "explain_column", "check_data_trust", "capture_knowledge",
 )
 
 

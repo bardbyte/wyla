@@ -91,9 +91,12 @@ says "not enough to define this" rather than inventing.
 
 ## Roadmap (implementation slices)
 
-1. **Signal-quality primitives** — querier classification + key inference.
-   *(this slice)*
-2. **Column priority score** — the composite over §Prioritization.
-3. **Prioritized batch enricher** — select the head, batch, stop at budget;
-   tail grounded-only.
-4. **On-demand tool + overlay + proposal record** — policy A.
+1. ✅ **Signal-quality primitives** — querier classification + key inference
+   (`enrichment/signals.py`).
+2. ✅ **Column priority score** — the composite over §Prioritization
+   (`enrichment/prioritize.py`).
+3. ✅ **Prioritized batch enricher** — analyst-only corpus + select the
+   head via the enricher's `skip_columns`; tail grounded-only
+   (`pipeline.py --enrich`; `--enrich-all-columns` restores the sweep).
+4. ✅ **On-demand tool + overlay + proposal record** — policy A
+   (`enrichment/on_demand.py`, `explain_column` MCP tool + agent roster).
