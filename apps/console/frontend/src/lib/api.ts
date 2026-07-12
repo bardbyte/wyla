@@ -2,8 +2,8 @@
  * payload plus its `live` flag so callers can label sample data. */
 
 import type {
-  AppConfig, GraphSummary, LexiconEntry, Metric, Pin, PinRun, Product,
-  ThreadHop, Viability, Witness,
+  AppConfig, GraphMap, GraphSummary, LexiconEntry, Metric, Pin, PinRun,
+  Product, ThreadHop, Unit, Viability, Witness,
 } from "./types";
 
 async function post<T>(url: string, body: unknown,
@@ -27,7 +27,7 @@ async function get<T>(url: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-type Live<T> = T & { live: boolean; source: "graph" | "sample" };
+type Live<T> = T & { live: boolean; source: "graph" | "empty" };
 
 export const api = {
   config: () => get<AppConfig>("/api/config"),
@@ -35,6 +35,13 @@ export const api = {
   products: (q = "") =>
     get<Live<{ products: Product[] }>>(
       `/api/products?q=${encodeURIComponent(q)}`),
+
+  productsByUnit: (q = "") =>
+    get<Live<{ units: Unit[] }>>(
+      `/api/products/by-unit?q=${encodeURIComponent(q)}`),
+
+  graphMap: () =>
+    get<Live<{ map: GraphMap }>>("/api/graph/map"),
 
   metrics: (q = "") =>
     get<Live<{ metrics: Metric[] }>>(

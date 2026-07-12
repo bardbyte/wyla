@@ -4,10 +4,18 @@
  * Editorial rules (applied everywhere):
  *  - Sentence case. No exclamation marks. No filler ("simply", "just").
  *  - Enterprise-neutral: the product serves any team; no role or
- *    industry personas in the interface.
- *  - Verbs lead on actions. States are honest ("Sample data", never an
- *    unlabeled mock). Claims are specific, not superlative.
+ *    industry personas in the interface. (The data's own business
+ *    units come from MDM and are shown as-is.)
+ *  - Verbs lead on actions. States are honest ("No graph loaded",
+ *    never an unlabeled mock). Claims are specific, not superlative.
  *  - Evidence levels use words, never percentages, at the surface.
+ *
+ * The information architecture is one loop, four surfaces:
+ *   Ask               — ask a question, watch it get answered, defend it
+ *   Data products     — what we know about your business, by unit
+ *   Knowledge graph   — the whole connected picture, provenance-typed
+ *   Bring your        — your team's knowledge, at the highest tier
+ *     knowledge
  */
 
 import type { Tier } from "./types";
@@ -17,12 +25,10 @@ export const BRAND = {
 };
 
 export const TABS = [
-  { id: "briefing", label: "Briefing", preview: false },
-  { id: "inquiries", label: "Inquiries", preview: false },
+  { id: "ask", label: "Ask", preview: false },
   { id: "products", label: "Data products", preview: false },
-  { id: "metrics", label: "Metrics", preview: false },
   { id: "graph", label: "Knowledge graph", preview: false },
-  { id: "knowledge", label: "Bring your knowledge", preview: true },
+  { id: "knowledge", label: "Bring your knowledge", preview: false },
 ] as const;
 
 export type TabId = (typeof TABS)[number]["id"];
@@ -40,37 +46,17 @@ export const TIERS: Record<
   blocked: { word: "Declined", fill: "◼", cls: "t-block" },
 };
 
-export const BRIEFING = {
-  title: "Your briefing",
-  sub:
-    "Answers your team decided to keep. Each one re-runs the exact " +
-    "query it was born from — through every gate, onto the audit " +
-    "ledger — so the numbers stay fresh and stay defensible.",
-  empty:
-    "Nothing pinned yet. Ask a question in Inquiries and pin the " +
-    "answer — Radix will keep it fresh here.",
-  emptyCta: "Ask a question",
-  rerun: "Re-run",
-  rerunning: "Running…",
-  rerunSeed: "Sample tiles don't re-run — pin a real answer.",
-  rerunNoSql: "This answer has no query behind it — nothing to re-run.",
-  unreachable: "The warehouse isn't reachable from here",
-  refusedPrefix: "Held by the gate",
-  evidence: "Evidence",
-  followUp: "Ask a follow-up",
-  verifyHold: "Hold to verify",
-  verifyHint: "A steward's hold is a signature.",
-  verifiedBadge: "Steward-verified",
-  unpinHold: "Hold to unpin",
-  asOf: "as of",
-  vsPrevious: "vs previous run",
-  viewTable: "View table",
-  hideTable: "Hide table",
-  shapeChanged: "Result shape changed — delta suppressed.",
-  suggestTitle: "Verified questions you could keep",
-  answerAndPin: "Answer & pin",
-  seedBadge: "Sample",
-  rowsWord: "rows",
+export const COMMON = {
+  liveGraph: "Live graph",
+  noGraph: "No graph loaded",
+  preview: "Preview — planned",
+  loading: "Loading…",
+  close: "Close",
+  noGraphTitle: "No graph is loaded",
+  noGraphSub:
+    "Point the server at a compiled snapshot (SYNAPSE_GRAPH_PATH) to " +
+    "bring every surface to life. Until then Radix shows nothing it " +
+    "can't stand behind.",
 };
 
 export const ENTITY = {
@@ -80,22 +66,18 @@ export const ENTITY = {
   askPrefix: "Tell me about ",
 };
 
-export const COMMON = {
-  liveGraph: "Live graph",
-  sampleData: "Sample data",
-  preview: "Preview — planned",
-  loading: "Loading…",
-  evidenceFooter: "Every number ships with its evidence.",
-  close: "Close",
-};
+/* ── Ask — the agentic centerpiece ────────────────────────── */
 
-export const INQUIRIES = {
-  emptyTitle: "Ask about your data.",
+export const ASK = {
+  emptyTitle: "Ask a question. Get an answer you can defend.",
   emptySub:
-    "Answers arrive with their sources, their confidence, and the " +
-    "trail that produced them.",
+    "Radix reads your knowledge graph, checks the meaning of every " +
+    "field, and — when a query is needed — drafts it, prices it, and " +
+    "waits for your approval before anything runs. Answers arrive with " +
+    "their sources, their confidence, and the trail that produced them.",
   placeholder:
-    "Ask about ownership, definitions, lineage, or the numbers themselves…",
+    "Ask about ownership, definitions, lineage, trust, or the numbers " +
+    "themselves…",
   send: "Ask",
   working: "Working…",
   gateTitle: "Approval needed to run this query",
@@ -112,26 +94,31 @@ export const INQUIRIES = {
   howTitle: "How this was produced",
   errorTitle: "That didn't go through",
   suggestTitle: "Verified questions you can ask now",
-  pin: "Pin this",
-  pinned: "Pinned — it's on your briefing now.",
   demoBanner:
     "Demo mode — scripted transcripts, not the live agent. Unset " +
     "SYNAPSE_CONSOLE_RUNNER (or set it to adk) and restart the server " +
     "to chat with Gemini.",
 };
 
+/* ── Data products — "we know your business", by unit ─────── */
+
 export const PRODUCTS = {
   title: "Data products",
   sub:
-    "Governed tables with their owners, lifecycle, and a readiness " +
-    "scorecard — how completely each one is described in the knowledge " +
-    "graph.",
+    "What we know about your business, grouped by the units MDM " +
+    "governs. Each table carries a readiness scorecard — how completely " +
+    "it is described in the knowledge graph — and its governance signals.",
   search: "Search data products…",
-  add: "Add a data product",
-  addNote:
-    "Adding a product syncs its schema, ownership, and usage into the " +
-    "graph.",
-  readiness: "Readiness",
+  empty: "No data products match that search.",
+  emptyNoGraph: COMMON.noGraphSub,
+  // per-unit rollup labels
+  uTables: "tables",
+  uColumns: "columns",
+  uDescribed: "described",
+  uGrounded: "corroborated",
+  uPii: "with PII",
+  uGoverned: "governed",
+  // per-product scorecard labels
   columns: "Columns",
   meaning: "Described",
   related: "Related tables",
@@ -140,61 +127,37 @@ export const PRODUCTS = {
   lineage: "Lineage",
   present: "Yes",
   absent: "—",
-  empty: "No data products match that search.",
+  unassigned: "Unassigned",
 };
 
-export const METRICS = {
-  title: "Metrics",
-  sub:
-    "The metric canon: definitions with their formulas, sources, and " +
-    "evidence level. New definitions are checked against the canon " +
-    "before anything is drafted.",
-  search: "Search metrics…",
-  copilotTitle: "Define a metric",
-  copilotSub:
-    "Describe the measure in plain language. Radix checks the canon " +
-    "first — duplicates are surfaced, not minted.",
-  nameLabel: "Metric name",
-  namePlaceholder: "e.g. Average settlement lag",
-  descLabel: "What it measures",
-  descPlaceholder:
-    "The average days between transaction and settlement, over settled " +
-    "transactions…",
-  check: "Check the canon",
-  checking: "Checking…",
-  verdictExact: "Already canonical",
-  verdictExactSub:
-    "This metric exists. Use the canonical definition below — a second " +
-    "definition of the same measure is how numbers stop agreeing.",
-  verdictNear: "Close to existing definitions",
-  verdictNearSub:
-    "Review these before drafting. If yours is genuinely different, " +
-    "say how it differs in the description and check again.",
-  verdictClear: "No conflicts found",
-  verdictClearSub:
-    "The canon has no matching or near definition. A draft can be " +
-    "grounded in existing columns and submitted for review.",
-  draftTitle: "Draft definition",
-  draftTierNote:
-    "Drafts carry the Inferred mark until a steward signs them. " +
-    "Signature is what makes canon — generation never does.",
-  submit: "Submit for steward review",
-  sharedTerms: "Shared terms",
-  formula: "Formula",
-  sources: "Sources",
-  empty: "No metrics match that search.",
-};
+/* ── Knowledge graph — the whole connected picture ────────── */
 
 export const GRAPH = {
   title: "Knowledge graph",
   sub:
     "One connected picture of your data. Every fact is typed by where " +
-    "it came from and how strongly it is supported.",
+    "it came from and how strongly it is supported — no single source, " +
+    "including AI enrichment, can reach the highest level alone.",
+  mapTitle: "The whole picture",
+  mapSub:
+    "Tables, the business entities they describe, the metrics computed " +
+    "from them, and the playbooks that govern them. Select any node to " +
+    "inspect its evidence or ask about it.",
+  mapEmpty: "Nothing is recorded in the current snapshot.",
+  truncatedNote: "Showing the most connected nodes.",
+  legendKinds: "Node types",
+  kinds: {
+    table: "Table",
+    entity: "Entity",
+    metric: "Metric",
+    skill: "Playbook",
+  } as Record<string, string>,
   storyTitle: "One thread, end to end",
   storySub:
-    "How a business entity connects to physical columns, a proven " +
-    "join, a canonical metric, and the playbook that governs it.",
-  pickerLabel: "Explore a data product",
+    "Anchor on a table to trace how it connects to a business entity, " +
+    "a proven join, a canonical metric, and the playbook that governs " +
+    "it.",
+  pickerLabel: "Trace a data product",
   pickerDefault: "The canonical thread",
   pickerEmpty:
     "Nothing is recorded for this table in the current snapshot.",
@@ -202,24 +165,63 @@ export const GRAPH = {
   witnessTitle: "Where the facts come from",
   witnessSub:
     "Independent sources contribute facts; agreement raises " +
-    "confidence. No single source — including AI enrichment — can " +
-    "reach the highest levels alone.",
+    "confidence. No single source can reach the highest level alone.",
   tierLegend: "Evidence levels",
   nodes: "Facts",
   edges: "Connections",
   openEvidence: "Select any step to inspect its evidence.",
 };
 
+/* ── Bring your knowledge — the partnership close (P5) ─────── */
+
 export const KNOWLEDGE = {
   title: "Bring your knowledge",
   sub:
-    "Connect the places your organization already writes things down. " +
-    "Each source becomes weighted evidence in the graph — reviewed, " +
-    "attributed, and never pasted in as unaccountable context.",
+    "The graph gets its meaning from your team. What you know — the " +
+    "definitions, the caveats, the way your unit actually uses a field — " +
+    "becomes the highest tier of evidence, attributed to you.",
+  captureTitle: "Tell Radix what your team knows",
+  captureSub:
+    "State a definition or a correction in your own words. The agent " +
+    "records it as a signed assertion — the top evidence level, above " +
+    "anything AI can infer — credited to you and durable across runs.",
+  captureExamples: [
+    "In our unit, an account with status 'A' is actively managed, not " +
+      "merely open.",
+    "Roll rate is measured on the closing balance, not the average.",
+    "custins_cardmember is the system of record for tenure, not " +
+      "risk_pers_acct.",
+  ],
+  captureCta: "Assert this in Ask",
   how:
-    "Connected sources contribute facts with a defined weight. " +
-    "Corroboration across sources raises confidence; a steward's " +
-    "signature settles it.",
+    "A signed assertion outranks every inferred or connected fact. " +
+    "Corroboration across sources raises confidence; your signature " +
+    "settles it.",
+  ladderTitle: "How knowledge earns its evidence level",
+  ladder: [
+    {
+      tier: "inferred" as const,
+      text:
+        "A connected source or AI enrichment contributes a fact with " +
+        "its own weight — labeled evidence, never pasted context.",
+    },
+    {
+      tier: "grounded" as const,
+      text:
+        "Independent agreement across sources corroborates an " +
+        "assertion and raises its level.",
+    },
+    {
+      tier: "human_asserted" as const,
+      text:
+        "Your signature settles it — the highest level, and the only " +
+        "way to reach it.",
+    },
+  ],
+  ladderFoot:
+    "Everything stays attributed: every fact can name the person, " +
+    "document, or catalog entry it came from.",
+  connectTitle: "Connect the places you already write things down",
   connectors: [
     {
       icon: "▤",
@@ -243,30 +245,6 @@ export const KNOWLEDGE = {
     },
   ],
   connect: "Connect",
-  ladderTitle: "How outside knowledge earns its evidence level",
-  ladder: [
-    {
-      tier: "inferred" as const,
-      text:
-        "A connected source contributes facts with its own weight — " +
-        "labeled evidence, never pasted context.",
-    },
-    {
-      tier: "grounded" as const,
-      text:
-        "Independent agreement across sources corroborates an " +
-        "assertion and raises its level.",
-    },
-    {
-      tier: "human_asserted" as const,
-      text:
-        "A steward's signature settles it — the highest level, and " +
-        "the only way to reach it.",
-    },
-  ],
-  ladderFoot:
-    "Everything stays attributed: every fact can name the document, " +
-    "page, or catalog entry it came from.",
 };
 
 export const CONFIG = {

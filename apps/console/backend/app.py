@@ -237,6 +237,10 @@ def create_app(runner: Runner | None = None,
     def graph_summary() -> dict:
         return app.state.data.graph_summary()
 
+    @app.get("/api/graph/map")
+    def graph_map() -> dict:
+        return app.state.data.graph_map()
+
     @app.get("/api/graph/thread")
     def graph_thread(table: str = "") -> dict:
         return app.state.data.graph_thread(table)

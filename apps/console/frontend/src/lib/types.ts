@@ -57,6 +57,29 @@ export interface Product {
   domain: string; lifecycle: string; tier: Tier; readiness: Readiness;
 }
 
+export interface Unit {
+  unit: string; table_count: number; total_columns: number;
+  mean_meaning_pct: number; grounded_tables: number;
+  pii_tables: number; governed_tables: number; products: Product[];
+}
+
+export interface GraphMapNode {
+  id: string; label: string;
+  kind: "table" | "entity" | "metric" | "skill";
+  tier: Tier; columns?: number; business_unit?: string;
+  pii?: boolean; subtitle?: string;
+}
+
+export interface GraphMapEdge {
+  source: string; target: string;
+  kind: "equivalent_to" | "identifies" | "computed_from" | "applies_to";
+  tier: Tier;
+}
+
+export interface GraphMap {
+  nodes: GraphMapNode[]; edges: GraphMapEdge[]; truncated: boolean;
+}
+
 export interface Metric {
   name: string; ref: string; formula: string; description: string;
   tier: Tier; sources: string[];
