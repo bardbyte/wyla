@@ -43,8 +43,9 @@ from pydantic import BaseModel
 from apps.console.backend.data import ConsoleData
 from apps.console.backend.events import to_sse
 from apps.console.backend.pins import (
-    NoSqlError, PinStore, SeedPinError,
+    NoSqlError, PinStore,
 )
+from apps.console.backend.evaluator import EvalLog, TurnEvaluator
 from apps.console.backend.runner import ADKRunner, Runner, ScriptedRunner
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
@@ -142,6 +143,9 @@ def create_app(runner: Runner | None = None,
                      else {"mode": "n/a (scripted)"})
     # gate_id → decision, set by /approve; the resumable loop consumes it
     app.state.gate_decisions = {}
+    # every turn scored the moment it completes, from the same events
+    # the UI rendered — the /api/evals feed
+    app.state.evals = EvalLog(TurnEvaluator(app.state.data))
 
     # ── agent stream ─────────────────────────────────────────
 
@@ -196,10 +200,20 @@ def create_app(runner: Runner | None = None,
         conversation_id = req.conversation_id or turn_id
 
         async def event_stream():
+            recorded: list[dict] = []
             async for event in app.state.runner.stream(
                     req.message, turn_id=turn_id,
                     conversation_id=conversation_id):
+                try:
+                    recorded.append(event.model_dump(mode="python"))
+                except Exception:
+                    pass  # evals never get to break the stream
                 yield to_sse(event)
+            # score the finished turn; failures are invisible to the UI
+            try:
+                app.state.evals.record(turn_id, req.message, recorded)
+            except Exception:
+                pass
 
         return StreamingResponse(
             event_stream(), media_type="text/event-stream",
@@ -210,6 +224,12 @@ def create_app(runner: Runner | None = None,
     def approve(req: ApproveRequest) -> dict:
         app.state.gate_decisions[req.gate_id] = req.approved
         return {"gate_id": req.gate_id, "approved": req.approved}
+
+    @app.get("/api/evals/recent")
+    def evals_recent() -> dict:
+        """Every recent turn, scored: deterministic checks with
+        plain-language explanations, newest first."""
+        return app.state.evals.recent()
 
     # ── read-side API (graph-backed; honest-empty when no snapshot) ──
 
@@ -241,6 +261,30 @@ def create_app(runner: Runner | None = None,
     def graph_map() -> dict:
         return app.state.data.graph_map()
 
+    @app.get("/api/graph/insights")
+    def graph_insights(table: str) -> dict:
+        return app.state.data.table_insights(table)
+
+    @app.get("/api/agent/selftest")
+    def agent_selftest() -> dict:
+        """Build the live agent server-side WITHOUT calling Vertex, so
+        'the console doesn't work' names itself: snapshot missing, adk /
+        genai version drift, import errors — each mapped to its fix by
+        _explain_failure. Scripted runner → trivially ok."""
+        runner = app.state.runner
+        if not isinstance(runner, ADKRunner):
+            return {"ok": True, "runner": type(runner).__name__,
+                    "note": "demo transcripts — no live agent to test"}
+        try:
+            runner._ensure()
+            return {"ok": True, "runner": "ADKRunner",
+                    "model": os.environ.get("GEMINI_MODEL",
+                                            "gemini-3.1-pro-preview")}
+        except Exception as exc:
+            from apps.console.backend.runner import _explain_failure
+            return {"ok": False, "runner": "ADKRunner",
+                    "error": _explain_failure(exc)}
+
     @app.get("/api/graph/thread")
     def graph_thread(table: str = "") -> dict:
         return app.state.data.graph_thread(table)
@@ -248,6 +292,11 @@ def create_app(runner: Runner | None = None,
     @app.get("/api/questions")
     def questions() -> dict:
         return app.state.data.questions()
+
+    @app.get("/api/questions/starters")
+    def starter_questions() -> dict:
+        """Capability-tour starters derived from the loaded graph."""
+        return app.state.data.starter_questions()
 
     @app.get("/api/witness")
     def witness(ref: str) -> dict:
@@ -262,8 +311,7 @@ def create_app(runner: Runner | None = None,
     @app.get("/api/pins")
     def pins_list() -> dict:
         return {"live": app.state.data.live,
-                "source": "graph" if app.state.data.live else "sample",
-                "seeded": app.state.pins.seeded,
+                "source": "graph" if app.state.data.live else "empty",
                 "pins": app.state.pins.list()}
 
     @app.post("/api/pins", status_code=201)
@@ -281,8 +329,6 @@ def create_app(runner: Runner | None = None,
                 pin_id, app.state.warehouse_factory(), actor=req.actor)
         except KeyError:
             return JSONResponse({"code": "not_found"}, status_code=404)
-        except SeedPinError:
-            return JSONResponse({"code": "seed_pin"}, status_code=409)
         except NoSqlError:
             return JSONResponse({"code": "no_sql"}, status_code=409)
 
@@ -293,8 +339,6 @@ def create_app(runner: Runner | None = None,
                 pin_id, verified=req.verified, actor=req.actor)}
         except KeyError:
             return JSONResponse({"code": "not_found"}, status_code=404)
-        except SeedPinError:
-            return JSONResponse({"code": "seed_pin"}, status_code=409)
 
     @app.delete("/api/pins/{pin_id}")
     def pin_delete(pin_id: str) -> object:
@@ -303,8 +347,6 @@ def create_app(runner: Runner | None = None,
             return {"deleted": pin_id}
         except KeyError:
             return JSONResponse({"code": "not_found"}, status_code=404)
-        except SeedPinError:
-            return JSONResponse({"code": "seed_pin"}, status_code=409)
 
     # ── the SPA (after API routes, so /api wins) ─────────────
 

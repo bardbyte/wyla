@@ -206,5 +206,23 @@ ConsoleEvent = Union[
 
 
 def to_sse(event: BaseModel) -> str:
-    """One event → one SSE frame."""
-    return f"data: {event.model_dump_json()}\n\n"
+    """One event → one SSE frame.
+
+    Serialization must NEVER kill the stream: `args`/`payload`/`result`
+    are typed Any, and a live tool result can smuggle in a value pydantic
+    can't serialize (protobuf composite, Decimal, bytes). One bad event
+    used to raise inside the StreamingResponse generator and hang the UI
+    mid-turn. Fall back to a stringifying dump — degraded is legible,
+    dead is not."""
+    import json
+
+    try:
+        body = event.model_dump_json()
+    except Exception:
+        try:
+            body = json.dumps(event.model_dump(mode="python"), default=str)
+        except Exception as exc:  # last resort: a legible error event
+            body = json.dumps({
+                "type": "error", "recoverable": True,
+                "message": f"event serialization failed: {exc}"[:300]})
+    return f"data: {body}\n\n"

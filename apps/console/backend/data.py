@@ -25,7 +25,6 @@ if str(REPO_ROOT / "synapse") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "synapse"))
 
 _DEFAULT_SNAPSHOT = REPO_ROOT / "synapse" / "data" / "cache" / "graph_snapshot.json"
-_DEFAULT_DEMO = REPO_ROOT / "synapse" / "data" / "cache" / "demo_questions.json"
 
 # Columns whose *values* are governance-guarded never leak metadata
 # that looks like data: sample/top values are stripped from payloads.
@@ -59,7 +58,7 @@ class ConsoleData:
                 from synapse.graph.store import GraphStore
                 self.store = GraphStore.load_json(self.snapshot_path)
             except Exception:
-                self.store = None                 # unreadable → sample world
+                self.store = None                 # unreadable → honest empty
 
     @property
     def live(self) -> bool:
@@ -445,6 +444,147 @@ class ConsoleData:
         return self._wrap("map", {"nodes": nodes, "edges": edges,
                                   "truncated": truncated})
 
+    def table_insights(self, table: str) -> dict[str, Any]:
+        """Everything the graph knows about ONE table — the Insights
+        view. Mirrors a catalog's per-dataset insights (description,
+        derived relationships, query recommendations) but every
+        relationship carries its WITNESSES: who asserted it (declared
+        FK, analyst query log, LLM, steward) and at what tier — the
+        receipts a catalog's flat "LLM-inferred" label lacks."""
+        from synapse.graph.store import canonical_uri
+        empty = {"table": table, "found": False, "description": {},
+                 "columns": {}, "relationships": [], "recommendations": []}
+        if not self.live:
+            return self._wrap("insights", empty)
+        node = self._find_table_node(table)
+        if node is None:
+            return self._wrap("insights", empty)
+        t_uri = node.canonical_uri
+        name = node.properties.get("table_name", table)
+
+        col_uris = [e.to_uri for e in self.store.outgoing(t_uri, "CONTAINS")]
+        col_set = set(col_uris)
+        n_desc = n_pii = 0
+        col_names: list[str] = []
+        for c in col_uris:
+            cn = self.store.get(c)
+            if cn is None:
+                continue
+            col_names.append(c.rsplit("/", 1)[-1])
+            if (cn.properties.get("description")
+                    or cn.properties.get("ai_generated_description")):
+                n_desc += 1
+            if cn.properties.get("is_pii"):
+                n_pii += 1
+
+        def _witness(edge) -> str:
+            """One legible label per relationship — the curation story."""
+            srcs = set(edge.provenance.sources)
+            if "human_approval" in srcs:
+                return "curated"
+            if "bq" in srcs and (edge.properties.get("constraint")
+                                 == "foreign_key"):
+                return "declared FK"
+            if "corpus" in srcs:
+                return "query log (analyst)"
+            if "llm_generated" in srcs:
+                return "LLM-inferred"
+            return next(iter(srcs), "unknown")
+
+        def _colname(uri: str) -> str:
+            return (uri.rsplit("/", 2)[-2] + "." + uri.rsplit("/", 1)[-1])
+
+        rels: list[dict[str, Any]] = []
+        for e in self.store.edges.values():
+            row: dict[str, Any] | None = None
+            if e.edge_type == "EQUIVALENT_TO" and (
+                    e.from_uri in col_set or e.to_uri in col_set):
+                other = e.to_uri if e.from_uri in col_set else e.from_uri
+                row = {"kind": "join",
+                       "predicate": f"{_colname(e.from_uri)} = "
+                                    f"{_colname(e.to_uri)}",
+                       "other": other.rsplit("/", 2)[-2],
+                       "other_ref": canonical_uri(
+                           "table", other.rsplit("/", 2)[-2])}
+            elif e.edge_type == "IDENTIFIES" and e.from_uri in col_set:
+                ent = self.store.get(e.to_uri)
+                label = (ent.properties.get("name")
+                         if ent else e.to_uri.rsplit("/", 1)[-1])
+                row = {"kind": "identifies",
+                       "predicate": f"{_colname(e.from_uri)} identifies "
+                                    f"{label}",
+                       "other": str(label), "other_ref": e.to_uri}
+            elif e.edge_type == "COMPUTED_FROM" and e.to_uri in col_set:
+                m = self.store.get(e.from_uri)
+                label = (m.properties.get("name")
+                         if m else e.from_uri.rsplit("/", 1)[-1])
+                row = {"kind": "metric",
+                       "predicate": f"{label} computed from "
+                                    f"{_colname(e.to_uri)}",
+                       "other": str(label), "other_ref": e.from_uri}
+            elif e.edge_type == "UPSTREAM_OF" and (
+                    e.from_uri == t_uri or e.to_uri == t_uri):
+                other = e.to_uri if e.from_uri == t_uri else e.from_uri
+                direction = ("feeds" if e.from_uri == t_uri else "fed by")
+                row = {"kind": "lineage",
+                       "predicate": f"{name} {direction} "
+                                    f"{other.rsplit('/', 1)[-1]}",
+                       "other": other.rsplit("/", 1)[-1],
+                       "other_ref": other}
+            elif e.edge_type == "VALIDATED_BY" and e.from_uri in (
+                    col_set | {t_uri}):
+                rule = self.store.get(e.to_uri)
+                kindname = (rule.properties.get("rule_kind", "rule")
+                            if rule else "rule")
+                row = {"kind": "dq",
+                       "predicate": f"{_colname(e.from_uri)} validated by "
+                                    f"{kindname}",
+                       "other": str(kindname), "other_ref": e.to_uri}
+            if row is not None:
+                row["sources"] = list(e.provenance.sources)
+                row["witness"] = _witness(e)
+                row["tier"] = e.provenance.confidence_tier
+                rels.append(row)
+        order = {"join": 0, "identifies": 1, "metric": 2, "lineage": 3,
+                 "dq": 4}
+        rels.sort(key=lambda r: (order.get(r["kind"], 9), r["predicate"]))
+
+        recs: list[dict[str, str]] = []
+        for m_uri in {r["other_ref"] for r in rels if r["kind"] == "metric"}:
+            m = self.store.get(m_uri)
+            if m is None or len(recs) >= 6:
+                continue
+            mn = m.properties.get("name", "")
+            if mn and not any(mn.lower() in r["question"].lower()
+                              for r in recs):
+                recs.append({"question": f"What is the {mn} for {name}?",
+                             "source": "observed metric"})
+        if node.properties.get("business_owner") or any(
+                r["kind"] == "lineage" for r in rels):
+            recs.append({"question": f"Who owns {name} and what feeds it?",
+                         "source": "governance"})
+        if any(r["kind"] == "dq" for r in rels):
+            recs.append({"question": f"Is {name} trustworthy right now?",
+                         "source": "data quality"})
+        recs.append({"question": f"How confident are we in {name}, "
+                                 "and why?",
+                     "source": "witness ledger"})
+
+        return self._wrap("insights", {
+            "table": name, "found": True, "ref": t_uri,
+            "description": {
+                "curated": str(node.properties.get("description") or ""),
+                "ai": str(node.properties.get(
+                    "ai_generated_description") or ""),
+                "tier": node.provenance.confidence_tier,
+                "sources": list(node.provenance.sources),
+            },
+            "columns": {"count": len(col_uris), "described": n_desc,
+                        "pii": n_pii},
+            "relationships": rels[:40],
+            "recommendations": recs[:6],
+        })
+
     # ── metrics ──────────────────────────────────────────────
 
     def metrics(self, q: str = "") -> dict[str, Any]:
@@ -557,8 +697,51 @@ class ConsoleData:
                 "score": node.provenance.confidence_score,
                 "sources": list(node.provenance.sources),
             },
+            "ledger": self._witness_ledger(node),
             "edges": edges[:40],
         })
+
+    @staticmethod
+    def _witness_ledger(node) -> dict[str, Any]:
+        """The confidence arithmetic, shown honestly (mockup 2a): every
+        witness with its weight, capped count, and contribution, plus
+        the exact tier rule that fired. No hidden math."""
+        from synapse.graph.store import SOURCE_WEIGHTS
+        prov = node.provenance
+        counts = prov.evidence_count_by_source or {}
+        cap, denom = 5, 15.0
+        rows = []
+        for s in prov.sources:
+            w = SOURCE_WEIGHTS.get(s, 0)
+            n = counts.get(s, 1) or 1
+            capped = min(max(n, 1), cap)
+            rows.append({
+                "source": s, "weight": w, "count": n, "capped": capped,
+                "contribution": round(w * capped / denom, 3),
+            })
+        rows.sort(key=lambda r: -r["contribution"])
+        weighted = sum(r["weight"] * r["capped"] for r in rows)
+        score = min(0.99, weighted / denom)
+        distinct = len(set(prov.sources))
+        if "human_approval" in prov.sources:
+            rule = ("a human signature sets the ceiling — one witness "
+                    "with mass, not proof")
+        elif distinct >= 4:
+            rule = f"grounded: {distinct} distinct witnesses agree"
+        elif distinct >= 3 and score >= 0.70:
+            rule = (f"grounded: {distinct} witnesses and score "
+                    f"{score:.2f} ≥ 0.70")
+        elif score >= 0.90:
+            rule = f"grounded: score {score:.2f} ≥ 0.90"
+        elif distinct >= 2:
+            rule = f"inferred: {distinct} distinct witnesses"
+        elif score >= 0.45:
+            rule = f"inferred: score {score:.2f} ≥ 0.45"
+        else:
+            rule = "one weak witness — unverified until corroborated"
+        return {"rows": rows, "weighted": weighted,
+                "denominator": int(denom), "score": round(score, 3),
+                "distinct": distinct, "rule": rule}
 
     def tier_for(self, ref: str) -> str | None:
         """The current confidence tier at a ref — the pin store's
@@ -601,22 +784,132 @@ class ConsoleData:
 
     # ── suggested questions ──────────────────────────────────
 
+    def starter_questions(self) -> dict[str, Any]:
+        """Starters derived from THIS graph, not a canned list — one per
+        capability, each with the why spelled out. The starter page is a
+        guided tour of what the system can actually do with the data it
+        actually has."""
+        if not self.live:
+            return self._wrap("starters", [])
+        store = self.store
+        bare = (lambda s: str(s).split(".")[-1])
+        out: list[dict[str, Any]] = []
+
+        def add(category: str, question: str, why: str,
+                prefill: bool = False) -> None:
+            out.append({"category": category, "question": question,
+                        "why": why, "prefill": prefill})
+
+        tables = sorted(
+            store.nodes_by_type("Table"),
+            key=lambda n: -len(store.outgoing(n.canonical_uri,
+                                              "CONTAINS")))
+        tname = (lambda n: bare(n.properties.get("table_name")
+                                or n.canonical_uri.rsplit("/", 1)[-1]))
+        metrics = store.nodes_by_type("Metric")
+
+        # live analysis — a metric bound to a table becomes a number
+        for m in metrics:
+            tbl = m.properties.get("sourced_from_table")
+            name = m.properties.get("name")
+            if tbl and name:
+                add("Live analysis",
+                    f"How is {name} trending on {bare(tbl)}?",
+                    "Drafts the SQL, prices the scan, waits for your "
+                    "signature, runs row-capped on the ledger.")
+                break
+
+        # meaning — a definition with provenance
+        for m in metrics:
+            name = m.properties.get("name")
+            if name and (m.properties.get("formula_sql")
+                         or m.properties.get("description")):
+                add("Meaning",
+                    f"What does {name} mean, exactly?",
+                    "The canonical definition, with every witness that "
+                    "vouches for it and its confidence tier.")
+                break
+
+        # ownership + lineage
+        for t in tables:
+            if t.properties.get("business_owner") or store.outgoing(
+                    t.canonical_uri, "UPSTREAM_OF") or store.incoming(
+                    t.canonical_uri, "UPSTREAM_OF"):
+                add("Ownership & lineage",
+                    f"Who owns {tname(t)} and what feeds it?",
+                    "Stewardship from the metadata spine plus observed "
+                    "lineage, cited.")
+                break
+
+        # joins — only observed reality
+        join_pair = None
+        for e in store.edges.values():
+            if e.edge_type != "EQUIVALENT_TO":
+                continue
+            fa = store.get(e.from_uri)
+            fb = store.get(e.to_uri)
+            ta = fa.properties.get("table_name") if fa else None
+            tb = fb.properties.get("table_name") if fb else None
+            if ta and tb and bare(ta) != bare(tb):
+                join_pair = (bare(ta), bare(tb))
+                break
+        if join_pair:
+            add("Join paths",
+                f"How do I join {join_pair[0]} to {join_pair[1]} safely?",
+                "Only joins the corpus has actually observed — the "
+                "agent never invents an ON clause.")
+
+        # trust — a fact with real corroboration
+        for t in tables:
+            if len(set(t.provenance.sources)) >= 3:
+                add("Trust",
+                    f"How confident are we in {tname(t)}, and why?",
+                    "The witness ledger: every source's weight and the "
+                    "arithmetic behind the tier.")
+                break
+
+        # data quality
+        for rule in store.nodes_by_type("DataQualityRule"):
+            tbl = rule.properties.get("target_table")
+            if tbl:
+                add("Data quality",
+                    f"Is {bare(tbl)} trustworthy right now?",
+                    "Data-quality rules and their latest status, "
+                    "disclosed with the answer.")
+                break
+
+        # governance — the refusal moment
+        pii_col = next(
+            (c for c in store.nodes_by_type("Column")
+             if c.properties.get("is_pii")), None)
+        if pii_col:
+            col = bare(pii_col.properties.get("name")
+                       or pii_col.canonical_uri.rsplit("/", 1)[-1])
+            add("Governance",
+                f"Show me raw {col} values",
+                "Watch the guardrail refuse — and offer the compliant "
+                "alternative instead.")
+
+        # teach it — the signature ceremony
+        if tables:
+            add("Teach it",
+                f"Record that {tname(tables[0])} means ",
+                "Finish the sentence and sign it: your assertion "
+                "outranks every machine guess, and the sky turns gold.",
+                prefill=True)
+
+        return self._wrap("starters", out[:8])
+
     def questions(self) -> dict[str, Any]:
-        demo = Path(os.environ.get("SYNAPSE_DEMO_QUESTIONS",
-                                   _DEFAULT_DEMO)).expanduser()
-        if demo.exists():
-            try:
-                verified = json.loads(
-                    demo.read_text(encoding="utf-8")).get("verified", [])
-                if verified:
-                    return {"live": True, "source": "graph",
-                            "questions": [{
-                                "question": q.get("question", ""),
-                                "archetype": q.get("archetype", ""),
-                            } for q in verified[:12]]}
-            except Exception:
-                pass
-        return self._wrap("questions", [])
+        """Back-compat shape over the graph-derived starters — nothing
+        canned ever reaches a surface."""
+        starters = self.starter_questions()
+        return {"live": starters["live"], "source": starters["source"],
+                "questions": [{
+                    "question": st["question"],
+                    "archetype": st["category"],
+                } for st in starters["starters"]
+                    if not st.get("prefill")]}
 
 
 def _dedupe_lexicon(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:

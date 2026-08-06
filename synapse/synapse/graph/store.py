@@ -33,6 +33,10 @@ SourceName = Literal[
     # knowledge.md + metric_contracts.yaml). Expert testimony: narrow
     # coverage, highest per-fact trust short of an explicit human approval.
     "skills",
+    # External catalog connectors — each export fuses in as one more
+    # weighted witness (never authority): Collibra is a human-governed
+    # catalog, Knowledge Catalog (Dataplex) is largely machine-harvested.
+    "collibra", "knowledge_catalog",
 ]
 
 ConfidenceTier = Literal[
@@ -53,7 +57,9 @@ SOURCE_WEIGHTS: dict[SourceName, int] = {
     "bq":               6,
     "metric_catalog":   5,  # curated metric registry
     "glossary":         5,  # curated term registry
+    "collibra":         5,  # governed external catalog — curated testimony
     "dq_engine":        4,  # rule-based DQ checks — system-attested
+    "knowledge_catalog": 4, # Dataplex/KC harvest — machine-attested catalog
     "baseline_lookml":  3,
     "table_catalog":    3,
     # Skills are guardrails + agent knowledge, NOT a data-grounding witness:

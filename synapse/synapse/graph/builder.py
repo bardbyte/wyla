@@ -39,8 +39,16 @@ from synapse.graph.store import (
 
 def build_graph_from_sources(
     sources_dir: Path, allowlist: "set[str] | None" = None,
+    into: "GraphStore | None" = None,
 ) -> GraphStore:
     """One-shot graph build from synthetic / real source artifacts.
+
+    ``into`` turns the build into an APPEND: ingest on top of an existing
+    store (a loaded snapshot) instead of an empty one. Every upsert is a
+    monotonic merge — new tables land as new nodes, and a source seen
+    again on a known node fuses as one more witness (tiers recompute,
+    non-empty values never regress). With an allowlist, pruning only ever
+    removes nodes minted by THIS run — nothing pre-existing is dropped.
 
     Expected layout under sources_dir:
         registries/raw/glossary.csv
@@ -61,7 +69,8 @@ def build_graph_from_sources(
     parsing would otherwise mint as Table nodes are dropped. Cross-cutting
     nodes (Synonym, Entity, Skill, Guardrail, User) are always kept.
     """
-    store = GraphStore()
+    store = into if into is not None else GraphStore()
+    preexisting = frozenset(store.nodes) if into is not None else frozenset()
 
     # Order matters — table_catalog seeds Table nodes; everything else attaches.
     _ingest_table_catalog(store, sources_dir / "registries" / "raw" / "table_catalog.csv")
@@ -103,7 +112,7 @@ def build_graph_from_sources(
     _synthesize_dq_from_profile(store)
 
     if allowlist is not None:
-        _prune_to_allowlist(store, allowlist)
+        _prune_to_allowlist(store, allowlist, keep=preexisting)
 
     return store
 
@@ -199,17 +208,20 @@ def _node_table(node: "Node") -> str | None:
     return None  # CodeMapping (column-only) + cross-cutting types
 
 
-def _prune_to_allowlist(store: GraphStore, allowlist: "set[str]") -> None:
+def _prune_to_allowlist(store: GraphStore, allowlist: "set[str]",
+                        keep: "frozenset[str]" = frozenset()) -> None:
     """Drop table-scoped nodes outside the allowlist + their dangling edges.
 
     A node with no resolvable table (a cross-cutting type, or a scoped
     node missing its table property) is KEPT — we only remove nodes we can
     positively place outside the scope, so nothing is lost by accident.
+    ``keep`` protects pre-existing nodes in append mode: pruning may only
+    remove what this run minted.
     """
     allow = {normalize_table_name(t) for t in allowlist}
     drop: set[str] = set()
     for uri, node in store.nodes.items():
-        if node.node_type not in _TABLE_SCOPED:
+        if node.node_type not in _TABLE_SCOPED or uri in keep:
             continue
         tbl = _node_table(node)
         if tbl and normalize_table_name(tbl) not in allow:

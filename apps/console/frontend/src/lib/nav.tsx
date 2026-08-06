@@ -26,6 +26,45 @@ interface Nav {
   clearHandoff(): void;
   graphAnchor: string | null;
   clearGraphAnchor(): void;
+  /* the live-traversal channel: Ask reports which graph objects the
+   * agent touches (table names / synapse:// refs → last-touch ms);
+   * any graph surface lights them up. */
+  activity: Record<string, number>;
+  reportActivity(keys: string[]): void;
+  clearActivity(): void;
+  agentBusy: boolean;
+  setAgentBusy(busy: boolean): void;
+  traversalVerb: string;
+  setTraversalVerb(v: string): void;
+  /* anticipation: while the user TYPES, nodes matching the draft
+   * question glimmer — the space is listening (mockup treatment B/C) */
+  listening: string[];
+  setListening(keys: string[]): void;
+  /* the seal, liftable into any surface (mockup 1c): Ask registers the
+   * pending SQL gate + its resolver so the Knowledge Graph can render
+   * governance as a physical act in space */
+  pendingGate: PendingGate | null;
+  setPendingGate(g: PendingGate | null): void;
+  /* condensation (mockup 1d): the finished turn's finding + citations,
+   * so the graph can raise the paper plate with citation threads */
+  lastFinding: Finding | null;
+  setLastFinding(f: Finding | null): void;
+  /* the signature ceremony (mockup 1e): a just-signed ref ignites gold */
+  ceremony: { ref: string; at: number } | null;
+  setCeremony(c: { ref: string; at: number } | null): void;
+}
+
+export interface PendingGate {
+  gateId: string;
+  sql: string;
+  bytes: number;
+  checks: string[];
+  resolve(approved: boolean): void;
+}
+
+export interface Finding {
+  text: string;
+  citations: { label: string; ref: string }[];
 }
 
 const NavContext = createContext<Nav | null>(null);
@@ -35,6 +74,14 @@ export function NavProvider({ children }: { children: ReactNode }) {
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const [graphAnchor, setGraphAnchor] = useState<string | null>(null);
   const [evidenceRef, setEvidenceRef] = useState<string | null>(null);
+  const [activity, setActivity] = useState<Record<string, number>>({});
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [traversalVerb, setTraversalVerb] = useState("");
+  const [listening, setListening] = useState<string[]>([]);
+  const [pendingGate, setPendingGate] = useState<PendingGate | null>(null);
+  const [lastFinding, setLastFinding] = useState<Finding | null>(null);
+  const [ceremony, setCeremony] =
+    useState<{ ref: string; at: number } | null>(null);
 
   const go = useCallback((t: TabId) => setTab(t), []);
   const askAbout = useCallback(
@@ -50,13 +97,29 @@ export function NavProvider({ children }: { children: ReactNode }) {
   const closeEvidence = useCallback(() => setEvidenceRef(null), []);
   const clearHandoff = useCallback(() => setHandoff(null), []);
   const clearGraphAnchor = useCallback(() => setGraphAnchor(null), []);
+  const reportActivity = useCallback((keys: string[]) => {
+    if (!keys.length) return;
+    const now = Date.now();
+    setActivity((prev) => {
+      const next = { ...prev };
+      for (const k of keys) next[k.toLowerCase()] = now;
+      return next;
+    });
+  }, []);
+  const clearActivity = useCallback(() => setActivity({}), []);
 
   const value = useMemo<Nav>(() => ({
     tab, go, askAbout, goToGraph, openEvidence, evidenceRef,
     closeEvidence, handoff, clearHandoff, graphAnchor, clearGraphAnchor,
+    activity, reportActivity, clearActivity, agentBusy, setAgentBusy,
+    traversalVerb, setTraversalVerb, listening, setListening,
+    pendingGate, setPendingGate, lastFinding, setLastFinding,
+    ceremony, setCeremony,
   }), [tab, go, askAbout, goToGraph, openEvidence, evidenceRef,
        closeEvidence, handoff, clearHandoff, graphAnchor,
-       clearGraphAnchor]);
+       clearGraphAnchor, activity, reportActivity, clearActivity,
+       agentBusy, traversalVerb, listening, pendingGate, lastFinding,
+       ceremony]);
 
   return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
 }

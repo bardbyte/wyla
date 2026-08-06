@@ -11,7 +11,7 @@ function systemTheme(): Theme {
 /** Explicit choice persists; otherwise follow the OS. */
 export function useTheme(): [Theme, () => void] {
   const [theme, setTheme] = useState<Theme>(() => {
-    const saved = localStorage.getItem("radix-theme");
+    const saved = localStorage.getItem("synapse-theme");
     return saved === "light" || saved === "dark" ? saved : systemTheme();
   });
 
@@ -22,7 +22,7 @@ export function useTheme(): [Theme, () => void] {
   const toggle = useCallback(() => {
     setTheme((t) => {
       const next = t === "dark" ? "light" : "dark";
-      localStorage.setItem("radix-theme", next);
+      localStorage.setItem("synapse-theme", next);
       return next;
     });
   }, []);

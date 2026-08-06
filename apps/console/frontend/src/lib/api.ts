@@ -2,8 +2,9 @@
  * payload plus its `live` flag so callers can label sample data. */
 
 import type {
-  AppConfig, GraphMap, GraphSummary, LexiconEntry, Metric, Pin, PinRun,
-  Product, ThreadHop, Unit, Viability, Witness,
+  AgentSelftest, AppConfig, EvalsRecent, GraphMap, GraphSummary,
+  LexiconEntry, Metric, Pin, PinRun, Product, Starter, TableInsights,
+  ThreadHop, Unit, Viability, Witness,
 } from "./types";
 
 async function post<T>(url: string, body: unknown,
@@ -43,6 +44,12 @@ export const api = {
   graphMap: () =>
     get<Live<{ map: GraphMap }>>("/api/graph/map"),
 
+  graphInsights: (table: string) =>
+    get<Live<{ insights: TableInsights }>>(
+      `/api/graph/insights?table=${encodeURIComponent(table)}`),
+
+  agentSelftest: () => get<AgentSelftest>("/api/agent/selftest"),
+
   metrics: (q = "") =>
     get<Live<{ metrics: Metric[] }>>(
       `/api/metrics?q=${encodeURIComponent(q)}`),
@@ -68,7 +75,7 @@ export const api = {
     get<Live<{ lexicon: LexiconEntry[] }>>("/api/lexicon"),
 
   pins: () =>
-    get<Live<{ seeded: boolean; pins: Pin[] }>>("/api/pins"),
+    get<Live<{ pins: Pin[] }>>("/api/pins"),
 
   createPin: (body: {
     question: string; answer?: string;
@@ -89,10 +96,6 @@ export const api = {
     post<{ deleted: string }>(
       `/api/pins/${encodeURIComponent(id)}`, undefined, "DELETE"),
 
-  questions: () =>
-    get<Live<{ questions: { question: string; archetype: string }[] }>>(
-      "/api/questions"),
-
   witness: (ref: string) =>
     get<Live<{ witness: Witness }>>(
       `/api/witness?ref=${encodeURIComponent(ref)}`),
@@ -103,4 +106,9 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ gate_id: gateId, approved }),
     }),
+
+  evalsRecent: () => get<EvalsRecent>("/api/evals/recent"),
+
+  starters: () =>
+    get<Live<{ starters: Starter[] }>>("/api/questions/starters"),
 };

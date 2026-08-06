@@ -44,6 +44,9 @@ from synapse.graph.builder import build_graph_from_sources  # noqa: E402
 from synapse.loaders.gold_sql_loader import load_gold_sql_corpus  # noqa: E402
 from synapse.loaders.skills_loader import load_skills_library  # noqa: E402
 
+_DEFAULT_SOURCES_DIR = str(SYNAPSE_ROOT / "data" / "cache" / "sources")
+_DEFAULT_OUT = str(SYNAPSE_ROOT / "data" / "cache" / "graph_snapshot.json")
+
 
 def _stage(msg: str) -> None:
     print(f"\n\033[1;36m═══ {msg} ═══\033[0m")
@@ -55,6 +58,36 @@ def _note(msg: str) -> None:
 
 def run_pipeline(args: argparse.Namespace) -> Path:
     sources_dir = Path(args.sources_dir).expanduser()
+
+    # ── 0. Append mode ───────────────────────────────────────
+    #    Load an existing snapshot and fuse ONLY what this run stages on
+    #    top of it — new tables land as new nodes, a known source seen
+    #    again fuses as one more witness, tiers recompute, and nothing
+    #    pre-existing is pruned or regressed. No full rebuild.
+    base_store = None
+    _append_tmp = None
+    if getattr(args, "append_to", ""):
+        from synapse.graph.store import GraphStore
+        snap = Path(args.append_to).expanduser()
+        if not snap.exists():
+            raise SystemExit(f"--append-to: no snapshot at {snap}")
+        _stage("Append mode: loading the existing snapshot")
+        base_store = GraphStore.load_json(snap)
+        s0 = base_store.stats()
+        _note(f"base: {snap}")
+        _note(f"nodes: {s0['n_nodes']}  edges: {s0['n_edges']}  "
+              f"(version {base_store.snapshot_version})")
+        # stage this run's artifacts in a scratch dir, not the shared
+        # sources dir — an append fuses what YOU pass, not old artifacts
+        if args.sources_dir == _DEFAULT_SOURCES_DIR:
+            import tempfile
+            _append_tmp = tempfile.TemporaryDirectory(
+                prefix="synapse_append_")
+            sources_dir = Path(_append_tmp.name)
+            _note(f"staging: {sources_dir} (scratch)")
+        # default output = write the same snapshot forward
+        if args.out == _DEFAULT_OUT:
+            args.out = str(snap)
     sources_dir.mkdir(parents=True, exist_ok=True)
     run_report: dict[str, dict] = {}
 
@@ -237,11 +270,30 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     if build_allowlist:
         _note(f"allowlist: graph scoped to {len(build_allowlist)} manifest "
               f"table(s); out-of-scope + CTE-noise nodes pruned")
-    store = build_graph_from_sources(sources_dir, allowlist=build_allowlist)
+    store = build_graph_from_sources(sources_dir, allowlist=build_allowlist,
+                                     into=base_store)
     stats = store.stats()
     _note(f"nodes: {stats['n_nodes']}  edges: {stats['n_edges']}")
     _note(f"by type: {stats['nodes_by_type']}")
     _note(f"by tier: {stats['nodes_by_confidence_tier']}")
+
+    # ── 6a. External catalog connectors (weighted witnesses) ─
+    #        A Collibra export fuses in AFTER compile so its testimony
+    #        lands on the fused nodes: known tables gain a distinct
+    #        witness (tier recomputes), unknown tables are minted at the
+    #        single-witness floor. Works in full builds and appends.
+    if getattr(args, "collibra_export", ""):
+        _stage("Collibra export → collibra witness (weight 5)")
+        from synapse.loaders.collibra_loader import load_collibra_export
+        col_res = load_collibra_export(
+            store, Path(args.collibra_export).expanduser())
+        _note(f"{col_res['tables']} table asset(s) · "
+              f"{col_res['columns']} column asset(s) fused")
+        for reason in col_res["skipped"][:8]:
+            _note(f"⚠ skipped: {reason}")
+        run_report["collibra"] = col_res
+        stats = store.stats()
+        _note(f"by tier now: {stats['nodes_by_confidence_tier']}")
 
     # ── 6b. LLM enrichment (witness #5) — batched, opt-in, budgeted ──
     #        One Gemini call per ≤batch-size columns; wide tables get
@@ -549,16 +601,25 @@ def main() -> None:
                         help="steward-approved entities YAML (default: "
                              "semantic-graph/config/entities.yaml when it "
                              "exists; produced by scripts/entities.py apply)")
+    parser.add_argument("--append-to", default="",
+                        help="INCREMENTAL mode: load this existing snapshot "
+                             "and fuse only what this run stages on top of "
+                             "it — new tables mint, known nodes gain the new "
+                             "witnesses, tiers recompute, nothing pre-"
+                             "existing is pruned. Writes back to the same "
+                             "path unless --out is given. No full rebuild.")
+    parser.add_argument("--collibra-export", default="",
+                        help="Collibra asset export (JSON) fused as the "
+                             "'collibra' witness (weight 5) — works in full "
+                             "builds and appends")
     parser.add_argument("--sources-dir",
-                        default=str(SYNAPSE_ROOT / "data" / "cache" / "sources"),
+                        default=_DEFAULT_SOURCES_DIR,
                         help="staging dir for canonical artifacts")
-    parser.add_argument("--out",
-                        default=str(SYNAPSE_ROOT / "data" / "cache"
-                                    / "graph_snapshot.json"))
+    parser.add_argument("--out", default=_DEFAULT_OUT)
     args = parser.parse_args()
     if not any([args.demo, args.skills_dir, args.gold_sql_dir,
                 args.bq_extract_dir, args.lumi_session, args.mdm_cache_dir,
-                args.mdm_crawl, args.mdm_manifest]):
+                args.mdm_crawl, args.mdm_manifest, args.collibra_export]):
         parser.error("nothing to load — pass --demo or at least one source")
     run_pipeline(args)
 

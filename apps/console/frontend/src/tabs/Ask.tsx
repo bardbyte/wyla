@@ -14,7 +14,7 @@
  * Bring your knowledge.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RefText } from "../components/EntityRef";
 import { WitnessDrawer } from "../components/WitnessDrawer";
 import {
@@ -22,10 +22,46 @@ import {
   Spinner, TierChip,
 } from "../components/ui";
 import { api } from "../lib/api";
-import { ASK as C } from "../lib/copy";
+import { ASK as C, EVALS, GRAPH, TIERS } from "../lib/copy";
 import { useNav } from "../lib/nav";
+import { computeListening } from "../lib/anticipation";
 import { streamChat } from "../lib/sse";
-import type { AnswerSections, ConsoleEvent } from "../lib/types";
+import { SpaceCanvas } from "../components/SpaceCanvas";
+import { SpaceAskBar, SpaceSeal } from "../components/SpaceBits";
+import type {
+  AgentSelftest, AnswerSections, ConsoleEvent, EvalTurn, GraphMap,
+  Starter,
+} from "../lib/types";
+
+/** Pull graph-object mentions out of a streamed event so the map can
+ * light up what the agent touches: synapse:// refs anywhere, plus known
+ * table names appearing in args, SQL, or result summaries. */
+function extractActivity(ev: ConsoleEvent,
+                         known: ReadonlySet<string>): string[] {
+  const found = new Set<string>();
+  const scan = (v: unknown, depth = 0) => {
+    if (depth > 6 || v == null) return;
+    if (typeof v === "string") {
+      for (const m of v.matchAll(/synapse:\/\/[\w./-]+/g)) found.add(m[0]);
+      const low = v.toLowerCase();
+      for (const t of known) if (low.includes(t)) found.add(t);
+      return;
+    }
+    if (Array.isArray(v)) { v.forEach((x) => scan(x, depth + 1)); return; }
+    if (typeof v === "object") {
+      Object.values(v as Record<string, unknown>)
+        .forEach((x) => scan(x, depth + 1));
+    }
+  };
+  switch (ev.type) {
+    case "tool_call": scan(ev.args); scan(ev.args_summary); scan(ev.verb); break;
+    case "tool_result": scan(ev.summary); scan(ev.payload); break;
+    case "sql_gate": scan(ev.sql); break;
+    case "answer": scan(ev.sections.citations); break;
+    default: break;
+  }
+  return [...found];
+}
 
 interface Turn {
   question: string;
@@ -35,11 +71,12 @@ interface Turn {
   gate: Extract<ConsoleEvent, { type: "sql_gate" }> | null;
   heldNote: string | null;
   done: boolean;
+  evalv: EvalTurn | null;
 }
 
 const newTurn = (question: string): Turn => ({
   question, log: [], liveText: "", answer: null,
-  gate: null, heldNote: null, done: false,
+  gate: null, heldNote: null, done: false, evalv: null,
 });
 
 export function AskTab() {
@@ -55,35 +92,86 @@ export function AskTab() {
 
   const [busy, setBusy] = useState(false);
   const [question, setQuestion] = useState("");
-  const [suggestions, setSuggestions] = useState<
-    { question: string; archetype: string }[]
-  >([]);
+  const [starters, setStarters] = useState<Starter[]>([]);
+  const [spaceQ, setSpaceQ] = useState("");
   const [inspect, setInspect] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
+  const [map, setMap] = useState<GraphMap | null>(null);
+  const [selftest, setSelftest] = useState<AgentSelftest | null>(null);
+  // first light (1a) plays once per session, on whichever surface opens
+  const [intro] = useState(() => {
+    try {
+      if (sessionStorage.getItem("synapse-firstlight")) return false;
+      sessionStorage.setItem("synapse-firstlight", "1");
+      return true;
+    } catch { return false; }
+  });
+  const knownTables = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
+  const approveGateRef = useRef<(id: string) => void>(() => undefined);
+  const holdGateRef = useRef<(id: string) => void>(() => undefined);
+  const captureRefs = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
-    api.questions().then((d) => setSuggestions(d.questions))
+    api.starters().then((d) => setStarters(d.starters))
       .catch(() => undefined);
     api.config()
       .then((c) => setDemoMode(c.runner === "ScriptedRunner"))
       .catch(() => undefined);
+    api.graphMap().then((d) => {
+      setMap(d.map);
+      const names = new Set<string>();
+      for (const n of d.map.nodes) {
+        if (n.kind !== "table") continue;
+        const bare = n.label.toLowerCase().split(/[./]/).pop();
+        if (bare && bare.length > 3) names.add(bare);
+      }
+      knownTables.current = names;
+    }).catch(() => setMap(null));
+    // the live agent proves it can START (imports, versions, snapshot)
+    // without spending a token — failures render with their exact fix
+    api.agentSelftest().then(setSelftest).catch(() => undefined);
   }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [turns, busy]);
 
+  /* the sky listens while you type; the traversal owns it once you ask */
+  const anticipation = useMemo(
+    () => computeListening(question, map), [question, map]);
+  const spaceListening = useMemo(
+    () => computeListening(spaceQ, map), [spaceQ, map]);
+  useEffect(() => {
+    nav.setListening(busy ? [] : anticipation.ids);
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [anticipation, busy]);
+
   const patchLast = (fn: (t: Turn) => Turn) =>
     setTurns((ts) =>
       ts.length ? [...ts.slice(0, -1), fn(ts[ts.length - 1])] : ts);
 
   const handleEvent = (ev: ConsoleEvent) => {
+    nav.reportActivity(extractActivity(ev, knownTables.current));
+    if (ev.type === "tool_call" && ev.verb) nav.setTraversalVerb(ev.verb);
+    if (ev.type === "tool_call" && ev.tool === "capture_knowledge") {
+      const a = (ev.args ?? {}) as Record<string, unknown>;
+      const subject = [String(a.subject_type ?? ""), String(a.subject_ref ?? "")]
+        .filter(Boolean).join("/");
+      if (subject) captureRefs.current.set(ev.call_id, subject);
+    }
     switch (ev.type) {
       case "turn_start":
         break;
-      case "tool_call":
       case "tool_result":
+        // a successful capture is a SIGNATURE — the sky turns gold (1e)
+        if (ev.ok !== false) {
+          const cap = captureRefs.current.get(ev.call_id);
+          if (cap) nav.setCeremony({ ref: cap, at: Date.now() });
+        }
+        patchLast((t) => ({ ...t, log: [...t.log, ev] }));
+        break;
+      case "tool_call":
       case "gate_resolved":
       case "thinking":
       case "sandbox":
@@ -97,14 +185,38 @@ export function AskTab() {
       case "sql_gate":
         gated.current = true;
         patchLast((t) => ({ ...t, gate: ev }));
+        nav.setPendingGate({
+          gateId: ev.gate_id, sql: ev.sql,
+          bytes: ev.bytes_estimate ?? 0,
+          checks: ev.guardrail_checks,
+          resolve: (approved: boolean) => (approved
+            ? approveGateRef.current(ev.gate_id)
+            : holdGateRef.current(ev.gate_id)),
+        });
         break;
       case "answer":
         // the structured card supersedes streamed text (scripted mode)
         patchLast((t) => ({ ...t, liveText: "", answer: ev.sections }));
+        // condensation: the graph raises the paper plate + threads (1d)
+        nav.setLastFinding({
+          text: ev.sections.answer.replace(/\*\*/g, ""),
+          citations: ev.sections.citations.map((c) => ({
+            label: c.label, ref: c.ref })),
+        });
         break;
       case "turn_end":
         patchLast((t) => ({ ...t, done: true }));
         setBusy(false);
+        nav.setAgentBusy(false);
+        // the turn was scored server-side the moment it finished —
+        // attach the verdict to the turn it belongs to
+        api.evalsRecent().then((f) => {
+          const scored = f.turns[0];
+          if (!scored) return;
+          setTurns((ts) => ts.map((t) =>
+            t.question === scored.question && t.done && !t.evalv
+              ? { ...t, evalv: scored } : t));
+        }).catch(() => undefined);
         break;
     }
   };
@@ -117,12 +229,18 @@ export function AskTab() {
     pending.current = [];
     setTurns((ts) => [...ts, newTurn(q)]);
     setBusy(true);
+    nav.clearActivity();          // a fresh traversal per question
+    nav.setLastFinding(null);     // the last plate lowers
+    nav.setAgentBusy(true);
     try {
       for await (const ev of streamChat(q, conversationId.current)) {
         if (gated.current) pending.current.push(ev);
         else handleEvent(ev);
       }
-      if (!gated.current && pending.current.length === 0) setBusy(false);
+      if (!gated.current && pending.current.length === 0) {
+        setBusy(false);
+        nav.setAgentBusy(false);
+      }
     } catch (e) {
       handleEvent({
         type: "error",
@@ -131,6 +249,7 @@ export function AskTab() {
       });
       patchLast((t) => ({ ...t, done: true }));
       setBusy(false);
+      nav.setAgentBusy(false);
     }
   };
 
@@ -148,6 +267,7 @@ export function AskTab() {
   const approveGate = async (gateId: string) => {
     await api.approve(gateId, true).catch(() => undefined);
     gated.current = false;
+    nav.setPendingGate(null);
     patchLast((t) => ({ ...t, gate: null }));
     const queued = pending.current;
     pending.current = [];
@@ -158,24 +278,77 @@ export function AskTab() {
     await api.approve(gateId, false).catch(() => undefined);
     gated.current = false;
     pending.current = [];
+    nav.setPendingGate(null);
     patchLast((t) => ({
       ...t, gate: null, heldNote: C.heldNote, done: true,
     }));
     setBusy(false);
   };
+  approveGateRef.current = approveGate;
+  holdGateRef.current = holdGate;
 
   return (
+    <div className="ask-wrap">
     <div className="chat">
       {demoMode && (
         <div className="demo-banner" role="alert">
           <span aria-hidden>▲</span> {C.demoBanner}
         </div>
       )}
+      {selftest && !selftest.ok && (
+        <div className="notice agent-issue" role="alert">
+          <span aria-hidden>⚠</span>
+          <span><strong>{C.agentIssue}.</strong> {selftest.error}</span>
+        </div>
+      )}
+      {map && map.nodes.length > 0 && (
+        <section
+          className={`ask-space ${turns.length === 0 ? "tall" : "slim"}`}>
+          <SpaceCanvas map={map} activity={nav.activity} backdrop
+            listening={spaceQ ? spaceListening.ids : nav.listening}
+            verb={nav.traversalVerb}
+            intro={intro} introLine={GRAPH.firstLight}
+            finding={nav.lastFinding}
+            ceremonyRef={nav.ceremony?.ref ?? null}
+            overlay={
+              <>
+                {nav.pendingGate && <SpaceSeal gate={nav.pendingGate} />}
+                {turns.length === 0 && !busy && (
+                  <SpaceAskBar value={spaceQ} onChange={setSpaceQ}
+                    onSubmit={(t) => { setSpaceQ(""); void ask(t); }}
+                    placeholder={GRAPH.askSpace} tally={spaceListening}
+                    raised={!!nav.lastFinding} />
+                )}
+              </>
+            } />
+        </section>
+      )}
       <div className="chat-scroll" ref={scrollRef}>
-        {turns.length === 0 && (
+        {turns.length === 0 && (!map || map.nodes.length === 0) && (
           <div className="ask-hero">
             <h1 className="h-page">{C.emptyTitle}</h1>
             <p className="h-sub">{C.emptySub}</p>
+          </div>
+        )}
+        {turns.length === 0 && starters.length > 0 && (
+          <div className="starters">
+            <div className="h-section">{C.startersTitle}</div>
+            <p className="starters-sub">{C.startersSub}</p>
+            <div className="starters-grid">
+              {starters.map((st) => (
+                <button key={st.question} type="button"
+                  className="starter-card"
+                  onClick={() => st.prefill
+                    ? setSpaceQ(st.question)
+                    : void ask(st.question)}>
+                  <span className="starter-cat">{st.category}</span>
+                  <span className="starter-q">
+                    {st.question}{st.prefill ? "…" : ""}
+                  </span>
+                  <span className="starter-why">{st.why}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -206,6 +379,21 @@ export function AskTab() {
                 <Markdown text={t.liveText} />
               </div>
             )}
+            {t.evalv && (
+              <button type="button"
+                className={`eval-chip v-${t.evalv.verdict}`}
+                onClick={() => nav.go("evals")}
+                title={t.evalv.verdict_text}>
+                <span aria-hidden>
+                  {t.evalv.verdict === "needs_review" ? "✕" : "✓"}
+                </span>
+                {EVALS.verdicts[t.evalv.verdict]} ·{" "}
+                {Math.round(t.evalv.score * 100)}%
+                {t.evalv.corrections.length > 0 &&
+                  ` · ${t.evalv.corrections.length} self-correction${
+                    t.evalv.corrections.length > 1 ? "s" : ""}`}
+              </button>
+            )}
           </section>
         ))}
 
@@ -216,17 +404,8 @@ export function AskTab() {
         )}
       </div>
 
+      {turns.length > 0 && (
       <div className="composer">
-        {turns.length === 0 && suggestions.length > 0 && (
-          <div className="suggest" aria-label={C.suggestTitle}>
-            {suggestions.slice(0, 4).map((s) => (
-              <button key={s.question} type="button"
-                onClick={() => void ask(s.question)}>
-                {s.question}
-              </button>
-            ))}
-          </div>
-        )}
         <div className="composer-row">
           <textarea
             className="textarea"
@@ -248,11 +427,37 @@ export function AskTab() {
             {C.send}
           </button>
         </div>
+        {!busy && anticipation.ids.length > 0 && (
+          <div className="listen-tally" aria-live="polite">
+            <span>
+              {anticipation.ids.length} nodes listening
+              {anticipation.nMetrics > 0 &&
+                ` · ${anticipation.nMetrics} metric${
+                  anticipation.nMetrics > 1 ? "s" : ""}`}
+              {anticipation.nTables > 0 &&
+                ` · ${anticipation.nTables} table${
+                  anticipation.nTables > 1 ? "s" : ""}`}
+            </span>
+            {anticipation.best && (
+              <button type="button" className="listen-best"
+                onClick={() => nav.openEvidence(anticipation.best!.ref)}>
+                {anticipation.best.ref}
+                <em className={`lt-${anticipation.best.tier}`}>
+                  {TIERS[anticipation.best.tier as keyof typeof TIERS]
+                    ?.word ?? anticipation.best.tier}
+                </em>
+              </button>
+            )}
+          </div>
+        )}
       </div>
+      )}
 
       {inspect && (
         <WitnessDrawer refUri={inspect} onClose={() => setInspect(null)} />
       )}
+    </div>
+
     </div>
   );
 }
@@ -363,6 +568,7 @@ function AnswerCard({
 }) {
   return (
     <div className="answer-card card card-pad">
+      <span className="finding-eyebrow">Finding</span>
       <p className="brief-answer">
         <RefText text={sections.answer} />
       </p>

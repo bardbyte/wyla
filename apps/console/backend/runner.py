@@ -157,6 +157,32 @@ class ScriptedRunner:
                          provenance=Provenance(tier="grounded", score=0.85,
                                                sources=["bq", "mdm"],
                                                evidence_count=3))
+        # the self-correction beat: the validator catches the first
+        # draft BEFORE the seal, the agent revises, re-validates clean —
+        # the workflow's draft → validate → fix → re-validate rule, and
+        # what the Evals tab surfaces as "caught and corrected"
+        yield ToolCall(call_id="c-v1", tool="validate_sql_plan",
+                       verb=verb_for("validate_sql_plan"),
+                       args_summary="draft #1")
+        yield ToolResult(call_id="c-v1", ok=False,
+                         summary="✗ unknown column open_dt on "
+                                 "sbs_new_accounts — the declared witness "
+                                 "(bq) says acct_open_dt",
+                         provenance=Provenance(tier="grounded", score=0.9,
+                                               sources=["bq"],
+                                               evidence_count=1))
+        yield Thinking(delta="The validator caught a bad column in my "
+                       "first draft — revising against the declared "
+                       "schema before anything reaches the seal.")
+        yield ToolCall(call_id="c-v2", tool="validate_sql_plan",
+                       verb=verb_for("validate_sql_plan"),
+                       args_summary="draft #2, revised")
+        yield ToolResult(call_id="c-v2", ok=True,
+                         summary="clean — columns declared, guardrails "
+                                 "pass, single read-only statement",
+                         provenance=Provenance(tier="grounded", score=0.95,
+                                               sources=["bq", "skills"],
+                                               evidence_count=2))
         yield SqlGate(
             gate_id="g1",
             sql="SELECT DATE_TRUNC(acct_open_dt, MONTH) m, COUNT(*) n\n"
@@ -329,6 +355,45 @@ def _explain_failure(exc: Exception) -> str:
     return raw
 
 
+def _jsonable(obj, _depth: int = 0):
+    """Deep-convert an ADK/protobuf value into plain JSON types.
+
+    THE live-path serialization fix: `dict(fc.args)` is shallow, so
+    protobuf MapComposite / RepeatedComposite values nested inside tool
+    args and results survived into `ToolCall.args` / `ToolResult.payload`
+    (typed dict[str, Any]). Pydantic's serializer then raised on the
+    unknown type INSIDE the SSE generator — the stream died mid-turn and
+    the UI spun forever, while `adk web` (its own serializer) worked.
+    Everything non-primitive degrades to str; depth-capped so a cyclic
+    object can't hang the stream."""
+    if _depth > 8:
+        return str(obj)
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, bytes):
+        try:
+            return obj.decode("utf-8", "replace")
+        except Exception:
+            return repr(obj)
+    # Mapping-like (dict, MapComposite, Struct): items() or keys()
+    try:
+        items = obj.items()
+    except (AttributeError, TypeError):
+        items = None
+    if items is not None:
+        try:
+            return {str(k): _jsonable(v, _depth + 1) for k, v in items}
+        except Exception:
+            return str(obj)
+    # Sequence-like (list, tuple, RepeatedComposite) — but not str/bytes
+    try:
+        return [_jsonable(v, _depth + 1) for v in obj]
+    except TypeError:
+        return str(obj)
+    except Exception:
+        return str(obj)
+
+
 def _map_adk_event(ev) -> list[ConsoleEvent]:
     """ADK event → zero or more ConsoleEvents. Kept defensive: ADK's
     surface shifts across versions, so every access is guarded."""
@@ -338,7 +403,9 @@ def _map_adk_event(ev) -> list[ConsoleEvent]:
     for part in parts:
         fc = getattr(part, "function_call", None)
         if fc is not None:
-            args = dict(getattr(fc, "args", {}) or {})
+            args = _jsonable(getattr(fc, "args", {}) or {})
+            if not isinstance(args, dict):
+                args = {"value": args}
             out.append(ToolCall(
                 call_id=getattr(fc, "id", "") or getattr(fc, "name", ""),
                 tool=getattr(fc, "name", "tool"),
@@ -347,13 +414,15 @@ def _map_adk_event(ev) -> list[ConsoleEvent]:
             continue
         fr = getattr(part, "function_response", None)
         if fr is not None:
-            resp = getattr(fr, "response", {}) or {}
+            resp = _jsonable(getattr(fr, "response", {}) or {})
+            if not isinstance(resp, dict):
+                resp = {"value": resp}
             out.append(ToolResult(
                 call_id=getattr(fr, "id", "") or getattr(fr, "name", ""),
                 ok=not bool(resp.get("error")),
                 summary=_summarize_payload(resp),
                 provenance=_lift_provenance(resp),
-                payload=resp if isinstance(resp, dict) else None))
+                payload=resp))
             continue
         text = getattr(part, "text", None)
         if text:

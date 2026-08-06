@@ -184,3 +184,43 @@ blurs real and illustrative.
 - **Graduation** — scheduled ambient briefings: the Briefing tab
   already answers before being asked; the schedule (and push) is what
   remains.
+
+## Run it on your laptop, with YOUR graph
+
+The console is snapshot-driven end to end: every surface (space map,
+Insights, Evals, the agent's tools) reads whatever compiled snapshot
+you point it at. Nothing needs the demo world.
+
+```bash
+# 0 · one-time setup (fonts are vendored — no CDN needed)
+cd apps/console/frontend && npm install && npm run build && cd ../../..
+python -m venv .venv && source .venv/bin/activate
+pip install -r apps/console/requirements.txt
+pip install pydantic httpx sqlglot pyyaml    # graph + eval deps
+
+# 1 · offline first — scripted agent, YOUR real graph
+SYNAPSE_CONSOLE_RUNNER=scripted \
+SYNAPSE_GRAPH_PATH=/abs/path/to/your/graph_snapshot.json \
+python -m uvicorn apps.console.backend.app:app --port 8080
+# → http://localhost:8080 — the cosmos, Insights, Evals all run on
+#   your graph; only the chat transcript is canned.
+
+# 2 · live agent (Vertex creds on the laptop)
+export GOOGLE_GENAI_USE_VERTEXAI=1 GOOGLE_CLOUD_PROJECT=... \
+       GOOGLE_CLOUD_LOCATION=... GOOGLE_APPLICATION_CREDENTIALS=...
+SYNAPSE_GRAPH_PATH=/abs/path/to/your/graph_snapshot.json \
+python -m uvicorn apps.console.backend.app:app --port 8080
+# If the agent can't start, the Ask tab shows the exact fix
+# (GET /api/agent/selftest runs at load — no tokens spent).
+
+# 3 · grow the graph WITHOUT a rebuild (new tables / new sources)
+python synapse/scripts/pipeline.py \
+    --append-to /abs/path/to/your/graph_snapshot.json \
+    --collibra-export your_collibra_export.json
+# then restart the server — known tables gain the new witness and
+# their tier recomputes; new tables appear in the sky as vapour.
+```
+
+Sanity checks: `GET /health` (runner + model), `GET /api/config`
+(exact SDK versions this process imported, TLS mode, graph path),
+`GET /api/agent/selftest` (can the live agent even construct).

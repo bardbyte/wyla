@@ -1,4 +1,4 @@
-/** The Radix copy deck — every static string in the product, in one
+/** The Synapse copy deck — every static string in the product, in one
  * reviewable place.
  *
  * Editorial rules (applied everywhere):
@@ -21,7 +21,7 @@
 import type { Tier } from "./types";
 
 export const BRAND = {
-  name: "Radix",
+  name: "Synapse",
 };
 
 export const TABS = [
@@ -29,6 +29,7 @@ export const TABS = [
   { id: "products", label: "Data products", preview: false },
   { id: "graph", label: "Knowledge graph", preview: false },
   { id: "knowledge", label: "Bring your knowledge", preview: false },
+  { id: "evals", label: "Evals", preview: false },
 ] as const;
 
 export type TabId = (typeof TABS)[number]["id"];
@@ -55,7 +56,7 @@ export const COMMON = {
   noGraphTitle: "No graph is loaded",
   noGraphSub:
     "Point the server at a compiled snapshot (SYNAPSE_GRAPH_PATH) to " +
-    "bring every surface to life. Until then Radix shows nothing it " +
+    "bring every surface to life. Until then Synapse shows nothing it " +
     "can't stand behind.",
 };
 
@@ -71,7 +72,7 @@ export const ENTITY = {
 export const ASK = {
   emptyTitle: "Ask a question. Get an answer you can defend.",
   emptySub:
-    "Radix reads your knowledge graph, checks the meaning of every " +
+    "Synapse reads your knowledge graph, checks the meaning of every " +
     "field, and — when a query is needed — drafts it, prices it, and " +
     "waits for your approval before anything runs. Answers arrive with " +
     "their sources, their confidence, and the trail that produced them.",
@@ -98,6 +99,18 @@ export const ASK = {
     "Demo mode — scripted transcripts, not the live agent. Unset " +
     "SYNAPSE_CONSOLE_RUNNER (or set it to adk) and restart the server " +
     "to chat with Gemini.",
+  activityTitle: "Synapse activity",
+  activityHint:
+    "The part of the graph the agent touches lights up as it works. " +
+    "Idle, you see the whole ecosystem.",
+  activityOpen: "Show activity",
+  activityClose: "Hide activity",
+  activityFull: "Open the full graph",
+  agentIssue: "The live agent can't start on this server",
+  startersTitle: "A tour of what this graph can answer",
+  startersSub:
+    "Derived from the loaded graph itself — each one exercises a " +
+    "different capability. Or ask the sky above anything at all.",
 };
 
 /* ── Data products — "we know your business", by unit ─────── */
@@ -170,6 +183,35 @@ export const GRAPH = {
   nodes: "Facts",
   edges: "Connections",
   openEvidence: "Select any step to inspect its evidence.",
+  liveNow: "agent working — watching the traversal",
+  insightsTitle: "Insights",
+  insightsAiTag: "AI-generated",
+  insightsNoDesc:
+    "No description yet. Ask the agent about this table, or assert one " +
+    "in Bring your knowledge.",
+  insightsColumns: "columns",
+  insightsDescribed: "described",
+  insightsPii: "PII",
+  insightsRels: "Derived relationships — each with its witnesses",
+  insightsNoRels:
+    "No relationships recorded for this table in the current snapshot.",
+  insightsRelKind: "Kind",
+  insightsRelPredicate: "Relationship",
+  insightsRelWitness: "Witness",
+  insightsRelTier: "Evidence",
+  insightsRecs: "Questions you can ask about this table",
+  viewLabel: "Map view",
+  viewConstellation: "Constellation",
+  viewOrbits: "Trust orbits",
+  viewLanes: "Lanes",
+  orbitsCaption:
+    "Trust as radius — signed at the centre, unverified at the rim. " +
+    "Steward work literally pulls facts inward.",
+  lanesCaption:
+    "The sky, organized: one lane per kind, sorted by name.",
+  firstLight: "Every fact. And where it came from.",
+  goldenLine: "The sky is more golden than yesterday.",
+  askSpace: "Ask the graph",
 };
 
 /* ── Bring your knowledge — the partnership close (P5) ─────── */
@@ -180,7 +222,7 @@ export const KNOWLEDGE = {
     "The graph gets its meaning from your team. What you know — the " +
     "definitions, the caveats, the way your unit actually uses a field — " +
     "becomes the highest tier of evidence, attributed to you.",
-  captureTitle: "Tell Radix what your team knows",
+  captureTitle: "Tell Synapse what your team knows",
   captureSub:
     "State a definition or a correction in your own words. The agent " +
     "records it as a signed assertion — the top evidence level, above " +
@@ -250,4 +292,30 @@ export const KNOWLEDGE = {
 export const CONFIG = {
   scripted: "Demo transcript",
   live: "Live agent",
+};
+
+export const EVALS = {
+  title: "Evals",
+  sub: "Every turn is scored the moment it completes: deterministic "
+    + "checks on 100% of traffic, each with a plain-language "
+    + "explanation of whether what we did was accurate.",
+  liveNow: "scoring live",
+  empty: "No turns scored yet.",
+  emptySub: "Ask something in the Ask tab — the moment the turn "
+    + "finishes, its accuracy report appears here.",
+  statTurns: "turns scored",
+  statGrounded: "fully grounded",
+  statScore: "average score",
+  statCorrections: "self-corrections",
+  checksTitle: "The checks",
+  correctionsTitle: "Caught and corrected mid-turn",
+  rubricNote: "Deterministic rubric, run on every turn: citations "
+    + "resolve into the graph, cited facts carry an honest tier, "
+    + "nothing executes without the seal, joins exist in observed "
+    + "reality, the tool budget holds, the answer keeps its contract.",
+  verdicts: {
+    grounded: "Grounded",
+    grounded_caveats: "Grounded, with caveats",
+    needs_review: "Needs review",
+  } as Record<string, string>,
 };

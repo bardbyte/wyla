@@ -76,6 +76,26 @@ export interface GraphMapEdge {
   tier: Tier;
 }
 
+export interface InsightRelationship {
+  kind: "join" | "identifies" | "metric" | "lineage" | "dq";
+  predicate: string; other: string; other_ref: string;
+  sources: string[]; witness: string; tier: Tier;
+}
+
+export interface TableInsights {
+  table: string; found: boolean; ref?: string;
+  description: { curated?: string; ai?: string; tier?: Tier;
+    sources?: string[] };
+  columns: { count?: number; described?: number; pii?: number };
+  relationships: InsightRelationship[];
+  recommendations: { question: string; source: string }[];
+}
+
+export interface AgentSelftest {
+  ok: boolean; runner: string; model?: string; note?: string;
+  error?: string;
+}
+
 export interface GraphMap {
   nodes: GraphMapNode[]; edges: GraphMapEdge[]; truncated: boolean;
 }
@@ -105,10 +125,21 @@ export interface ThreadHop {
   kind: string; label: string; ref: string; tier: Tier; detail: string;
 }
 
+export interface WitnessLedgerRow {
+  source: string; weight: number; count: number; capped: number;
+  contribution: number;
+}
+
+export interface WitnessLedger {
+  rows: WitnessLedgerRow[]; weighted: number; denominator: number;
+  score: number; distinct: number; rule: string;
+}
+
 export interface Witness {
   ref: string; found: boolean; kind?: string;
   properties?: Record<string, unknown>;
   provenance?: { tier: Tier; score: number; sources: string[] };
+  ledger?: WitnessLedger;
   edges?: { type: string; other: string; direction: string; tier: Tier }[];
 }
 
@@ -139,7 +170,7 @@ export interface Pin {
   headline: Headline;
   rows: Record<string, unknown>[];
   created_at: string; actor: string;
-  source: "live" | "scripted" | "seed";
+  source: "live" | "scripted";
   verified: { by: string; at: string } | null;
   history: PinRun[];
 }
@@ -149,4 +180,30 @@ export interface AppConfig {
   vertexai: boolean; project_set: boolean; credentials_set: boolean;
   tls: Record<string, unknown>;
   graph: { path: string; live: boolean };
+}
+
+export interface EvalCheck {
+  id: string; label: string;
+  status: "pass" | "warn" | "fail" | "skip";
+  explanation: string;
+}
+
+export interface EvalTurn {
+  turn_id: string; question: string;
+  verdict: "grounded" | "grounded_caveats" | "needs_review";
+  verdict_text: string; score: number;
+  checks: EvalCheck[]; corrections: string[];
+  n_tool_calls: number; ts: number;
+}
+
+export interface EvalsRecent {
+  turns: EvalTurn[];
+  summary: {
+    n_turns: number; grounded_rate: number | null;
+    avg_score: number | null; self_corrections: number;
+  };
+}
+
+export interface Starter {
+  category: string; question: string; why: string; prefill: boolean;
 }
