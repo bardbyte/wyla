@@ -25,7 +25,6 @@ if str(REPO_ROOT / "synapse") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "synapse"))
 
 _DEFAULT_SNAPSHOT = REPO_ROOT / "synapse" / "data" / "cache" / "graph_snapshot.json"
-_DEFAULT_DEMO = REPO_ROOT / "synapse" / "data" / "cache" / "demo_questions.json"
 
 # Columns whose *values* are governance-guarded never leak metadata
 # that looks like data: sample/top values are stripped from payloads.
@@ -59,7 +58,7 @@ class ConsoleData:
                 from synapse.graph.store import GraphStore
                 self.store = GraphStore.load_json(self.snapshot_path)
             except Exception:
-                self.store = None                 # unreadable → sample world
+                self.store = None                 # unreadable → honest empty
 
     @property
     def live(self) -> bool:
@@ -551,13 +550,6 @@ class ConsoleData:
         rels.sort(key=lambda r: (order.get(r["kind"], 9), r["predicate"]))
 
         recs: list[dict[str, str]] = []
-        qs = self.questions().get("questions") or []
-        needles = {_norm(name)} | {_norm(c) for c in col_names if len(c) > 3}
-        for q in qs:
-            qn = _norm(q.get("question", ""))
-            if any(nd and nd in qn for nd in needles):
-                recs.append({"question": q["question"],
-                             "source": "verified"})
         for m_uri in {r["other_ref"] for r in rels if r["kind"] == "metric"}:
             m = self.store.get(m_uri)
             if m is None or len(recs) >= 6:
@@ -567,6 +559,16 @@ class ConsoleData:
                               for r in recs):
                 recs.append({"question": f"What is the {mn} for {name}?",
                              "source": "observed metric"})
+        if node.properties.get("business_owner") or any(
+                r["kind"] == "lineage" for r in rels):
+            recs.append({"question": f"Who owns {name} and what feeds it?",
+                         "source": "governance"})
+        if any(r["kind"] == "dq" for r in rels):
+            recs.append({"question": f"Is {name} trustworthy right now?",
+                         "source": "data quality"})
+        recs.append({"question": f"How confident are we in {name}, "
+                                 "and why?",
+                     "source": "witness ledger"})
 
         return self._wrap("insights", {
             "table": name, "found": True, "ref": t_uri,
@@ -899,21 +901,15 @@ class ConsoleData:
         return self._wrap("starters", out[:8])
 
     def questions(self) -> dict[str, Any]:
-        demo = Path(os.environ.get("SYNAPSE_DEMO_QUESTIONS",
-                                   _DEFAULT_DEMO)).expanduser()
-        if demo.exists():
-            try:
-                verified = json.loads(
-                    demo.read_text(encoding="utf-8")).get("verified", [])
-                if verified:
-                    return {"live": True, "source": "graph",
-                            "questions": [{
-                                "question": q.get("question", ""),
-                                "archetype": q.get("archetype", ""),
-                            } for q in verified[:12]]}
-            except Exception:
-                pass
-        return self._wrap("questions", [])
+        """Back-compat shape over the graph-derived starters — nothing
+        canned ever reaches a surface."""
+        starters = self.starter_questions()
+        return {"live": starters["live"], "source": starters["source"],
+                "questions": [{
+                    "question": st["question"],
+                    "archetype": st["category"],
+                } for st in starters["starters"]
+                    if not st.get("prefill")]}
 
 
 def _dedupe_lexicon(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:

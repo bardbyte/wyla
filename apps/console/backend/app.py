@@ -43,7 +43,7 @@ from pydantic import BaseModel
 from apps.console.backend.data import ConsoleData
 from apps.console.backend.events import to_sse
 from apps.console.backend.pins import (
-    NoSqlError, PinStore, SeedPinError,
+    NoSqlError, PinStore,
 )
 from apps.console.backend.evaluator import EvalLog, TurnEvaluator
 from apps.console.backend.runner import ADKRunner, Runner, ScriptedRunner
@@ -311,8 +311,7 @@ def create_app(runner: Runner | None = None,
     @app.get("/api/pins")
     def pins_list() -> dict:
         return {"live": app.state.data.live,
-                "source": "graph" if app.state.data.live else "sample",
-                "seeded": app.state.pins.seeded,
+                "source": "graph" if app.state.data.live else "empty",
                 "pins": app.state.pins.list()}
 
     @app.post("/api/pins", status_code=201)
@@ -330,8 +329,6 @@ def create_app(runner: Runner | None = None,
                 pin_id, app.state.warehouse_factory(), actor=req.actor)
         except KeyError:
             return JSONResponse({"code": "not_found"}, status_code=404)
-        except SeedPinError:
-            return JSONResponse({"code": "seed_pin"}, status_code=409)
         except NoSqlError:
             return JSONResponse({"code": "no_sql"}, status_code=409)
 
@@ -342,8 +339,6 @@ def create_app(runner: Runner | None = None,
                 pin_id, verified=req.verified, actor=req.actor)}
         except KeyError:
             return JSONResponse({"code": "not_found"}, status_code=404)
-        except SeedPinError:
-            return JSONResponse({"code": "seed_pin"}, status_code=409)
 
     @app.delete("/api/pins/{pin_id}")
     def pin_delete(pin_id: str) -> object:
@@ -352,8 +347,6 @@ def create_app(runner: Runner | None = None,
             return {"deleted": pin_id}
         except KeyError:
             return JSONResponse({"code": "not_found"}, status_code=404)
-        except SeedPinError:
-            return JSONResponse({"code": "seed_pin"}, status_code=409)
 
     # ── the SPA (after API routes, so /api wins) ─────────────
 

@@ -170,7 +170,7 @@ export interface Pin {
   headline: Headline;
   rows: Record<string, unknown>[];
   created_at: string; actor: string;
-  source: "live" | "scripted" | "seed";
+  source: "live" | "scripted";
   verified: { by: string; at: string } | null;
   history: PinRun[];
 }

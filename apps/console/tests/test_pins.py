@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 
 from apps.console.backend.app import create_app
 from apps.console.backend.pins import (
-    NoSqlError, PinStore, SeedPinError, choose_locator, compute_headline,
+    NoSqlError, PinStore, choose_locator, compute_headline,
     sql_hash, worst_tier,
 )
 from apps.console.backend.runner import ScriptedRunner
@@ -186,36 +186,16 @@ def test_locator_miss_flags_instead_of_lying(tmp_path):
     assert out["run"]["value"] is None          # no invented delta
 
 
-# ─── seeds: teaching fixtures, never mutated ─────────────────
+# ─── no seeds, no samples ────────────────────────────────────
 
 
-def test_seeds_served_only_before_first_write_and_protected(tmp_path):
+def test_briefing_is_honestly_empty_before_the_first_pin(tmp_path):
     store = _store(tmp_path)
-    assert store.seeded is True
-    seeds = store.list()
-    assert len(seeds) == 3
-    assert all(p["source"] == "seed" for p in seeds)
-    # one seed demonstrates a delta offline (two ok history entries)
-    with_delta = [p for p in seeds
-                  if len([h for h in p["history"]
-                          if h["status"] == "ok"]) >= 2]
-    assert with_delta, "one seed must carry a rerun history"
-
-    with pytest.raises(SeedPinError):
-        store.rerun("seed-1", None)
-    with pytest.raises(SeedPinError):
-        store.verify("seed-1")
-    with pytest.raises(SeedPinError):
-        store.delete("seed-1")
-
+    assert store.list() == []
     pin = store.create(question="real", sql=None)
-    assert store.seeded is False
-    listed = store.list()
-    assert [p["id"] for p in listed] == [pin["id"]]   # seeds retired
-
+    assert [p["id"] for p in store.list()] == [pin["id"]]
     store.delete(pin["id"])
-    assert store.list() == []                   # true empty state persists
-
+    assert store.list() == []
 
 def test_verify_sets_and_clears_signature(tmp_path):
     store = _store(tmp_path)
@@ -240,8 +220,7 @@ def test_pins_endpoints_round_trip(tmp_path):
     client = TestClient(create_app(
         ScriptedRunner(), pins=PinStore(tmp_path / "pins.json"),
         warehouse_factory=lambda: None))
-    first = client.get("/api/pins").json()
-    assert first["seeded"] is True and len(first["pins"]) == 3
+    assert client.get("/api/pins").json()["pins"] == []
 
     created = client.post("/api/pins", json={
         "question": "monthly counts", "sql": "SELECT m, n FROM t",
@@ -249,7 +228,6 @@ def test_pins_endpoints_round_trip(tmp_path):
     pin_id = created["pin"]["id"]
 
     listed = client.get("/api/pins").json()
-    assert listed["seeded"] is False
     assert [p["id"] for p in listed["pins"]] == [pin_id]
 
     rerun = client.post(f"/api/pins/{pin_id}/rerun", json={})
@@ -269,8 +247,6 @@ def test_rerun_endpoint_codes(tmp_path):
         warehouse_factory=lambda: None))
     assert client.post("/api/pins/ghost/rerun",
                        json={}).status_code == 404
-    assert client.post("/api/pins/seed-1/rerun",
-                       json={}).status_code == 409
     fact = client.post("/api/pins", json={"question": "fact"}).json()
     resp = client.post(f"/api/pins/{fact['pin']['id']}/rerun", json={})
     assert resp.status_code == 409 and resp.json()["code"] == "no_sql"

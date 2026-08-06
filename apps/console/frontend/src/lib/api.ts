@@ -75,7 +75,7 @@ export const api = {
     get<Live<{ lexicon: LexiconEntry[] }>>("/api/lexicon"),
 
   pins: () =>
-    get<Live<{ seeded: boolean; pins: Pin[] }>>("/api/pins"),
+    get<Live<{ pins: Pin[] }>>("/api/pins"),
 
   createPin: (body: {
     question: string; answer?: string;
@@ -95,10 +95,6 @@ export const api = {
   deletePin: (id: string) =>
     post<{ deleted: string }>(
       `/api/pins/${encodeURIComponent(id)}`, undefined, "DELETE"),
-
-  questions: () =>
-    get<Live<{ questions: { question: string; archetype: string }[] }>>(
-      "/api/questions"),
 
   witness: (ref: string) =>
     get<Live<{ witness: Witness }>>(

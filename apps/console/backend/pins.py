@@ -10,10 +10,9 @@ the loop, every attempt on the audit ledger, joinable to it by
 
 Storage is a JSON file next to the graph snapshot (SYNAPSE_PINS_PATH,
 default synapse/data/cache/pins.json — the cache dir is gitignored).
-Atomic writes, in-process lock. Three seed pins furnish the Briefing
-ONLY until the file exists; the first real pin retires them, and
-deleting every pin leaves the true empty state. Seeds are read-only
-teaching fixtures.
+Atomic writes, in-process lock. No seeds, no samples: before the first
+real pin the Briefing is honestly empty — everything shown is something
+someone actually asked and kept.
 
 `verified` is a flag in this file, not a graph fact — the console never
 writes the graph. Promoting a verified pin to a weight-10
@@ -45,10 +44,6 @@ _NON_MEASURE = re.compile(
 
 _TIER_ORDER = ["deprecated", "guessed", "inferred", "grounded",
                "human_asserted"]
-
-
-class SeedPinError(Exception):
-    """Seeds are teaching fixtures — never mutated."""
 
 
 class NoSqlError(Exception):
@@ -136,17 +131,13 @@ class PinStore:
                        encoding="utf-8")
         os.replace(tmp, self.path)
 
-    @property
-    def seeded(self) -> bool:
-        return not self.path.exists()
-
     # ── reads ────────────────────────────────────────────────
 
     def list(self) -> list[dict[str, Any]]:
         """Newest-first. Citation tiers (and the rollup) refresh through
         the resolver on every read, so a steward signature elsewhere
         shows up here without a re-pin."""
-        pins = _SEED_PINS() if self.seeded else self._load()
+        pins = self._load()
         if self._tier_resolver is not None:
             for pin in pins:
                 changed = False
@@ -211,17 +202,15 @@ class PinStore:
             }],
         }
         with self._lock:
-            pins = [] if self.seeded else self._load()
+            pins = self._load()
             pins.append(pin)
-            self._save(pins)          # first write retires the seeds
+            self._save(pins)
         return pin
 
     def _mutate(self, pin_id: str,
                 fn: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
-        if pin_id.startswith("seed-"):
-            raise SeedPinError(pin_id)
         with self._lock:
-            pins = [] if self.seeded else self._load()
+            pins = self._load()
             pin = next((p for p in pins if p.get("id") == pin_id), None)
             if pin is None:
                 raise KeyError(pin_id)
@@ -237,10 +226,8 @@ class PinStore:
         return self._mutate(pin_id, apply)
 
     def delete(self, pin_id: str) -> None:
-        if pin_id.startswith("seed-"):
-            raise SeedPinError(pin_id)
         with self._lock:
-            pins = [] if self.seeded else self._load()
+            pins = self._load()
             kept = [p for p in pins if p.get("id") != pin_id]
             if len(kept) == len(pins):
                 raise KeyError(pin_id)
@@ -255,10 +242,8 @@ class PinStore:
         writes the audit-ledger line itself; this method only records
         the outcome on the pin — ok refreshes rows/headline via the
         STORED locator, a refusal leaves the pin's value untouched."""
-        if pin_id.startswith("seed-"):
-            raise SeedPinError(pin_id)
         with self._lock:
-            pins = [] if self.seeded else self._load()
+            pins = self._load()
             pin = next((p for p in pins if p.get("id") == pin_id), None)
             if pin is None:
                 raise KeyError(pin_id)
@@ -305,93 +290,3 @@ class PinStore:
             return {"pin": pin, "run": run}
 
 
-# ─── the seed briefing (served only before the first real pin) ─
-
-def _SEED_PINS() -> list[dict[str, Any]]:
-    sql = ("SELECT DATE_TRUNC(acct_open_dt, MONTH) m, COUNT(*) n\n"
-           "FROM sbs_new_accounts GROUP BY 1 ORDER BY 1")
-    return [
-        {
-            "id": "seed-1",
-            "question": "How are new accounts trending month over month?",
-            "answer": "New accounts are up **8.4% month over month**.",
-            "sql": sql, "sql_sha256": sql_hash(sql),
-            "citations": [
-                {"label": "bq:sbs_new_accounts",
-                 "ref": "synapse://table/sbs_new_accounts",
-                 "tier": "grounded"},
-                {"label": "ledger#4821", "ref": "ledger:#4821",
-                 "tier": None},
-            ],
-            "tier": "grounded",
-            "locator": {"row": "last", "column": "n"},
-            "headline": {"kind": "series_last", "column": "n",
-                         "value": 1247, "n_rows": 8},
-            "rows": [{"m": "2026-05", "n": 1150},
-                     {"m": "2026-06", "n": 1247}],
-            "created_at": "2026-07-06T09:00:00+00:00",
-            "actor": "user", "source": "seed", "verified": None,
-            "history": [
-                {"kind": "capture", "ts": "2026-07-05T09:00:00+00:00",
-                 "actor": "user", "status": "ok", "code": None,
-                 "value": 1150, "n_rows": 8, "ledger_id": "4820"},
-                {"kind": "rerun", "ts": "2026-07-06T09:00:00+00:00",
-                 "actor": "user", "status": "ok", "code": None,
-                 "value": 1247, "n_rows": 8, "ledger_id": "4821"},
-            ],
-        },
-        {
-            "id": "seed-2",
-            "question": "What is the C-30 roll rate, and how is it "
-                        "defined?",
-            "answer": "**C-30 roll rate** = balances rolling from current "
-                      "to 30+ days past due, over prior current balances "
-                      "— defined by the RollRates playbook.",
-            "sql": None, "sql_sha256": None,
-            "citations": [
-                {"label": "metric:C-30 roll rate",
-                 "ref": "synapse://metric/c30_roll_rate",
-                 "tier": "grounded"},
-            ],
-            "tier": "grounded", "locator": None,
-            "headline": {"kind": "none"},
-            "rows": [],
-            "created_at": "2026-07-05T15:00:00+00:00",
-            "actor": "user", "source": "seed", "verified":
-                {"by": "steward", "at": "2026-07-06T10:00:00+00:00"},
-            "history": [
-                {"kind": "capture", "ts": "2026-07-05T15:00:00+00:00",
-                 "actor": "user", "status": "ok", "code": None,
-                 "value": None, "n_rows": 0, "ledger_id": None},
-            ],
-        },
-        {
-            "id": "seed-3",
-            "question": "What share of decisioned applications were "
-                        "approved last month?",
-            "answer": "**72.4%** of decisioned applications were "
-                      "approved.",
-            "sql": "SELECT COUNTIF(decision = 'approved') / COUNT(*) "
-                   "approval_rate FROM sbs_new_accounts",
-            "sql_sha256": sql_hash(
-                "SELECT COUNTIF(decision = 'approved') / COUNT(*) "
-                "approval_rate FROM sbs_new_accounts"),
-            "citations": [
-                {"label": "bq:sbs_new_accounts",
-                 "ref": "synapse://table/sbs_new_accounts",
-                 "tier": "grounded"},
-            ],
-            "tier": "grounded",
-            "locator": {"row": "last", "column": "approval_rate"},
-            "headline": {"kind": "scalar", "column": "approval_rate",
-                         "value": 0.724, "n_rows": 1},
-            "rows": [{"approval_rate": 0.724}],
-            "created_at": "2026-07-04T11:00:00+00:00",
-            "actor": "user", "source": "seed", "verified": None,
-            "history": [
-                {"kind": "capture", "ts": "2026-07-04T11:00:00+00:00",
-                 "actor": "user", "status": "ok", "code": None,
-                 "value": 0.724, "n_rows": 1, "ledger_id": "4790"},
-            ],
-        },
-    ]

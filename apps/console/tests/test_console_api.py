@@ -342,16 +342,17 @@ def test_api_surface_round_trips():
     assert client.get("/api/graph/summary").json()["summary"]["nodes"] > 0
     assert client.get("/api/graph/map").json()["map"]["nodes"]
     assert client.get("/api/graph/thread").json()["thread"]["hops"]
-    # questions come from the demo-questions FILE, not the graph — the
-    # endpoint round-trips a list (possibly empty when no file is staged)
-    assert isinstance(client.get("/api/questions").json()["questions"], list)
+    # questions are the graph-derived starters, back-compat shape
+    qs = client.get("/api/questions").json()["questions"]
+    assert qs and all(q["question"] and q["archetype"] for q in qs)
     v = client.post("/api/metrics/viability",
                     json={"name": "approval rate"}).json()
     assert v["viability"]["verdict"] in ("exact", "near_duplicate", "clear")
     r = client.get("/api/terms/resolve", params={"term": "roll rate"}).json()
     assert r["resolution"]["canonical"]["name"]
     assert client.get("/api/lexicon").json()["lexicon"]
-    assert client.get("/api/pins").json()["pins"]
+    # no seeds, no samples: honestly empty before the first real pin
+    assert client.get("/api/pins").json()["pins"] == []
 
 
 # ─── failures name the fix ───────────────────────────────────
