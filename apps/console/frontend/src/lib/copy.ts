@@ -1,4 +1,4 @@
-/** The Radix copy deck — every static string in the product, in one
+/** The Synapse copy deck — every static string in the product, in one
  * reviewable place.
  *
  * Editorial rules (applied everywhere):
@@ -21,7 +21,7 @@
 import type { Tier } from "./types";
 
 export const BRAND = {
-  name: "Radix",
+  name: "Synapse",
 };
 
 export const TABS = [
@@ -55,7 +55,7 @@ export const COMMON = {
   noGraphTitle: "No graph is loaded",
   noGraphSub:
     "Point the server at a compiled snapshot (SYNAPSE_GRAPH_PATH) to " +
-    "bring every surface to life. Until then Radix shows nothing it " +
+    "bring every surface to life. Until then Synapse shows nothing it " +
     "can't stand behind.",
 };
 
@@ -71,7 +71,7 @@ export const ENTITY = {
 export const ASK = {
   emptyTitle: "Ask a question. Get an answer you can defend.",
   emptySub:
-    "Radix reads your knowledge graph, checks the meaning of every " +
+    "Synapse reads your knowledge graph, checks the meaning of every " +
     "field, and — when a query is needed — drafts it, prices it, and " +
     "waits for your approval before anything runs. Answers arrive with " +
     "their sources, their confidence, and the trail that produced them.",
@@ -205,7 +205,7 @@ export const KNOWLEDGE = {
     "The graph gets its meaning from your team. What you know — the " +
     "definitions, the caveats, the way your unit actually uses a field — " +
     "becomes the highest tier of evidence, attributed to you.",
-  captureTitle: "Tell Radix what your team knows",
+  captureTitle: "Tell Synapse what your team knows",
   captureSub:
     "State a definition or a correction in your own words. The agent " +
     "records it as a signed assertion — the top evidence level, above " +

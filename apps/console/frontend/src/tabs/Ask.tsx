@@ -25,7 +25,7 @@ import { api } from "../lib/api";
 import { ASK as C, GRAPH } from "../lib/copy";
 import { useNav } from "../lib/nav";
 import { streamChat } from "../lib/sse";
-import { GraphCanvas } from "./Graph";
+import { SpaceCanvas } from "../components/SpaceCanvas";
 import type {
   AgentSelftest, AnswerSections, ConsoleEvent, GraphMap,
 } from "../lib/types";
@@ -130,6 +130,7 @@ export function AskTab() {
 
   const handleEvent = (ev: ConsoleEvent) => {
     nav.reportActivity(extractActivity(ev, knownTables.current));
+    if (ev.type === "tool_call" && ev.verb) nav.setTraversalVerb(ev.verb);
     switch (ev.type) {
       case "turn_start":
         break;
@@ -321,7 +322,7 @@ export function AskTab() {
     </div>
 
     {map && map.nodes.length > 0 && (
-      <aside className={`activity-panel ${showActivity ? "" : "closed"}`}>
+      <aside className={`space-strip ${showActivity ? "" : "closed"}`}>
         <div className="ap-head">
           <span className="h-section">{C.activityTitle}</span>
           {nav.agentBusy && (
@@ -334,18 +335,17 @@ export function AskTab() {
             {showActivity ? C.activityClose : C.activityOpen}
           </button>
         </div>
-        {showActivity && (
-          <>
-            <GraphCanvas map={map} activity={nav.activity} mini />
-            <div className="ap-foot">
-              <span>{C.activityHint}</span>
-              <button type="button" className="btn quiet"
-                onClick={() => nav.go("graph")}>
-                {C.activityFull} →
-              </button>
-            </div>
-          </>
-        )}
+        <div className="sp-holder">
+          <SpaceCanvas map={map} activity={nav.activity} backdrop portrait
+            verb={nav.traversalVerb} />
+        </div>
+        <div className="ap-foot">
+          <span>{C.activityHint}</span>
+          <button type="button" className="btn quiet"
+            onClick={() => nav.go("graph")}>
+            {C.activityFull} →
+          </button>
+        </div>
       </aside>
     )}
     </div>

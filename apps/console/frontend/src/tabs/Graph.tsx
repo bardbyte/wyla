@@ -1,45 +1,32 @@
-/** Knowledge graph — the whole connected picture.
+/** Knowledge graph — Synapse space, full size.
  *
- * The map is the showcase: tables, the business entities they describe,
- * the metrics computed from them, and the playbooks that govern them,
- * laid out by a deterministic force simulation (no dependencies, no
- * randomness — same snapshot, same picture). Shape encodes kind so the
- * one reserved data hue never masquerades as brand or evidence.
+ * The hero is the cosmos (components/SpaceCanvas): the whole estate as
+ * a dark, living constellation — tables as suns orbited by their real
+ * column counts, color = evidence tier, shape = kind. While the agent
+ * answers, the traversal fires across it; idle, it breathes.
  *
- * Two behaviors on top of the map:
- *  - LIVE TRAVERSAL: while the agent answers, the nodes and edges it
- *    touches light up and pulse (nav.activity, reported by Ask). Idle,
- *    the whole ecosystem renders calm — ask, and the synapse fires.
- *  - INSIGHTS: select a table and everything the graph knows about it
- *    renders below — description (curated vs AI), derived relationships
- *    with their WITNESSES (declared FK · analyst query log · LLM ·
- *    curated) and tier, and verified question recommendations.
+ * Select a table and INSIGHTS renders below: description (curated vs
+ * AI-labeled), column rollup, derived relationships with their
+ * WITNESSES (declared FK · query log (analyst) · curated · LLM-inferred)
+ * and tier, and ask-able question recommendations. Below that, the
+ * evidence machinery: what the graph knows, where facts come from, and
+ * the one-thread drill-down.
  */
 
-import { useEffect, useMemo, useState } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useState } from "react";
+import { SpaceCanvas } from "../components/SpaceCanvas";
 import { WitnessDrawer } from "../components/WitnessDrawer";
 import { SourceBadge, Spinner, TierChip } from "../components/ui";
 import { api } from "../lib/api";
 import { COMMON, ENTITY, GRAPH as C } from "../lib/copy";
 import { useNav } from "../lib/nav";
 import type {
-  GraphMap, GraphMapNode, GraphSummary, TableInsights, ThreadHop, Tier,
+  GraphMap, GraphSummary, TableInsights, ThreadHop, Tier,
 } from "../lib/types";
 
 const HOP_ICON: Record<string, string> = {
   table: "▤", entity: "◆", column: "▦", join: "⋈", metric: "∑", skill: "❖",
 };
-
-const shortName = (s: string) => {
-  const tail = s.split(/[./]/).pop() ?? s;
-  return tail.length > 22 ? tail.slice(0, 21) + "…" : tail;
-};
-
-/* Traversal highlights are PER-TURN, not time-decayed: a new question
- * clears the previous traversal (Ask calls nav.clearActivity), and the
- * touched subgraph stays lit after the answer for show-and-tell. No
- * wall-clock arithmetic — container/laptop clock steps can't kill it. */
 
 export function GraphTab() {
   const nav = useNav();
@@ -103,40 +90,38 @@ export function GraphTab() {
           <SourceBadge live={live} />
         </div>
 
-        {/* ── the whole picture ── */}
-        <section className="card card-pad" style={{ marginBottom: "var(--s-5)" }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: "var(--s-3)", flexWrap: "wrap" }}>
+        {/* ── Synapse space ── */}
+        <section className="card space-hero" style={{ marginBottom: "var(--s-5)" }}>
+          <div className="space-head">
             <div className="h-section">{C.mapTitle}</div>
             {nav.agentBusy && (
               <span className="activity-live">
                 <span className="live-dot" aria-hidden /> {C.liveNow}
               </span>
             )}
+            <span style={{ marginLeft: "auto", color: "var(--ink-3)", fontSize: "var(--fs-12)" }}>
+              {C.mapSub}
+            </span>
           </div>
-          <p style={{ color: "var(--ink-2)", margin: "var(--s-2) 0 var(--s-4)", maxWidth: "60ch" }}>
-            {C.mapSub}
-          </p>
-          {map === null && <Spinner />}
+          {map === null && <div style={{ padding: "var(--s-5)" }}><Spinner /></div>}
           {map !== null && map.nodes.length === 0 && (
             <div className="empty">
               {live ? C.mapEmpty : COMMON.noGraphSub}
             </div>
           )}
           {map !== null && map.nodes.length > 0 && (
-            <GraphCanvas map={map} activity={nav.activity}
+            <SpaceCanvas map={map} activity={nav.activity}
               selected={sel} onSelect={setSel}
-              onExplore={(t) => setAnchor(t)}
-              onAsk={(t) => nav.askAbout(ENTITY.askPrefix + t)}
-              onEvidence={(ref) => setInspect(ref)} />
+              verb={nav.traversalVerb} />
           )}
           {map?.truncated && (
-            <p style={{ color: "var(--ink-3)", fontSize: "var(--fs-12)", marginTop: "var(--s-2)" }}>
+            <p style={{ color: "var(--ink-3)", fontSize: "var(--fs-12)", padding: "0 var(--s-5) var(--s-3)" }}>
               {C.truncatedNote}
             </p>
           )}
         </section>
 
-        {/* ── insights for the selected table ── */}
+        {/* ── selection: tables get Insights; the rest a slim bar ── */}
         {selNode && selNode.kind === "table" && (
           <InsightsPanel table={selNode.label}
             onInspect={setInspect}
@@ -145,6 +130,20 @@ export function GraphTab() {
                 n.label.toLowerCase() === t.toLowerCase());
               if (node) setSel(node.id);
             }} />
+        )}
+        {selNode && selNode.kind !== "table" && (
+          <section className="card card-pad sel-bar" style={{ marginBottom: "var(--s-5)" }}>
+            <span className="h-section">{C.kinds[selNode.kind] ?? selNode.kind}</span>
+            <span className="ins-table">{selNode.label}</span>
+            <TierChip tier={selNode.tier} onClick={() => setInspect(selNode.id)} />
+            <span style={{ flex: 1 }} />
+            <button type="button" className="btn quiet"
+              onClick={() => setInspect(selNode.id)}>{ENTITY.evidence}</button>
+            <button type="button" className="btn quiet"
+              onClick={() => nav.askAbout(ENTITY.askPrefix + selNode.label)}>
+              {ENTITY.ask}
+            </button>
+          </section>
         )}
 
         {/* ── what the graph knows · where facts come from ── */}
@@ -382,253 +381,5 @@ function InsightsPanel({ table, onInspect, onSelectTable }: {
         </>
       )}
     </section>
-  );
-}
-
-/* ── the whole-graph canvas ─────────────────────────────────── */
-
-const W = 960;
-const H = 560;
-const PAD_X = 116;   // room for the centered labels under edge nodes
-const PAD_Y = 54;
-
-interface Pt { x: number; y: number }
-
-/** Fruchterman–Reingold with mild centre gravity, clamped to a padded
- * frame. Deterministic: initial positions come from the node index (a
- * ring), never Math.random, so a snapshot always renders the same
- * graph. The connected core spreads by its edges; gravity keeps
- * disconnected nodes off the corners so they ring the cluster instead
- * of piling in it. ~24 spine nodes → the loop is trivially cheap. */
-function layout(nodes: GraphMapNode[],
-                edges: { source: string; target: string }[]): Pt[] {
-  const n = nodes.length;
-  if (!n) return [];
-  const idx = new Map(nodes.map((nd, i) => [nd.id, i]));
-  const pos: Pt[] = nodes.map((_, i) => {
-    const a = (i / n) * 2 * Math.PI;
-    return { x: W / 2 + Math.cos(a) * W * 0.22,
-             y: H / 2 + Math.sin(a) * H * 0.22 };
-  });
-  const links = edges
-    .map((e) => [idx.get(e.source), idx.get(e.target)] as [number?, number?])
-    .filter((l): l is [number, number] => l[0] != null && l[1] != null);
-  const k = Math.sqrt((W * H) / Math.max(1, n)) * 0.9;
-  const iters = 400;
-  for (let it = 0; it < iters; it++) {
-    const disp: Pt[] = pos.map(() => ({ x: 0, y: 0 }));
-    for (let a = 0; a < n; a++) {
-      for (let b = a + 1; b < n; b++) {
-        let dx = pos[a].x - pos[b].x;
-        let dy = pos[a].y - pos[b].y;
-        const d = Math.hypot(dx, dy) || 0.01;
-        const f = (k * k) / d;
-        dx /= d; dy /= d;
-        disp[a].x += dx * f; disp[a].y += dy * f;
-        disp[b].x -= dx * f; disp[b].y -= dy * f;
-      }
-    }
-    for (const [a, b] of links) {
-      let dx = pos[a].x - pos[b].x;
-      let dy = pos[a].y - pos[b].y;
-      const d = Math.hypot(dx, dy) || 0.01;
-      const f = (d * d) / k;
-      dx /= d; dy /= d;
-      disp[a].x -= dx * f; disp[a].y -= dy * f;
-      disp[b].x += dx * f; disp[b].y += dy * f;
-    }
-    const temp = (1 - it / iters) * (W * 0.045);
-    for (let i = 0; i < n; i++) {
-      // mild gravity toward centre keeps loose nodes off the corners
-      disp[i].x += (W / 2 - pos[i].x) * 0.035;
-      disp[i].y += (H / 2 - pos[i].y) * 0.035;
-      const d = Math.hypot(disp[i].x, disp[i].y) || 0.01;
-      pos[i].x += (disp[i].x / d) * Math.min(d, temp);
-      pos[i].y += (disp[i].y / d) * Math.min(d, temp);
-      pos[i].x = Math.max(PAD_X, Math.min(W - PAD_X, pos[i].x));
-      pos[i].y = Math.max(PAD_Y, Math.min(H - PAD_Y, pos[i].y));
-    }
-  }
-  return pos;
-}
-
-function Glyph({ kind, x, y, r, cls, onClick }: {
-  kind: string; x: number; y: number; r: number; cls: string;
-  onClick: (e: ReactMouseEvent) => void;
-}) {
-  const common = { className: cls, onClick,
-    style: { cursor: "pointer" } as const };
-  if (kind === "metric")
-    return <rect x={x - r} y={y - r} width={2 * r} height={2 * r}
-      rx={2} {...common} />;
-  if (kind === "entity")
-    return <polygon points={`${x},${y - r} ${x + r},${y} ${x},${y + r} ${x - r},${y}`}
-      {...common} />;
-  if (kind === "skill")
-    return <polygon points={`${x},${y - r} ${x + r * 0.92},${y + r * 0.6} ${x - r * 0.92},${y + r * 0.6}`}
-      {...common} />;
-  return <circle cx={x} cy={y} r={r} {...common} />;
-}
-
-/** Is this node "touched" by the current turn's traversal? Matched by
- * full synapse:// id or by bare table/metric name (case-insensitive). */
-function isActive(n: GraphMapNode,
-                  activity: Record<string, number>): boolean {
-  const label = n.label.toLowerCase();
-  const bare = label.split(/[./]/).pop() ?? label;
-  return Boolean(activity[n.id.toLowerCase()] ?? activity[label]
-                 ?? activity[bare]);
-}
-
-export function GraphCanvas({
-  map, activity = {}, selected = null, onSelect, mini = false,
-  onExplore, onAsk, onEvidence,
-}: {
-  map: GraphMap;
-  activity?: Record<string, number>;
-  selected?: string | null;
-  onSelect?: (id: string | null) => void;
-  mini?: boolean;
-  onExplore?: (table: string) => void;
-  onAsk?: (label: string) => void;
-  onEvidence?: (ref: string) => void;
-}) {
-  const [localSel, setLocalSel] = useState<string | null>(null);
-  const sel = onSelect ? selected : localSel;
-  const setSel = onSelect ?? setLocalSel;
-
-  const sig = map.nodes.map((n) => n.id).join("|") + "#" + map.edges.length;
-  const pos = useMemo(() => layout(map.nodes, map.edges), [sig]); // eslint-disable-line
-
-  const idx = useMemo(
-    () => new Map(map.nodes.map((n, i) => [n.id, i])), [sig]); // eslint-disable-line
-  const degree = useMemo(() => {
-    const d = new Map<string, number>();
-    for (const e of map.edges) {
-      d.set(e.source, (d.get(e.source) ?? 0) + 1);
-      d.set(e.target, (d.get(e.target) ?? 0) + 1);
-    }
-    return d;
-  }, [sig]); // eslint-disable-line
-
-  const activeIds = useMemo(() => {
-    const s = new Set<string>();
-    for (const n of map.nodes) if (isActive(n, activity)) s.add(n.id);
-    return s;
-  }, [map, activity]);
-
-  // neighborhood of the selected node (for dimming the rest)
-  const neighbors = useMemo(() => {
-    if (!sel) return null;
-    const s = new Set<string>([sel]);
-    for (const e of map.edges) {
-      if (e.source === sel) s.add(e.target);
-      if (e.target === sel) s.add(e.source);
-    }
-    return s;
-  }, [sel, sig]); // eslint-disable-line
-
-  const selNode = sel ? map.nodes.find((n) => n.id === sel) ?? null : null;
-  const traversing = activeIds.size > 0;
-
-  return (
-    <div className={`graph-canvas-wrap ${mini ? "mini" : ""}`}>
-      <svg className="graph-canvas" viewBox={`0 0 ${W} ${H}`}
-        role="img" aria-label="Knowledge graph map"
-        onClick={() => setSel(null)}>
-        <g>
-          {map.edges.map((e, i) => {
-            const a = idx.get(e.source); const b = idx.get(e.target);
-            if (a == null || b == null) return null;
-            const hotSel = neighbors
-              ? (e.source === sel || e.target === sel) : false;
-            const hotAct = activeIds.has(e.source) && activeIds.has(e.target);
-            const dim = (neighbors && !hotSel && !hotAct)
-              || (traversing && !hotAct && !hotSel);
-            return (
-              <line key={i} x1={pos[a].x} y1={pos[a].y}
-                x2={pos[b].x} y2={pos[b].y}
-                className={`gedge ${hotSel || hotAct ? "hot" : ""} ${dim ? "dim" : ""}`} />
-            );
-          })}
-        </g>
-        <g>
-          {map.nodes.map((n) => {
-            const p = pos[idx.get(n.id)!];
-            const r = 8 + Math.min(10, (degree.get(n.id) ?? 0) * 1.6);
-            const isSel = n.id === sel;
-            const act = activeIds.has(n.id);
-            const dim = (neighbors && !neighbors.has(n.id) && !act)
-              || (traversing && !act && n.id !== sel);
-            const showLabel = !mini || act || isSel;
-            return (
-              <g key={n.id} className={`gnode-g ${dim ? "dim" : ""}`}>
-                {act && (
-                  <>
-                    <circle cx={p.x} cy={p.y} r={r + 6}
-                      className="gnode-ring" aria-hidden />
-                    <circle cx={p.x} cy={p.y} r={r + 6}
-                      className="gnode-halo" aria-hidden />
-                  </>
-                )}
-                <Glyph kind={n.kind} x={p.x} y={p.y} r={r}
-                  cls={`gnode k-${n.kind} ${isSel ? "sel" : ""} ${act ? "active" : ""}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSel(isSel ? null : n.id);
-                  }} />
-                {showLabel && (
-                  <text x={p.x} y={p.y + r + 12}
-                    className={`glabel ${act ? "active" : ""} ${mini ? "mini" : ""}`}
-                    textAnchor="middle">{shortName(n.label)}</text>
-                )}
-              </g>
-            );
-          })}
-        </g>
-      </svg>
-
-      {!mini && (
-        <div className="graph-legend" aria-hidden>
-          <span><i className="lg-shape lg-table" /> {C.kinds.table}</span>
-          <span><i className="lg-shape lg-entity" /> {C.kinds.entity}</span>
-          <span><i className="lg-shape lg-metric" /> {C.kinds.metric}</span>
-          <span><i className="lg-shape lg-skill" /> {C.kinds.skill}</span>
-        </div>
-      )}
-
-      {!mini && selNode && (
-        <div className="graph-inspect card">
-          <div className="gi-head">
-            <div>
-              <div className="gi-kind">{C.kinds[selNode.kind] ?? selNode.kind}</div>
-              <div className="gi-label">{shortName(selNode.label)}</div>
-            </div>
-            <TierChip tier={selNode.tier}
-              onClick={() => onEvidence?.(selNode.id)} />
-          </div>
-          {selNode.kind === "table" && (
-            <div className="gi-facts">
-              {selNode.columns != null && <span>{selNode.columns} columns</span>}
-              {selNode.business_unit && <span>{selNode.business_unit}</span>}
-              {selNode.pii && <span className="gi-pii">PII</span>}
-            </div>
-          )}
-          {selNode.subtitle && (
-            <div className="gi-sub">{selNode.subtitle}</div>
-          )}
-          <div className="gi-actions">
-            <button type="button" className="btn quiet"
-              onClick={() => onEvidence?.(selNode.id)}>{ENTITY.evidence}</button>
-            {selNode.kind === "table" && (
-              <button type="button" className="btn quiet"
-                onClick={() => onExplore?.(selNode.label)}>{ENTITY.explore}</button>
-            )}
-            <button type="button" className="btn quiet"
-              onClick={() => onAsk?.(selNode.label)}>{ENTITY.ask}</button>
-          </div>
-        </div>
-      )}
-    </div>
   );
 }

@@ -34,6 +34,8 @@ interface Nav {
   clearActivity(): void;
   agentBusy: boolean;
   setAgentBusy(busy: boolean): void;
+  traversalVerb: string;
+  setTraversalVerb(v: string): void;
 }
 
 const NavContext = createContext<Nav | null>(null);
@@ -45,6 +47,7 @@ export function NavProvider({ children }: { children: ReactNode }) {
   const [evidenceRef, setEvidenceRef] = useState<string | null>(null);
   const [activity, setActivity] = useState<Record<string, number>>({});
   const [agentBusy, setAgentBusy] = useState(false);
+  const [traversalVerb, setTraversalVerb] = useState("");
 
   const go = useCallback((t: TabId) => setTab(t), []);
   const askAbout = useCallback(
@@ -75,10 +78,11 @@ export function NavProvider({ children }: { children: ReactNode }) {
     tab, go, askAbout, goToGraph, openEvidence, evidenceRef,
     closeEvidence, handoff, clearHandoff, graphAnchor, clearGraphAnchor,
     activity, reportActivity, clearActivity, agentBusy, setAgentBusy,
+    traversalVerb, setTraversalVerb,
   }), [tab, go, askAbout, goToGraph, openEvidence, evidenceRef,
        closeEvidence, handoff, clearHandoff, graphAnchor,
        clearGraphAnchor, activity, reportActivity, clearActivity,
-       agentBusy]);
+       agentBusy, traversalVerb]);
 
   return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
 }
