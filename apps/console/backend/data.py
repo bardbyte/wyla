@@ -808,16 +808,66 @@ class ConsoleData:
                                 or n.canonical_uri.rsplit("/", 1)[-1]))
         metrics = store.nodes_by_type("Metric")
 
-        # live analysis — a metric bound to a table becomes a number
+        # live analysis — REAL analytical questions in natural
+        # language, built from a metric plus its table's actual columns
+        # (a date column → trend; a low-cardinality column → breakdown)
+        def _cols(t_node):
+            out = []
+            for e in store.outgoing(t_node.canonical_uri, "CONTAINS"):
+                c = store.get(e.to_uri)
+                if c is not None:
+                    out.append(c)
+            return out
+
+        def _date_col(cols):
+            for c in cols:
+                nm = str(c.properties.get("name", "")).lower()
+                dt = str(c.properties.get("data_type", "")).upper()
+                if dt in ("DATE", "DATETIME", "TIMESTAMP")                         or nm.endswith(("_dt", "_date")):
+                    return c.properties.get("name")
+            return None
+
+        def _seg_col(cols):
+            for c in cols:
+                nm = str(c.properties.get("name", "")).lower()
+                if c.properties.get("cardinality_bucket") == "low"                         or nm.endswith(("_status", "_type", "_code",
+                                        "_segment", "_flag")):
+                    return c.properties.get("name")
+            return None
+
+        n_live = 0
         for m in metrics:
             tbl = m.properties.get("sourced_from_table")
             name = m.properties.get("name")
-            if tbl and name:
-                add("Live analysis",
-                    f"How is {name} trending on {bare(tbl)}?",
+            if not (tbl and name):
+                continue
+            t_node = next((t for t in tables if tname(t) == bare(tbl)),
+                          None)
+            cols = _cols(t_node) if t_node is not None else []
+            date_c, seg_c = _date_col(cols), _seg_col(cols)
+            if n_live == 0:
+                q = (f"How has {name} moved month over month this year?"
+                     if date_c else
+                     f"What is {name} right now, exactly?")
+                add("Live analysis", q,
                     "Drafts the SQL, prices the scan, waits for your "
                     "signature, runs row-capped on the ledger.")
+                n_live += 1
+                if seg_c:
+                    add("Live analysis",
+                        f"Which {seg_c} drives {name} on "
+                        f"{bare(tbl)}?",
+                        f"A real breakdown: grouped by the observed "
+                        f"{seg_c} values, verified before it runs.")
+                    n_live += 1
+            elif n_live == 2:
                 break
+            else:
+                add("Live analysis",
+                    f"Compare {name} against last quarter.",
+                    "Time-sliced from the same governed table, on "
+                    "the audit ledger.")
+                n_live += 1
 
         # meaning — a definition with provenance
         for m in metrics:

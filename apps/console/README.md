@@ -206,8 +206,14 @@ python -m uvicorn apps.console.backend.app:app --port 8080
 #   your graph; only the chat transcript is canned.
 
 # 2 · live agent (Vertex creds on the laptop)
+#     TWO service accounts are supported: the agent's (Vertex) and a
+#     SEPARATE one for warehouse execution — e.g. both under ~/.gcp
 export GOOGLE_GENAI_USE_VERTEXAI=1 GOOGLE_CLOUD_PROJECT=... \
-       GOOGLE_CLOUD_LOCATION=... GOOGLE_APPLICATION_CREDENTIALS=...
+       GOOGLE_CLOUD_LOCATION=... \
+       GOOGLE_APPLICATION_CREDENTIALS=~/.gcp/gemini-agent-sa.json
+export BQ_CREDENTIALS=~/.gcp/warehouse-exec-sa.json   # execution SA key
+export BQ_BILLING_PROJECT=...                         # its billing project
+# (BQ_CREDENTIALS unset → the warehouse uses the agent's credentials)
 SYNAPSE_GRAPH_PATH=/abs/path/to/your/graph_snapshot.json \
 python -m uvicorn apps.console.backend.app:app --port 8080
 # If the agent can't start, the Ask tab shows the exact fix

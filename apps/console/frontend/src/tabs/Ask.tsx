@@ -14,7 +14,7 @@
  * Bring your knowledge.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RefText } from "../components/EntityRef";
 import { WitnessDrawer } from "../components/WitnessDrawer";
 import {
@@ -22,15 +22,12 @@ import {
   Spinner, TierChip,
 } from "../components/ui";
 import { api } from "../lib/api";
-import { ASK as C, EVALS, GRAPH, TIERS } from "../lib/copy";
+import { ASK as C, GRAPH } from "../lib/copy";
 import { useNav } from "../lib/nav";
-import { computeListening } from "../lib/anticipation";
 import { streamChat } from "../lib/sse";
-import { SpaceCanvas } from "../components/SpaceCanvas";
-import { SpaceAskBar, SpaceSeal } from "../components/SpaceBits";
+import { GraphCanvas } from "./Graph";
 import type {
-  AgentSelftest, AnswerSections, ConsoleEvent, EvalTurn, GraphMap,
-  Starter,
+  AgentSelftest, AnswerSections, ConsoleEvent, GraphMap,
 } from "../lib/types";
 
 /** Pull graph-object mentions out of a streamed event so the map can
@@ -71,12 +68,11 @@ interface Turn {
   gate: Extract<ConsoleEvent, { type: "sql_gate" }> | null;
   heldNote: string | null;
   done: boolean;
-  evalv: EvalTurn | null;
 }
 
 const newTurn = (question: string): Turn => ({
   question, log: [], liveText: "", answer: null,
-  gate: null, heldNote: null, done: false, evalv: null,
+  gate: null, heldNote: null, done: false,
 });
 
 export function AskTab() {
@@ -92,28 +88,19 @@ export function AskTab() {
 
   const [busy, setBusy] = useState(false);
   const [question, setQuestion] = useState("");
-  const [starters, setStarters] = useState<Starter[]>([]);
-  const [spaceQ, setSpaceQ] = useState("");
+  const [suggestions, setSuggestions] = useState<
+    { question: string; archetype: string }[]
+  >([]);
   const [inspect, setInspect] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [map, setMap] = useState<GraphMap | null>(null);
+  const [showActivity, setShowActivity] = useState(true);
   const [selftest, setSelftest] = useState<AgentSelftest | null>(null);
-  // first light (1a) plays once per session, on whichever surface opens
-  const [intro] = useState(() => {
-    try {
-      if (sessionStorage.getItem("synapse-firstlight")) return false;
-      sessionStorage.setItem("synapse-firstlight", "1");
-      return true;
-    } catch { return false; }
-  });
   const knownTables = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
-  const approveGateRef = useRef<(id: string) => void>(() => undefined);
-  const holdGateRef = useRef<(id: string) => void>(() => undefined);
-  const captureRefs = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
-    api.starters().then((d) => setStarters(d.starters))
+    api.questions().then((d) => setSuggestions(d.questions))
       .catch(() => undefined);
     api.config()
       .then((c) => setDemoMode(c.runner === "ScriptedRunner"))
@@ -137,41 +124,17 @@ export function AskTab() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [turns, busy]);
 
-  /* the sky listens while you type; the traversal owns it once you ask */
-  const anticipation = useMemo(
-    () => computeListening(question, map), [question, map]);
-  const spaceListening = useMemo(
-    () => computeListening(spaceQ, map), [spaceQ, map]);
-  useEffect(() => {
-    nav.setListening(busy ? [] : anticipation.ids);
-    /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [anticipation, busy]);
-
   const patchLast = (fn: (t: Turn) => Turn) =>
     setTurns((ts) =>
       ts.length ? [...ts.slice(0, -1), fn(ts[ts.length - 1])] : ts);
 
   const handleEvent = (ev: ConsoleEvent) => {
     nav.reportActivity(extractActivity(ev, knownTables.current));
-    if (ev.type === "tool_call" && ev.verb) nav.setTraversalVerb(ev.verb);
-    if (ev.type === "tool_call" && ev.tool === "capture_knowledge") {
-      const a = (ev.args ?? {}) as Record<string, unknown>;
-      const subject = [String(a.subject_type ?? ""), String(a.subject_ref ?? "")]
-        .filter(Boolean).join("/");
-      if (subject) captureRefs.current.set(ev.call_id, subject);
-    }
     switch (ev.type) {
       case "turn_start":
         break;
-      case "tool_result":
-        // a successful capture is a SIGNATURE — the sky turns gold (1e)
-        if (ev.ok !== false) {
-          const cap = captureRefs.current.get(ev.call_id);
-          if (cap) nav.setCeremony({ ref: cap, at: Date.now() });
-        }
-        patchLast((t) => ({ ...t, log: [...t.log, ev] }));
-        break;
       case "tool_call":
+      case "tool_result":
       case "gate_resolved":
       case "thinking":
       case "sandbox":
@@ -185,38 +148,15 @@ export function AskTab() {
       case "sql_gate":
         gated.current = true;
         patchLast((t) => ({ ...t, gate: ev }));
-        nav.setPendingGate({
-          gateId: ev.gate_id, sql: ev.sql,
-          bytes: ev.bytes_estimate ?? 0,
-          checks: ev.guardrail_checks,
-          resolve: (approved: boolean) => (approved
-            ? approveGateRef.current(ev.gate_id)
-            : holdGateRef.current(ev.gate_id)),
-        });
         break;
       case "answer":
         // the structured card supersedes streamed text (scripted mode)
         patchLast((t) => ({ ...t, liveText: "", answer: ev.sections }));
-        // condensation: the graph raises the paper plate + threads (1d)
-        nav.setLastFinding({
-          text: ev.sections.answer.replace(/\*\*/g, ""),
-          citations: ev.sections.citations.map((c) => ({
-            label: c.label, ref: c.ref })),
-        });
         break;
       case "turn_end":
         patchLast((t) => ({ ...t, done: true }));
         setBusy(false);
         nav.setAgentBusy(false);
-        // the turn was scored server-side the moment it finished —
-        // attach the verdict to the turn it belongs to
-        api.evalsRecent().then((f) => {
-          const scored = f.turns[0];
-          if (!scored) return;
-          setTurns((ts) => ts.map((t) =>
-            t.question === scored.question && t.done && !t.evalv
-              ? { ...t, evalv: scored } : t));
-        }).catch(() => undefined);
         break;
     }
   };
@@ -230,7 +170,6 @@ export function AskTab() {
     setTurns((ts) => [...ts, newTurn(q)]);
     setBusy(true);
     nav.clearActivity();          // a fresh traversal per question
-    nav.setLastFinding(null);     // the last plate lowers
     nav.setAgentBusy(true);
     try {
       for await (const ev of streamChat(q, conversationId.current)) {
@@ -267,7 +206,6 @@ export function AskTab() {
   const approveGate = async (gateId: string) => {
     await api.approve(gateId, true).catch(() => undefined);
     gated.current = false;
-    nav.setPendingGate(null);
     patchLast((t) => ({ ...t, gate: null }));
     const queued = pending.current;
     pending.current = [];
@@ -278,14 +216,11 @@ export function AskTab() {
     await api.approve(gateId, false).catch(() => undefined);
     gated.current = false;
     pending.current = [];
-    nav.setPendingGate(null);
     patchLast((t) => ({
       ...t, gate: null, heldNote: C.heldNote, done: true,
     }));
     setBusy(false);
   };
-  approveGateRef.current = approveGate;
-  holdGateRef.current = holdGate;
 
   return (
     <div className="ask-wrap">
@@ -301,54 +236,11 @@ export function AskTab() {
           <span><strong>{C.agentIssue}.</strong> {selftest.error}</span>
         </div>
       )}
-      {map && map.nodes.length > 0 && (
-        <section
-          className={`ask-space ${turns.length === 0 ? "tall" : "slim"}`}>
-          <SpaceCanvas map={map} activity={nav.activity} backdrop
-            listening={spaceQ ? spaceListening.ids : nav.listening}
-            verb={nav.traversalVerb}
-            intro={intro} introLine={GRAPH.firstLight}
-            finding={nav.lastFinding}
-            ceremonyRef={nav.ceremony?.ref ?? null}
-            overlay={
-              <>
-                {nav.pendingGate && <SpaceSeal gate={nav.pendingGate} />}
-                {turns.length === 0 && !busy && (
-                  <SpaceAskBar value={spaceQ} onChange={setSpaceQ}
-                    onSubmit={(t) => { setSpaceQ(""); void ask(t); }}
-                    placeholder={GRAPH.askSpace} tally={spaceListening}
-                    raised={!!nav.lastFinding} />
-                )}
-              </>
-            } />
-        </section>
-      )}
       <div className="chat-scroll" ref={scrollRef}>
-        {turns.length === 0 && (!map || map.nodes.length === 0) && (
+        {turns.length === 0 && (
           <div className="ask-hero">
             <h1 className="h-page">{C.emptyTitle}</h1>
             <p className="h-sub">{C.emptySub}</p>
-          </div>
-        )}
-        {turns.length === 0 && starters.length > 0 && (
-          <div className="starters">
-            <div className="h-section">{C.startersTitle}</div>
-            <p className="starters-sub">{C.startersSub}</p>
-            <div className="starters-grid">
-              {starters.map((st) => (
-                <button key={st.question} type="button"
-                  className="starter-card"
-                  onClick={() => st.prefill
-                    ? setSpaceQ(st.question)
-                    : void ask(st.question)}>
-                  <span className="starter-cat">{st.category}</span>
-                  <span className="starter-q">
-                    {st.question}{st.prefill ? "…" : ""}
-                  </span>
-                  <span className="starter-why">{st.why}</span>
-                </button>
-              ))}
-            </div>
           </div>
         )}
 
@@ -356,7 +248,9 @@ export function AskTab() {
           <section key={i} className="turn">
             <div className="msg-user">{t.question}</div>
             {t.log.length > 0 && (
-              <WorkLog log={t.log} onInspect={setInspect} />
+              <ThinkingModule log={t.log}
+                busy={busy && i === turns.length - 1}
+                onInspect={setInspect} />
             )}
             {t.gate && (
               <GateCard
@@ -379,21 +273,6 @@ export function AskTab() {
                 <Markdown text={t.liveText} />
               </div>
             )}
-            {t.evalv && (
-              <button type="button"
-                className={`eval-chip v-${t.evalv.verdict}`}
-                onClick={() => nav.go("evals")}
-                title={t.evalv.verdict_text}>
-                <span aria-hidden>
-                  {t.evalv.verdict === "needs_review" ? "✕" : "✓"}
-                </span>
-                {EVALS.verdicts[t.evalv.verdict]} ·{" "}
-                {Math.round(t.evalv.score * 100)}%
-                {t.evalv.corrections.length > 0 &&
-                  ` · ${t.evalv.corrections.length} self-correction${
-                    t.evalv.corrections.length > 1 ? "s" : ""}`}
-              </button>
-            )}
           </section>
         ))}
 
@@ -404,8 +283,17 @@ export function AskTab() {
         )}
       </div>
 
-      {turns.length > 0 && (
       <div className="composer">
+        {turns.length === 0 && suggestions.length > 0 && (
+          <div className="suggest" aria-label={C.suggestTitle}>
+            {suggestions.slice(0, 4).map((s) => (
+              <button key={s.question} type="button"
+                onClick={() => void ask(s.question)}>
+                {s.question}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="composer-row">
           <textarea
             className="textarea"
@@ -427,42 +315,93 @@ export function AskTab() {
             {C.send}
           </button>
         </div>
-        {!busy && anticipation.ids.length > 0 && (
-          <div className="listen-tally" aria-live="polite">
-            <span>
-              {anticipation.ids.length} nodes listening
-              {anticipation.nMetrics > 0 &&
-                ` · ${anticipation.nMetrics} metric${
-                  anticipation.nMetrics > 1 ? "s" : ""}`}
-              {anticipation.nTables > 0 &&
-                ` · ${anticipation.nTables} table${
-                  anticipation.nTables > 1 ? "s" : ""}`}
-            </span>
-            {anticipation.best && (
-              <button type="button" className="listen-best"
-                onClick={() => nav.openEvidence(anticipation.best!.ref)}>
-                {anticipation.best.ref}
-                <em className={`lt-${anticipation.best.tier}`}>
-                  {TIERS[anticipation.best.tier as keyof typeof TIERS]
-                    ?.word ?? anticipation.best.tier}
-                </em>
-              </button>
-            )}
-          </div>
-        )}
       </div>
-      )}
 
       {inspect && (
         <WitnessDrawer refUri={inspect} onClose={() => setInspect(null)} />
       )}
     </div>
 
+    {map && map.nodes.length > 0 && (
+      <aside className={`activity-panel ${showActivity ? "" : "closed"}`}>
+        <div className="ap-head">
+          <span className="h-section">{C.activityTitle}</span>
+          {nav.agentBusy && (
+            <span className="activity-live">
+              <span className="live-dot" aria-hidden /> {GRAPH.liveNow}
+            </span>
+          )}
+          <button type="button" className="toggle-btn"
+            onClick={() => setShowActivity((v) => !v)}>
+            {showActivity ? C.activityClose : C.activityOpen}
+          </button>
+        </div>
+        {showActivity && (
+          <>
+            <GraphCanvas map={map} activity={nav.activity} mini />
+            <div className="ap-foot">
+              <span>{C.activityHint}</span>
+              <button type="button" className="btn quiet"
+                onClick={() => nav.go("graph")}>
+                {C.activityFull} →
+              </button>
+            </div>
+          </>
+        )}
+      </aside>
+    )}
     </div>
   );
 }
 
 /* ── pieces ── */
+
+/** Trim a raw thinking delta to its essence: Gemini often opens with
+ * a bold heading — use it when present, else the first sentence. */
+function summarizeThought(text: string, cap = 90): string {
+  const heading = /\*\*([^*]{4,})\*\*/.exec(text)?.[1];
+  const plain = (heading ?? text).replace(/\*\*|__|`/g, "").trim();
+  const sentence = plain.split(/(?<=[.!?])\s+/)[0] ?? plain;
+  return sentence.length > cap ? sentence.slice(0, cap - 1) + "…" : sentence;
+}
+
+/** Gemini-style thinking: while the agent works, ONE line says what it
+ * is doing right now; the step-by-step log lives behind the chevron.
+ * Done, it collapses to a quiet summary. */
+function ThinkingModule({ log, busy, onInspect }: {
+  log: ConsoleEvent[]; busy: boolean;
+  onInspect: (ref: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const steps = log.filter((e) =>
+    e.type === "thinking" || e.type === "tool_call").length;
+  const lastVerb = [...log].reverse().find(
+    (e) => e.type === "tool_call") as
+    Extract<ConsoleEvent, { type: "tool_call" }> | undefined;
+  const lastThought = [...log].reverse().find(
+    (e) => e.type === "thinking") as
+    Extract<ConsoleEvent, { type: "thinking" }> | undefined;
+  const headline = busy
+    ? (lastVerb?.verb
+       || (lastThought ? summarizeThought(lastThought.delta)
+                       : "Thinking…"))
+    : `Thought through ${steps} step${steps === 1 ? "" : "s"}`;
+  return (
+    <div className={`think-mod ${busy ? "live" : ""}`}>
+      <button type="button" className="think-head" aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}>
+        <span className="think-dot" aria-hidden />
+        <span className={`think-line ${busy ? "shimmer" : ""}`}>
+          {headline.length > 110
+            ? headline.slice(0, 109) + "…" : headline}
+        </span>
+        <span className={`think-chev ${open ? "open" : ""}`}
+          aria-hidden>▾</span>
+      </button>
+      {open && <WorkLog log={log} onInspect={onInspect} />}
+    </div>
+  );
+}
 
 function WorkLog({
   log, onInspect,
@@ -473,13 +412,26 @@ function WorkLog({
     <div className="worklog">
       {log.map((ev, i) => {
         switch (ev.type) {
-          case "thinking":
+          case "thinking": {
+            const head = summarizeThought(ev.delta, 80);
+            const rest = ev.delta.replace(/\*\*|__|`/g, "").trim();
+            const body = rest.startsWith(head.replace(/…$/, ""))
+              ? rest.slice(head.replace(/…$/, "").length).trim() : rest;
             return (
               <div key={i} className="wl-row">
                 <span className="g" aria-hidden>≋</span>
-                <span className="think">{ev.delta}</span>
+                <span className="think">
+                  <b>{head}</b>
+                  {body && (
+                    <span className="think-more">
+                      {" "}{body.length > 220
+                        ? body.slice(0, 219) + "…" : body}
+                    </span>
+                  )}
+                </span>
               </div>
             );
+          }
           case "tool_call":
             return (
               <div key={i} className="wl-row">
@@ -568,7 +520,6 @@ function AnswerCard({
 }) {
   return (
     <div className="answer-card card card-pad">
-      <span className="finding-eyebrow">Finding</span>
       <p className="brief-answer">
         <RefText text={sections.answer} />
       </p>

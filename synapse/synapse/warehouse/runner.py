@@ -270,23 +270,38 @@ class WarehouseRunner:
 
 
 class BigQueryClient:
-    """google-cloud-bigquery adapter. Lazy import; standard env auth
-    (GOOGLE_APPLICATION_CREDENTIALS + billing project)."""
+    """google-cloud-bigquery adapter. Lazy import.
+
+    Credential split: execution often runs as a DIFFERENT service
+    account than the Gemini agent. BQ_CREDENTIALS (path to the
+    execution SA's JSON key) wins for the warehouse; absent, the
+    standard chain (GOOGLE_APPLICATION_CREDENTIALS) applies — one
+    account for both is still fine."""
 
     def __init__(self, project: str | None = None,
-                 location: str | None = None) -> None:
+                 location: str | None = None,
+                 credentials_path: str | None = None) -> None:
         import os
 
         from google.cloud import bigquery  # deferred — laptop dependency
 
         self._bq = bigquery
+        creds = None
+        key_path = (credentials_path
+                    or os.environ.get("BQ_CREDENTIALS", "").strip())
+        if key_path:
+            from google.oauth2 import service_account
+            creds = service_account.Credentials.from_service_account_file(
+                os.path.expanduser(key_path),
+                scopes=["https://www.googleapis.com/auth/bigquery"])
+            project = project or creds.project_id
         # Enterprise networks route BigQuery through a PSC endpoint (the
         # extraction scripts already use it). The SDK defaults to the
         # public endpoint, which may be blocked — honor the same override.
         api_endpoint = os.environ.get("BQ_API_ENDPOINT", "").strip()
         client_options = {"api_endpoint": api_endpoint} if api_endpoint else None
         self._client = bigquery.Client(
-            project=project, location=location,
+            project=project, location=location, credentials=creds,
             client_options=client_options)
 
     def dry_run(self, sql: str) -> dict[str, Any]:
