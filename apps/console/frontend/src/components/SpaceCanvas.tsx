@@ -62,6 +62,7 @@ function Glyph({ kind, x, y, r, fill, cls, onClick }: {
 
 export function SpaceCanvas({
   map, activity = {}, selected = null, onSelect, backdrop = false,
+  fill = false,
   portrait = false, verb = "", listening = [], variant = "constellation",
   intro = false, introLine = "", finding = null, ceremonyRef = null,
   overlay = null,
@@ -72,6 +73,8 @@ export function SpaceCanvas({
   onSelect?: (id: string | null) => void;
   /** backdrop mode: non-interactive, crops to fill its container */
   backdrop?: boolean;
+  /** fill mode: INTERACTIVE, fills its container (the full-page map) */
+  fill?: boolean;
   /** portrait mode: tall frame for the Ask side strip */
   portrait?: boolean;
   /** the agent's current tool verb, floated in-space while it works */
@@ -213,10 +216,11 @@ export function SpaceCanvas({
     + Math.min(9, (degree.get(n.id) ?? 0) * 1.5);
 
   return (
-    <div className={`space-wrap ${backdrop ? "backdrop" : ""}`}>
+    <div className={`space-wrap ${backdrop ? "backdrop" : ""} ${fill ? "fill" : ""}`}>
       <svg className="space-canvas"
         viewBox={`0 0 ${W} ${H}`}
-        preserveAspectRatio={backdrop ? "xMidYMid slice" : "xMidYMid meet"}
+        preserveAspectRatio={backdrop || fill
+          ? "xMidYMid slice" : "xMidYMid meet"}
         role="img" aria-label="Synapse space — the knowledge graph"
         onClick={backdrop ? undefined : () => setSel(null)}>
         <defs>

@@ -29,7 +29,6 @@ export const TABS = [
   { id: "products", label: "Data products", preview: false },
   { id: "graph", label: "Knowledge graph", preview: false },
   { id: "knowledge", label: "Bring your knowledge", preview: false },
-  { id: "evals", label: "Evals", preview: false },
 ] as const;
 
 export type TabId = (typeof TABS)[number]["id"];
@@ -210,6 +209,12 @@ export const GRAPH = {
   lanesCaption:
     "The sky, organized: one lane per kind, sorted by name.",
   firstLight: "Every fact. And where it came from.",
+  metricFrom: "Computed from",
+  metricNoSource:
+    "No observed source table for this metric in the snapshot.",
+  metricRelated: "Related metrics across these tables",
+  metricNoRelated:
+    "No other metrics are computed from these tables yet.",
   goldenLine: "The sky is more golden than yesterday.",
   askSpace: "Ask the graph",
 };

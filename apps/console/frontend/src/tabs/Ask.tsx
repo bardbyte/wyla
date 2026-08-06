@@ -22,15 +22,14 @@ import {
   Spinner, TierChip,
 } from "../components/ui";
 import { api } from "../lib/api";
-import { ASK as C, EVALS, GRAPH, TIERS } from "../lib/copy";
+import { ASK as C, GRAPH, TIERS } from "../lib/copy";
 import { useNav } from "../lib/nav";
 import { computeListening } from "../lib/anticipation";
 import { streamChat } from "../lib/sse";
 import { SpaceCanvas } from "../components/SpaceCanvas";
 import { SpaceAskBar, SpaceSeal } from "../components/SpaceBits";
 import type {
-  AgentSelftest, AnswerSections, ConsoleEvent, EvalTurn, GraphMap,
-  Starter,
+  AgentSelftest, AnswerSections, ConsoleEvent, GraphMap, Starter,
 } from "../lib/types";
 
 /** Pull graph-object mentions out of a streamed event so the map can
@@ -71,12 +70,11 @@ interface Turn {
   gate: Extract<ConsoleEvent, { type: "sql_gate" }> | null;
   heldNote: string | null;
   done: boolean;
-  evalv: EvalTurn | null;
 }
 
 const newTurn = (question: string): Turn => ({
   question, log: [], liveText: "", answer: null,
-  gate: null, heldNote: null, done: false, evalv: null,
+  gate: null, heldNote: null, done: false,
 });
 
 export function AskTab() {
@@ -208,15 +206,6 @@ export function AskTab() {
         patchLast((t) => ({ ...t, done: true }));
         setBusy(false);
         nav.setAgentBusy(false);
-        // the turn was scored server-side the moment it finished —
-        // attach the verdict to the turn it belongs to
-        api.evalsRecent().then((f) => {
-          const scored = f.turns[0];
-          if (!scored) return;
-          setTurns((ts) => ts.map((t) =>
-            t.question === scored.question && t.done && !t.evalv
-              ? { ...t, evalv: scored } : t));
-        }).catch(() => undefined);
         break;
     }
   };
@@ -356,7 +345,9 @@ export function AskTab() {
           <section key={i} className="turn">
             <div className="msg-user">{t.question}</div>
             {t.log.length > 0 && (
-              <WorkLog log={t.log} onInspect={setInspect} />
+              <ThinkingModule log={t.log}
+                busy={busy && i === turns.length - 1}
+                verb={nav.traversalVerb} onInspect={setInspect} />
             )}
             {t.gate && (
               <GateCard
@@ -378,21 +369,6 @@ export function AskTab() {
               <div className="answer-card card card-pad">
                 <Markdown text={t.liveText} />
               </div>
-            )}
-            {t.evalv && (
-              <button type="button"
-                className={`eval-chip v-${t.evalv.verdict}`}
-                onClick={() => nav.go("evals")}
-                title={t.evalv.verdict_text}>
-                <span aria-hidden>
-                  {t.evalv.verdict === "needs_review" ? "✕" : "✓"}
-                </span>
-                {EVALS.verdicts[t.evalv.verdict]} ·{" "}
-                {Math.round(t.evalv.score * 100)}%
-                {t.evalv.corrections.length > 0 &&
-                  ` · ${t.evalv.corrections.length} self-correction${
-                    t.evalv.corrections.length > 1 ? "s" : ""}`}
-              </button>
             )}
           </section>
         ))}
@@ -463,6 +439,39 @@ export function AskTab() {
 }
 
 /* ── pieces ── */
+
+/** Gemini-style thinking: while the agent works, ONE animated headline
+ * says what it is doing right now; the step-by-step log lives behind
+ * the chevron. Done, it collapses to a quiet summary line. */
+function ThinkingModule({ log, busy, verb, onInspect }: {
+  log: ConsoleEvent[]; busy: boolean; verb: string;
+  onInspect: (ref: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const steps = log.filter((e) =>
+    e.type === "thinking" || e.type === "tool_call").length;
+  const lastThought = [...log].reverse().find(
+    (e) => e.type === "thinking") as
+    Extract<ConsoleEvent, { type: "thinking" }> | undefined;
+  const headline = busy
+    ? (verb || lastThought?.delta || "Thinking…")
+    : `Thought through ${steps} step${steps === 1 ? "" : "s"}`;
+  return (
+    <div className={`think-mod ${busy ? "live" : ""}`}>
+      <button type="button" className="think-head" aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}>
+        <span className="think-dot" aria-hidden />
+        <span className={`think-line ${busy ? "shimmer" : ""}`}>
+          {headline.length > 110
+            ? headline.slice(0, 109) + "…" : headline}
+        </span>
+        <span className={`think-chev ${open ? "open" : ""}`}
+          aria-hidden>▾</span>
+      </button>
+      {open && <WorkLog log={log} onInspect={onInspect} />}
+    </div>
+  );
+}
 
 function WorkLog({
   log, onInspect,
