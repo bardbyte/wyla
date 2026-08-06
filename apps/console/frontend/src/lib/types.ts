@@ -203,3 +203,7 @@ export interface EvalsRecent {
     avg_score: number | null; self_corrections: number;
   };
 }
+
+export interface Starter {
+  category: string; question: string; why: string; prefill: boolean;
+}

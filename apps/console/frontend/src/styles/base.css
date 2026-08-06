@@ -1107,3 +1107,53 @@ code, pre { font-family: var(--font-mono); font-size: var(--fs-12); }
 /* while the finding plate holds the stage, the ask bar yields upward */
 .space-ask.raised { bottom: auto; top: 22px; }
 .space-ask.raised .space-ask-tally { display: none; }
+
+/* ── Ask = the space (hero on top, record beneath) ────────── */
+
+.ask-space {
+  position: relative; flex: none; overflow: hidden;
+  background: #05090F; border-bottom: 1px solid var(--line);
+  transition: height 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ask-space.tall { height: min(56vh, 540px); }
+.ask-space.slim { height: 280px; }
+.ask-space .space-wrap.backdrop { border-radius: 0; }
+
+/* the capability tour, derived from the loaded graph */
+.starters { padding: var(--s-6) var(--s-6) var(--s-4); }
+.starters-sub {
+  color: var(--ink-2); font-size: var(--fs-13);
+  margin: var(--s-2) 0 var(--s-4); max-width: 60ch;
+}
+.starters-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: var(--s-4);
+}
+.starter-card {
+  appearance: none; cursor: pointer; text-align: left; font: inherit;
+  display: flex; flex-direction: column; gap: var(--s-2);
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-md); padding: var(--s-4);
+  transition: border-color var(--t-fast), transform var(--t-fast);
+}
+.starter-card:hover {
+  border-color: var(--accent); transform: translateY(-2px);
+}
+.starter-cat {
+  font-family: var(--font-label); font-size: var(--fs-11);
+  font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--accent);
+}
+.starter-q {
+  font-family: var(--font-display); font-size: var(--fs-16);
+  font-weight: 560; line-height: 1.25; color: var(--ink);
+}
+.starter-why {
+  font-size: var(--fs-12); color: var(--ink-3); line-height: 1.45;
+}
+@media (max-width: 1180px) {
+  .starters-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 700px) {
+  .starters-grid { grid-template-columns: 1fr; }
+}

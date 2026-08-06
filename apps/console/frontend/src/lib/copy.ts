@@ -107,6 +107,10 @@ export const ASK = {
   activityClose: "Hide activity",
   activityFull: "Open the full graph",
   agentIssue: "The live agent can't start on this server",
+  startersTitle: "A tour of what this graph can answer",
+  startersSub:
+    "Derived from the loaded graph itself — each one exercises a " +
+    "different capability. Or ask the sky above anything at all.",
 };
 
 /* ── Data products — "we know your business", by unit ─────── */

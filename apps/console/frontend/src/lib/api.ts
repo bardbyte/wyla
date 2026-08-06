@@ -3,8 +3,8 @@
 
 import type {
   AgentSelftest, AppConfig, EvalsRecent, GraphMap, GraphSummary,
-  LexiconEntry, Metric, Pin, PinRun, Product, TableInsights, ThreadHop,
-  Unit, Viability, Witness,
+  LexiconEntry, Metric, Pin, PinRun, Product, Starter, TableInsights,
+  ThreadHop, Unit, Viability, Witness,
 } from "./types";
 
 async function post<T>(url: string, body: unknown,
@@ -112,4 +112,7 @@ export const api = {
     }),
 
   evalsRecent: () => get<EvalsRecent>("/api/evals/recent"),
+
+  starters: () =>
+    get<Live<{ starters: Starter[] }>>("/api/questions/starters"),
 };

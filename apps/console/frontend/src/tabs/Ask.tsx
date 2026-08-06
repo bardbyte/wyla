@@ -27,8 +27,10 @@ import { useNav } from "../lib/nav";
 import { computeListening } from "../lib/anticipation";
 import { streamChat } from "../lib/sse";
 import { SpaceCanvas } from "../components/SpaceCanvas";
+import { SpaceAskBar, SpaceSeal } from "../components/SpaceBits";
 import type {
   AgentSelftest, AnswerSections, ConsoleEvent, EvalTurn, GraphMap,
+  Starter,
 } from "../lib/types";
 
 /** Pull graph-object mentions out of a streamed event so the map can
@@ -90,14 +92,20 @@ export function AskTab() {
 
   const [busy, setBusy] = useState(false);
   const [question, setQuestion] = useState("");
-  const [suggestions, setSuggestions] = useState<
-    { question: string; archetype: string }[]
-  >([]);
+  const [starters, setStarters] = useState<Starter[]>([]);
+  const [spaceQ, setSpaceQ] = useState("");
   const [inspect, setInspect] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [map, setMap] = useState<GraphMap | null>(null);
-  const [showActivity, setShowActivity] = useState(true);
   const [selftest, setSelftest] = useState<AgentSelftest | null>(null);
+  // first light (1a) plays once per session, on whichever surface opens
+  const [intro] = useState(() => {
+    try {
+      if (sessionStorage.getItem("synapse-firstlight")) return false;
+      sessionStorage.setItem("synapse-firstlight", "1");
+      return true;
+    } catch { return false; }
+  });
   const knownTables = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const approveGateRef = useRef<(id: string) => void>(() => undefined);
@@ -105,7 +113,7 @@ export function AskTab() {
   const captureRefs = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
-    api.questions().then((d) => setSuggestions(d.questions))
+    api.starters().then((d) => setStarters(d.starters))
       .catch(() => undefined);
     api.config()
       .then((c) => setDemoMode(c.runner === "ScriptedRunner"))
@@ -132,6 +140,8 @@ export function AskTab() {
   /* the sky listens while you type; the traversal owns it once you ask */
   const anticipation = useMemo(
     () => computeListening(question, map), [question, map]);
+  const spaceListening = useMemo(
+    () => computeListening(spaceQ, map), [spaceQ, map]);
   useEffect(() => {
     nav.setListening(busy ? [] : anticipation.ids);
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
@@ -291,11 +301,54 @@ export function AskTab() {
           <span><strong>{C.agentIssue}.</strong> {selftest.error}</span>
         </div>
       )}
+      {map && map.nodes.length > 0 && (
+        <section
+          className={`ask-space ${turns.length === 0 ? "tall" : "slim"}`}>
+          <SpaceCanvas map={map} activity={nav.activity} backdrop
+            listening={spaceQ ? spaceListening.ids : nav.listening}
+            verb={nav.traversalVerb}
+            intro={intro} introLine={GRAPH.firstLight}
+            finding={nav.lastFinding}
+            ceremonyRef={nav.ceremony?.ref ?? null}
+            overlay={
+              <>
+                {nav.pendingGate && <SpaceSeal gate={nav.pendingGate} />}
+                {turns.length === 0 && !busy && (
+                  <SpaceAskBar value={spaceQ} onChange={setSpaceQ}
+                    onSubmit={(t) => { setSpaceQ(""); void ask(t); }}
+                    placeholder={GRAPH.askSpace} tally={spaceListening}
+                    raised={!!nav.lastFinding} />
+                )}
+              </>
+            } />
+        </section>
+      )}
       <div className="chat-scroll" ref={scrollRef}>
-        {turns.length === 0 && (
+        {turns.length === 0 && (!map || map.nodes.length === 0) && (
           <div className="ask-hero">
             <h1 className="h-page">{C.emptyTitle}</h1>
             <p className="h-sub">{C.emptySub}</p>
+          </div>
+        )}
+        {turns.length === 0 && starters.length > 0 && (
+          <div className="starters">
+            <div className="h-section">{C.startersTitle}</div>
+            <p className="starters-sub">{C.startersSub}</p>
+            <div className="starters-grid">
+              {starters.map((st) => (
+                <button key={st.question} type="button"
+                  className="starter-card"
+                  onClick={() => st.prefill
+                    ? setSpaceQ(st.question)
+                    : void ask(st.question)}>
+                  <span className="starter-cat">{st.category}</span>
+                  <span className="starter-q">
+                    {st.question}{st.prefill ? "…" : ""}
+                  </span>
+                  <span className="starter-why">{st.why}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -351,17 +404,8 @@ export function AskTab() {
         )}
       </div>
 
+      {turns.length > 0 && (
       <div className="composer">
-        {turns.length === 0 && suggestions.length > 0 && (
-          <div className="suggest" aria-label={C.suggestTitle}>
-            {suggestions.slice(0, 4).map((s) => (
-              <button key={s.question} type="button"
-                onClick={() => void ask(s.question)}>
-                {s.question}
-              </button>
-            ))}
-          </div>
-        )}
         <div className="composer-row">
           <textarea
             className="textarea"
@@ -407,39 +451,13 @@ export function AskTab() {
           </div>
         )}
       </div>
+      )}
 
       {inspect && (
         <WitnessDrawer refUri={inspect} onClose={() => setInspect(null)} />
       )}
     </div>
 
-    {map && map.nodes.length > 0 && (
-      <aside className={`space-strip ${showActivity ? "" : "closed"}`}>
-        <div className="ap-head">
-          <span className="h-section">{C.activityTitle}</span>
-          {nav.agentBusy && (
-            <span className="activity-live">
-              <span className="live-dot" aria-hidden /> {GRAPH.liveNow}
-            </span>
-          )}
-          <button type="button" className="toggle-btn"
-            onClick={() => setShowActivity((v) => !v)}>
-            {showActivity ? C.activityClose : C.activityOpen}
-          </button>
-        </div>
-        <div className="sp-holder">
-          <SpaceCanvas map={map} activity={nav.activity} backdrop portrait
-            listening={nav.listening} verb={nav.traversalVerb} />
-        </div>
-        <div className="ap-foot">
-          <span>{C.activityHint}</span>
-          <button type="button" className="btn quiet"
-            onClick={() => nav.go("graph")}>
-            {C.activityFull} →
-          </button>
-        </div>
-      </aside>
-    )}
     </div>
   );
 }

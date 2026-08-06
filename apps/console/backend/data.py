@@ -782,6 +782,122 @@ class ConsoleData:
 
     # ── suggested questions ──────────────────────────────────
 
+    def starter_questions(self) -> dict[str, Any]:
+        """Starters derived from THIS graph, not a canned list — one per
+        capability, each with the why spelled out. The starter page is a
+        guided tour of what the system can actually do with the data it
+        actually has."""
+        if not self.live:
+            return self._wrap("starters", [])
+        store = self.store
+        bare = (lambda s: str(s).split(".")[-1])
+        out: list[dict[str, Any]] = []
+
+        def add(category: str, question: str, why: str,
+                prefill: bool = False) -> None:
+            out.append({"category": category, "question": question,
+                        "why": why, "prefill": prefill})
+
+        tables = sorted(
+            store.nodes_by_type("Table"),
+            key=lambda n: -len(store.outgoing(n.canonical_uri,
+                                              "CONTAINS")))
+        tname = (lambda n: bare(n.properties.get("table_name")
+                                or n.canonical_uri.rsplit("/", 1)[-1]))
+        metrics = store.nodes_by_type("Metric")
+
+        # live analysis — a metric bound to a table becomes a number
+        for m in metrics:
+            tbl = m.properties.get("sourced_from_table")
+            name = m.properties.get("name")
+            if tbl and name:
+                add("Live analysis",
+                    f"How is {name} trending on {bare(tbl)}?",
+                    "Drafts the SQL, prices the scan, waits for your "
+                    "signature, runs row-capped on the ledger.")
+                break
+
+        # meaning — a definition with provenance
+        for m in metrics:
+            name = m.properties.get("name")
+            if name and (m.properties.get("formula_sql")
+                         or m.properties.get("description")):
+                add("Meaning",
+                    f"What does {name} mean, exactly?",
+                    "The canonical definition, with every witness that "
+                    "vouches for it and its confidence tier.")
+                break
+
+        # ownership + lineage
+        for t in tables:
+            if t.properties.get("business_owner") or store.outgoing(
+                    t.canonical_uri, "UPSTREAM_OF") or store.incoming(
+                    t.canonical_uri, "UPSTREAM_OF"):
+                add("Ownership & lineage",
+                    f"Who owns {tname(t)} and what feeds it?",
+                    "Stewardship from the metadata spine plus observed "
+                    "lineage, cited.")
+                break
+
+        # joins — only observed reality
+        join_pair = None
+        for e in store.edges.values():
+            if e.edge_type != "EQUIVALENT_TO":
+                continue
+            fa = store.get(e.from_uri)
+            fb = store.get(e.to_uri)
+            ta = fa.properties.get("table_name") if fa else None
+            tb = fb.properties.get("table_name") if fb else None
+            if ta and tb and bare(ta) != bare(tb):
+                join_pair = (bare(ta), bare(tb))
+                break
+        if join_pair:
+            add("Join paths",
+                f"How do I join {join_pair[0]} to {join_pair[1]} safely?",
+                "Only joins the corpus has actually observed — the "
+                "agent never invents an ON clause.")
+
+        # trust — a fact with real corroboration
+        for t in tables:
+            if len(set(t.provenance.sources)) >= 3:
+                add("Trust",
+                    f"How confident are we in {tname(t)}, and why?",
+                    "The witness ledger: every source's weight and the "
+                    "arithmetic behind the tier.")
+                break
+
+        # data quality
+        for rule in store.nodes_by_type("DataQualityRule"):
+            tbl = rule.properties.get("target_table")
+            if tbl:
+                add("Data quality",
+                    f"Is {bare(tbl)} trustworthy right now?",
+                    "Data-quality rules and their latest status, "
+                    "disclosed with the answer.")
+                break
+
+        # governance — the refusal moment
+        pii_col = next(
+            (c for c in store.nodes_by_type("Column")
+             if c.properties.get("is_pii")), None)
+        if pii_col:
+            col = bare(pii_col.properties.get("name")
+                       or pii_col.canonical_uri.rsplit("/", 1)[-1])
+            add("Governance",
+                f"Show me raw {col} values",
+                "Watch the guardrail refuse — and offer the compliant "
+                "alternative instead.")
+
+        # teach it — the signature ceremony
+        if tables:
+            add("Teach it",
+                f"Record that {tname(tables[0])} means ",
+                "Finish the sentence and sign it: your assertion "
+                "outranks every machine guess, and the sky turns gold.",
+                prefill=True)
+
+        return self._wrap("starters", out[:8])
+
     def questions(self) -> dict[str, Any]:
         demo = Path(os.environ.get("SYNAPSE_DEMO_QUESTIONS",
                                    _DEFAULT_DEMO)).expanduser()

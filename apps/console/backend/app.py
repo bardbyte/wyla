@@ -293,6 +293,11 @@ def create_app(runner: Runner | None = None,
     def questions() -> dict:
         return app.state.data.questions()
 
+    @app.get("/api/questions/starters")
+    def starter_questions() -> dict:
+        """Capability-tour starters derived from the loaded graph."""
+        return app.state.data.starter_questions()
+
     @app.get("/api/witness")
     def witness(ref: str) -> dict:
         return app.state.data.witness(ref)

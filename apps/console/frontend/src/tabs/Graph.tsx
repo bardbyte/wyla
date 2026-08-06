@@ -15,11 +15,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { SpaceCanvas } from "../components/SpaceCanvas";
+import { SpaceAskBar, SpaceSeal } from "../components/SpaceBits";
 import { WitnessDrawer } from "../components/WitnessDrawer";
-import { HoldButton, SourceBadge, Spinner, TierChip, formatBytes } from "../components/ui";
+import { SourceBadge, Spinner, TierChip } from "../components/ui";
 import { computeListening } from "../lib/anticipation";
 import { api } from "../lib/api";
-import { ASK, COMMON, ENTITY, GRAPH as C, TIERS } from "../lib/copy";
+import { COMMON, ENTITY, GRAPH as C } from "../lib/copy";
 import { useNav } from "../lib/nav";
 import type {
   GraphMap, GraphSummary, TableInsights, ThreadHop, Tier,
@@ -173,55 +174,15 @@ export function GraphTab() {
                       {C.goldenLine}
                     </div>
                   )}
-                  {nav.pendingGate && (
-                    <div className="space-seal" role="group"
-                      aria-label={ASK.gateTitle}>
-                      <div className="seal-eyebrow">{ASK.gateTitle}</div>
-                      <code className="seal-sql">
-                        {nav.pendingGate.sql.length > 90
-                          ? nav.pendingGate.sql.slice(0, 89) + "…"
-                          : nav.pendingGate.sql}
-                      </code>
-                      <div className="seal-row">
-                        <span className="seal-scan">
-                          {ASK.gateScan}: <strong>
-                            {formatBytes(nav.pendingGate.bytes)}</strong>
-                        </span>
-                        <HoldButton label={ASK.gateHold}
-                          onConfirm={() =>
-                            nav.pendingGate?.resolve(true)} />
-                        <button type="button" className="btn quiet"
-                          onClick={() =>
-                            nav.pendingGate?.resolve(false)}>
-                          {ASK.gateLater}
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  {nav.pendingGate && <SpaceSeal gate={nav.pendingGate} />}
                   {!nav.pendingGate && !nav.agentBusy && (
-                    <div className={`space-ask ${nav.lastFinding ? "raised" : ""}`}>
-                      <span className="space-ask-dot" aria-hidden />
-                      <input value={spaceQ}
-                        onChange={(e) => setSpaceQ(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && spaceQ.trim()) {
-                            nav.askAbout(spaceQ.trim(), { send: true });
-                            setSpaceQ("");
-                          }
-                        }}
-                        placeholder={C.askSpace}
-                        aria-label={C.askSpace} />
-                      {anticipation.ids.length > 0 && (
-                        <span className="space-ask-tally">
-                          {anticipation.ids.length} listening
-                          {anticipation.best &&
-                            ` · ${anticipation.best.label} (${
-                              TIERS[anticipation.best.tier as
-                                keyof typeof TIERS]?.word
-                              ?? anticipation.best.tier})`}
-                        </span>
-                      )}
-                    </div>
+                    <SpaceAskBar value={spaceQ} onChange={setSpaceQ}
+                      onSubmit={(t) => {
+                        nav.askAbout(t, { send: true });
+                        setSpaceQ("");
+                      }}
+                      placeholder={C.askSpace} tally={anticipation}
+                      raised={!!nav.lastFinding} />
                   )}
                 </>
               } />
