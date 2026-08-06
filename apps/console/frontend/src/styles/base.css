@@ -1312,3 +1312,14 @@ code, pre { font-family: var(--font-mono); font-size: var(--fs-12); }
     background: none; }
   .space-panel { animation: none; }
 }
+
+/* Ask: the space beside the conversation, not above it */
+.ask-side {
+  flex: none; width: min(44%, 620px); min-width: 380px; min-height: 0;
+  position: relative; background: #05090F;
+  border-left: 1px solid var(--line);
+}
+.ask-side .space-wrap.backdrop { height: 100%; }
+.ask-side .space-ask { width: min(420px, 86%); bottom: 40px; }
+.ask-side .space-seal { right: 16px; bottom: 16px; width: min(380px, 90%); }
+@media (max-width: 1100px) { .ask-side { display: none; } }

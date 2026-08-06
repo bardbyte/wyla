@@ -290,28 +290,6 @@ export function AskTab() {
           <span><strong>{C.agentIssue}.</strong> {selftest.error}</span>
         </div>
       )}
-      {map && map.nodes.length > 0 && (
-        <section
-          className={`ask-space ${turns.length === 0 ? "tall" : "slim"}`}>
-          <SpaceCanvas map={map} activity={nav.activity} backdrop
-            listening={spaceQ ? spaceListening.ids : nav.listening}
-            verb={nav.traversalVerb}
-            intro={intro} introLine={GRAPH.firstLight}
-            finding={nav.lastFinding}
-            ceremonyRef={nav.ceremony?.ref ?? null}
-            overlay={
-              <>
-                {nav.pendingGate && <SpaceSeal gate={nav.pendingGate} />}
-                {turns.length === 0 && !busy && (
-                  <SpaceAskBar value={spaceQ} onChange={setSpaceQ}
-                    onSubmit={(t) => { setSpaceQ(""); void ask(t); }}
-                    placeholder={GRAPH.askSpace} tally={spaceListening}
-                    raised={!!nav.lastFinding} />
-                )}
-              </>
-            } />
-        </section>
-      )}
       <div className="chat-scroll" ref={scrollRef}>
         {turns.length === 0 && (!map || map.nodes.length === 0) && (
           <div className="ask-hero">
@@ -433,6 +411,26 @@ export function AskTab() {
         <WitnessDrawer refUri={inspect} onClose={() => setInspect(null)} />
       )}
     </div>
+
+    {map && map.nodes.length > 0 && (
+      <aside className="ask-side" aria-label="Synapse space">
+          <SpaceCanvas map={map} activity={nav.activity} backdrop portrait
+          listening={spaceQ ? spaceListening.ids : nav.listening}
+          verb={nav.traversalVerb}
+          intro={intro} introLine={GRAPH.firstLight}
+          ceremonyRef={nav.ceremony?.ref ?? null}
+          overlay={
+          <>
+            {nav.pendingGate && <SpaceSeal gate={nav.pendingGate} />}
+            {turns.length === 0 && !busy && (
+              <SpaceAskBar value={spaceQ} onChange={setSpaceQ}
+                onSubmit={(t) => { setSpaceQ(""); void ask(t); }}
+                placeholder={GRAPH.askSpace} tally={spaceListening} />
+            )}
+          </>
+          } />
+      </aside>
+    )}
 
     </div>
   );
