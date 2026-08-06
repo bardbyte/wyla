@@ -157,6 +157,32 @@ class ScriptedRunner:
                          provenance=Provenance(tier="grounded", score=0.85,
                                                sources=["bq", "mdm"],
                                                evidence_count=3))
+        # the self-correction beat: the validator catches the first
+        # draft BEFORE the seal, the agent revises, re-validates clean —
+        # the workflow's draft → validate → fix → re-validate rule, and
+        # what the Evals tab surfaces as "caught and corrected"
+        yield ToolCall(call_id="c-v1", tool="validate_sql_plan",
+                       verb=verb_for("validate_sql_plan"),
+                       args_summary="draft #1")
+        yield ToolResult(call_id="c-v1", ok=False,
+                         summary="✗ unknown column open_dt on "
+                                 "sbs_new_accounts — the declared witness "
+                                 "(bq) says acct_open_dt",
+                         provenance=Provenance(tier="grounded", score=0.9,
+                                               sources=["bq"],
+                                               evidence_count=1))
+        yield Thinking(delta="The validator caught a bad column in my "
+                       "first draft — revising against the declared "
+                       "schema before anything reaches the seal.")
+        yield ToolCall(call_id="c-v2", tool="validate_sql_plan",
+                       verb=verb_for("validate_sql_plan"),
+                       args_summary="draft #2, revised")
+        yield ToolResult(call_id="c-v2", ok=True,
+                         summary="clean — columns declared, guardrails "
+                                 "pass, single read-only statement",
+                         provenance=Provenance(tier="grounded", score=0.95,
+                                               sources=["bq", "skills"],
+                                               evidence_count=2))
         yield SqlGate(
             gate_id="g1",
             sql="SELECT DATE_TRUNC(acct_open_dt, MONTH) m, COUNT(*) n\n"

@@ -45,6 +45,7 @@ from apps.console.backend.events import to_sse
 from apps.console.backend.pins import (
     NoSqlError, PinStore, SeedPinError,
 )
+from apps.console.backend.evaluator import EvalLog, TurnEvaluator
 from apps.console.backend.runner import ADKRunner, Runner, ScriptedRunner
 
 _FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
@@ -142,6 +143,9 @@ def create_app(runner: Runner | None = None,
                      else {"mode": "n/a (scripted)"})
     # gate_id → decision, set by /approve; the resumable loop consumes it
     app.state.gate_decisions = {}
+    # every turn scored the moment it completes, from the same events
+    # the UI rendered — the /api/evals feed
+    app.state.evals = EvalLog(TurnEvaluator(app.state.data))
 
     # ── agent stream ─────────────────────────────────────────
 
@@ -196,10 +200,20 @@ def create_app(runner: Runner | None = None,
         conversation_id = req.conversation_id or turn_id
 
         async def event_stream():
+            recorded: list[dict] = []
             async for event in app.state.runner.stream(
                     req.message, turn_id=turn_id,
                     conversation_id=conversation_id):
+                try:
+                    recorded.append(event.model_dump(mode="python"))
+                except Exception:
+                    pass  # evals never get to break the stream
                 yield to_sse(event)
+            # score the finished turn; failures are invisible to the UI
+            try:
+                app.state.evals.record(turn_id, req.message, recorded)
+            except Exception:
+                pass
 
         return StreamingResponse(
             event_stream(), media_type="text/event-stream",
@@ -210,6 +224,12 @@ def create_app(runner: Runner | None = None,
     def approve(req: ApproveRequest) -> dict:
         app.state.gate_decisions[req.gate_id] = req.approved
         return {"gate_id": req.gate_id, "approved": req.approved}
+
+    @app.get("/api/evals/recent")
+    def evals_recent() -> dict:
+        """Every recent turn, scored: deterministic checks with
+        plain-language explanations, newest first."""
+        return app.state.evals.recent()
 
     # ── read-side API (graph-backed; honest-empty when no snapshot) ──
 

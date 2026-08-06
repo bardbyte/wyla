@@ -170,3 +170,25 @@ export interface AppConfig {
   tls: Record<string, unknown>;
   graph: { path: string; live: boolean };
 }
+
+export interface EvalCheck {
+  id: string; label: string;
+  status: "pass" | "warn" | "fail" | "skip";
+  explanation: string;
+}
+
+export interface EvalTurn {
+  turn_id: string; question: string;
+  verdict: "grounded" | "grounded_caveats" | "needs_review";
+  verdict_text: string; score: number;
+  checks: EvalCheck[]; corrections: string[];
+  n_tool_calls: number; ts: number;
+}
+
+export interface EvalsRecent {
+  turns: EvalTurn[];
+  summary: {
+    n_turns: number; grounded_rate: number | null;
+    avg_score: number | null; self_corrections: number;
+  };
+}

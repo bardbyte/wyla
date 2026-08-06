@@ -762,3 +762,99 @@ code, pre { font-family: var(--font-mono); font-size: var(--fs-12); }
   .chat-scroll { padding: var(--s-4); }
   .tabnav { margin-left: var(--s-2); }
 }
+
+/* ── Evals — every turn scored, in plain language ────────── */
+
+.eval-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: var(--s-4); margin-bottom: var(--s-5);
+}
+.eval-stat {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-md); padding: var(--s-4) var(--s-5);
+}
+.eval-stat b {
+  display: block; font-size: var(--fs-22, 22px); font-weight: 650;
+  font-variant-numeric: tabular-nums; color: var(--ink);
+}
+.eval-stat span { font-size: var(--fs-12); color: var(--ink-3); }
+
+.verdict-pill {
+  display: inline-flex; align-items: center; gap: var(--s-2);
+  font-size: var(--fs-12); font-weight: 600;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid;
+  white-space: nowrap;
+}
+.verdict-pill em, .eval-chip em { font-style: normal; opacity: 0.75; }
+.v-grounded {
+  color: var(--tier-high); border-color: var(--tier-high);
+  background: var(--tier-high-soft);
+}
+.v-grounded_caveats {
+  color: var(--tier-mid); border-color: var(--tier-mid);
+  background: var(--tier-mid-soft);
+}
+.v-needs_review {
+  color: var(--tier-block); border-color: var(--tier-block);
+  background: var(--tier-block-soft);
+}
+
+.eval-turn { padding: var(--s-5); margin-bottom: var(--s-4); }
+.eval-turn-head {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  font: inherit; width: 100%; display: flex; align-items: center;
+  gap: var(--s-4); text-align: left; padding: 0;
+}
+.eval-q { font-weight: 600; color: var(--ink); flex: 1; }
+.eval-verdict-text {
+  color: var(--ink-2); font-size: var(--fs-13);
+  margin: var(--s-2) 0 var(--s-4);
+}
+.eval-corrections {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft); border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  padding: var(--s-3) var(--s-4); margin-bottom: var(--s-4);
+}
+.eval-correction { font-size: var(--fs-13); color: var(--ink-2); }
+.eval-correction span { color: var(--accent); margin-right: 4px; }
+
+.eval-checks { display: flex; flex-direction: column; margin-top: var(--s-2); }
+.eval-check {
+  display: grid; grid-template-columns: 22px 240px 1fr;
+  gap: var(--s-3); padding: var(--s-2) 0; align-items: baseline;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-13);
+}
+.eval-check:first-child { border-top: 0; }
+.ec-glyph { font-weight: 700; text-align: center; }
+.s-pass .ec-glyph { color: var(--tier-high); }
+.s-warn .ec-glyph { color: var(--tier-mid); }
+.s-fail .ec-glyph { color: var(--tier-block); }
+.s-skip .ec-glyph { color: var(--ink-3); }
+.s-skip .ec-label, .s-skip .ec-expl { color: var(--ink-3); }
+.ec-label { font-weight: 550; color: var(--ink); }
+.ec-expl { color: var(--ink-2); }
+
+.eval-empty { padding: var(--s-6); text-align: center; }
+.eval-empty p { color: var(--ink-2); margin: var(--s-2) 0 var(--s-4); }
+.eval-rubric-note {
+  color: var(--ink-3); font-size: var(--fs-12);
+  margin: var(--s-5) 0; max-width: 70ch;
+}
+
+/* the per-turn verdict chip in Ask */
+.eval-chip {
+  appearance: none; cursor: pointer; font: inherit;
+  display: inline-flex; align-items: center; gap: var(--s-2);
+  font-size: var(--fs-12); font-weight: 600;
+  padding: 3px 10px; margin-top: var(--s-2);
+  border-radius: 999px; border: 1px solid;
+  transition: filter var(--t-fast);
+}
+.eval-chip:hover { filter: brightness(0.96); }
+
+@media (max-width: 860px) {
+  .eval-stats { grid-template-columns: repeat(2, 1fr); }
+  .eval-check { grid-template-columns: 22px 1fr; }
+  .ec-expl { grid-column: 2; }
+}

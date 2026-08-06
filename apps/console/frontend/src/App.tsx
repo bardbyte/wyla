@@ -3,6 +3,7 @@ import { BRAND, TABS } from "./lib/copy";
 import { NavProvider, useNav } from "./lib/nav";
 import { useTheme } from "./lib/theme";
 import { AskTab } from "./tabs/Ask";
+import { EvalsTab } from "./tabs/Evals";
 import { GraphTab } from "./tabs/Graph";
 import { KnowledgeTab } from "./tabs/Knowledge";
 import { ProductsTab } from "./tabs/Products";
@@ -62,6 +63,7 @@ function Shell() {
         {nav.tab === "products" && <ProductsTab />}
         {nav.tab === "graph" && <GraphTab />}
         {nav.tab === "knowledge" && <KnowledgeTab />}
+        {nav.tab === "evals" && <EvalsTab />}
       </main>
 
       {nav.evidenceRef && (

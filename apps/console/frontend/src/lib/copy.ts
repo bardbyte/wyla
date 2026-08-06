@@ -29,6 +29,7 @@ export const TABS = [
   { id: "products", label: "Data products", preview: false },
   { id: "graph", label: "Knowledge graph", preview: false },
   { id: "knowledge", label: "Bring your knowledge", preview: false },
+  { id: "evals", label: "Evals", preview: false },
 ] as const;
 
 export type TabId = (typeof TABS)[number]["id"];
@@ -275,4 +276,30 @@ export const KNOWLEDGE = {
 export const CONFIG = {
   scripted: "Demo transcript",
   live: "Live agent",
+};
+
+export const EVALS = {
+  title: "Evals",
+  sub: "Every turn is scored the moment it completes: deterministic "
+    + "checks on 100% of traffic, each with a plain-language "
+    + "explanation of whether what we did was accurate.",
+  liveNow: "scoring live",
+  empty: "No turns scored yet.",
+  emptySub: "Ask something in the Ask tab — the moment the turn "
+    + "finishes, its accuracy report appears here.",
+  statTurns: "turns scored",
+  statGrounded: "fully grounded",
+  statScore: "average score",
+  statCorrections: "self-corrections",
+  checksTitle: "The checks",
+  correctionsTitle: "Caught and corrected mid-turn",
+  rubricNote: "Deterministic rubric, run on every turn: citations "
+    + "resolve into the graph, cited facts carry an honest tier, "
+    + "nothing executes without the seal, joins exist in observed "
+    + "reality, the tool budget holds, the answer keeps its contract.",
+  verdicts: {
+    grounded: "Grounded",
+    grounded_caveats: "Grounded, with caveats",
+    needs_review: "Needs review",
+  } as Record<string, string>,
 };

@@ -22,12 +22,12 @@ import {
   Spinner, TierChip,
 } from "../components/ui";
 import { api } from "../lib/api";
-import { ASK as C, GRAPH } from "../lib/copy";
+import { ASK as C, EVALS, GRAPH } from "../lib/copy";
 import { useNav } from "../lib/nav";
 import { streamChat } from "../lib/sse";
 import { SpaceCanvas } from "../components/SpaceCanvas";
 import type {
-  AgentSelftest, AnswerSections, ConsoleEvent, GraphMap,
+  AgentSelftest, AnswerSections, ConsoleEvent, EvalTurn, GraphMap,
 } from "../lib/types";
 
 /** Pull graph-object mentions out of a streamed event so the map can
@@ -68,11 +68,12 @@ interface Turn {
   gate: Extract<ConsoleEvent, { type: "sql_gate" }> | null;
   heldNote: string | null;
   done: boolean;
+  evalv: EvalTurn | null;
 }
 
 const newTurn = (question: string): Turn => ({
   question, log: [], liveText: "", answer: null,
-  gate: null, heldNote: null, done: false,
+  gate: null, heldNote: null, done: false, evalv: null,
 });
 
 export function AskTab() {
@@ -158,6 +159,15 @@ export function AskTab() {
         patchLast((t) => ({ ...t, done: true }));
         setBusy(false);
         nav.setAgentBusy(false);
+        // the turn was scored server-side the moment it finished —
+        // attach the verdict to the turn it belongs to
+        api.evalsRecent().then((f) => {
+          const scored = f.turns[0];
+          if (!scored) return;
+          setTurns((ts) => ts.map((t) =>
+            t.question === scored.question && t.done && !t.evalv
+              ? { ...t, evalv: scored } : t));
+        }).catch(() => undefined);
         break;
     }
   };
@@ -271,6 +281,21 @@ export function AskTab() {
               <div className="answer-card card card-pad">
                 <Markdown text={t.liveText} />
               </div>
+            )}
+            {t.evalv && (
+              <button type="button"
+                className={`eval-chip v-${t.evalv.verdict}`}
+                onClick={() => nav.go("evals")}
+                title={t.evalv.verdict_text}>
+                <span aria-hidden>
+                  {t.evalv.verdict === "needs_review" ? "✕" : "✓"}
+                </span>
+                {EVALS.verdicts[t.evalv.verdict]} ·{" "}
+                {Math.round(t.evalv.score * 100)}%
+                {t.evalv.corrections.length > 0 &&
+                  ` · ${t.evalv.corrections.length} self-correction${
+                    t.evalv.corrections.length > 1 ? "s" : ""}`}
+              </button>
             )}
           </section>
         ))}
