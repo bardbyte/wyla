@@ -13,12 +13,13 @@
  * the one-thread drill-down.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SpaceCanvas } from "../components/SpaceCanvas";
 import { WitnessDrawer } from "../components/WitnessDrawer";
-import { SourceBadge, Spinner, TierChip } from "../components/ui";
+import { HoldButton, SourceBadge, Spinner, TierChip, formatBytes } from "../components/ui";
+import { computeListening } from "../lib/anticipation";
 import { api } from "../lib/api";
-import { COMMON, ENTITY, GRAPH as C } from "../lib/copy";
+import { ASK, COMMON, ENTITY, GRAPH as C, TIERS } from "../lib/copy";
 import { useNav } from "../lib/nav";
 import type {
   GraphMap, GraphSummary, TableInsights, ThreadHop, Tier,
@@ -39,7 +40,17 @@ export function GraphTab() {
   const [anchor, setAnchor] = useState("");
   const [sel, setSel] = useState<string | null>(null);
   const [variant, setVariant] =
-    useState<"constellation" | "orbits">("constellation");
+    useState<"constellation" | "orbits" | "lanes">("constellation");
+  // first light (1a): the arrival plays once per session
+  const [intro] = useState(() => {
+    try {
+      if (sessionStorage.getItem("synapse-firstlight")) return false;
+      sessionStorage.setItem("synapse-firstlight", "1");
+      return true;
+    } catch { return false; }
+  });
+  const [spaceQ, setSpaceQ] = useState("");
+  const [goldenLine, setGoldenLine] = useState(false);
 
   useEffect(() => {
     if (nav.graphAnchor) {
@@ -75,6 +86,23 @@ export function GraphTab() {
       n.label.toLowerCase().endsWith("." + want));
     if (node) setSel(node.id);
   }, [anchor, map]);
+
+  const anticipation = useMemo(
+    () => computeListening(spaceQ, map), [spaceQ, map]);
+
+  // the signature ceremony (1e): gold ignition + the quiet line, then a
+  // map refetch so the node's REAL new tier paints the sky
+  useEffect(() => {
+    if (!nav.ceremony) return;
+    setGoldenLine(true);
+    const t1 = setTimeout(() => setGoldenLine(false), 5200);
+    const t2 = setTimeout(() => {
+      api.graphMap().then((d) => setMap(d.map)).catch(() => undefined);
+      nav.setCeremony(null);
+    }, 5600);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [nav.ceremony?.at]);
 
   const witnesses = summary ? Object.entries(summary.witnesses) : [];
   const maxW = witnesses.reduce((m, [, n]) => Math.max(m, n), 1);
@@ -113,9 +141,15 @@ export function GraphTab() {
                 onClick={() => setVariant("orbits")}>
                 {C.viewOrbits}
               </button>
+              <button type="button" role="tab"
+                aria-selected={variant === "lanes"}
+                onClick={() => setVariant("lanes")}>
+                {C.viewLanes}
+              </button>
             </div>
             <span style={{ marginLeft: "auto", color: "var(--ink-3)", fontSize: "var(--fs-12)" }}>
-              {variant === "orbits" ? C.orbitsCaption : C.mapSub}
+              {variant === "orbits" ? C.orbitsCaption
+                : variant === "lanes" ? C.lanesCaption : C.mapSub}
             </span>
           </div>
           {map === null && <div style={{ padding: "var(--s-5)" }}><Spinner /></div>}
@@ -127,7 +161,70 @@ export function GraphTab() {
           {map !== null && map.nodes.length > 0 && (
             <SpaceCanvas map={map} activity={nav.activity}
               selected={sel} onSelect={setSel} variant={variant}
-              verb={nav.traversalVerb} />
+              verb={nav.traversalVerb}
+              listening={anticipation.ids}
+              intro={intro} introLine={C.firstLight}
+              finding={nav.lastFinding}
+              ceremonyRef={nav.ceremony?.ref ?? null}
+              overlay={
+                <>
+                  {goldenLine && (
+                    <div className="sp-goldenline" aria-hidden>
+                      {C.goldenLine}
+                    </div>
+                  )}
+                  {nav.pendingGate && (
+                    <div className="space-seal" role="group"
+                      aria-label={ASK.gateTitle}>
+                      <div className="seal-eyebrow">{ASK.gateTitle}</div>
+                      <code className="seal-sql">
+                        {nav.pendingGate.sql.length > 90
+                          ? nav.pendingGate.sql.slice(0, 89) + "…"
+                          : nav.pendingGate.sql}
+                      </code>
+                      <div className="seal-row">
+                        <span className="seal-scan">
+                          {ASK.gateScan}: <strong>
+                            {formatBytes(nav.pendingGate.bytes)}</strong>
+                        </span>
+                        <HoldButton label={ASK.gateHold}
+                          onConfirm={() =>
+                            nav.pendingGate?.resolve(true)} />
+                        <button type="button" className="btn quiet"
+                          onClick={() =>
+                            nav.pendingGate?.resolve(false)}>
+                          {ASK.gateLater}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {!nav.pendingGate && !nav.agentBusy && (
+                    <div className={`space-ask ${nav.lastFinding ? "raised" : ""}`}>
+                      <span className="space-ask-dot" aria-hidden />
+                      <input value={spaceQ}
+                        onChange={(e) => setSpaceQ(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && spaceQ.trim()) {
+                            nav.askAbout(spaceQ.trim(), { send: true });
+                            setSpaceQ("");
+                          }
+                        }}
+                        placeholder={C.askSpace}
+                        aria-label={C.askSpace} />
+                      {anticipation.ids.length > 0 && (
+                        <span className="space-ask-tally">
+                          {anticipation.ids.length} listening
+                          {anticipation.best &&
+                            ` · ${anticipation.best.label} (${
+                              TIERS[anticipation.best.tier as
+                                keyof typeof TIERS]?.word
+                              ?? anticipation.best.tier})`}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </>
+              } />
           )}
           {map?.truncated && (
             <p style={{ color: "var(--ink-3)", fontSize: "var(--fs-12)", padding: "0 var(--s-5) var(--s-3)" }}>

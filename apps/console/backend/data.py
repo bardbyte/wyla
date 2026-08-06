@@ -695,8 +695,51 @@ class ConsoleData:
                 "score": node.provenance.confidence_score,
                 "sources": list(node.provenance.sources),
             },
+            "ledger": self._witness_ledger(node),
             "edges": edges[:40],
         })
+
+    @staticmethod
+    def _witness_ledger(node) -> dict[str, Any]:
+        """The confidence arithmetic, shown honestly (mockup 2a): every
+        witness with its weight, capped count, and contribution, plus
+        the exact tier rule that fired. No hidden math."""
+        from synapse.graph.store import SOURCE_WEIGHTS
+        prov = node.provenance
+        counts = prov.evidence_count_by_source or {}
+        cap, denom = 5, 15.0
+        rows = []
+        for s in prov.sources:
+            w = SOURCE_WEIGHTS.get(s, 0)
+            n = counts.get(s, 1) or 1
+            capped = min(max(n, 1), cap)
+            rows.append({
+                "source": s, "weight": w, "count": n, "capped": capped,
+                "contribution": round(w * capped / denom, 3),
+            })
+        rows.sort(key=lambda r: -r["contribution"])
+        weighted = sum(r["weight"] * r["capped"] for r in rows)
+        score = min(0.99, weighted / denom)
+        distinct = len(set(prov.sources))
+        if "human_approval" in prov.sources:
+            rule = ("a human signature sets the ceiling — one witness "
+                    "with mass, not proof")
+        elif distinct >= 4:
+            rule = f"grounded: {distinct} distinct witnesses agree"
+        elif distinct >= 3 and score >= 0.70:
+            rule = (f"grounded: {distinct} witnesses and score "
+                    f"{score:.2f} ≥ 0.70")
+        elif score >= 0.90:
+            rule = f"grounded: score {score:.2f} ≥ 0.90"
+        elif distinct >= 2:
+            rule = f"inferred: {distinct} distinct witnesses"
+        elif score >= 0.45:
+            rule = f"inferred: score {score:.2f} ≥ 0.45"
+        else:
+            rule = "one weak witness — unverified until corroborated"
+        return {"rows": rows, "weighted": weighted,
+                "denominator": int(denom), "score": round(score, 3),
+                "distinct": distinct, "rule": rule}
 
     def tier_for(self, ref: str) -> str | None:
         """The current confidence tier at a ref — the pin store's

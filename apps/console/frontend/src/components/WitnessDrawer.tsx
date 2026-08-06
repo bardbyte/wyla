@@ -98,7 +98,36 @@ export function WitnessDrawer({
                 <span className="tag">{w.kind}</span>
               </div>
 
-              {w.provenance && (
+              {w.ledger && w.ledger.rows.length > 0 ? (
+                <section className="dossier">
+                  <div className="dossier-eyebrow">Witness ledger</div>
+                  {w.ledger.rows.map((r) => (
+                    <div key={r.source} className="dossier-row">
+                      <span className="d-src">{r.source}</span>
+                      <span className="d-note">
+                        weight {r.weight} × {r.capped}
+                        {r.count > r.capped
+                          ? ` (of ${r.count}, capped)` : ""}
+                      </span>
+                      <span className="d-val">
+                        +{r.contribution.toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="dossier-eyebrow"
+                    style={{ marginTop: "var(--s-4)" }}>Arithmetic</div>
+                  <div className="dossier-math">
+                    <div>{w.ledger.rows.map((r) =>
+                      `${r.weight}×${r.capped}`).join(" + ")}
+                      {" = "}{w.ledger.weighted}
+                      {" / "}{w.ledger.denominator}</div>
+                    <div>= <strong>{w.ledger.score.toFixed(2)}</strong>
+                      {" · "}{w.ledger.distinct} distinct
+                      witness{w.ledger.distinct === 1 ? "" : "es"}</div>
+                    <div className="d-rule">{w.ledger.rule}</div>
+                  </div>
+                </section>
+              ) : w.provenance && (
                 <section>
                   <div className="h-section">Sources</div>
                   <div style={{ display: "flex", gap: "var(--s-2)", flexWrap: "wrap", marginTop: "var(--s-2)" }}>

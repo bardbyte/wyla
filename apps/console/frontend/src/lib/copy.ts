@@ -199,9 +199,15 @@ export const GRAPH = {
   viewLabel: "Map view",
   viewConstellation: "Constellation",
   viewOrbits: "Trust orbits",
+  viewLanes: "Lanes",
   orbitsCaption:
     "Trust as radius — signed at the centre, unverified at the rim. " +
     "Steward work literally pulls facts inward.",
+  lanesCaption:
+    "The sky, organized: one lane per kind, sorted by name.",
+  firstLight: "Every fact. And where it came from.",
+  goldenLine: "The sky is more golden than yesterday.",
+  askSpace: "Ask the graph",
 };
 
 /* ── Bring your knowledge — the partnership close (P5) ─────── */

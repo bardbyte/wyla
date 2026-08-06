@@ -40,6 +40,31 @@ interface Nav {
    * question glimmer — the space is listening (mockup treatment B/C) */
   listening: string[];
   setListening(keys: string[]): void;
+  /* the seal, liftable into any surface (mockup 1c): Ask registers the
+   * pending SQL gate + its resolver so the Knowledge Graph can render
+   * governance as a physical act in space */
+  pendingGate: PendingGate | null;
+  setPendingGate(g: PendingGate | null): void;
+  /* condensation (mockup 1d): the finished turn's finding + citations,
+   * so the graph can raise the paper plate with citation threads */
+  lastFinding: Finding | null;
+  setLastFinding(f: Finding | null): void;
+  /* the signature ceremony (mockup 1e): a just-signed ref ignites gold */
+  ceremony: { ref: string; at: number } | null;
+  setCeremony(c: { ref: string; at: number } | null): void;
+}
+
+export interface PendingGate {
+  gateId: string;
+  sql: string;
+  bytes: number;
+  checks: string[];
+  resolve(approved: boolean): void;
+}
+
+export interface Finding {
+  text: string;
+  citations: { label: string; ref: string }[];
 }
 
 const NavContext = createContext<Nav | null>(null);
@@ -53,6 +78,10 @@ export function NavProvider({ children }: { children: ReactNode }) {
   const [agentBusy, setAgentBusy] = useState(false);
   const [traversalVerb, setTraversalVerb] = useState("");
   const [listening, setListening] = useState<string[]>([]);
+  const [pendingGate, setPendingGate] = useState<PendingGate | null>(null);
+  const [lastFinding, setLastFinding] = useState<Finding | null>(null);
+  const [ceremony, setCeremony] =
+    useState<{ ref: string; at: number } | null>(null);
 
   const go = useCallback((t: TabId) => setTab(t), []);
   const askAbout = useCallback(
@@ -84,10 +113,13 @@ export function NavProvider({ children }: { children: ReactNode }) {
     closeEvidence, handoff, clearHandoff, graphAnchor, clearGraphAnchor,
     activity, reportActivity, clearActivity, agentBusy, setAgentBusy,
     traversalVerb, setTraversalVerb, listening, setListening,
+    pendingGate, setPendingGate, lastFinding, setLastFinding,
+    ceremony, setCeremony,
   }), [tab, go, askAbout, goToGraph, openEvidence, evidenceRef,
        closeEvidence, handoff, clearHandoff, graphAnchor,
        clearGraphAnchor, activity, reportActivity, clearActivity,
-       agentBusy, traversalVerb, listening]);
+       agentBusy, traversalVerb, listening, pendingGate, lastFinding,
+       ceremony]);
 
   return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
 }

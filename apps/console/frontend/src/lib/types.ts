@@ -125,10 +125,21 @@ export interface ThreadHop {
   kind: string; label: string; ref: string; tier: Tier; detail: string;
 }
 
+export interface WitnessLedgerRow {
+  source: string; weight: number; count: number; capped: number;
+  contribution: number;
+}
+
+export interface WitnessLedger {
+  rows: WitnessLedgerRow[]; weighted: number; denominator: number;
+  score: number; distinct: number; rule: string;
+}
+
 export interface Witness {
   ref: string; found: boolean; kind?: string;
   properties?: Record<string, unknown>;
   provenance?: { tier: Tier; score: number; sources: string[] };
+  ledger?: WitnessLedger;
   edges?: { type: string; other: string; direction: string; tier: Tier }[];
 }
 

@@ -695,6 +695,7 @@ code, pre { font-family: var(--font-mono); font-size: var(--fs-12); }
 .sp-label.hot { fill: #EAF3FF; font-weight: 700; font-size: 13px; }
 
 .sp-verb {
+  pointer-events: none;
   position: absolute; left: 14px; bottom: 14px; z-index: 3;
   display: inline-flex; align-items: center; gap: 8px;
   max-width: 78%; padding: 6px 12px; border-radius: 999px;
@@ -950,3 +951,159 @@ code, pre { font-family: var(--font-mono); font-size: var(--fs-12); }
 @media (prefers-reduced-motion: reduce) {
   .sp-listen { animation: none; }
 }
+
+/* ── Full mockup integration: 1a 1c 1d 1e 1g 2a ──────────── */
+
+/* 1a · first light: staggered arrival + the serif line, once */
+.sp-arrive { opacity: 0; animation: sp-arrivein 0.9s ease-out forwards; }
+@keyframes sp-arrivein {
+  from { opacity: 0; transform: scale(0.6); }
+  60% { opacity: 1; }
+  to { opacity: 1; transform: scale(1); }
+}
+.sp-node { transform-box: fill-box; transform-origin: center; }
+.sp-firstlight {
+  position: absolute; left: 0; right: 0; top: 34%;
+  text-align: center; pointer-events: none;
+  font-family: var(--font-display); font-style: italic;
+  font-size: clamp(18px, 2.4vw, 30px); color: #EAF3FF;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.6);
+  opacity: 0; animation: sp-lightline 5.2s ease-in-out 0.7s forwards;
+}
+@keyframes sp-lightline {
+  0% { opacity: 0; } 18% { opacity: 0.96; }
+  72% { opacity: 0.96; } 100% { opacity: 0; }
+}
+
+/* 1b · the in-space question bar: paper floating in the void */
+.space-ask {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: 56px; width: min(520px, 72%);
+  display: flex; align-items: center; gap: 10px;
+  background: var(--paper); border-radius: 12px;
+  padding: 12px 18px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+.space-ask-dot { width: 8px; height: 8px; border-radius: 50%;
+  background: var(--agent-cyan); flex: none;
+  animation: shimmer 2.8s ease-in-out infinite; }
+.space-ask input {
+  flex: 1; border: 0; outline: none; background: transparent;
+  font-family: var(--font-display); font-size: var(--fs-16);
+  font-weight: 500; color: var(--paper-ink); min-width: 0;
+}
+.space-ask input::placeholder { color: var(--paper-ink-soft); opacity: 0.6; }
+.space-ask-tally {
+  position: absolute; top: 100%; left: 0; right: 0; margin-top: 8px;
+  text-align: center; font-family: var(--font-mono);
+  font-size: var(--fs-11); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--agent-cyan);
+  pointer-events: none;
+}
+
+/* 1c · the seal, in space: governance as a physical act */
+.space-seal {
+  position: absolute; right: 26px; bottom: 26px;
+  width: min(400px, 62%);
+  background: var(--paper); border-radius: 10px;
+  padding: 14px 18px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+.seal-eyebrow {
+  font-family: var(--font-label); font-size: var(--fs-11);
+  font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+  color: #8A6320; margin-bottom: 6px;
+}
+.seal-sql {
+  display: block; font-family: var(--font-mono);
+  font-size: var(--fs-12); color: var(--paper-ink);
+  border: 1px solid var(--paper-rule); border-radius: 6px;
+  padding: 8px 10px; margin-bottom: 10px; overflow-wrap: anywhere;
+  background: var(--paper-2);
+}
+.seal-row { display: flex; align-items: center; gap: var(--s-3);
+  flex-wrap: wrap; }
+.seal-scan { font-size: var(--fs-12); color: var(--paper-ink-soft); }
+.space-seal .btn.quiet { color: var(--paper-ink-soft); }
+
+/* 1d · condensation: plate + threads inside the SVG */
+.sp-plate-paper { fill: #F3EEE3; filter: drop-shadow(0 14px 30px rgba(0,0,0,0.5)); }
+.sp-plate-eyebrow { font-family: var(--font-label); font-size: 10px;
+  font-weight: 600; letter-spacing: 0.16em; fill: #8A6320; }
+.sp-plate-title { font-family: var(--font-display); font-size: 22px;
+  font-weight: 600; fill: #17150F; }
+.sp-plate-cites { font-family: var(--font-mono); font-size: 10.5px;
+  fill: #8A6320; }
+.sp-thread {
+  stroke: #D9A441; stroke-width: 1; opacity: 0.7;
+  stroke-dasharray: 4 3;
+  animation: sp-threaddraw 0.8s ease-out;
+}
+@keyframes sp-threaddraw { from { opacity: 0; } to { opacity: 0.7; } }
+
+/* 1e · the signature ceremony */
+.sp-ceremony {
+  fill: none; stroke: #F2C94C; stroke-width: 2.5;
+  animation: sp-ceremonyring 0.5s ease-out forwards;
+}
+.sp-ceremony-after {
+  fill: none; stroke: #F2C94C; stroke-width: 1;
+  animation: sp-afterglow 1.4s ease-out 0.35s forwards; opacity: 0;
+}
+@keyframes sp-ceremonyring {
+  from { opacity: 0; transform: scale(0.4); }
+  60% { opacity: 1; }
+  to { opacity: 0.9; transform: scale(1); }
+}
+@keyframes sp-afterglow {
+  0% { opacity: 0.8; transform: scale(0.7); }
+  100% { opacity: 0; transform: scale(1.5); }
+}
+.sp-goldenline {
+  position: absolute; left: 0; right: 0; top: 30%;
+  text-align: center; pointer-events: none;
+  font-family: var(--font-display); font-style: italic;
+  font-size: clamp(16px, 2vw, 24px); color: #F2C94C;
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.65);
+  animation: sp-lightline 5s ease-in-out forwards;
+}
+
+/* 1g · sorted lanes */
+.sp-lane {
+  font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: 0.18em; fill: #64798F;
+}
+
+/* 2a · the witness dossier: the arithmetic on paper */
+.dossier {
+  background: var(--paper); color: var(--paper-ink);
+  border-radius: var(--r-md); padding: var(--s-4) var(--s-5);
+}
+.dossier-eyebrow {
+  font-family: var(--font-label); font-size: var(--fs-11);
+  font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+  color: #8A6320;
+}
+.dossier-row {
+  display: flex; align-items: baseline; gap: var(--s-3);
+  padding: var(--s-2) 0; border-bottom: 1px solid var(--paper-rule);
+  font-size: var(--fs-13);
+}
+.dossier-row:last-of-type { border-bottom: 0; }
+.d-src { font-family: var(--font-mono); font-weight: 500; }
+.d-note { color: var(--paper-ink-soft); font-size: var(--fs-12); }
+.d-val { margin-left: auto; font-family: var(--font-mono);
+  color: #8A6320; font-variant-numeric: tabular-nums; }
+.dossier-math {
+  font-family: var(--font-mono); font-size: var(--fs-12);
+  color: var(--paper-ink-soft); margin-top: var(--s-2);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.dossier-math strong { color: var(--paper-ink); font-size: var(--fs-14); }
+.d-rule { color: #8A6320; font-style: italic; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-arrive, .sp-firstlight, .sp-goldenline { animation-duration: 0.2s; }
+}
+
+/* while the finding plate holds the stage, the ask bar yields upward */
+.space-ask.raised { bottom: auto; top: 22px; }
+.space-ask.raised .space-ask-tally { display: none; }

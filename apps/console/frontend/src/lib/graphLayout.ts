@@ -97,6 +97,38 @@ export function layoutOrbits(nodes: GraphMapNode[],
   });
 }
 
+/* sorted lanes (mockup 1g): the sky organized — one horizontal lane
+ * per kind, nodes spread deterministically by name. */
+export const LANE_ORDER = ["table", "metric", "entity", "skill"] as const;
+
+export function layoutLanes(nodes: GraphMapNode[],
+                            W: number = SPACE_W,
+                            H: number = SPACE_H): Pt[] {
+  const present = LANE_ORDER.filter(
+    (k) => nodes.some((n) => n.kind === k));
+  const laneY = new Map<string, number>(present.map((k, i) => [
+    k, H * (0.16 + (i + 0.5) * (0.72 / Math.max(1, present.length)))]));
+  const byKind = new Map<string, number[]>();
+  nodes.forEach((n, i) => {
+    const arr = byKind.get(n.kind) ?? [];
+    arr.push(i); byKind.set(n.kind, arr);
+  });
+  const pos: Pt[] = nodes.map(() => ({ x: 0, y: 0 }));
+  for (const [kind, idxs] of byKind) {
+    idxs.sort((a, b) => nodes[a].label.localeCompare(nodes[b].label));
+    const y0 = laneY.get(kind) ?? H * 0.5;
+    const x0 = 180, x1 = W - 120;
+    idxs.forEach((idx, k) => {
+      const t = idxs.length === 1 ? 0.5 : k / (idxs.length - 1);
+      pos[idx] = {
+        x: x0 + t * (x1 - x0),
+        y: y0 + (hash01(idx * 5 + 3) - 0.5) * H * 0.07,
+      };
+    });
+  }
+  return pos;
+}
+
 export const shortName = (s: string): string => {
   const tail = s.split(/[./]/).pop() ?? s;
   return tail.length > 24 ? tail.slice(0, 23) + "…" : tail;

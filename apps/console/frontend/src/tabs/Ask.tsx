@@ -24,6 +24,7 @@ import {
 import { api } from "../lib/api";
 import { ASK as C, EVALS, GRAPH, TIERS } from "../lib/copy";
 import { useNav } from "../lib/nav";
+import { computeListening } from "../lib/anticipation";
 import { streamChat } from "../lib/sse";
 import { SpaceCanvas } from "../components/SpaceCanvas";
 import type {
@@ -58,41 +59,6 @@ function extractActivity(ev: ConsoleEvent,
     default: break;
   }
   return [...found];
-}
-
-/** Anticipation (mockup 1h, treatments B+C): while the user types,
- * nodes matching the draft glimmer in the sky, a mono tally counts
- * them, and the strongest match whispers its name. */
-function computeListening(q: string, map: GraphMap | null): {
-  ids: string[]; nMetrics: number; nTables: number;
-  best: { ref: string; label: string; tier: string } | null;
-} {
-  const none = { ids: [], nMetrics: 0, nTables: 0, best: null };
-  if (!map || q.trim().length < 4) return none;
-  const tokens = q.toLowerCase().split(/[^a-z0-9_]+/)
-    .filter((t) => t.length >= 4);
-  if (!tokens.length) return none;
-  const hits: { id: string; label: string; kind: string; tier: string;
-                score: number }[] = [];
-  for (const n of map.nodes) {
-    const label = n.label.toLowerCase();
-    const bare = label.split(/[./]/).pop() ?? label;
-    let score = 0;
-    for (const t of tokens)
-      if (label.includes(t) || bare.includes(t)) score += t.length;
-    if (score > 0) hits.push({ id: n.id, label: n.label, kind: n.kind,
-                               tier: n.tier, score });
-  }
-  hits.sort((a, b) => b.score - a.score);
-  const top = hits.slice(0, 6);
-  const best = top[0] && top[0].score >= 8 ? top[0] : null;
-  return {
-    ids: top.map((h) => h.id),
-    nMetrics: top.filter((h) => h.kind === "metric").length,
-    nTables: top.filter((h) => h.kind === "table").length,
-    best: best ? { ref: best.id, label: best.label, tier: best.tier }
-               : null,
-  };
 }
 
 interface Turn {
@@ -134,6 +100,9 @@ export function AskTab() {
   const [selftest, setSelftest] = useState<AgentSelftest | null>(null);
   const knownTables = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
+  const approveGateRef = useRef<(id: string) => void>(() => undefined);
+  const holdGateRef = useRef<(id: string) => void>(() => undefined);
+  const captureRefs = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     api.questions().then((d) => setSuggestions(d.questions))
@@ -175,11 +144,24 @@ export function AskTab() {
   const handleEvent = (ev: ConsoleEvent) => {
     nav.reportActivity(extractActivity(ev, knownTables.current));
     if (ev.type === "tool_call" && ev.verb) nav.setTraversalVerb(ev.verb);
+    if (ev.type === "tool_call" && ev.tool === "capture_knowledge") {
+      const a = (ev.args ?? {}) as Record<string, unknown>;
+      const subject = [String(a.subject_type ?? ""), String(a.subject_ref ?? "")]
+        .filter(Boolean).join("/");
+      if (subject) captureRefs.current.set(ev.call_id, subject);
+    }
     switch (ev.type) {
       case "turn_start":
         break;
-      case "tool_call":
       case "tool_result":
+        // a successful capture is a SIGNATURE — the sky turns gold (1e)
+        if (ev.ok !== false) {
+          const cap = captureRefs.current.get(ev.call_id);
+          if (cap) nav.setCeremony({ ref: cap, at: Date.now() });
+        }
+        patchLast((t) => ({ ...t, log: [...t.log, ev] }));
+        break;
+      case "tool_call":
       case "gate_resolved":
       case "thinking":
       case "sandbox":
@@ -193,10 +175,24 @@ export function AskTab() {
       case "sql_gate":
         gated.current = true;
         patchLast((t) => ({ ...t, gate: ev }));
+        nav.setPendingGate({
+          gateId: ev.gate_id, sql: ev.sql,
+          bytes: ev.bytes_estimate ?? 0,
+          checks: ev.guardrail_checks,
+          resolve: (approved: boolean) => (approved
+            ? approveGateRef.current(ev.gate_id)
+            : holdGateRef.current(ev.gate_id)),
+        });
         break;
       case "answer":
         // the structured card supersedes streamed text (scripted mode)
         patchLast((t) => ({ ...t, liveText: "", answer: ev.sections }));
+        // condensation: the graph raises the paper plate + threads (1d)
+        nav.setLastFinding({
+          text: ev.sections.answer.replace(/\*\*/g, ""),
+          citations: ev.sections.citations.map((c) => ({
+            label: c.label, ref: c.ref })),
+        });
         break;
       case "turn_end":
         patchLast((t) => ({ ...t, done: true }));
@@ -224,6 +220,7 @@ export function AskTab() {
     setTurns((ts) => [...ts, newTurn(q)]);
     setBusy(true);
     nav.clearActivity();          // a fresh traversal per question
+    nav.setLastFinding(null);     // the last plate lowers
     nav.setAgentBusy(true);
     try {
       for await (const ev of streamChat(q, conversationId.current)) {
@@ -260,6 +257,7 @@ export function AskTab() {
   const approveGate = async (gateId: string) => {
     await api.approve(gateId, true).catch(() => undefined);
     gated.current = false;
+    nav.setPendingGate(null);
     patchLast((t) => ({ ...t, gate: null }));
     const queued = pending.current;
     pending.current = [];
@@ -270,11 +268,14 @@ export function AskTab() {
     await api.approve(gateId, false).catch(() => undefined);
     gated.current = false;
     pending.current = [];
+    nav.setPendingGate(null);
     patchLast((t) => ({
       ...t, gate: null, heldNote: C.heldNote, done: true,
     }));
     setBusy(false);
   };
+  approveGateRef.current = approveGate;
+  holdGateRef.current = holdGate;
 
   return (
     <div className="ask-wrap">

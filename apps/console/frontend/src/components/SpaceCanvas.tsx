@@ -19,10 +19,11 @@
  */
 
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import {
-  SPACE_H, SPACE_W, STRIP_H, STRIP_W, TIER_ORBIT, hash01, isActive,
-  layoutOrbits, layoutSpine, shortName,
+  LANE_ORDER, SPACE_H, SPACE_W, STRIP_H, STRIP_W, TIER_ORBIT, hash01,
+  isActive, layoutLanes, layoutOrbits, layoutSpine, shortName,
 } from "../lib/graphLayout";
 import type { GraphMap, GraphMapNode } from "../lib/types";
 
@@ -62,6 +63,8 @@ function Glyph({ kind, x, y, r, fill, cls, onClick }: {
 export function SpaceCanvas({
   map, activity = {}, selected = null, onSelect, backdrop = false,
   portrait = false, verb = "", listening = [], variant = "constellation",
+  intro = false, introLine = "", finding = null, ceremonyRef = null,
+  overlay = null,
 }: {
   map: GraphMap;
   activity?: Record<string, number>;
@@ -75,8 +78,19 @@ export function SpaceCanvas({
   verb?: string;
   /** anticipation: node ids that match the question being TYPED */
   listening?: string[];
-  /** orbits = trust as radius: signed at the centre, vapour at the rim */
-  variant?: "constellation" | "orbits";
+  /** orbits = trust as radius; lanes = the sky organized by kind */
+  variant?: "constellation" | "orbits" | "lanes";
+  /** first light (mockup 1a): staggered arrival + a serif line, once */
+  intro?: boolean;
+  introLine?: string;
+  /** condensation (mockup 1d): the finding as a paper plate in-space,
+   *  citation threads drawn to the exact nodes that produced it */
+  finding?: { text: string;
+              citations: { label: string; ref: string }[] } | null;
+  /** the signature ceremony (mockup 1e): this ref ignites gold */
+  ceremonyRef?: string | null;
+  /** extra in-space chrome (the ask bar, the seal) rendered by the host */
+  overlay?: ReactNode;
 }) {
   const [localSel, setLocalSel] = useState<string | null>(null);
   const sel = onSelect ? selected : localSel;
@@ -88,8 +102,8 @@ export function SpaceCanvas({
     + `@${W}x${H}#${variant}`;
   /* eslint-disable react-hooks/exhaustive-deps */
   const pos = useMemo(
-    () => (variant === "orbits"
-      ? layoutOrbits(map.nodes, W, H)
+    () => (variant === "orbits" ? layoutOrbits(map.nodes, W, H)
+      : variant === "lanes" ? layoutLanes(map.nodes, W, H)
       : layoutSpine(map.nodes, map.edges, W, H)), [sig]);
   const idx = useMemo(
     () => new Map(map.nodes.map((n, i) => [n.id, i])), [sig]);
@@ -133,6 +147,66 @@ export function SpaceCanvas({
   }, [map, activity]);
   const traversing = activeIds.size > 0;
   const listenIds = useMemo(() => new Set(listening), [listening]);
+
+  /* first light: bigger bodies arrive first (mockup 1a) */
+  const arriveRank = useMemo(() => {
+    const order = map.nodes.map((_, i) => i).sort((a, b) =>
+      ((map.nodes[b].columns ?? 0) - (map.nodes[a].columns ?? 0))
+      || map.nodes[a].id.localeCompare(map.nodes[b].id));
+    return new Map(order.map((idx, k) => [map.nodes[idx].id, k]));
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [sig]);
+
+  /* the verb whispers NEXT TO the node the agent touched last (1c) */
+  const lastTouched = useMemo(() => {
+    let bestKey = ""; let bestAt = -1;
+    for (const [k, at] of Object.entries(activity))
+      if (at > bestAt) { bestAt = at; bestKey = k; }
+    if (!bestKey) return null;
+    for (const n of map.nodes) {
+      const label = n.label.toLowerCase();
+      const bare = label.split(/[./]/).pop() ?? label;
+      if (n.id.toLowerCase() === bestKey || label === bestKey
+          || bare === bestKey) {
+        const i = idx.get(n.id);
+        return i == null ? null : pos[i];
+      }
+    }
+    return null;
+  }, [activity, map, idx, pos]);
+
+  /* lane captions (1g): one label per present kind, at its lane */
+  const laneLabels = useMemo(() => {
+    if (variant !== "lanes") return [];
+    return LANE_ORDER.flatMap((k) => {
+      const ys = map.nodes.flatMap((n, i) =>
+        n.kind === k && pos[i] ? [pos[i].y] : []);
+      if (!ys.length) return [];
+      return [{ kind: k,
+                y: ys.reduce((a, b) => a + b, 0) / ys.length }];
+    });
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [variant, sig, pos]);
+
+  /* condensation threads (1d): plate → the nodes it cites */
+  const PLATE = { w: Math.min(560, W - 160), h: 108 };
+  const plateX = (W - PLATE.w) / 2, plateY = H - PLATE.h - 26;
+  const threadTargets = useMemo(() => {
+    if (!finding) return [];
+    const out: { x: number; y: number; fromX: number }[] = [];
+    finding.citations.forEach((c, k) => {
+      const node = map.nodes.find((n) =>
+        n.id === c.ref
+        || c.ref.toLowerCase().endsWith("/" + n.label.toLowerCase()));
+      if (!node) return;
+      const i = idx.get(node.id);
+      if (i == null || !pos[i]) return;
+      out.push({ x: pos[i].x, y: pos[i].y,
+                 fromX: plateX + 40 + k * 90 });
+    });
+    return out;
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [finding, sig, pos]);
 
   const nodeR = (n: GraphMapNode) =>
     (n.kind === "table" ? 9 : 7)
@@ -213,6 +287,20 @@ export function SpaceCanvas({
           })}
         </g>
 
+        {laneLabels.map((l) => (
+          <text key={l.kind} x={46} y={l.y + 4} className="sp-lane">
+            {({ table: "TABLES", metric: "METRICS", entity: "ENTITIES",
+                skill: "PLAYBOOKS" } as Record<string, string>)[l.kind]
+              ?? l.kind.toUpperCase()}
+          </text>
+        ))}
+
+        {/* condensation: citation threads first, under the suns */}
+        {finding && threadTargets.map((t, i) => (
+          <line key={i} x1={t.fromX} y1={plateY + 8} x2={t.x} y2={t.y}
+            className="sp-thread" />
+        ))}
+
         {/* suns + their column satellites */}
         <g>
           {map.nodes.map((n) => {
@@ -227,8 +315,24 @@ export function SpaceCanvas({
               ? Math.min(n.columns ?? 0, 18) : 0;
             const listen = listenIds.has(n.id) && !act;
             const showLabel = !backdrop || act || isSel || listen;
+            const ceremonial = ceremonyRef != null
+              && (n.id === ceremonyRef
+                  || ceremonyRef.toLowerCase().endsWith(
+                       "/" + n.label.toLowerCase()));
             return (
-              <g key={n.id} className={`sp-node ${dim ? "dim" : ""}`}>
+              <g key={n.id}
+                className={`sp-node ${dim ? "dim" : ""} ${intro ? "sp-arrive" : ""}`}
+                style={intro ? { animationDelay:
+                  `${Math.min(2.2, (arriveRank.get(n.id) ?? 0) * 0.11)}s` }
+                  : undefined}>
+                {ceremonial && (
+                  <>
+                    <circle cx={p.x} cy={p.y} r={r + 10}
+                      className="sp-ceremony" />
+                    <circle cx={p.x} cy={p.y} r={r + 22}
+                      className="sp-ceremony-after" />
+                  </>
+                )}
                 {/* orbit satellites: the table's columns, as tiny stars */}
                 {sats > 0 && (
                   <g className={act ? "sp-sats hot" : "sp-sats"}>
@@ -277,15 +381,45 @@ export function SpaceCanvas({
             );
           })}
         </g>
+        {/* condensation: the finding as a paper plate in-space (1d) */}
+        {finding && (
+          <g className="sp-plate">
+            <rect x={plateX} y={plateY} width={PLATE.w} height={PLATE.h}
+              rx={9} className="sp-plate-paper" />
+            <text x={plateX + 26} y={plateY + 30}
+              className="sp-plate-eyebrow">FINDING</text>
+            <text x={plateX + 26} y={plateY + 62}
+              className="sp-plate-title">
+              {finding.text.length > 52
+                ? finding.text.slice(0, 51) + "…" : finding.text}
+            </text>
+            <text x={plateX + 26} y={plateY + 88}
+              className="sp-plate-cites">
+              {finding.citations.map((c) => c.label).join("   ·   ")}
+            </text>
+          </g>
+        )}
       </svg>
 
       {/* the agent's current move, floated in space */}
       {verb && traversing && (
-        <div className="sp-verb">
+        <div className="sp-verb"
+          style={lastTouched && !backdrop ? {
+            left: `${Math.min(78, Math.max(6, (lastTouched.x / W) * 100))}%`,
+            right: "auto",
+            top: `${Math.min(88, Math.max(4, (lastTouched.y / H) * 100 + 5))}%`,
+            bottom: "auto",
+          } : undefined}>
           <span className="sp-verb-dot" aria-hidden />
           {verb}
         </div>
       )}
+
+      {intro && introLine && (
+        <div className="sp-firstlight" aria-hidden>{introLine}</div>
+      )}
+
+      {overlay}
 
       {!backdrop && (
         <div className="sp-legend" aria-hidden>
