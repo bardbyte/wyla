@@ -18,41 +18,10 @@
  * tier colors brighten to hold 4.5:1 on dark ground.
  */
 
-/* The three voices from the Synapse design language, vendored (OFL)
- * so a locked-down laptop needs no font CDN:
- *   Fraunces         — findings & display (paper serif)
- *   Bricolage        — labels & captions
- *   Spline Sans Mono — SQL, refs, ledger, tallies */
-@font-face {
-  font-family: "Fraunces";
-  src: url("../assets/fonts/fraunces-var.woff2") format("woff2");
-  font-weight: 100 900; font-display: swap;
-}
-@font-face {
-  font-family: "Bricolage";
-  src: url("../assets/fonts/bricolage-var.woff2") format("woff2");
-  font-weight: 200 800; font-display: swap;
-}
-@font-face {
-  font-family: "SplineMono";
-  src: url("../assets/fonts/spline-mono-var.woff2") format("woff2");
-  font-weight: 300 700; font-display: swap;
-}
-
 :root {
   /* type */
   --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
-  --font-label: "Bricolage", var(--font-ui);
-  --font-mono: "SplineMono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
-
-  /* the two materials (from the Synapse mockups): paper & light */
-  --paper: #F3EEE3;
-  --paper-2: #ECE5D4;
-  --paper-ink: #17150F;
-  --paper-ink-soft: #4A4437;
-  --paper-rule: #C9BFA8;
-  --agent-cyan: #5FD4F2;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
   --fs-11: 0.6875rem;
   --fs-12: 0.75rem;
   --fs-13: 0.8125rem;

@@ -106,10 +106,6 @@ export const ASK = {
   activityClose: "Hide activity",
   activityFull: "Open the full graph",
   agentIssue: "The live agent can't start on this server",
-  startersTitle: "A tour of what this graph can answer",
-  startersSub:
-    "Derived from the loaded graph itself — each one exercises a " +
-    "different capability. Or ask the sky above anything at all.",
 };
 
 /* ── Data products — "we know your business", by unit ─────── */
@@ -199,24 +195,6 @@ export const GRAPH = {
   insightsRelWitness: "Witness",
   insightsRelTier: "Evidence",
   insightsRecs: "Questions you can ask about this table",
-  viewLabel: "Map view",
-  viewConstellation: "Constellation",
-  viewOrbits: "Trust orbits",
-  viewLanes: "Lanes",
-  orbitsCaption:
-    "Trust as radius — signed at the centre, unverified at the rim. " +
-    "Steward work literally pulls facts inward.",
-  lanesCaption:
-    "The sky, organized: one lane per kind, sorted by name.",
-  firstLight: "Every fact. And where it came from.",
-  metricFrom: "Computed from",
-  metricNoSource:
-    "No observed source table for this metric in the snapshot.",
-  metricRelated: "Related metrics across these tables",
-  metricNoRelated:
-    "No other metrics are computed from these tables yet.",
-  goldenLine: "The sky is more golden than yesterday.",
-  askSpace: "Ask the graph",
 };
 
 /* ── Bring your knowledge — the partnership close (P5) ─────── */
@@ -297,30 +275,4 @@ export const KNOWLEDGE = {
 export const CONFIG = {
   scripted: "Demo transcript",
   live: "Live agent",
-};
-
-export const EVALS = {
-  title: "Evals",
-  sub: "Every turn is scored the moment it completes: deterministic "
-    + "checks on 100% of traffic, each with a plain-language "
-    + "explanation of whether what we did was accurate.",
-  liveNow: "scoring live",
-  empty: "No turns scored yet.",
-  emptySub: "Ask something in the Ask tab — the moment the turn "
-    + "finishes, its accuracy report appears here.",
-  statTurns: "turns scored",
-  statGrounded: "fully grounded",
-  statScore: "average score",
-  statCorrections: "self-corrections",
-  checksTitle: "The checks",
-  correctionsTitle: "Caught and corrected mid-turn",
-  rubricNote: "Deterministic rubric, run on every turn: citations "
-    + "resolve into the graph, cited facts carry an honest tier, "
-    + "nothing executes without the seal, joins exist in observed "
-    + "reality, the tool budget holds, the answer keeps its contract.",
-  verdicts: {
-    grounded: "Grounded",
-    grounded_caveats: "Grounded, with caveats",
-    needs_review: "Needs review",
-  } as Record<string, string>,
 };
