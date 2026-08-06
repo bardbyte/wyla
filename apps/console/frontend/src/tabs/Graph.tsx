@@ -1,8 +1,10 @@
-/** Knowledge graph — the constellation, full viewport.
+/** Context graph — the constellation, full viewport.
  *
- * The space IS the page: one interactive cosmos filling the viewport,
- * the paper ask bar floating in it, the seal and the finding rising in
- * it. Selecting a node slides a paper panel over the space:
+ * The CALM surface: exploration, not the live feed. The agent's
+ * traversal animates only in Ask's side panel; here the sky holds
+ * still for reading, anticipation answers your own typing, and the
+ * gold ceremony marks real tier changes. Selecting a node slides a
+ * paper panel over the space:
  *   table  → Insights (description, witnessed relationships, questions)
  *   metric → where it is computed from, and its RELATED METRICS across
  *            those tables — the cross-table metric picture, explained
@@ -13,7 +15,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { SpaceCanvas } from "../components/SpaceCanvas";
-import { SpaceAskBar, SpaceSeal } from "../components/SpaceBits";
+import { SpaceAskBar } from "../components/SpaceBits";
 import { WitnessDrawer } from "../components/WitnessDrawer";
 import { SourceBadge, Spinner, TierChip } from "../components/ui";
 import { computeListening } from "../lib/anticipation";
@@ -92,22 +94,15 @@ export function GraphTab() {
         </div>
       )}
       {map !== null && map.nodes.length > 0 && (
-        <SpaceCanvas map={map} activity={nav.activity} fill
+        <SpaceCanvas map={map} fill
           selected={sel} onSelect={setSel}
-          verb={nav.traversalVerb}
           listening={anticipation.ids}
           intro={intro} introLine={C.firstLight}
-          finding={nav.lastFinding}
           ceremonyRef={nav.ceremony?.ref ?? null}
           overlay={
             <>
               <header className="space-page-head">
                 <span className="sph-title">{C.title}</span>
-                {nav.agentBusy && (
-                  <span className="activity-live">
-                    <span className="live-dot" aria-hidden /> {C.liveNow}
-                  </span>
-                )}
                 <SourceBadge live={live} />
               </header>
               {goldenLine && (
@@ -115,15 +110,13 @@ export function GraphTab() {
                   {C.goldenLine}
                 </div>
               )}
-              {nav.pendingGate && <SpaceSeal gate={nav.pendingGate} />}
-              {!nav.pendingGate && !nav.agentBusy && !selNode && (
+              {!selNode && (
                 <SpaceAskBar value={spaceQ} onChange={setSpaceQ}
                   onSubmit={(t) => {
                     nav.askAbout(t, { send: true });
                     setSpaceQ("");
                   }}
-                  placeholder={C.askSpace} tally={anticipation}
-                  raised={!!nav.lastFinding} />
+                  placeholder={C.askSpace} tally={anticipation} />
               )}
               {selNode && (
                 <aside className="space-panel" role="dialog"

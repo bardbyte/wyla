@@ -91,7 +91,8 @@ def _runner() -> WarehouseRunner:
     credentials exist (work laptop); otherwise every call returns a
     structured no_client refusal that explains where it CAN run."""
     client = None
-    if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+    if (os.environ.get("BQ_CREDENTIALS")
+            or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")):
         try:
             from synapse.warehouse.runner import BigQueryClient
             client = BigQueryClient(

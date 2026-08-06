@@ -438,6 +438,16 @@ export function AskTab() {
 
 /* ── pieces ── */
 
+/** Trim a raw thinking delta to its essence: Gemini often opens with
+ * a bold heading ("**My Thought Process on X**") — use it when
+ * present, else the first sentence; markdown stripped, hard-capped. */
+function summarizeThought(text: string, cap = 90): string {
+  const heading = /\*\*([^*]{4,})\*\*/.exec(text)?.[1];
+  const plain = (heading ?? text).replace(/\*\*|__|`/g, "").trim();
+  const sentence = plain.split(/(?<=[.!?])\s+/)[0] ?? plain;
+  return sentence.length > cap ? sentence.slice(0, cap - 1) + "…" : sentence;
+}
+
 /** Gemini-style thinking: while the agent works, ONE animated headline
  * says what it is doing right now; the step-by-step log lives behind
  * the chevron. Done, it collapses to a quiet summary line. */
@@ -452,7 +462,8 @@ function ThinkingModule({ log, busy, verb, onInspect }: {
     (e) => e.type === "thinking") as
     Extract<ConsoleEvent, { type: "thinking" }> | undefined;
   const headline = busy
-    ? (verb || lastThought?.delta || "Thinking…")
+    ? (verb || (lastThought ? summarizeThought(lastThought.delta)
+                            : "Thinking…"))
     : `Thought through ${steps} step${steps === 1 ? "" : "s"}`;
   return (
     <div className={`think-mod ${busy ? "live" : ""}`}>
@@ -480,13 +491,26 @@ function WorkLog({
     <div className="worklog">
       {log.map((ev, i) => {
         switch (ev.type) {
-          case "thinking":
+          case "thinking": {
+            const head = summarizeThought(ev.delta, 80);
+            const rest = ev.delta.replace(/\*\*|__|`/g, "").trim();
+            const body = rest.startsWith(head.replace(/…$/, ""))
+              ? rest.slice(head.replace(/…$/, "").length).trim() : rest;
             return (
               <div key={i} className="wl-row">
                 <span className="g" aria-hidden>≋</span>
-                <span className="think">{ev.delta}</span>
+                <span className="think">
+                  <b>{head}</b>
+                  {body && (
+                    <span className="think-more">
+                      {" "}{body.length > 220
+                        ? body.slice(0, 219) + "…" : body}
+                    </span>
+                  )}
+                </span>
               </div>
             );
+          }
           case "tool_call":
             return (
               <div key={i} className="wl-row">

@@ -27,7 +27,7 @@ export const BRAND = {
 export const TABS = [
   { id: "ask", label: "Ask", preview: false },
   { id: "products", label: "Data products", preview: false },
-  { id: "graph", label: "Knowledge graph", preview: false },
+  { id: "graph", label: "Context graph", preview: false },
   { id: "knowledge", label: "Bring your knowledge", preview: false },
 ] as const;
 
@@ -145,7 +145,7 @@ export const PRODUCTS = {
 /* ── Knowledge graph — the whole connected picture ────────── */
 
 export const GRAPH = {
-  title: "Knowledge graph",
+  title: "Context graph",
   sub:
     "One connected picture of your data. Every fact is typed by where " +
     "it came from and how strongly it is supported — no single source, " +
