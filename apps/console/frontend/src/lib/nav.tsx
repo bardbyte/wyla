@@ -26,6 +26,14 @@ interface Nav {
   clearHandoff(): void;
   graphAnchor: string | null;
   clearGraphAnchor(): void;
+  /* the live-traversal channel: Ask reports which graph objects the
+   * agent touches (table names / synapse:// refs → last-touch ms);
+   * any graph surface lights them up. */
+  activity: Record<string, number>;
+  reportActivity(keys: string[]): void;
+  clearActivity(): void;
+  agentBusy: boolean;
+  setAgentBusy(busy: boolean): void;
 }
 
 const NavContext = createContext<Nav | null>(null);
@@ -35,6 +43,8 @@ export function NavProvider({ children }: { children: ReactNode }) {
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const [graphAnchor, setGraphAnchor] = useState<string | null>(null);
   const [evidenceRef, setEvidenceRef] = useState<string | null>(null);
+  const [activity, setActivity] = useState<Record<string, number>>({});
+  const [agentBusy, setAgentBusy] = useState(false);
 
   const go = useCallback((t: TabId) => setTab(t), []);
   const askAbout = useCallback(
@@ -50,13 +60,25 @@ export function NavProvider({ children }: { children: ReactNode }) {
   const closeEvidence = useCallback(() => setEvidenceRef(null), []);
   const clearHandoff = useCallback(() => setHandoff(null), []);
   const clearGraphAnchor = useCallback(() => setGraphAnchor(null), []);
+  const reportActivity = useCallback((keys: string[]) => {
+    if (!keys.length) return;
+    const now = Date.now();
+    setActivity((prev) => {
+      const next = { ...prev };
+      for (const k of keys) next[k.toLowerCase()] = now;
+      return next;
+    });
+  }, []);
+  const clearActivity = useCallback(() => setActivity({}), []);
 
   const value = useMemo<Nav>(() => ({
     tab, go, askAbout, goToGraph, openEvidence, evidenceRef,
     closeEvidence, handoff, clearHandoff, graphAnchor, clearGraphAnchor,
+    activity, reportActivity, clearActivity, agentBusy, setAgentBusy,
   }), [tab, go, askAbout, goToGraph, openEvidence, evidenceRef,
        closeEvidence, handoff, clearHandoff, graphAnchor,
-       clearGraphAnchor]);
+       clearGraphAnchor, activity, reportActivity, clearActivity,
+       agentBusy]);
 
   return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
 }

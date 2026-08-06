@@ -76,6 +76,26 @@ export interface GraphMapEdge {
   tier: Tier;
 }
 
+export interface InsightRelationship {
+  kind: "join" | "identifies" | "metric" | "lineage" | "dq";
+  predicate: string; other: string; other_ref: string;
+  sources: string[]; witness: string; tier: Tier;
+}
+
+export interface TableInsights {
+  table: string; found: boolean; ref?: string;
+  description: { curated?: string; ai?: string; tier?: Tier;
+    sources?: string[] };
+  columns: { count?: number; described?: number; pii?: number };
+  relationships: InsightRelationship[];
+  recommendations: { question: string; source: string }[];
+}
+
+export interface AgentSelftest {
+  ok: boolean; runner: string; model?: string; note?: string;
+  error?: string;
+}
+
 export interface GraphMap {
   nodes: GraphMapNode[]; edges: GraphMapEdge[]; truncated: boolean;
 }

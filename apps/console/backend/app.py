@@ -241,6 +241,30 @@ def create_app(runner: Runner | None = None,
     def graph_map() -> dict:
         return app.state.data.graph_map()
 
+    @app.get("/api/graph/insights")
+    def graph_insights(table: str) -> dict:
+        return app.state.data.table_insights(table)
+
+    @app.get("/api/agent/selftest")
+    def agent_selftest() -> dict:
+        """Build the live agent server-side WITHOUT calling Vertex, so
+        'the console doesn't work' names itself: snapshot missing, adk /
+        genai version drift, import errors — each mapped to its fix by
+        _explain_failure. Scripted runner → trivially ok."""
+        runner = app.state.runner
+        if not isinstance(runner, ADKRunner):
+            return {"ok": True, "runner": type(runner).__name__,
+                    "note": "demo transcripts — no live agent to test"}
+        try:
+            runner._ensure()
+            return {"ok": True, "runner": "ADKRunner",
+                    "model": os.environ.get("GEMINI_MODEL",
+                                            "gemini-3.1-pro-preview")}
+        except Exception as exc:
+            from apps.console.backend.runner import _explain_failure
+            return {"ok": False, "runner": "ADKRunner",
+                    "error": _explain_failure(exc)}
+
     @app.get("/api/graph/thread")
     def graph_thread(table: str = "") -> dict:
         return app.state.data.graph_thread(table)

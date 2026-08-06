@@ -22,10 +22,43 @@ import {
   Spinner, TierChip,
 } from "../components/ui";
 import { api } from "../lib/api";
-import { ASK as C } from "../lib/copy";
+import { ASK as C, GRAPH } from "../lib/copy";
 import { useNav } from "../lib/nav";
 import { streamChat } from "../lib/sse";
-import type { AnswerSections, ConsoleEvent } from "../lib/types";
+import { GraphCanvas } from "./Graph";
+import type {
+  AgentSelftest, AnswerSections, ConsoleEvent, GraphMap,
+} from "../lib/types";
+
+/** Pull graph-object mentions out of a streamed event so the map can
+ * light up what the agent touches: synapse:// refs anywhere, plus known
+ * table names appearing in args, SQL, or result summaries. */
+function extractActivity(ev: ConsoleEvent,
+                         known: ReadonlySet<string>): string[] {
+  const found = new Set<string>();
+  const scan = (v: unknown, depth = 0) => {
+    if (depth > 6 || v == null) return;
+    if (typeof v === "string") {
+      for (const m of v.matchAll(/synapse:\/\/[\w./-]+/g)) found.add(m[0]);
+      const low = v.toLowerCase();
+      for (const t of known) if (low.includes(t)) found.add(t);
+      return;
+    }
+    if (Array.isArray(v)) { v.forEach((x) => scan(x, depth + 1)); return; }
+    if (typeof v === "object") {
+      Object.values(v as Record<string, unknown>)
+        .forEach((x) => scan(x, depth + 1));
+    }
+  };
+  switch (ev.type) {
+    case "tool_call": scan(ev.args); scan(ev.args_summary); scan(ev.verb); break;
+    case "tool_result": scan(ev.summary); scan(ev.payload); break;
+    case "sql_gate": scan(ev.sql); break;
+    case "answer": scan(ev.sections.citations); break;
+    default: break;
+  }
+  return [...found];
+}
 
 interface Turn {
   question: string;
@@ -60,6 +93,10 @@ export function AskTab() {
   >([]);
   const [inspect, setInspect] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
+  const [map, setMap] = useState<GraphMap | null>(null);
+  const [showActivity, setShowActivity] = useState(true);
+  const [selftest, setSelftest] = useState<AgentSelftest | null>(null);
+  const knownTables = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -68,6 +105,19 @@ export function AskTab() {
     api.config()
       .then((c) => setDemoMode(c.runner === "ScriptedRunner"))
       .catch(() => undefined);
+    api.graphMap().then((d) => {
+      setMap(d.map);
+      const names = new Set<string>();
+      for (const n of d.map.nodes) {
+        if (n.kind !== "table") continue;
+        const bare = n.label.toLowerCase().split(/[./]/).pop();
+        if (bare && bare.length > 3) names.add(bare);
+      }
+      knownTables.current = names;
+    }).catch(() => setMap(null));
+    // the live agent proves it can START (imports, versions, snapshot)
+    // without spending a token — failures render with their exact fix
+    api.agentSelftest().then(setSelftest).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -79,6 +129,7 @@ export function AskTab() {
       ts.length ? [...ts.slice(0, -1), fn(ts[ts.length - 1])] : ts);
 
   const handleEvent = (ev: ConsoleEvent) => {
+    nav.reportActivity(extractActivity(ev, knownTables.current));
     switch (ev.type) {
       case "turn_start":
         break;
@@ -105,6 +156,7 @@ export function AskTab() {
       case "turn_end":
         patchLast((t) => ({ ...t, done: true }));
         setBusy(false);
+        nav.setAgentBusy(false);
         break;
     }
   };
@@ -117,12 +169,17 @@ export function AskTab() {
     pending.current = [];
     setTurns((ts) => [...ts, newTurn(q)]);
     setBusy(true);
+    nav.clearActivity();          // a fresh traversal per question
+    nav.setAgentBusy(true);
     try {
       for await (const ev of streamChat(q, conversationId.current)) {
         if (gated.current) pending.current.push(ev);
         else handleEvent(ev);
       }
-      if (!gated.current && pending.current.length === 0) setBusy(false);
+      if (!gated.current && pending.current.length === 0) {
+        setBusy(false);
+        nav.setAgentBusy(false);
+      }
     } catch (e) {
       handleEvent({
         type: "error",
@@ -131,6 +188,7 @@ export function AskTab() {
       });
       patchLast((t) => ({ ...t, done: true }));
       setBusy(false);
+      nav.setAgentBusy(false);
     }
   };
 
@@ -165,10 +223,17 @@ export function AskTab() {
   };
 
   return (
+    <div className="ask-wrap">
     <div className="chat">
       {demoMode && (
         <div className="demo-banner" role="alert">
           <span aria-hidden>▲</span> {C.demoBanner}
+        </div>
+      )}
+      {selftest && !selftest.ok && (
+        <div className="notice agent-issue" role="alert">
+          <span aria-hidden>⚠</span>
+          <span><strong>{C.agentIssue}.</strong> {selftest.error}</span>
         </div>
       )}
       <div className="chat-scroll" ref={scrollRef}>
@@ -253,6 +318,36 @@ export function AskTab() {
       {inspect && (
         <WitnessDrawer refUri={inspect} onClose={() => setInspect(null)} />
       )}
+    </div>
+
+    {map && map.nodes.length > 0 && (
+      <aside className={`activity-panel ${showActivity ? "" : "closed"}`}>
+        <div className="ap-head">
+          <span className="h-section">{C.activityTitle}</span>
+          {nav.agentBusy && (
+            <span className="activity-live">
+              <span className="live-dot" aria-hidden /> {GRAPH.liveNow}
+            </span>
+          )}
+          <button type="button" className="toggle-btn"
+            onClick={() => setShowActivity((v) => !v)}>
+            {showActivity ? C.activityClose : C.activityOpen}
+          </button>
+        </div>
+        {showActivity && (
+          <>
+            <GraphCanvas map={map} activity={nav.activity} mini />
+            <div className="ap-foot">
+              <span>{C.activityHint}</span>
+              <button type="button" className="btn quiet"
+                onClick={() => nav.go("graph")}>
+                {C.activityFull} →
+              </button>
+            </div>
+          </>
+        )}
+      </aside>
+    )}
     </div>
   );
 }

@@ -4,12 +4,16 @@
  * the metrics computed from them, and the playbooks that govern them,
  * laid out by a deterministic force simulation (no dependencies, no
  * randomness — same snapshot, same picture). Shape encodes kind so the
- * one reserved data hue never masquerades as brand or evidence. Select
- * a node to inspect its evidence, trace it, or ask about it.
+ * one reserved data hue never masquerades as brand or evidence.
  *
- * Below the map: what the graph knows (counts + evidence levels), where
- * the facts come from (witness weights), and a one-thread drill-down
- * that traces a single data product end to end.
+ * Two behaviors on top of the map:
+ *  - LIVE TRAVERSAL: while the agent answers, the nodes and edges it
+ *    touches light up and pulse (nav.activity, reported by Ask). Idle,
+ *    the whole ecosystem renders calm — ask, and the synapse fires.
+ *  - INSIGHTS: select a table and everything the graph knows about it
+ *    renders below — description (curated vs AI), derived relationships
+ *    with their WITNESSES (declared FK · analyst query log · LLM ·
+ *    curated) and tier, and verified question recommendations.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -20,7 +24,7 @@ import { api } from "../lib/api";
 import { COMMON, ENTITY, GRAPH as C } from "../lib/copy";
 import { useNav } from "../lib/nav";
 import type {
-  GraphMap, GraphMapNode, GraphSummary, ThreadHop, Tier,
+  GraphMap, GraphMapNode, GraphSummary, TableInsights, ThreadHop, Tier,
 } from "../lib/types";
 
 const HOP_ICON: Record<string, string> = {
@@ -32,6 +36,11 @@ const shortName = (s: string) => {
   return tail.length > 22 ? tail.slice(0, 21) + "…" : tail;
 };
 
+/* Traversal highlights are PER-TURN, not time-decayed: a new question
+ * clears the previous traversal (Ask calls nav.clearActivity), and the
+ * touched subgraph stays lit after the answer for show-and-tell. No
+ * wall-clock arithmetic — container/laptop clock steps can't kill it. */
+
 export function GraphTab() {
   const nav = useNav();
   const [summary, setSummary] = useState<GraphSummary | null>(null);
@@ -41,6 +50,7 @@ export function GraphTab() {
   const [inspect, setInspect] = useState<string | null>(null);
   const [tables, setTables] = useState<string[]>([]);
   const [anchor, setAnchor] = useState("");
+  const [sel, setSel] = useState<string | null>(null);
 
   useEffect(() => {
     if (nav.graphAnchor) {
@@ -67,8 +77,20 @@ export function GraphTab() {
       .catch(() => setHops([]));
   }, [anchor]);
 
+  // an anchor handed in from another tab selects its node on the map
+  useEffect(() => {
+    if (!anchor || !map) return;
+    const want = anchor.toLowerCase();
+    const node = map.nodes.find((n) =>
+      n.label.toLowerCase() === want ||
+      n.label.toLowerCase().endsWith("." + want));
+    if (node) setSel(node.id);
+  }, [anchor, map]);
+
   const witnesses = summary ? Object.entries(summary.witnesses) : [];
   const maxW = witnesses.reduce((m, [, n]) => Math.max(m, n), 1);
+  const selNode = sel && map
+    ? map.nodes.find((n) => n.id === sel) ?? null : null;
 
   return (
     <div className="page">
@@ -83,7 +105,14 @@ export function GraphTab() {
 
         {/* ── the whole picture ── */}
         <section className="card card-pad" style={{ marginBottom: "var(--s-5)" }}>
-          <div className="h-section">{C.mapTitle}</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: "var(--s-3)", flexWrap: "wrap" }}>
+            <div className="h-section">{C.mapTitle}</div>
+            {nav.agentBusy && (
+              <span className="activity-live">
+                <span className="live-dot" aria-hidden /> {C.liveNow}
+              </span>
+            )}
+          </div>
           <p style={{ color: "var(--ink-2)", margin: "var(--s-2) 0 var(--s-4)", maxWidth: "60ch" }}>
             {C.mapSub}
           </p>
@@ -94,7 +123,9 @@ export function GraphTab() {
             </div>
           )}
           {map !== null && map.nodes.length > 0 && (
-            <GraphCanvas map={map} onExplore={(t) => setAnchor(t)}
+            <GraphCanvas map={map} activity={nav.activity}
+              selected={sel} onSelect={setSel}
+              onExplore={(t) => setAnchor(t)}
               onAsk={(t) => nav.askAbout(ENTITY.askPrefix + t)}
               onEvidence={(ref) => setInspect(ref)} />
           )}
@@ -104,6 +135,17 @@ export function GraphTab() {
             </p>
           )}
         </section>
+
+        {/* ── insights for the selected table ── */}
+        {selNode && selNode.kind === "table" && (
+          <InsightsPanel table={selNode.label}
+            onInspect={setInspect}
+            onSelectTable={(t) => {
+              const node = map?.nodes.find((n) =>
+                n.label.toLowerCase() === t.toLowerCase());
+              if (node) setSel(node.id);
+            }} />
+        )}
 
         {/* ── what the graph knows · where facts come from ── */}
         <div className="two-col" style={{ marginBottom: "var(--s-5)" }}>
@@ -224,6 +266,125 @@ export function GraphTab() {
   );
 }
 
+/* ── the insights panel (per-table, catalog-style with receipts) ── */
+
+function InsightsPanel({ table, onInspect, onSelectTable }: {
+  table: string;
+  onInspect: (ref: string) => void;
+  onSelectTable: (table: string) => void;
+}) {
+  const nav = useNav();
+  const [ins, setIns] = useState<TableInsights | null>(null);
+
+  useEffect(() => {
+    setIns(null);
+    api.graphInsights(table)
+      .then((d) => setIns(d.insights))
+      .catch(() => setIns(null));
+  }, [table]);
+
+  return (
+    <section className="card card-pad insights" style={{ marginBottom: "var(--s-5)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: "var(--s-3)", flexWrap: "wrap" }}>
+        <div className="h-section">{C.insightsTitle}</div>
+        <span className="ins-table">{table}</span>
+      </div>
+      {ins === null && <Spinner />}
+      {ins !== null && !ins.found && (
+        <div className="empty">{C.pickerEmpty}</div>
+      )}
+      {ins !== null && ins.found && (
+        <>
+          <div className="ins-cols">
+            <div className="ins-desc">
+              {ins.description.curated && (
+                <p className="ins-curated">{ins.description.curated}</p>
+              )}
+              {ins.description.ai && (
+                <p className="ins-ai">
+                  <span className="tag">{C.insightsAiTag}</span>{" "}
+                  {ins.description.ai}
+                </p>
+              )}
+              {!ins.description.curated && !ins.description.ai && (
+                <p style={{ color: "var(--ink-3)" }}>{C.insightsNoDesc}</p>
+              )}
+            </div>
+            <div className="ins-stats">
+              {ins.description.tier && (
+                <TierChip tier={ins.description.tier}
+                  onClick={() => ins.ref && onInspect(ins.ref)} />
+              )}
+              <span className="score"><b>{ins.columns.count ?? 0}</b>{C.insightsColumns}</span>
+              <span className="score"><b>{ins.columns.described ?? 0}</b>{C.insightsDescribed}</span>
+              <span className="score"><b>{ins.columns.pii ?? 0}</b>{C.insightsPii}</span>
+            </div>
+          </div>
+
+          <div className="h-section" style={{ margin: "var(--s-4) 0 var(--s-2)" }}>
+            {C.insightsRels}
+          </div>
+          {ins.relationships.length === 0 && (
+            <div className="empty">{C.insightsNoRels}</div>
+          )}
+          {ins.relationships.length > 0 && (
+            <div className="results-wrap" style={{ margin: 0 }}>
+              <table className="results-table ins-rel-table">
+                <thead>
+                  <tr>
+                    <th>{C.insightsRelKind}</th>
+                    <th>{C.insightsRelPredicate}</th>
+                    <th>{C.insightsRelWitness}</th>
+                    <th>{C.insightsRelTier}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ins.relationships.map((r, i) => (
+                    <tr key={i}>
+                      <td style={{ fontFamily: "var(--font-ui)" }}>
+                        {HOP_ICON[r.kind === "dq" ? "column" : r.kind === "lineage" ? "join" : r.kind] ?? "•"}{" "}
+                        {r.kind}
+                      </td>
+                      <td>{r.predicate}</td>
+                      <td style={{ fontFamily: "var(--font-ui)" }}>
+                        <span className={`witness-chip w-${r.witness.replace(/[^a-z]+/gi, "-").toLowerCase()}`}>
+                          {r.witness}
+                        </span>
+                      </td>
+                      <td style={{ fontFamily: "var(--font-ui)" }}>
+                        <TierChip tier={r.tier} onClick={
+                          r.kind === "join"
+                            ? () => onSelectTable(r.other)
+                            : () => onInspect(r.other_ref)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {ins.recommendations.length > 0 && (
+            <>
+              <div className="h-section" style={{ margin: "var(--s-4) 0 var(--s-2)" }}>
+                {C.insightsRecs}
+              </div>
+              <div className="suggest">
+                {ins.recommendations.map((r) => (
+                  <button key={r.question} type="button"
+                    onClick={() => nav.askAbout(r.question)}>
+                    {r.question}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 /* ── the whole-graph canvas ─────────────────────────────────── */
 
 const W = 960;
@@ -309,13 +470,32 @@ function Glyph({ kind, x, y, r, cls, onClick }: {
   return <circle cx={x} cy={y} r={r} {...common} />;
 }
 
-function GraphCanvas({ map, onExplore, onAsk, onEvidence }: {
+/** Is this node "touched" by the current turn's traversal? Matched by
+ * full synapse:// id or by bare table/metric name (case-insensitive). */
+function isActive(n: GraphMapNode,
+                  activity: Record<string, number>): boolean {
+  const label = n.label.toLowerCase();
+  const bare = label.split(/[./]/).pop() ?? label;
+  return Boolean(activity[n.id.toLowerCase()] ?? activity[label]
+                 ?? activity[bare]);
+}
+
+export function GraphCanvas({
+  map, activity = {}, selected = null, onSelect, mini = false,
+  onExplore, onAsk, onEvidence,
+}: {
   map: GraphMap;
-  onExplore: (table: string) => void;
-  onAsk: (label: string) => void;
-  onEvidence: (ref: string) => void;
+  activity?: Record<string, number>;
+  selected?: string | null;
+  onSelect?: (id: string | null) => void;
+  mini?: boolean;
+  onExplore?: (table: string) => void;
+  onAsk?: (label: string) => void;
+  onEvidence?: (ref: string) => void;
 }) {
-  const [sel, setSel] = useState<string | null>(null);
+  const [localSel, setLocalSel] = useState<string | null>(null);
+  const sel = onSelect ? selected : localSel;
+  const setSel = onSelect ?? setLocalSel;
 
   const sig = map.nodes.map((n) => n.id).join("|") + "#" + map.edges.length;
   const pos = useMemo(() => layout(map.nodes, map.edges), [sig]); // eslint-disable-line
@@ -331,6 +511,12 @@ function GraphCanvas({ map, onExplore, onAsk, onEvidence }: {
     return d;
   }, [sig]); // eslint-disable-line
 
+  const activeIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const n of map.nodes) if (isActive(n, activity)) s.add(n.id);
+    return s;
+  }, [map, activity]);
+
   // neighborhood of the selected node (for dimming the rest)
   const neighbors = useMemo(() => {
     if (!sel) return null;
@@ -343,9 +529,10 @@ function GraphCanvas({ map, onExplore, onAsk, onEvidence }: {
   }, [sel, sig]); // eslint-disable-line
 
   const selNode = sel ? map.nodes.find((n) => n.id === sel) ?? null : null;
+  const traversing = activeIds.size > 0;
 
   return (
-    <div className="graph-canvas-wrap">
+    <div className={`graph-canvas-wrap ${mini ? "mini" : ""}`}>
       <svg className="graph-canvas" viewBox={`0 0 ${W} ${H}`}
         role="img" aria-label="Knowledge graph map"
         onClick={() => setSel(null)}>
@@ -353,13 +540,15 @@ function GraphCanvas({ map, onExplore, onAsk, onEvidence }: {
           {map.edges.map((e, i) => {
             const a = idx.get(e.source); const b = idx.get(e.target);
             if (a == null || b == null) return null;
-            const hot = neighbors
+            const hotSel = neighbors
               ? (e.source === sel || e.target === sel) : false;
-            const dim = neighbors && !hot;
+            const hotAct = activeIds.has(e.source) && activeIds.has(e.target);
+            const dim = (neighbors && !hotSel && !hotAct)
+              || (traversing && !hotAct && !hotSel);
             return (
               <line key={i} x1={pos[a].x} y1={pos[a].y}
                 x2={pos[b].x} y2={pos[b].y}
-                className={`gedge ${hot ? "hot" : ""} ${dim ? "dim" : ""}`} />
+                className={`gedge ${hotSel || hotAct ? "hot" : ""} ${dim ? "dim" : ""}`} />
             );
           })}
         </g>
@@ -368,38 +557,55 @@ function GraphCanvas({ map, onExplore, onAsk, onEvidence }: {
             const p = pos[idx.get(n.id)!];
             const r = 8 + Math.min(10, (degree.get(n.id) ?? 0) * 1.6);
             const isSel = n.id === sel;
-            const dim = neighbors && !neighbors.has(n.id);
+            const act = activeIds.has(n.id);
+            const dim = (neighbors && !neighbors.has(n.id) && !act)
+              || (traversing && !act && n.id !== sel);
+            const showLabel = !mini || act || isSel;
             return (
               <g key={n.id} className={`gnode-g ${dim ? "dim" : ""}`}>
+                {act && (
+                  <>
+                    <circle cx={p.x} cy={p.y} r={r + 6}
+                      className="gnode-ring" aria-hidden />
+                    <circle cx={p.x} cy={p.y} r={r + 6}
+                      className="gnode-halo" aria-hidden />
+                  </>
+                )}
                 <Glyph kind={n.kind} x={p.x} y={p.y} r={r}
-                  cls={`gnode k-${n.kind} ${isSel ? "sel" : ""}`}
+                  cls={`gnode k-${n.kind} ${isSel ? "sel" : ""} ${act ? "active" : ""}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     setSel(isSel ? null : n.id);
                   }} />
-                <text x={p.x} y={p.y + r + 12} className="glabel"
-                  textAnchor="middle">{shortName(n.label)}</text>
+                {showLabel && (
+                  <text x={p.x} y={p.y + r + 12}
+                    className={`glabel ${act ? "active" : ""} ${mini ? "mini" : ""}`}
+                    textAnchor="middle">{shortName(n.label)}</text>
+                )}
               </g>
             );
           })}
         </g>
       </svg>
 
-      <div className="graph-legend" aria-hidden>
-        <span><i className="lg-shape lg-table" /> {C.kinds.table}</span>
-        <span><i className="lg-shape lg-entity" /> {C.kinds.entity}</span>
-        <span><i className="lg-shape lg-metric" /> {C.kinds.metric}</span>
-        <span><i className="lg-shape lg-skill" /> {C.kinds.skill}</span>
-      </div>
+      {!mini && (
+        <div className="graph-legend" aria-hidden>
+          <span><i className="lg-shape lg-table" /> {C.kinds.table}</span>
+          <span><i className="lg-shape lg-entity" /> {C.kinds.entity}</span>
+          <span><i className="lg-shape lg-metric" /> {C.kinds.metric}</span>
+          <span><i className="lg-shape lg-skill" /> {C.kinds.skill}</span>
+        </div>
+      )}
 
-      {selNode && (
+      {!mini && selNode && (
         <div className="graph-inspect card">
           <div className="gi-head">
             <div>
               <div className="gi-kind">{C.kinds[selNode.kind] ?? selNode.kind}</div>
               <div className="gi-label">{shortName(selNode.label)}</div>
             </div>
-            <TierChip tier={selNode.tier} onClick={() => onEvidence(selNode.id)} />
+            <TierChip tier={selNode.tier}
+              onClick={() => onEvidence?.(selNode.id)} />
           </div>
           {selNode.kind === "table" && (
             <div className="gi-facts">
@@ -413,13 +619,13 @@ function GraphCanvas({ map, onExplore, onAsk, onEvidence }: {
           )}
           <div className="gi-actions">
             <button type="button" className="btn quiet"
-              onClick={() => onEvidence(selNode.id)}>{ENTITY.evidence}</button>
+              onClick={() => onEvidence?.(selNode.id)}>{ENTITY.evidence}</button>
             {selNode.kind === "table" && (
               <button type="button" className="btn quiet"
-                onClick={() => onExplore(selNode.label)}>{ENTITY.explore}</button>
+                onClick={() => onExplore?.(selNode.label)}>{ENTITY.explore}</button>
             )}
             <button type="button" className="btn quiet"
-              onClick={() => onAsk(selNode.label)}>{ENTITY.ask}</button>
+              onClick={() => onAsk?.(selNode.label)}>{ENTITY.ask}</button>
           </div>
         </div>
       )}

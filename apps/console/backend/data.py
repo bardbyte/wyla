@@ -445,6 +445,144 @@ class ConsoleData:
         return self._wrap("map", {"nodes": nodes, "edges": edges,
                                   "truncated": truncated})
 
+    def table_insights(self, table: str) -> dict[str, Any]:
+        """Everything the graph knows about ONE table — the Insights
+        view. Mirrors a catalog's per-dataset insights (description,
+        derived relationships, query recommendations) but every
+        relationship carries its WITNESSES: who asserted it (declared
+        FK, analyst query log, LLM, steward) and at what tier — the
+        receipts a catalog's flat "LLM-inferred" label lacks."""
+        from synapse.graph.store import canonical_uri
+        empty = {"table": table, "found": False, "description": {},
+                 "columns": {}, "relationships": [], "recommendations": []}
+        if not self.live:
+            return self._wrap("insights", empty)
+        node = self._find_table_node(table)
+        if node is None:
+            return self._wrap("insights", empty)
+        t_uri = node.canonical_uri
+        name = node.properties.get("table_name", table)
+
+        col_uris = [e.to_uri for e in self.store.outgoing(t_uri, "CONTAINS")]
+        col_set = set(col_uris)
+        n_desc = n_pii = 0
+        col_names: list[str] = []
+        for c in col_uris:
+            cn = self.store.get(c)
+            if cn is None:
+                continue
+            col_names.append(c.rsplit("/", 1)[-1])
+            if (cn.properties.get("description")
+                    or cn.properties.get("ai_generated_description")):
+                n_desc += 1
+            if cn.properties.get("is_pii"):
+                n_pii += 1
+
+        def _witness(edge) -> str:
+            """One legible label per relationship — the curation story."""
+            srcs = set(edge.provenance.sources)
+            if "human_approval" in srcs:
+                return "curated"
+            if "bq" in srcs and (edge.properties.get("constraint")
+                                 == "foreign_key"):
+                return "declared FK"
+            if "corpus" in srcs:
+                return "query log (analyst)"
+            if "llm_generated" in srcs:
+                return "LLM-inferred"
+            return next(iter(srcs), "unknown")
+
+        def _colname(uri: str) -> str:
+            return (uri.rsplit("/", 2)[-2] + "." + uri.rsplit("/", 1)[-1])
+
+        rels: list[dict[str, Any]] = []
+        for e in self.store.edges.values():
+            row: dict[str, Any] | None = None
+            if e.edge_type == "EQUIVALENT_TO" and (
+                    e.from_uri in col_set or e.to_uri in col_set):
+                other = e.to_uri if e.from_uri in col_set else e.from_uri
+                row = {"kind": "join",
+                       "predicate": f"{_colname(e.from_uri)} = "
+                                    f"{_colname(e.to_uri)}",
+                       "other": other.rsplit("/", 2)[-2],
+                       "other_ref": canonical_uri(
+                           "table", other.rsplit("/", 2)[-2])}
+            elif e.edge_type == "IDENTIFIES" and e.from_uri in col_set:
+                ent = self.store.get(e.to_uri)
+                label = (ent.properties.get("name")
+                         if ent else e.to_uri.rsplit("/", 1)[-1])
+                row = {"kind": "identifies",
+                       "predicate": f"{_colname(e.from_uri)} identifies "
+                                    f"{label}",
+                       "other": str(label), "other_ref": e.to_uri}
+            elif e.edge_type == "COMPUTED_FROM" and e.to_uri in col_set:
+                m = self.store.get(e.from_uri)
+                label = (m.properties.get("name")
+                         if m else e.from_uri.rsplit("/", 1)[-1])
+                row = {"kind": "metric",
+                       "predicate": f"{label} computed from "
+                                    f"{_colname(e.to_uri)}",
+                       "other": str(label), "other_ref": e.from_uri}
+            elif e.edge_type == "UPSTREAM_OF" and (
+                    e.from_uri == t_uri or e.to_uri == t_uri):
+                other = e.to_uri if e.from_uri == t_uri else e.from_uri
+                direction = ("feeds" if e.from_uri == t_uri else "fed by")
+                row = {"kind": "lineage",
+                       "predicate": f"{name} {direction} "
+                                    f"{other.rsplit('/', 1)[-1]}",
+                       "other": other.rsplit("/", 1)[-1],
+                       "other_ref": other}
+            elif e.edge_type == "VALIDATED_BY" and e.from_uri in (
+                    col_set | {t_uri}):
+                rule = self.store.get(e.to_uri)
+                kindname = (rule.properties.get("rule_kind", "rule")
+                            if rule else "rule")
+                row = {"kind": "dq",
+                       "predicate": f"{_colname(e.from_uri)} validated by "
+                                    f"{kindname}",
+                       "other": str(kindname), "other_ref": e.to_uri}
+            if row is not None:
+                row["sources"] = list(e.provenance.sources)
+                row["witness"] = _witness(e)
+                row["tier"] = e.provenance.confidence_tier
+                rels.append(row)
+        order = {"join": 0, "identifies": 1, "metric": 2, "lineage": 3,
+                 "dq": 4}
+        rels.sort(key=lambda r: (order.get(r["kind"], 9), r["predicate"]))
+
+        recs: list[dict[str, str]] = []
+        qs = self.questions().get("questions") or []
+        needles = {_norm(name)} | {_norm(c) for c in col_names if len(c) > 3}
+        for q in qs:
+            qn = _norm(q.get("question", ""))
+            if any(nd and nd in qn for nd in needles):
+                recs.append({"question": q["question"],
+                             "source": "verified"})
+        for m_uri in {r["other_ref"] for r in rels if r["kind"] == "metric"}:
+            m = self.store.get(m_uri)
+            if m is None or len(recs) >= 6:
+                continue
+            mn = m.properties.get("name", "")
+            if mn and not any(mn.lower() in r["question"].lower()
+                              for r in recs):
+                recs.append({"question": f"What is the {mn} for {name}?",
+                             "source": "observed metric"})
+
+        return self._wrap("insights", {
+            "table": name, "found": True, "ref": t_uri,
+            "description": {
+                "curated": str(node.properties.get("description") or ""),
+                "ai": str(node.properties.get(
+                    "ai_generated_description") or ""),
+                "tier": node.provenance.confidence_tier,
+                "sources": list(node.provenance.sources),
+            },
+            "columns": {"count": len(col_uris), "described": n_desc,
+                        "pii": n_pii},
+            "relationships": rels[:40],
+            "recommendations": recs[:6],
+        })
+
     # ── metrics ──────────────────────────────────────────────
 
     def metrics(self, q: str = "") -> dict[str, Any]:

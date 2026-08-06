@@ -2,8 +2,8 @@
  * payload plus its `live` flag so callers can label sample data. */
 
 import type {
-  AppConfig, GraphMap, GraphSummary, LexiconEntry, Metric, Pin, PinRun,
-  Product, ThreadHop, Unit, Viability, Witness,
+  AgentSelftest, AppConfig, GraphMap, GraphSummary, LexiconEntry, Metric,
+  Pin, PinRun, Product, TableInsights, ThreadHop, Unit, Viability, Witness,
 } from "./types";
 
 async function post<T>(url: string, body: unknown,
@@ -42,6 +42,12 @@ export const api = {
 
   graphMap: () =>
     get<Live<{ map: GraphMap }>>("/api/graph/map"),
+
+  graphInsights: (table: string) =>
+    get<Live<{ insights: TableInsights }>>(
+      `/api/graph/insights?table=${encodeURIComponent(table)}`),
+
+  agentSelftest: () => get<AgentSelftest>("/api/agent/selftest"),
 
   metrics: (q = "") =>
     get<Live<{ metrics: Metric[] }>>(

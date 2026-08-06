@@ -98,6 +98,14 @@ export const ASK = {
     "Demo mode — scripted transcripts, not the live agent. Unset " +
     "SYNAPSE_CONSOLE_RUNNER (or set it to adk) and restart the server " +
     "to chat with Gemini.",
+  activityTitle: "Synapse activity",
+  activityHint:
+    "The part of the graph the agent touches lights up as it works. " +
+    "Idle, you see the whole ecosystem.",
+  activityOpen: "Show activity",
+  activityClose: "Hide activity",
+  activityFull: "Open the full graph",
+  agentIssue: "The live agent can't start on this server",
 };
 
 /* ── Data products — "we know your business", by unit ─────── */
@@ -170,6 +178,23 @@ export const GRAPH = {
   nodes: "Facts",
   edges: "Connections",
   openEvidence: "Select any step to inspect its evidence.",
+  liveNow: "agent working — watching the traversal",
+  insightsTitle: "Insights",
+  insightsAiTag: "AI-generated",
+  insightsNoDesc:
+    "No description yet. Ask the agent about this table, or assert one " +
+    "in Bring your knowledge.",
+  insightsColumns: "columns",
+  insightsDescribed: "described",
+  insightsPii: "PII",
+  insightsRels: "Derived relationships — each with its witnesses",
+  insightsNoRels:
+    "No relationships recorded for this table in the current snapshot.",
+  insightsRelKind: "Kind",
+  insightsRelPredicate: "Relationship",
+  insightsRelWitness: "Witness",
+  insightsRelTier: "Evidence",
+  insightsRecs: "Questions you can ask about this table",
 };
 
 /* ── Bring your knowledge — the partnership close (P5) ─────── */
