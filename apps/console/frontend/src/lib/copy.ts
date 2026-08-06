@@ -196,6 +196,12 @@ export const GRAPH = {
   insightsRelWitness: "Witness",
   insightsRelTier: "Evidence",
   insightsRecs: "Questions you can ask about this table",
+  viewLabel: "Map view",
+  viewConstellation: "Constellation",
+  viewOrbits: "Trust orbits",
+  orbitsCaption:
+    "Trust as radius — signed at the centre, unverified at the rim. " +
+    "Steward work literally pulls facts inward.",
 };
 
 /* ── Bring your knowledge — the partnership close (P5) ─────── */

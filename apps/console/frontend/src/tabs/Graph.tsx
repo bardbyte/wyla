@@ -38,6 +38,8 @@ export function GraphTab() {
   const [tables, setTables] = useState<string[]>([]);
   const [anchor, setAnchor] = useState("");
   const [sel, setSel] = useState<string | null>(null);
+  const [variant, setVariant] =
+    useState<"constellation" | "orbits">("constellation");
 
   useEffect(() => {
     if (nav.graphAnchor) {
@@ -99,8 +101,21 @@ export function GraphTab() {
                 <span className="live-dot" aria-hidden /> {C.liveNow}
               </span>
             )}
+            <div className="view-toggle" role="tablist"
+              aria-label={C.viewLabel}>
+              <button type="button" role="tab"
+                aria-selected={variant === "constellation"}
+                onClick={() => setVariant("constellation")}>
+                {C.viewConstellation}
+              </button>
+              <button type="button" role="tab"
+                aria-selected={variant === "orbits"}
+                onClick={() => setVariant("orbits")}>
+                {C.viewOrbits}
+              </button>
+            </div>
             <span style={{ marginLeft: "auto", color: "var(--ink-3)", fontSize: "var(--fs-12)" }}>
-              {C.mapSub}
+              {variant === "orbits" ? C.orbitsCaption : C.mapSub}
             </span>
           </div>
           {map === null && <div style={{ padding: "var(--s-5)" }}><Spinner /></div>}
@@ -111,7 +126,7 @@ export function GraphTab() {
           )}
           {map !== null && map.nodes.length > 0 && (
             <SpaceCanvas map={map} activity={nav.activity}
-              selected={sel} onSelect={setSel}
+              selected={sel} onSelect={setSel} variant={variant}
               verb={nav.traversalVerb} />
           )}
           {map?.truncated && (

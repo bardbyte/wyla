@@ -21,8 +21,8 @@
 import { useMemo, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import {
-  SPACE_H, SPACE_W, STRIP_H, STRIP_W, hash01, isActive, layoutSpine,
-  shortName,
+  SPACE_H, SPACE_W, STRIP_H, STRIP_W, TIER_ORBIT, hash01, isActive,
+  layoutOrbits, layoutSpine, shortName,
 } from "../lib/graphLayout";
 import type { GraphMap, GraphMapNode } from "../lib/types";
 
@@ -61,7 +61,7 @@ function Glyph({ kind, x, y, r, fill, cls, onClick }: {
 
 export function SpaceCanvas({
   map, activity = {}, selected = null, onSelect, backdrop = false,
-  portrait = false, verb = "",
+  portrait = false, verb = "", listening = [], variant = "constellation",
 }: {
   map: GraphMap;
   activity?: Record<string, number>;
@@ -73,6 +73,10 @@ export function SpaceCanvas({
   portrait?: boolean;
   /** the agent's current tool verb, floated in-space while it works */
   verb?: string;
+  /** anticipation: node ids that match the question being TYPED */
+  listening?: string[];
+  /** orbits = trust as radius: signed at the centre, vapour at the rim */
+  variant?: "constellation" | "orbits";
 }) {
   const [localSel, setLocalSel] = useState<string | null>(null);
   const sel = onSelect ? selected : localSel;
@@ -81,9 +85,12 @@ export function SpaceCanvas({
   const W = portrait ? STRIP_W : SPACE_W;
   const H = portrait ? STRIP_H : SPACE_H;
   const sig = map.nodes.map((n) => n.id).join("|") + "#" + map.edges.length
-    + `@${W}x${H}`;
+    + `@${W}x${H}#${variant}`;
   /* eslint-disable react-hooks/exhaustive-deps */
-  const pos = useMemo(() => layoutSpine(map.nodes, map.edges, W, H), [sig]);
+  const pos = useMemo(
+    () => (variant === "orbits"
+      ? layoutOrbits(map.nodes, W, H)
+      : layoutSpine(map.nodes, map.edges, W, H)), [sig]);
   const idx = useMemo(
     () => new Map(map.nodes.map((n, i) => [n.id, i])), [sig]);
   const degree = useMemo(() => {
@@ -125,6 +132,7 @@ export function SpaceCanvas({
     return s;
   }, [map, activity]);
   const traversing = activeIds.size > 0;
+  const listenIds = useMemo(() => new Set(listening), [listening]);
 
   const nodeR = (n: GraphMapNode) =>
     (n.kind === "table" ? 9 : 7)
@@ -164,6 +172,18 @@ export function SpaceCanvas({
         {/* the breathing core of the synapse */}
         <circle cx={W / 2} cy={H / 2} r={Math.min(W, H) * 0.235}
           fill="url(#sp-core)" className="sp-corepulse" />
+        {/* trust orbits: signed at the centre, vapour at the rim */}
+        {variant === "orbits" && (
+          <g aria-hidden>
+            {Object.entries(TIER_ORBIT)
+              .filter(([t]) => t !== "deprecated")
+              .map(([t, f]) => (
+                <ellipse key={t} cx={W / 2} cy={H / 2}
+                  rx={(W / 2 - 130) * f} ry={(H / 2 - 64) * f}
+                  className={`sp-orbit ${t === "human_asserted" ? "gold" : ""}`} />
+              ))}
+          </g>
+        )}
 
         {/* constellation edges */}
         <g>
@@ -205,7 +225,8 @@ export function SpaceCanvas({
               || (sel != null && !isSel && !act);
             const sats = n.kind === "table"
               ? Math.min(n.columns ?? 0, 18) : 0;
-            const showLabel = !backdrop || act || isSel;
+            const listen = listenIds.has(n.id) && !act;
+            const showLabel = !backdrop || act || isSel || listen;
             return (
               <g key={n.id} className={`sp-node ${dim ? "dim" : ""}`}>
                 {/* orbit satellites: the table's columns, as tiny stars */}
@@ -223,6 +244,10 @@ export function SpaceCanvas({
                       );
                     })}
                   </g>
+                )}
+                {listen && (
+                  <circle cx={p.x} cy={p.y} r={r + 7}
+                    className="sp-listen" />
                 )}
                 {act && (
                   <>
@@ -245,7 +270,7 @@ export function SpaceCanvas({
                 {showLabel && (
                   <text x={p.x}
                     y={labelUp.has(n.id) ? p.y - r - 10 : p.y + r + 16}
-                    className={`sp-label ${act || isSel ? "hot" : ""}`}
+                    className={`sp-label ${act || isSel ? "hot" : ""} ${listen ? "listen" : ""}`}
                     textAnchor="middle">{shortName(n.label)}</text>
                 )}
               </g>

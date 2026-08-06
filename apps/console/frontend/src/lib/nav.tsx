@@ -36,6 +36,10 @@ interface Nav {
   setAgentBusy(busy: boolean): void;
   traversalVerb: string;
   setTraversalVerb(v: string): void;
+  /* anticipation: while the user TYPES, nodes matching the draft
+   * question glimmer — the space is listening (mockup treatment B/C) */
+  listening: string[];
+  setListening(keys: string[]): void;
 }
 
 const NavContext = createContext<Nav | null>(null);
@@ -48,6 +52,7 @@ export function NavProvider({ children }: { children: ReactNode }) {
   const [activity, setActivity] = useState<Record<string, number>>({});
   const [agentBusy, setAgentBusy] = useState(false);
   const [traversalVerb, setTraversalVerb] = useState("");
+  const [listening, setListening] = useState<string[]>([]);
 
   const go = useCallback((t: TabId) => setTab(t), []);
   const askAbout = useCallback(
@@ -78,11 +83,11 @@ export function NavProvider({ children }: { children: ReactNode }) {
     tab, go, askAbout, goToGraph, openEvidence, evidenceRef,
     closeEvidence, handoff, clearHandoff, graphAnchor, clearGraphAnchor,
     activity, reportActivity, clearActivity, agentBusy, setAgentBusy,
-    traversalVerb, setTraversalVerb,
+    traversalVerb, setTraversalVerb, listening, setListening,
   }), [tab, go, askAbout, goToGraph, openEvidence, evidenceRef,
        closeEvidence, handoff, clearHandoff, graphAnchor,
        clearGraphAnchor, activity, reportActivity, clearActivity,
-       agentBusy, traversalVerb]);
+       agentBusy, traversalVerb, listening]);
 
   return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
 }

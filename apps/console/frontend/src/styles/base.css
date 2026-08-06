@@ -858,3 +858,95 @@ code, pre { font-family: var(--font-mono); font-size: var(--fs-12); }
   .eval-check { grid-template-columns: 22px 1fr; }
   .ec-expl { grid-column: 2; }
 }
+
+/* ── Paper & light (from the Synapse mockups) ────────────── */
+
+/* the finding plate: the answer is PAPER — ivory, serif, printed,
+   still — whatever the app theme. The human record. */
+.answer-card.card {
+  background: var(--paper);
+  border-color: var(--paper-rule);
+  color: var(--paper-ink);
+}
+.finding-eyebrow {
+  display: block; font-family: var(--font-label);
+  font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.16em;
+  text-transform: uppercase; color: #8A6320;
+  margin-bottom: var(--s-2);
+}
+.answer-card .brief-answer {
+  font-family: var(--font-display); font-optical-sizing: auto;
+  font-size: var(--fs-28); font-weight: 560; line-height: 1.12;
+  letter-spacing: -0.01em; color: var(--paper-ink);
+  max-width: 24em;
+}
+.answer-card .brief-answer strong { font-weight: 700; }
+.answer-card .h-section { color: #8A6320; }
+.answer-card .ac-block { border-top: 1px solid var(--paper-rule); }
+.answer-card .cite {
+  background: transparent; border: 0; border-radius: 0;
+  border-bottom: 1px solid var(--paper-ink-soft);
+  font-family: var(--font-mono); color: var(--paper-ink);
+  padding: 2px 0;
+}
+.answer-card .cite:hover { color: #8A6320; border-color: #8A6320; }
+.answer-card .cite .ref { color: var(--paper-ink-soft); }
+.answer-card .ac-foot { color: var(--paper-ink-soft);
+  border-top: 1px solid var(--paper-rule); }
+.answer-card .ac-foot .tag {
+  background: transparent; border: 1px solid var(--paper-rule);
+  color: var(--paper-ink-soft);
+}
+.answer-card details p { color: var(--paper-ink-soft) !important; }
+.answer-card :focus-visible { outline-color: #8A6320; }
+
+/* anticipation: the sky listens while you type (mockup 1h, B + C) */
+.listen-tally {
+  display: flex; align-items: center; gap: var(--s-4);
+  margin-top: var(--s-2); padding: 0 var(--s-2);
+  font-family: var(--font-mono); font-size: var(--fs-11);
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--agent-cyan);
+}
+.listen-best {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  font-family: var(--font-mono); font-size: var(--fs-11);
+  letter-spacing: 0.04em; text-transform: none;
+  color: var(--ink-2); padding: 0;
+  border-bottom: 1px dotted var(--ink-3);
+}
+.listen-best:hover { color: var(--ink); }
+.listen-best em {
+  font-style: normal; margin-left: var(--s-2);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.listen-best .lt-human_asserted, .listen-best .lt-grounded { color: var(--tier-high); }
+.listen-best .lt-inferred, .lt-inferred { color: var(--tier-mid); }
+.listen-best .lt-guessed, .lt-guessed { color: var(--tier-low); }
+.sp-listen {
+  fill: none; stroke: #5FD4F2; stroke-width: 1.2;
+  stroke-dasharray: 3 4; opacity: 0.8;
+  animation: sp-listenspin 9s linear infinite;
+  transform-box: fill-box; transform-origin: center;
+}
+@keyframes sp-listenspin { to { transform: rotate(360deg); } }
+.sp-label.listen { fill: #5FD4F2; opacity: 0.95; }
+
+/* trust orbits (mockup 1f): signed at the centre, vapour at the rim */
+.sp-orbit { fill: none; stroke: rgba(138, 155, 181, 0.13); stroke-width: 1; }
+.sp-orbit.gold { stroke: rgba(217, 164, 65, 0.28); }
+
+.view-toggle { display: inline-flex; gap: 2px; margin-left: var(--s-4);
+  border: 1px solid var(--line); border-radius: 999px; padding: 2px; }
+.view-toggle button {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: var(--fs-11); font-weight: 600;
+  color: var(--ink-3); padding: 3px 12px; border-radius: 999px;
+}
+.view-toggle button[aria-selected="true"] {
+  background: var(--accent-soft); color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-listen { animation: none; }
+}

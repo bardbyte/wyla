@@ -14,7 +14,7 @@
  * Bring your knowledge.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RefText } from "../components/EntityRef";
 import { WitnessDrawer } from "../components/WitnessDrawer";
 import {
@@ -22,7 +22,7 @@ import {
   Spinner, TierChip,
 } from "../components/ui";
 import { api } from "../lib/api";
-import { ASK as C, EVALS, GRAPH } from "../lib/copy";
+import { ASK as C, EVALS, GRAPH, TIERS } from "../lib/copy";
 import { useNav } from "../lib/nav";
 import { streamChat } from "../lib/sse";
 import { SpaceCanvas } from "../components/SpaceCanvas";
@@ -58,6 +58,41 @@ function extractActivity(ev: ConsoleEvent,
     default: break;
   }
   return [...found];
+}
+
+/** Anticipation (mockup 1h, treatments B+C): while the user types,
+ * nodes matching the draft glimmer in the sky, a mono tally counts
+ * them, and the strongest match whispers its name. */
+function computeListening(q: string, map: GraphMap | null): {
+  ids: string[]; nMetrics: number; nTables: number;
+  best: { ref: string; label: string; tier: string } | null;
+} {
+  const none = { ids: [], nMetrics: 0, nTables: 0, best: null };
+  if (!map || q.trim().length < 4) return none;
+  const tokens = q.toLowerCase().split(/[^a-z0-9_]+/)
+    .filter((t) => t.length >= 4);
+  if (!tokens.length) return none;
+  const hits: { id: string; label: string; kind: string; tier: string;
+                score: number }[] = [];
+  for (const n of map.nodes) {
+    const label = n.label.toLowerCase();
+    const bare = label.split(/[./]/).pop() ?? label;
+    let score = 0;
+    for (const t of tokens)
+      if (label.includes(t) || bare.includes(t)) score += t.length;
+    if (score > 0) hits.push({ id: n.id, label: n.label, kind: n.kind,
+                               tier: n.tier, score });
+  }
+  hits.sort((a, b) => b.score - a.score);
+  const top = hits.slice(0, 6);
+  const best = top[0] && top[0].score >= 8 ? top[0] : null;
+  return {
+    ids: top.map((h) => h.id),
+    nMetrics: top.filter((h) => h.kind === "metric").length,
+    nTables: top.filter((h) => h.kind === "table").length,
+    best: best ? { ref: best.id, label: best.label, tier: best.tier }
+               : null,
+  };
 }
 
 interface Turn {
@@ -124,6 +159,14 @@ export function AskTab() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [turns, busy]);
+
+  /* the sky listens while you type; the traversal owns it once you ask */
+  const anticipation = useMemo(
+    () => computeListening(question, map), [question, map]);
+  useEffect(() => {
+    nav.setListening(busy ? [] : anticipation.ids);
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [anticipation, busy]);
 
   const patchLast = (fn: (t: Turn) => Turn) =>
     setTurns((ts) =>
@@ -339,6 +382,29 @@ export function AskTab() {
             {C.send}
           </button>
         </div>
+        {!busy && anticipation.ids.length > 0 && (
+          <div className="listen-tally" aria-live="polite">
+            <span>
+              {anticipation.ids.length} nodes listening
+              {anticipation.nMetrics > 0 &&
+                ` · ${anticipation.nMetrics} metric${
+                  anticipation.nMetrics > 1 ? "s" : ""}`}
+              {anticipation.nTables > 0 &&
+                ` · ${anticipation.nTables} table${
+                  anticipation.nTables > 1 ? "s" : ""}`}
+            </span>
+            {anticipation.best && (
+              <button type="button" className="listen-best"
+                onClick={() => nav.openEvidence(anticipation.best!.ref)}>
+                {anticipation.best.ref}
+                <em className={`lt-${anticipation.best.tier}`}>
+                  {TIERS[anticipation.best.tier as keyof typeof TIERS]
+                    ?.word ?? anticipation.best.tier}
+                </em>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {inspect && (
@@ -362,7 +428,7 @@ export function AskTab() {
         </div>
         <div className="sp-holder">
           <SpaceCanvas map={map} activity={nav.activity} backdrop portrait
-            verb={nav.traversalVerb} />
+            listening={nav.listening} verb={nav.traversalVerb} />
         </div>
         <div className="ap-foot">
           <span>{C.activityHint}</span>
@@ -483,6 +549,7 @@ function AnswerCard({
 }) {
   return (
     <div className="answer-card card card-pad">
+      <span className="finding-eyebrow">Finding</span>
       <p className="brief-answer">
         <RefText text={sections.answer} />
       </p>

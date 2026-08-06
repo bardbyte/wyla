@@ -72,6 +72,31 @@ export function layoutSpine(nodes: GraphMapNode[],
   return pos;
 }
 
+/* trust-as-radius (mockup 1f): signed at the centre, vapour at the
+ * rim — the sky's goldenness becomes spatial. Deterministic polar
+ * placement: radius from tier, angle golden-stepped by sort order. */
+export const TIER_ORBIT: Record<string, number> = {
+  human_asserted: 0.22, grounded: 0.44, inferred: 0.66,
+  guessed: 0.88, deprecated: 0.97,
+};
+
+export function layoutOrbits(nodes: GraphMapNode[],
+                             W: number = SPACE_W,
+                             H: number = SPACE_H): Pt[] {
+  const cx = W / 2, cy = H / 2;
+  const RX = W / 2 - 130, RY = H / 2 - 64;
+  const order = nodes.map((_, i) => i)
+    .sort((a, b) => nodes[a].id.localeCompare(nodes[b].id));
+  const rank = new Map(order.map((idx, k) => [idx, k]));
+  return nodes.map((n, i) => {
+    const k = rank.get(i) ?? i;
+    const f = TIER_ORBIT[n.tier] ?? 0.88;
+    const ang = k * 2.39996 + hash01(k * 13 + 7) * 0.5;
+    return { x: cx + Math.cos(ang) * RX * f,
+             y: cy + Math.sin(ang) * RY * f };
+  });
+}
+
 export const shortName = (s: string): string => {
   const tail = s.split(/[./]/).pop() ?? s;
   return tail.length > 24 ? tail.slice(0, 23) + "…" : tail;
