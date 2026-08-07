@@ -329,7 +329,8 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     catalog_aliases = None
     if getattr(args, "table_aliases", "") and (
             getattr(args, "dmp_export", "")
-            or getattr(args, "measures_catalog", "")):
+            or getattr(args, "measures_catalog", "")
+            or getattr(args, "domain_tags", "")):
         from synapse.loaders.measures_catalog_loader import load_table_aliases
         catalog_aliases = load_table_aliases(
             Path(args.table_aliases).expanduser())
@@ -381,6 +382,29 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         run_report["measures"] = mm_res
         stats = store.stats()
         _note(f"by tier now: {stats['nodes_by_confidence_tier']}")
+
+    # ── 6c2. Steward domain tags (human_approval witness) ────
+    #         The curated Company Domain → tables map. Runs AFTER every
+    #         machine loader so the human assignment overrides mined and
+    #         crawled labels; the rollup below then derives
+    #         steward-asserted BusinessUnit nodes from it.
+    steward_descriptions: dict[str, str] = {}
+    if getattr(args, "domain_tags", ""):
+        _stage("Steward domain tags → human_approval witness (ceiling)")
+        from synapse.loaders.domain_tags_loader import load_domain_tags
+        dt_res = load_domain_tags(
+            store, Path(args.domain_tags).expanduser(),
+            aliases=catalog_aliases)
+        steward_descriptions = dt_res.pop("descriptions", {})
+        _note(f"{dt_res['domains']} domain(s) → "
+              f"{dt_res['tables_stamped']} table(s) stamped")
+        if dt_res["stubs_minted"]:
+            _note(f"{len(dt_res['stubs_minted'])} tagged table(s) not yet "
+                  f"crawled — minted as stubs: "
+                  f"{', '.join(dt_res['stubs_minted'][:6])}")
+        for reason in dt_res["skipped"][:8]:
+            _note(f"⚠ skipped: {reason}")
+        run_report["domain_tags"] = dt_res
 
     # ── 6d. LLM enrichment (witness #5) — batched, opt-in, budgeted ──
     #        One Gemini call per ≤batch-size columns; wide tables get
@@ -577,6 +601,32 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             _note(f"post-enrichment tiers: "
                   f"{stats['nodes_by_confidence_tier']}")
 
+    # ── 6d2. Business-unit rollup — the segment level, derived ──
+    #         Always runs (cheap, idempotent): lifts the business_unit
+    #         property tables carry into first-class BusinessUnit nodes
+    #         with evidence-derived descriptions and inherited witnesses,
+    #         so search can route segment-first. Append builds recompute
+    #         it from what the tables now say.
+    from synapse.graph.rollup import rollup_business_units
+    _stage("Business-unit rollup — segment level from member evidence")
+    rollup_report = rollup_business_units(store)
+    if steward_descriptions:
+        from synapse.loaders.domain_tags_loader import (
+            apply_steward_descriptions)
+        n_desc = apply_steward_descriptions(store, steward_descriptions)
+        _note(f"{n_desc} unit description(s) overridden by the steward")
+    if rollup_report["business_units"]:
+        for unit in rollup_report["units"]:
+            _note(f"{unit['business_unit'][:34]:34} "
+                  f"{unit['tables']:>3} table(s) {unit['metrics']:>4} "
+                  f"metric(s)  {unit['tier']}")
+        if rollup_report["tables_without_business_unit"]:
+            _note(f"{rollup_report['tables_without_business_unit']} "
+                  "table(s) carry no business_unit — MDM crawl gap")
+    else:
+        _note("no table carries a business_unit — rollup skipped")
+    run_report["business_unit_rollup"] = rollup_report
+
     # ── 6e. Context-readiness scorecard ──────────────────────
     #        Node counts don't measure retrieval quality. Per manifest
     #        table: can the graph actually answer questions about it?
@@ -717,9 +767,17 @@ def main() -> None:
                              "counted from ALL rows regardless)")
     parser.add_argument("--table-aliases", default="",
                         help="JSON {alias: canonical} table-name map "
-                             "shared by --dmp-export/--measures-catalog "
-                             "(fuses spelling drift like offer/offr onto "
-                             "one node)")
+                             "shared by --dmp-export/--measures-catalog/"
+                             "--domain-tags (fuses spelling drift like "
+                             "offer/offr onto one node)")
+    parser.add_argument("--domain-tags", default="",
+                        help="steward Company Domain → tables map (JSON: "
+                             "{'Credit Risk': ['tbl', ...]} or "
+                             "[{'company_domain', 'description', "
+                             "'tables'}]) stamped as the human_approval "
+                             "witness — overrides mined/crawled labels; "
+                             "the rollup derives steward-asserted "
+                             "BusinessUnit nodes from it")
     parser.add_argument("--weights-override", default="",
                         help="experiment knob: JSON object or path "
                              "retuning SOURCE_WEIGHTS for THIS build "
@@ -733,7 +791,7 @@ def main() -> None:
     if not any([args.demo, args.skills_dir, args.gold_sql_dir,
                 args.bq_extract_dir, args.lumi_session, args.mdm_cache_dir,
                 args.mdm_crawl, args.mdm_manifest, args.collibra_export,
-                args.dmp_export, args.measures_catalog]):
+                args.dmp_export, args.measures_catalog, args.domain_tags]):
         parser.error("nothing to load — pass --demo or at least one source")
     run_pipeline(args)
 

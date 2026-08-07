@@ -68,20 +68,37 @@ def build_server(graph_path: str | Path, *, tenant_id: str = "default"):
 
     @mcp.tool()
     def search_entities(query: str, top_k: int = 10,
-                        node_kinds: list[str] | None = None) -> dict:
+                        node_kinds: list[str] | None = None,
+                        business_unit: str = "") -> dict:
         """Resolve a business term to graph objects (Table, Column, Metric,
-        Synonym, Skill, Guardrail). CALL FIRST for any term whose schema
-        binding isn't obvious ("active cardmembers", "NAA", "Platinum").
-        Do NOT call when you already hold an exact table/metric name —
-        go straight to inspect_table / get_metric."""
-        return service.search_entities(query, top_k, node_kinds)
+        Synonym, Skill, Guardrail, BusinessUnit). CALL FIRST for any term
+        whose schema binding isn't obvious ("active cardmembers", "NAA",
+        "Platinum"). Pass business_unit to stay inside one segment after
+        route_question picked it. Do NOT call when you already hold an
+        exact table/metric name — go straight to inspect_table/get_metric."""
+        return service.search_entities(query, top_k, node_kinds,
+                                       business_unit)
+
+    @mcp.tool()
+    def route_question(question: str, top_units: int = 3) -> dict:
+        """Segment-first routing: which business unit (company domain) is
+        this question about? Ranks the graph's BusinessUnit nodes against
+        the question and returns, per unit: the evidence-derived profile,
+        best-matching tables and metrics inside it, and the skill
+        playbooks that cover it. CALL FIRST for broad or ambiguous
+        questions — then work inside the winning unit
+        (search_entities(business_unit=...), inspect_table). Falls back
+        to flat search when the snapshot has no rollup."""
+        return service.route_question(question, top_units)
 
     @mcp.tool()
     def list_tables_for_domain(data_domain: str = "", company_domain: str = "",
-                               tag: str = "") -> dict:
-        """Browse tables by governance domain or tag. Use for "what tables
-        do we have for X?" — NOT free-text search (use search_entities)."""
-        return service.list_tables_for_domain(data_domain, company_domain, tag)
+                               tag: str = "", business_unit: str = "") -> dict:
+        """Browse tables by governance domain, tag, or business unit. Use
+        for "what tables do we have for X?" — NOT free-text search (use
+        search_entities)."""
+        return service.list_tables_for_domain(data_domain, company_domain,
+                                              tag, business_unit)
 
     @mcp.tool()
     def inspect_table(table: str, include: list[str] | None = None,

@@ -371,6 +371,11 @@ class Node(BaseModel):
         "Table", "Column", "Entity", "Metric", "Synonym", "User",
         "CodeMapping", "FilterValue", "DataQualityRule",
         "Skill", "Guardrail",
+        # Segment level, DERIVED: minted by the rollup stage from the
+        # business_unit property its member tables carry (MDM ownership
+        # authoritative; catalogs gap-fill). Never asserted directly by a
+        # loader — recomputed from current members on every build.
+        "BusinessUnit",
     ]
     properties: dict[str, Any] = Field(default_factory=dict)
     provenance: Provenance = Field(default_factory=Provenance)

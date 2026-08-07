@@ -48,7 +48,23 @@ def build_agent(model: str = DEFAULT_MODEL, toolset: str | None = None):
     except (AttributeError, TypeError, ValueError):
         pass                       # older SDK: run without thinking config
 
+    # Domain sub-agents (opt-in, SYNAPSE_DOMAIN_AGENTS=1): one specialist
+    # per BusinessUnit node in the snapshot. The root stays the generalist
+    # front door; ADK transfer + route_question let it identify the
+    # company domain first, then hand the thread to the specialist that
+    # knows that segment's tables and playbooks. No units in the graph
+    # (rollup never ran) → no sub-agents, root behaves exactly as before.
+    sub_agents = []
+    if os.environ.get("SYNAPSE_DOMAIN_AGENTS") == "1":
+        try:
+            from .domains import build_domain_agents
+            from .tools import _service
+            sub_agents = build_domain_agents(model, tools, _service())
+        except Exception:
+            sub_agents = []        # a broken snapshot must not kill chat
+
     def _agent(cfg):
+        kwargs = {"sub_agents": sub_agents} if sub_agents else {}
         return Agent(
             model=model,
             name="warehouse_analyst",
@@ -62,6 +78,7 @@ def build_agent(model: str = DEFAULT_MODEL, toolset: str | None = None):
             instruction=instruction,
             tools=tools,
             generate_content_config=cfg,
+            **kwargs,
         )
 
     try:

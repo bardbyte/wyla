@@ -195,6 +195,14 @@ def _parse_skill_package(pkg_dir: Path, domain_group: str = "") -> dict[str, Any
     return {
         "skill_id": skill_id,
         "domain": domain,
+        # Company-domain (business-unit) association, author-declared:
+        # `company_domain: Credit Risk` in skill.yaml pins this skill to a
+        # segment for route_question and the domain sub-agents. Absent, the
+        # association is inferred from tables_used ∩ the unit's members —
+        # so arranging skills per domain is one line per skill.yaml.
+        "company_domain": str(
+            manifest.get("company_domain")
+            or manifest.get("business_unit") or "").strip(),
         "description": str(manifest.get("description") or "").strip(),
         "parameters": manifest.get("parameters") or [],
         "outputs": manifest.get("outputs") or [],

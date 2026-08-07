@@ -22,7 +22,9 @@ from collections import deque
 from typing import Any
 
 from synapse.graph.inspector import inspect_table as _inspect_impl
-from synapse.graph.store import Edge, GraphStore, Node, canonical_uri
+from synapse.graph.store import (
+    Edge, GraphStore, Node, canonical_uri, normalize_table_name,
+)
 from synapse.mcp.cache import TTLCache
 from synapse.mcp.envelope import ErrorDetail, ResponseMeta, SynapseResponse
 
@@ -126,25 +128,53 @@ class GraphService:
 
     @classmethod
     def _tokens(cls, text: str) -> set[str]:
-        return {t for t in
+        return {cls._stem(t) for t in
                 "".join(c if c.isalnum() else " " for c in text.lower()).split()
                 if len(t) > 1 and t not in cls._STOPWORDS}
 
+    @staticmethod
+    def _stem(token: str) -> str:
+        """Light plural fold so 'merchants' meets 'merchant'. Applied to
+        BOTH query and haystack tokens — consistency, not linguistics,
+        is what makes bag-of-words equality survive the transform."""
+        if len(token) > 4 and token.endswith("ies"):
+            return token[:-3] + "y"
+        if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+            return token[:-1]
+        return token
+
     def _score_node(self, node: Node, query_tokens: set[str]) -> float:
-        """Deterministic lexical scoring — BM25-lite over name-ish fields."""
+        """Deterministic lexical scoring — BM25-lite over name-ish fields.
+
+        Beyond names: the behavioral vocabulary the catalogs carry — the
+        curated question a DMP metric answers, the group-by/filter
+        patterns analysts actually used, a business unit's derived
+        vocabulary — because that is how askers phrase things, which
+        names alone never cover."""
         props = node.properties
         haystacks = [
             (str(props.get(k, "")), w) for k, w in (
                 ("table_name", 3.0), ("business_name", 2.5),
                 ("skill_id", 3.0), ("surface_form", 3.0),
-                ("canonical_entity", 2.0), ("rule", 2.0),
-                ("column", 2.0), ("description", 1.0),
+                ("name", 3.0), ("canonical_entity", 2.0), ("rule", 2.0),
+                ("column", 2.0), ("business_unit", 2.0),
+                ("question_answered", 1.5),
+                ("description", 1.0), ("domain", 1.0),
+                ("sub_domain", 1.0), ("data_domain", 1.0),
             )
         ]
         name_tail = node.canonical_uri.rsplit("/", 1)[-1]
         haystacks.append((name_tail.replace("_", " "), 2.5))
         for syn in props.get("synonyms", []) or []:
             haystacks.append((str(syn), 2.5))
+        for key, weight in (("group_by_patterns", 1.0),
+                            ("common_filters", 1.0), ("vocabulary", 1.0),
+                            ("member_tables", 1.0), ("top_metrics", 1.0),
+                            ("question_bank", 1.5)):
+            values = props.get(key) or []
+            if values:
+                haystacks.append(
+                    (" ".join(str(v) for v in values), weight))
         score = 0.0
         for text, weight in haystacks:
             if not text:
@@ -163,21 +193,46 @@ class GraphService:
     # ─── 1. discovery & search ───────────────────────────────
 
     def search_entities(self, query: str, top_k: int = 10,
-                        node_kinds: list[str] | None = None) -> dict[str, Any]:
+                        node_kinds: list[str] | None = None,
+                        business_unit: str = "") -> dict[str, Any]:
         """Resolve a business term to graph objects (tables, columns,
-        metrics, synonyms, skills, guardrails). First call for any term
-        whose binding isn't obvious."""
+        metrics, synonyms, skills, guardrails, business units). First
+        call for any term whose binding isn't obvious. ``business_unit``
+        narrows to one segment: only nodes carrying that unit (or the
+        unit node itself, or columns of its tables) are scored."""
         started = time.monotonic()
         if not query or not query.strip():
             return self._err("search_entities", started, "invalid_input",
                              "query must be a non-empty string")
         kinds = set(node_kinds) if node_kinds else None
         query_tokens = self._tokens(query)
+        bu_filter = business_unit.strip().lower()
+        bu_tables: set[str] | None = None
+        if bu_filter:
+            bu_tables = {
+                str(t.properties.get("table_name", "")).lower()
+                for t in self.store.nodes_by_type("Table")
+                if bu_filter in str(
+                    t.properties.get("business_unit", "")).lower()
+            }
         hits: list[tuple[float, Node]] = []
         for node in self.store.nodes.values():
             if kinds and node.node_type not in kinds:
                 continue
+            if bu_filter and not self._in_business_unit(
+                    node, bu_filter, bu_tables or set()):
+                continue
             score = self._score_node(node, query_tokens)
+            # A business unit aggregates its members' vocabulary, so it
+            # matches almost anything about them — in FLAT search the
+            # precise fact must outrank its container. Dampen units here
+            # only; route_question scores them undamped (routing is
+            # exactly the container question). Exception: the query IS
+            # the unit's name — asked for the container, get the
+            # container.
+            if node.node_type == "BusinessUnit" and query_tokens \
+                    != self._tokens(str(node.properties.get("name", ""))):
+                score *= 0.5
             if score >= 0.2:  # floor: a single weak token hit is noise
                 hits.append((score, node))
         hits.sort(key=lambda pair: (-pair[0], pair[1].canonical_uri))
@@ -187,8 +242,11 @@ class GraphService:
             or n.properties.get("skill_id")
             or n.properties.get("surface_form")
             or n.properties.get("rule")
+            or n.properties.get("name")
             or n.canonical_uri.rsplit("/", 1)[-1],
             "business_name": n.properties.get("business_name", ""),
+            "business_unit": str(n.properties.get("business_unit", "")),
+            "uri": n.canonical_uri,
             "summary": (str(n.properties.get("description")
                             or n.properties.get("rule")
                             or n.properties.get("formula") or ""))[:160],
@@ -198,17 +256,38 @@ class GraphService:
         if not top:
             return self._err(
                 "search_entities", started, "not_found",
-                f"nothing in the graph matches {query!r}",
+                f"nothing in the graph matches {query!r}"
+                + (f" within business unit {business_unit!r}" if bu_filter
+                   else ""),
                 suggestions=["try a shorter term",
+                             "route_question() to find the right segment",
                              "list_tables_for_domain() to browse"],
             )
         return self._ok("search_entities", started, {"hits": top})
 
+    @staticmethod
+    def _in_business_unit(node: Node, bu_lower: str,
+                          bu_table_names: set[str]) -> bool:
+        """Does a node belong to the filtered business unit? Tables and
+        metrics carry the label; the unit node matches by name; columns
+        belong through their table. Nodes with no BU affiliation at all
+        (entities, synonyms…) are excluded — that is what a filter means."""
+        props = node.properties
+        own = str(props.get("business_unit", "")).lower()
+        if own and bu_lower in own:
+            return True
+        if node.node_type == "BusinessUnit":
+            return bu_lower in str(props.get("name", "")).lower()
+        table = str(props.get("table_name", "")
+                    or props.get("sourced_from_table", "")).lower()
+        return bool(table) and table in bu_table_names
+
     def list_tables_for_domain(self, data_domain: str = "",
                                company_domain: str = "",
-                               tag: str = "") -> dict[str, Any]:
-        """Browse tables by MDM domain taxonomy or tag. Not a free-text
-        search — use search_entities for that."""
+                               tag: str = "",
+                               business_unit: str = "") -> dict[str, Any]:
+        """Browse tables by MDM domain taxonomy, tag, or business unit.
+        Not a free-text search — use search_entities for that."""
         started = time.monotonic()
         rows = []
         for t in self.store.nodes_by_type("Table"):
@@ -221,16 +300,154 @@ class GraphService:
                 continue
             if tag and tag not in (props.get("tags") or []):
                 continue
+            if business_unit and business_unit.lower() not in str(
+                    props.get("business_unit", "")).lower():
+                continue
             rows.append({
                 "table": props.get("table_name", ""),
                 "fqn": props.get("fqn", ""),
                 "business_name": props.get("business_name", ""),
+                "business_unit": str(props.get("business_unit", "")),
                 "asset_kind": props.get("asset_kind", "Table"),
                 "n_columns": len(self.store.outgoing(t.canonical_uri, "CONTAINS")),
                 **self._prov(t),
             })
         rows.sort(key=lambda r: r["table"])
         return self._ok("list_tables_for_domain", started, {"tables": rows})
+
+    def route_question(self, question: str,
+                       top_units: int = 3) -> dict[str, Any]:
+        """Segment-first routing: which business unit is this question
+        about, and what lives there? Ranks BusinessUnit nodes against the
+        question, then scores tables/metrics WITHIN the winning units and
+        attaches the skill playbooks that cover them. Call FIRST for any
+        broad or ambiguous question; then search_entities with the
+        ``business_unit`` filter, or the unit's tables directly.
+
+        Falls back to flat search hits when the snapshot has no
+        business-unit rollup — honest about which mode answered."""
+        started = time.monotonic()
+        if not question or not question.strip():
+            return self._err("route_question", started, "invalid_input",
+                             "question must be a non-empty string")
+        tokens = self._tokens(question)
+        units = self.store.nodes_by_type("BusinessUnit")
+        if not units:
+            flat = self.search_entities(question, top_k=5)
+            return self._ok("route_question", started, {
+                "mode": "flat_search",
+                "note": ("no business-unit rollup in this snapshot — "
+                         "returning flat search hits; run the pipeline "
+                         "rollup stage to enable segment routing"),
+                "hits": (flat.get("data") or {}).get("hits", []),
+            })
+        scored = sorted(
+            ((self._score_node(u, tokens), u) for u in units),
+            key=lambda pair: (-pair[0], pair[1].canonical_uri))
+        scored = [(s, u) for s, u in scored if s > 0]
+        if not scored:
+            # zero lexical signal on every unit — routing would be a
+            # coin toss dressed as an answer. Fall back honestly.
+            flat = self.search_entities(question, top_k=5)
+            return self._ok("route_question", started, {
+                "mode": "flat_search",
+                "note": ("no business unit matches this phrasing — "
+                         "returning flat search hits instead of a "
+                         "guessed segment"),
+                "hits": (flat.get("data") or {}).get("hits", []),
+            })
+        routed = []
+        for score, unit in scored[:max(1, min(top_units, 10))]:
+            name = str(unit.properties.get("name", ""))
+            members = [
+                self.store.get(e.to_uri)
+                for e in self.store.outgoing(unit.canonical_uri, "CONTAINS")
+            ]
+            members = [m for m in members if m is not None]
+            top_tables = sorted(
+                members,
+                key=lambda t: (-self._score_node(t, tokens),
+                               str(t.properties.get("table_name"))))[:5]
+            member_names = {
+                normalize_table_name(str(t.properties.get(
+                    "table_name", ""))) for t in members}
+            metrics = [
+                m for m in self.store.nodes_by_type("Metric")
+                if normalize_table_name(str(m.properties.get(
+                    "sourced_from_table", ""))) in member_names]
+            top_metrics = sorted(
+                metrics,
+                key=lambda m: (-self._score_node(m, tokens),
+                               -int(m.properties.get("execution_count")
+                                    or 0), m.canonical_uri))[:5]
+            routed.append({
+                "business_unit": name,
+                "uri": unit.canonical_uri,
+                "score": round(score, 3),
+                "description": str(unit.properties.get("description", "")),
+                **self._prov(unit),
+                "top_tables": [{
+                    "table": str(t.properties.get("table_name", "")),
+                    "business_name": str(
+                        t.properties.get("business_name", "")),
+                    "match": round(self._score_node(t, tokens), 3),
+                    "confidence_tier": t.provenance.confidence_tier,
+                } for t in top_tables],
+                "top_metrics": [{
+                    "metric": str(m.properties.get("business_name")
+                                  or m.canonical_uri.rsplit("/", 1)[-1]),
+                    "table": str(
+                        m.properties.get("sourced_from_table", "")),
+                    "match": round(self._score_node(m, tokens), 3),
+                } for m in top_metrics],
+                "skills": self._skills_for_unit(name, member_names),
+            })
+        return self._ok("route_question", started, {
+            "mode": "segment_routing",
+            "units": routed,
+            "next": ("inspect the winning unit's tables, or "
+                     "search_entities(query, business_unit=<name>) "
+                     "to stay inside it"),
+        })
+
+    def _skills_for_unit(self, unit_name: str,
+                         member_tables: set[str]) -> list[dict[str, Any]]:
+        """Skill playbooks covering a business unit — matched by an
+        explicit company_domain on the bundle, or by the bundle's
+        tables_used landing inside the unit. Registry (files) preferred;
+        graph Skill nodes with APPLIES_TO edges are the fallback."""
+        unit_l = unit_name.lower()
+        out: list[dict[str, Any]] = []
+        if self.skills is not None:
+            for b in getattr(self.skills, "skills", []):
+                declared = str(b.get("company_domain", "")).lower()
+                tables = {normalize_table_name(str(t))
+                          for t in (b.get("tables_used") or [])}
+                if ((declared and (declared in unit_l
+                                   or unit_l in declared))
+                        or tables & member_tables):
+                    out.append({
+                        "skill_id": b.get("skill_id"),
+                        "domain": b.get("domain", ""),
+                        "description": str(b.get("description", ""))[:160],
+                    })
+            return out
+        for s in self.store.nodes_by_type("Skill"):
+            applies = set()
+            for e in self.store.outgoing(s.canonical_uri, "APPLIES_TO"):
+                target = self.store.get(e.to_uri)
+                if target is not None:
+                    applies.add(normalize_table_name(str(
+                        target.properties.get("table_name", ""))))
+            if applies & member_tables:
+                out.append({
+                    "skill_id": s.properties.get("skill_id")
+                    or s.canonical_uri.rsplit("/", 1)[-1],
+                    "domain": s.properties.get("domain", ""),
+                    "description": str(
+                        s.properties.get("description", ""))[:160],
+                })
+        return out
 
     # ─── 2. table-centric inspection ─────────────────────────
 

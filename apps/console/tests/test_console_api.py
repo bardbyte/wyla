@@ -291,14 +291,15 @@ def test_classic_roster_is_the_user_selected_bound():
     from apps.analyst.tools import build_classic_tools
     names = {t.__name__ for t in build_classic_tools()}
     assert names == {
-        "search_entities", "list_tables_for_domain", "inspect_table",
+        "search_entities", "route_question", "list_tables_for_domain",
+        "inspect_table",
         "find_columns_for_concept", "get_join_path", "get_lineage",
         "get_metric", "get_skill", "get_dq_status", "disambiguate_term",
         "validate_sql_plan", "get_entity", "get_steward_review_queue",
         "explain_column", "check_data_trust", "capture_knowledge",
         "dry_run_sql", "execute_sql",
     }
-    assert len(names) == 18
+    assert len(names) == 19
 
 
 def test_classic_instruction_keeps_the_output_contract():

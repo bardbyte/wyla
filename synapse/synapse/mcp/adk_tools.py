@@ -24,17 +24,32 @@ from synapse.mcp.service import GraphService
 def build_adk_tools(service: GraphService) -> list[Callable[..., dict[str, Any]]]:
     """Named, docstring-carrying closures for every graph tool."""
 
-    def search_entities(query: str, top_k: int = 10) -> dict:
+    def search_entities(query: str, top_k: int = 10,
+                        business_unit: str = "") -> dict:
         """Resolve a business term to graph objects (tables, columns,
-        metrics, synonyms, skills). Call FIRST for any term whose schema
-        binding isn't obvious. Returns hits with confidence_tier + sources."""
-        return service.search_entities(query, top_k)
+        metrics, synonyms, skills, business units). Call FIRST for any
+        term whose schema binding isn't obvious. Pass business_unit to
+        stay inside the segment route_question picked. Returns hits with
+        uri, confidence_tier + sources."""
+        return service.search_entities(query, top_k,
+                                       business_unit=business_unit)
+
+    def route_question(question: str, top_units: int = 3) -> dict:
+        """Which business unit (company domain) is this question about?
+        Ranks the graph's business units against the question; returns
+        each unit's evidence-derived profile, best-matching tables and
+        metrics inside it, and the skill playbooks covering it. Call
+        FIRST for broad or ambiguous questions, then work inside the
+        winning unit."""
+        return service.route_question(question, top_units)
 
     def list_tables_for_domain(data_domain: str = "",
-                               company_domain: str = "") -> dict:
-        """Browse tables by governance domain. For "what tables exist for
-        X?" — not free-text search."""
-        return service.list_tables_for_domain(data_domain, company_domain)
+                               company_domain: str = "",
+                               business_unit: str = "") -> dict:
+        """Browse tables by governance domain or business unit. For "what
+        tables exist for X?" — not free-text search."""
+        return service.list_tables_for_domain(
+            data_domain, company_domain, business_unit=business_unit)
 
     def inspect_table(table: str, column_limit: int = 50) -> dict:
         """Everything known about one table (identity, columns, governance,
@@ -140,7 +155,8 @@ def build_adk_tools(service: GraphService) -> list[Callable[..., dict[str, Any]]
                                          statement, actor)
 
     return [
-        search_entities, list_tables_for_domain, inspect_table,
+        search_entities, route_question, list_tables_for_domain,
+        inspect_table,
         find_columns_for_concept, get_filter_values, resolve_code,
         get_join_path, get_lineage, get_metric, get_skill, get_guardrails,
         get_dq_status, explain_confidence, disambiguate_term,
