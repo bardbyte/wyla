@@ -1,6 +1,6 @@
-"""Domain sub-agents — one specialist per business unit, self-identified.
+"""Domain sub-agents — one specialist per company domain, self-identified.
 
-The graph's BusinessUnit nodes (built by the rollup stage from MDM
+The graph's Domain nodes (built by the rollup stage from MDM
 ownership + the mined/DMP catalogs, or the steward's --domain-tags map)
 define WHO the specialists are; this module turns each into a scoped ADK
 sub-agent whose instruction embeds only what the graph can prove about
@@ -80,17 +80,17 @@ def _spec_for_unit(service: Any, unit: Any) -> dict[str, Any]:
         "Operating rules, same as the general analyst: ground every "
         "claim in graph tools and cite trust tiers; guardrails bind; "
         "validate_sql_plan before showing SQL; prefer "
-        "search_entities(query, business_unit=" + repr(name) + ") so "
+        "search_entities(query, domain=" + repr(name) + ") so "
         "results stay inside your segment. If the question clearly "
-        "belongs to another business unit, say so and transfer back to "
+        "belongs to another company domain, say so and transfer back to "
         "the root analyst instead of guessing.",
     ]
     instruction = "\n".join(p for p in lines if p is not None)
     return {
         "name": _slug(name),
-        "business_unit": name,
+        "domain": name,
         "description": (
-            f"Specialist for the {name} business unit "
+            f"Specialist for the {name} company domain "
             f"({props.get('table_count', len(members))} tables; "
             f"knows its tables, metrics, and playbooks)."),
         "instruction": instruction,
@@ -100,9 +100,9 @@ def _spec_for_unit(service: Any, unit: Any) -> dict[str, Any]:
 
 
 def build_domain_agent_specs(service: Any) -> list[dict[str, Any]]:
-    """One spec per BusinessUnit node, largest segment first. Pure
+    """One spec per Domain node, largest domain first. Pure
     composition — returns plain dicts, imports nothing from ADK."""
-    units = service.store.nodes_by_type("BusinessUnit")
+    units = service.store.nodes_by_type("Domain")
     specs = [_spec_for_unit(service, u) for u in units]
     specs.sort(key=lambda s: (-s["n_tables"], s["name"]))
     return specs
@@ -112,7 +112,7 @@ def build_domain_agents(model: str, tools: list[Any],
                         service: Any) -> list[Any]:
     """Adapt specs to google-adk Agents (call only when ADK is present).
     Each specialist carries the same tool roster as the root — scoping
-    lives in the instruction + business_unit filters, not in capability
+    lives in the instruction + domain filters, not in capability
     removal, so a specialist can still follow a join across segments
     when the graph proves one."""
     from google.adk import Agent

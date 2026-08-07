@@ -25,11 +25,11 @@ _VERBS: dict[str, Callable[[dict[str, Any]], str]] = {
     "resolve_code": lambda a: (
         f"Decoding value “{a.get('value', a.get('raw_value', '…'))}”"),
     "route_question": lambda a: (
-        "Identifying which business unit this question belongs to"),
+        "Identifying which company domain this question belongs to"),
     "search_entities": lambda a: (
         f"Searching the graph for “{a.get('query', '…')}”"
-        + (f" within {a['business_unit']}"
-           if a.get("business_unit") else "")),
+        + (f" within {a.get('domain') or a.get('business_unit')}"
+           if a.get("domain") or a.get("business_unit") else "")),
     "list_skills": lambda a: "Looking up the governing skill packages",
     "get_skill": lambda a: (
         f"Loading the {a.get('skill_id', 'relevant')} skill"),

@@ -194,43 +194,38 @@ class GraphService:
 
     def search_entities(self, query: str, top_k: int = 10,
                         node_kinds: list[str] | None = None,
-                        business_unit: str = "") -> dict[str, Any]:
+                        domain: str = "") -> dict[str, Any]:
         """Resolve a business term to graph objects (tables, columns,
-        metrics, synonyms, skills, guardrails, business units). First
-        call for any term whose binding isn't obvious. ``business_unit``
-        narrows to one segment: only nodes carrying that unit (or the
-        unit node itself, or columns of its tables) are scored."""
+        metrics, synonyms, skills, guardrails, domains). First call for
+        any term whose binding isn't obvious. ``domain`` narrows to one
+        company domain: membership resolves through the domain layer's
+        edges (so overlap works), falling back to the labels tables
+        carry when the layer wasn't built."""
         started = time.monotonic()
         if not query or not query.strip():
             return self._err("search_entities", started, "invalid_input",
                              "query must be a non-empty string")
         kinds = set(node_kinds) if node_kinds else None
         query_tokens = self._tokens(query)
-        bu_filter = business_unit.strip().lower()
-        bu_tables: set[str] | None = None
-        if bu_filter:
-            bu_tables = {
-                str(t.properties.get("table_name", "")).lower()
-                for t in self.store.nodes_by_type("Table")
-                if bu_filter in str(
-                    t.properties.get("business_unit", "")).lower()
-            }
+        domain_filter = domain.strip().lower()
+        domain_tables: set[str] = (
+            self._domain_member_tables(domain_filter)
+            if domain_filter else set())
         hits: list[tuple[float, Node]] = []
         for node in self.store.nodes.values():
             if kinds and node.node_type not in kinds:
                 continue
-            if bu_filter and not self._in_business_unit(
-                    node, bu_filter, bu_tables or set()):
+            if domain_filter and not self._in_domain(
+                    node, domain_filter, domain_tables):
                 continue
             score = self._score_node(node, query_tokens)
-            # A business unit aggregates its members' vocabulary, so it
-            # matches almost anything about them — in FLAT search the
-            # precise fact must outrank its container. Dampen units here
-            # only; route_question scores them undamped (routing is
-            # exactly the container question). Exception: the query IS
-            # the unit's name — asked for the container, get the
-            # container.
-            if node.node_type == "BusinessUnit" and query_tokens \
+            # A domain aggregates its members' vocabulary, so it matches
+            # almost anything about them — in FLAT search the precise
+            # fact must outrank its container. Dampen domains here only;
+            # route_question scores them undamped (routing is exactly
+            # the container question). Exception: the query IS the
+            # domain's name — asked for the container, get the container.
+            if node.node_type == "Domain" and query_tokens \
                     != self._tokens(str(node.properties.get("name", ""))):
                 score *= 0.5
             if score >= 0.2:  # floor: a single weak token hit is noise
@@ -257,38 +252,68 @@ class GraphService:
             return self._err(
                 "search_entities", started, "not_found",
                 f"nothing in the graph matches {query!r}"
-                + (f" within business unit {business_unit!r}" if bu_filter
-                   else ""),
+                + (f" within domain {domain!r}" if domain_filter else ""),
                 suggestions=["try a shorter term",
-                             "route_question() to find the right segment",
+                             "route_question() to find the right domain",
                              "list_tables_for_domain() to browse"],
             )
         return self._ok("search_entities", started, {"hits": top})
 
+    def _domain_member_tables(self, domain_lower: str) -> set[str]:
+        """Member table names (lowercased) of every domain whose name
+        matches — resolved through the layer's membership edges (the
+        overlap-capable truth), unioned with the labels tables carry
+        (fallback when the rollup never ran)."""
+        members: set[str] = set()
+        for d in self.store.nodes_by_type("Domain"):
+            if domain_lower not in str(
+                    d.properties.get("name", "")).lower():
+                continue
+            for e in self.store.outgoing(d.canonical_uri, "CONTAINS"):
+                t = self.store.get(e.to_uri)
+                if t is not None:
+                    members.add(str(
+                        t.properties.get("table_name", "")).lower())
+        for t in self.store.nodes_by_type("Table"):
+            if (domain_lower in str(
+                    t.properties.get("business_unit", "")).lower()
+                    or domain_lower in str(
+                        t.properties.get("company_domain", "")).lower()):
+                members.add(str(t.properties.get("table_name", "")).lower())
+        members.discard("")
+        return members
+
     @staticmethod
-    def _in_business_unit(node: Node, bu_lower: str,
-                          bu_table_names: set[str]) -> bool:
-        """Does a node belong to the filtered business unit? Tables and
-        metrics carry the label; the unit node matches by name; columns
-        belong through their table. Nodes with no BU affiliation at all
-        (entities, synonyms…) are excluded — that is what a filter means."""
+    def _in_domain(node: Node, domain_lower: str,
+                   member_tables: set[str]) -> bool:
+        """Does a node belong to the filtered domain? Tables belong via
+        the resolved member set (edges ∪ labels), metrics through their
+        source table or their own label, columns through their table;
+        the domain node matches by name. Nodes with no affiliation at
+        all (entities, synonyms…) are excluded — that is what a filter
+        means."""
         props = node.properties
-        own = str(props.get("business_unit", "")).lower()
-        if own and bu_lower in own:
+        if node.node_type == "Domain":
+            return domain_lower in str(props.get("name", "")).lower()
+        own = (str(props.get("business_unit", ""))
+               + " " + str(props.get("company_domain", ""))).lower()
+        if own.strip() and domain_lower in own:
             return True
-        if node.node_type == "BusinessUnit":
-            return bu_lower in str(props.get("name", "")).lower()
         table = str(props.get("table_name", "")
                     or props.get("sourced_from_table", "")).lower()
-        return bool(table) and table in bu_table_names
+        return bool(table) and table in member_tables
 
     def list_tables_for_domain(self, data_domain: str = "",
                                company_domain: str = "",
                                tag: str = "",
-                               business_unit: str = "") -> dict[str, Any]:
-        """Browse tables by MDM domain taxonomy, tag, or business unit.
-        Not a free-text search — use search_entities for that."""
+                               domain: str = "") -> dict[str, Any]:
+        """Browse tables by MDM domain taxonomy, tag, or company domain.
+        ``domain`` resolves through the domain layer's membership edges
+        (overlap-aware), falling back to table labels. Not a free-text
+        search — use search_entities for that."""
         started = time.monotonic()
+        domain_tables = (self._domain_member_tables(domain.strip().lower())
+                         if domain.strip() else None)
         rows = []
         for t in self.store.nodes_by_type("Table"):
             props = t.properties
@@ -300,8 +325,9 @@ class GraphService:
                 continue
             if tag and tag not in (props.get("tags") or []):
                 continue
-            if business_unit and business_unit.lower() not in str(
-                    props.get("business_unit", "")).lower():
+            if domain_tables is not None and str(
+                    props.get("table_name", "")).lower() \
+                    not in domain_tables:
                 continue
             rows.append({
                 "table": props.get("table_name", ""),
@@ -317,28 +343,30 @@ class GraphService:
 
     def route_question(self, question: str,
                        top_units: int = 3) -> dict[str, Any]:
-        """Segment-first routing: which business unit is this question
-        about, and what lives there? Ranks BusinessUnit nodes against the
-        question, then scores tables/metrics WITHIN the winning units and
-        attaches the skill playbooks that cover them. Call FIRST for any
-        broad or ambiguous question; then search_entities with the
-        ``business_unit`` filter, or the unit's tables directly.
+        """Domain-first routing: which company domain is this question
+        about, and what lives there? Ranks Domain nodes against the
+        question, then scores tables/metrics WITHIN the winning domains
+        and attaches the skill playbooks that cover them. A table can
+        belong to several domains — memberships are edges, so it shows
+        up under each with its own witnesses. Call FIRST for any broad
+        or ambiguous question; then search_entities with the ``domain``
+        filter, or the domain's tables directly.
 
-        Falls back to flat search hits when the snapshot has no
-        business-unit rollup — honest about which mode answered."""
+        Falls back to flat search hits when the snapshot has no domain
+        layer — honest about which mode answered."""
         started = time.monotonic()
         if not question or not question.strip():
             return self._err("route_question", started, "invalid_input",
                              "question must be a non-empty string")
         tokens = self._tokens(question)
-        units = self.store.nodes_by_type("BusinessUnit")
+        units = self.store.nodes_by_type("Domain")
         if not units:
             flat = self.search_entities(question, top_k=5)
             return self._ok("route_question", started, {
                 "mode": "flat_search",
-                "note": ("no business-unit rollup in this snapshot — "
-                         "returning flat search hits; run the pipeline "
-                         "rollup stage to enable segment routing"),
+                "note": ("no domain layer in this snapshot — returning "
+                         "flat search hits; run the pipeline rollup "
+                         "stage to enable domain routing"),
                 "hits": (flat.get("data") or {}).get("hits", []),
             })
         scored = sorted(
@@ -346,14 +374,13 @@ class GraphService:
             key=lambda pair: (-pair[0], pair[1].canonical_uri))
         scored = [(s, u) for s, u in scored if s > 0]
         if not scored:
-            # zero lexical signal on every unit — routing would be a
+            # zero lexical signal on every domain — routing would be a
             # coin toss dressed as an answer. Fall back honestly.
             flat = self.search_entities(question, top_k=5)
             return self._ok("route_question", started, {
                 "mode": "flat_search",
-                "note": ("no business unit matches this phrasing — "
-                         "returning flat search hits instead of a "
-                         "guessed segment"),
+                "note": ("no domain matches this phrasing — returning "
+                         "flat search hits instead of a guessed domain"),
                 "hits": (flat.get("data") or {}).get("hits", []),
             })
         routed = []
@@ -380,11 +407,14 @@ class GraphService:
                 key=lambda m: (-self._score_node(m, tokens),
                                -int(m.properties.get("execution_count")
                                     or 0), m.canonical_uri))[:5]
+            shared = unit.properties.get("shared_tables") or []
             routed.append({
-                "business_unit": name,
+                "domain": name,
                 "uri": unit.canonical_uri,
                 "score": round(score, 3),
                 "description": str(unit.properties.get("description", "")),
+                "description_by": str(
+                    unit.properties.get("description_by", "rollup")),
                 **self._prov(unit),
                 "top_tables": [{
                     "table": str(t.properties.get("table_name", "")),
@@ -400,14 +430,15 @@ class GraphService:
                         m.properties.get("sourced_from_table", "")),
                     "match": round(self._score_node(m, tokens), 3),
                 } for m in top_metrics],
+                "shared_tables": shared,
                 "skills": self._skills_for_unit(name, member_names),
             })
         return self._ok("route_question", started, {
-            "mode": "segment_routing",
-            "units": routed,
-            "next": ("inspect the winning unit's tables, or "
-                     "search_entities(query, business_unit=<name>) "
-                     "to stay inside it"),
+            "mode": "domain_routing",
+            "domains": routed,
+            "next": ("inspect the winning domain's tables, or "
+                     "search_entities(query, domain=<name>) to stay "
+                     "inside it"),
         })
 
     def _skills_for_unit(self, unit_name: str,

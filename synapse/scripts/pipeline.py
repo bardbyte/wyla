@@ -384,20 +384,22 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         _note(f"by tier now: {stats['nodes_by_confidence_tier']}")
 
     # ── 6c2. Steward domain tags (human_approval witness) ────
-    #         The curated Company Domain → tables map. Runs AFTER every
-    #         machine loader so the human assignment overrides mined and
-    #         crawled labels; the rollup below then derives
-    #         steward-asserted BusinessUnit nodes from it.
-    steward_descriptions: dict[str, str] = {}
+    #         The curated Company Domain → tables map. COEXISTS with the
+    #         machine labels: minted as Domain nodes + membership edges,
+    #         never stamped onto table properties — what MDM said stays
+    #         as MDM said it. Overlap (one table, several domains) is
+    #         first-class. The rollup below fuses both witness families.
     if getattr(args, "domain_tags", ""):
-        _stage("Steward domain tags → human_approval witness (ceiling)")
+        _stage("Steward domain tags → human_approval memberships")
         from synapse.loaders.domain_tags_loader import load_domain_tags
         dt_res = load_domain_tags(
             store, Path(args.domain_tags).expanduser(),
             aliases=catalog_aliases)
-        steward_descriptions = dt_res.pop("descriptions", {})
         _note(f"{dt_res['domains']} domain(s) → "
-              f"{dt_res['tables_stamped']} table(s) stamped")
+              f"{dt_res['memberships']} membership edge(s)")
+        if dt_res["overlapping_tables"]:
+            for t, ds in list(dt_res["overlapping_tables"].items())[:6]:
+                _note(f"overlap: {t} ∈ {', '.join(ds)}")
         if dt_res["stubs_minted"]:
             _note(f"{len(dt_res['stubs_minted'])} tagged table(s) not yet "
                   f"crawled — minted as stubs: "
@@ -601,31 +603,29 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             _note(f"post-enrichment tiers: "
                   f"{stats['nodes_by_confidence_tier']}")
 
-    # ── 6d2. Business-unit rollup — the segment level, derived ──
-    #         Always runs (cheap, idempotent): lifts the business_unit
-    #         property tables carry into first-class BusinessUnit nodes
-    #         with evidence-derived descriptions and inherited witnesses,
-    #         so search can route segment-first. Append builds recompute
-    #         it from what the tables now say.
-    from synapse.graph.rollup import rollup_business_units
-    _stage("Business-unit rollup — segment level from member evidence")
-    rollup_report = rollup_business_units(store)
-    if steward_descriptions:
-        from synapse.loaders.domain_tags_loader import (
-            apply_steward_descriptions)
-        n_desc = apply_steward_descriptions(store, steward_descriptions)
-        _note(f"{n_desc} unit description(s) overridden by the steward")
-    if rollup_report["business_units"]:
+    # ── 6d2. Domain rollup — the layer on top, derived + steward ──
+    #         Always runs (cheap, idempotent): rebuilds the Domain layer
+    #         from the union of machine labels on tables (derived edges,
+    #         recomputed) and steward memberships (human_approval edges,
+    #         preserved verbatim), with per-domain evidence profiles.
+    from synapse.graph.rollup import rollup_domains
+    _stage("Domain rollup — the layer on top of the graph")
+    rollup_report = rollup_domains(store)
+    if rollup_report["domains"]:
         for unit in rollup_report["units"]:
-            _note(f"{unit['business_unit'][:34]:34} "
-                  f"{unit['tables']:>3} table(s) {unit['metrics']:>4} "
-                  f"metric(s)  {unit['tier']}")
-        if rollup_report["tables_without_business_unit"]:
-            _note(f"{rollup_report['tables_without_business_unit']} "
-                  "table(s) carry no business_unit — MDM crawl gap")
+            _note(f"{unit['domain'][:34]:34} "
+                  f"{unit['tables']:>3} table(s) "
+                  f"({unit['steward_members']} steward) "
+                  f"{unit['metrics']:>4} metric(s)  {unit['tier']}")
+        for t, ds in list(
+                rollup_report["overlapping_tables"].items())[:6]:
+            _note(f"overlap: {t} ∈ {', '.join(ds)}")
+        if rollup_report["tables_in_no_domain"]:
+            _note(f"{rollup_report['tables_in_no_domain']} "
+                  "table(s) in no domain — MDM crawl gap")
     else:
-        _note("no table carries a business_unit — rollup skipped")
-    run_report["business_unit_rollup"] = rollup_report
+        _note("no domain evidence anywhere — layer empty")
+    run_report["domain_rollup"] = rollup_report
 
     # ── 6e. Context-readiness scorecard ──────────────────────
     #        Node counts don't measure retrieval quality. Per manifest

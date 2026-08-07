@@ -22,7 +22,7 @@ Gold-example kinds, honest about what each proves:
     metric_name            curated metric display name → metric node.
     mined_measure_name     usage-mined measure name → metric node.
     table_business_name    curated table display name → table node.
-    business_unit_route    the BU label itself → its BusinessUnit node
+    domain_route           the domain label itself → its Domain node
                            (only when the rollup ran).
 
 Scoring: an example is credited at the rank of the FIRST hit whose uri is
@@ -133,10 +133,10 @@ def extract_gold_set(store: GraphStore) -> list[GoldExample]:
         if biz and biz.lower() != raw.lower():
             add(biz, [t.canonical_uri], "table_business_name")
 
-    for u in store.nodes_by_type("BusinessUnit"):
+    for u in store.nodes_by_type("Domain"):
         name = str(u.properties.get("name") or "")
         if name:
-            add(name, [u.canonical_uri], "business_unit_route")
+            add(name, [u.canonical_uri], "domain_route")
 
     return gold
 

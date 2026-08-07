@@ -371,11 +371,16 @@ class Node(BaseModel):
         "Table", "Column", "Entity", "Metric", "Synonym", "User",
         "CodeMapping", "FilterValue", "DataQualityRule",
         "Skill", "Guardrail",
-        # Segment level, DERIVED: minted by the rollup stage from the
-        # business_unit property its member tables carry (MDM ownership
-        # authoritative; catalogs gap-fill). Never asserted directly by a
-        # loader — recomputed from current members on every build.
-        "BusinessUnit",
+        # The company-domain layer ON TOP of the physical graph.
+        # Membership is EDGE-based (Domain —CONTAINS→ Table) so one table
+        # can belong to several domains, each membership independently
+        # witnessed: derived edges come from the business_unit/
+        # company_domain labels tables carry (MDM ownership, catalog
+        # gap-fill) and are recomputed every build; steward edges
+        # (--domain-tags, human_approval) coexist with them and survive
+        # recomputes. The layer never overwrites what MDM said on the
+        # table — labels stay as evidence, the layer is the view.
+        "Domain",
     ]
     properties: dict[str, Any] = Field(default_factory=dict)
     provenance: Provenance = Field(default_factory=Provenance)
