@@ -37,6 +37,13 @@ SourceName = Literal[
     # weighted witness (never authority): Collibra is a human-governed
     # catalog, Knowledge Catalog (Dataplex) is largely machine-harvested.
     "collibra", "knowledge_catalog",
+    # Data Marketplace curated metric catalog — author-owned metric
+    # definitions with SQL expressions; curated-family testimony.
+    "dmp",
+    # Metrics/joins distilled from historical query execution — stronger
+    # than one raw corpus observation (already aggregated + scored), far
+    # below any curated catalog.
+    "usage_mined",
 ]
 
 ConfidenceTier = Literal[
@@ -58,6 +65,7 @@ SOURCE_WEIGHTS: dict[SourceName, int] = {
     "metric_catalog":   5,  # curated metric registry
     "glossary":         5,  # curated term registry
     "collibra":         5,  # governed external catalog — curated testimony
+    "dmp":              5,  # Data Marketplace metric catalog — author-owned
     "dq_engine":        4,  # rule-based DQ checks — system-attested
     "knowledge_catalog": 4, # Dataplex/KC harvest — machine-attested catalog
     "baseline_lookml":  3,
@@ -66,6 +74,10 @@ SOURCE_WEIGHTS: dict[SourceName, int] = {
     # a skill "applying to" a table says nothing about the table's data
     # quality, so skills no longer witness Table/Column tiers (see builder).
     "skills":           2,
+    # Mined from historical execution: each catalog row is already a
+    # distillation of many real queries, so it outweighs one raw corpus
+    # observation — but it is machine-derived, so curated catalogs beat it.
+    "usage_mined":      2,
     "corpus":           1,  # per observation
     "usage":            1,  # per observation
     "llm_generated":    1,  # AI-suggested; trust low until corroborated
@@ -77,6 +89,32 @@ SOURCE_WEIGHTS: dict[SourceName, int] = {
 # agreeing once each. Distinct-source breadth > single-source depth.
 _PER_SOURCE_COUNT_CAP = 5
 _SCORE_DENOMINATOR = 15.0
+
+
+def apply_weight_overrides(overrides: dict[str, int]) -> dict[str, int]:
+    """Experiment knob: retune SOURCE_WEIGHTS for one build.
+
+    Storage philosophy stays Knowledge-Vault-shaped (every fact kept with
+    its calibrated score; tier gates live at answer time), so experiments
+    happen on the WEIGHTS, not by loosening storage. The pipeline calls
+    this from --weights-override / SYNAPSE_SOURCE_WEIGHTS before any
+    stage runs, so tiers compute under the tuned prior everywhere.
+
+    Unknown source names or non-integer weights raise — a typo silently
+    ignored would invalidate the whole experiment. Returns the previous
+    values of the overridden keys so callers (tests) can restore them.
+    """
+    for name, weight in overrides.items():
+        if name not in SOURCE_WEIGHTS:
+            raise ValueError(
+                f"unknown source {name!r} in weights override — known: "
+                + ", ".join(sorted(SOURCE_WEIGHTS)))
+        if not isinstance(weight, int) or isinstance(weight, bool):
+            raise ValueError(
+                f"weight for {name!r} must be an integer, got {weight!r}")
+    previous = {name: SOURCE_WEIGHTS[name] for name in overrides}
+    SOURCE_WEIGHTS.update(overrides)   # type: ignore[arg-type]
+    return previous
 
 
 def confidence_from_sources(
@@ -363,6 +401,11 @@ class Edge(BaseModel):
         "DEFINED_BY",      # Metric → Skill; contract that defines the metric
         # MDM attribute lineage:
         "DERIVES_FROM",    # Column → Column; value derivation with logic
+        # Usage-mined table co-occurrence: Table → Table, directed as
+        # observed in historical queries (props: observed_count, last_seen).
+        # Table-level and behavioral — distinct from the column-level
+        # EQUIVALENT_TO join-key equivalences the corpus pass emits.
+        "JOINS_WITH",
     ]
     properties: dict[str, Any] = Field(default_factory=dict)
     provenance: Provenance = Field(default_factory=Provenance)

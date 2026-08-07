@@ -288,6 +288,28 @@ def _build_per_source_view(store: GraphStore, node: Any) -> dict[str, Any]:
                 "at low confidence until corroborated by MDM or human review."
             ),
         },
+        # ─── Catalog connectors ───
+        "dmp": {
+            "contributed": _has("dmp"),
+            "evidence_count": counts.get("dmp", 0),
+            "is_in_dmp": props.get("is_in_dmp"),
+            "note": (
+                "Data Marketplace metric catalog — author-owned metric "
+                "definitions (weight 5, curated family). Metrics carry "
+                "author, question_answered, and the DMP SQL expression."
+            ),
+        },
+        "usage_mined": {
+            "contributed": _has("usage_mined"),
+            "evidence_count": counts.get("usage_mined", 0),
+            "business_unit": props.get("business_unit"),
+            "note": (
+                "Measures + join co-occurrence mined from historical query "
+                "execution (weight 2, user_count-scaled). Mined metrics "
+                "carry execution/user/query counts; table-level JOINS_WITH "
+                "edges carry observed_count."
+            ),
+        },
     }
 
 

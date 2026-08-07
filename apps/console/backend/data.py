@@ -53,6 +53,17 @@ class ConsoleData:
                 path = alt
         self.snapshot_path = path
         self.store = None
+        # Experiment coherence: a snapshot built under SYNAPSE_SOURCE_WEIGHTS
+        # must be EXPLAINED under the same prior — apply the same override
+        # here so the witness ledger's weights match the build's. A bad
+        # value must not take the console down; it just keeps defaults.
+        env_weights = os.environ.get("SYNAPSE_SOURCE_WEIGHTS", "")
+        if env_weights:
+            try:
+                from synapse.graph.store import apply_weight_overrides
+                apply_weight_overrides(json.loads(env_weights))
+            except Exception:
+                pass
         if self.snapshot_path.exists():
             try:
                 from synapse.graph.store import GraphStore
@@ -411,7 +422,7 @@ class ConsoleData:
 
         # roll column-level structural edges up to their spine endpoints
         structural = {"EQUIVALENT_TO", "IDENTIFIES", "COMPUTED_FROM",
-                      "APPLIES_TO"}
+                      "APPLIES_TO", "JOINS_WITH"}
         seen: set[tuple[str, str, str]] = set()
         edges: list[dict[str, Any]] = []
         for e in self.store.edges.values():
@@ -487,6 +498,8 @@ class ConsoleData:
                 return "declared FK"
             if "corpus" in srcs:
                 return "query log (analyst)"
+            if "usage_mined" in srcs:
+                return "query history (mined)"
             if "llm_generated" in srcs:
                 return "LLM-inferred"
             return next(iter(srcs), "unknown")
@@ -522,6 +535,16 @@ class ConsoleData:
                        "predicate": f"{label} computed from "
                                     f"{_colname(e.to_uri)}",
                        "other": str(label), "other_ref": e.from_uri}
+            elif e.edge_type == "JOINS_WITH" and (
+                    e.from_uri == t_uri or e.to_uri == t_uri):
+                other = e.to_uri if e.from_uri == t_uri else e.from_uri
+                n_obs = e.properties.get("observed_count") or 0
+                row = {"kind": "join",
+                       "predicate": f"{name} observed joined with "
+                                    f"{other.rsplit('/', 1)[-1]} in "
+                                    f"{n_obs} historical queries",
+                       "other": other.rsplit("/", 1)[-1],
+                       "other_ref": other}
             elif e.edge_type == "UPSTREAM_OF" and (
                     e.from_uri == t_uri or e.to_uri == t_uri):
                 other = e.to_uri if e.from_uri == t_uri else e.from_uri
