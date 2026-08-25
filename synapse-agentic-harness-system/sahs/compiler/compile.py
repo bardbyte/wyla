@@ -127,8 +127,18 @@ def compile_build(graph_root: Path, builds_root: Path
     metric_rows = sorted(collapsed.values(),
                          key=lambda r: (-r["authority"], -r["support"],
                                         r["id"]))
+    # primary group identity: a fused metric ANSWERS as its highest-
+    # authority catalog name (dmp ≻ gmns ≻ skill ≻ mined ≻ label@table);
+    # the other memberships stay in mgroups as corroboration
+    _CATALOG_RANK = {"dmp": 0, "gmns": 1, "skill": 2, "mined": 3}
+
+    def _primacy(group: str) -> tuple[int, str]:
+        catalog = group.split(":", 2)[1] if group.count(":") >= 2 else ""
+        return (_CATALOG_RANK.get(catalog, 4), group)
+
     for row in metric_rows:
-        row["mgroup"] = sorted(row["mgroups"])[0]
+        row["mgroups"] = sorted(row["mgroups"])
+        row["mgroup"] = min(row["mgroups"], key=_primacy)
 
     # ── binding rows ──
     binding_rows: list[dict[str, Any]] = []
@@ -275,6 +285,32 @@ def compile_build(graph_root: Path, builds_root: Path
         encoding="utf-8")
     (build_dir / "acl.json").write_text(
         json.dumps(acl, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+    # snapshot schema (serving-facing: only columns BigQuery can serve —
+    # D1 omissions fall out naturally) + observed join pairs
+    schema = {
+        c.physical: {name: column.data_type
+                     for name, column in c.columns.items()}
+        for c in consensus.values()}
+    (build_dir / "schema.json").write_text(
+        json.dumps(schema, indent=1, sort_keys=True) + "\n",
+        encoding="utf-8")
+    join_rows = [
+        {"a": s.split(":", 1)[1], "b": o.split(":", 1)[1],
+         "support": quad.prov.support or 1}
+        for (s, r, o), quad in sorted(edges.items())
+        if r == "co_queried_with"]
+    (build_dir / "indexes" / "joins.jsonl").write_text(
+        "".join(json.dumps(j, sort_keys=True) + "\n" for j in join_rows),
+        encoding="utf-8")
+    domain_rows = [
+        {"key": node_id.split(":", 1)[1],
+         "values": record.props.get("values", [])}
+        for node_id, record in sorted(nodes.items())
+        if node_id.startswith("domain:")]
+    (build_dir / "indexes" / "domains.jsonl").write_text(
+        "".join(json.dumps(d, sort_keys=True) + "\n"
+                for d in domain_rows), encoding="utf-8")
 
     # ── manifest (no wall-clock — determinism) ──
     manifest = {

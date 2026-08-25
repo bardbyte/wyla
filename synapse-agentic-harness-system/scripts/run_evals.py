@@ -43,6 +43,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--samples", type=int, default=1)
     parser.add_argument("--stochastic", action="store_true",
                         help="SUT is non-deterministic; use --samples")
+    parser.add_argument("--include-external", action="store_true",
+                        help="score coverage=external tasks too (they are "
+                             "excluded from the floor by default)")
     parser.add_argument("--plain", action="store_true")
     parser.add_argument("--json", action="store_true", dest="json_out")
     args = parser.parse_args(argv)
@@ -50,6 +53,15 @@ def main(argv: list[str] | None = None) -> int:
     tasks = []
     for path in args.tasks:
         tasks.extend(read_tasks(Path(path)))
+    loaded = len(tasks)
+    excluded = 0
+    if not args.include_external:
+        in_scope = [t for t in tasks if "coverage=external" not in t.tags]
+        excluded = loaded - len(in_scope)
+        tasks = in_scope
+    # E5: the denominator never shrinks silently — print even when 0
+    print(f"excluded (coverage=external): {excluded} of {loaded}",
+          file=sys.stderr)
     if not tasks:
         print("no tasks loaded", file=sys.stderr)
         return EXIT_VALIDATION_ERROR
@@ -81,9 +93,24 @@ def main(argv: list[str] | None = None) -> int:
         on_trial=lambda t: (console.item_ok() if t.verdict == "pass"
                             else console.item_quarantined(t.verdict,
                                                           t.reason)))
+    report["excluded_out_of_coverage"] = excluded
     print(format_report(report), file=sys.stderr)
     if out:
         console.output(write_report(report, out / "eval_report.json"))
+        if report["failures"]:
+            # E5: every floor failure gets triaged — this file is the
+            # table a human fills in and commits; open resolver_bug
+            # items block P3 exit
+            triage = out / "triage" / "floor_failures.jsonl"
+            triage.parent.mkdir(parents=True, exist_ok=True)
+            with triage.open("w", encoding="utf-8") as f:
+                for failure in report["failures"]:
+                    f.write(json.dumps({
+                        **failure, "triage": "pending",
+                        "category": None,   # resolver_bug | gold_defect
+                                            # | coverage_gap
+                    }, ensure_ascii=False) + "\n")
+            console.output(triage)
 
     ok = True
     if args.fail_under is not None:
@@ -101,7 +128,9 @@ def main(argv: list[str] | None = None) -> int:
                           ",".join(report["determinism_alarms"])) and ok
 
     code = EXIT_OK if ok else EXIT_GATE_FAILURE
-    summary = console.finish(code, extra={"overall": report["overall"]})
+    summary = console.finish(code, extra={
+        "overall": report["overall"],
+        "excluded_out_of_coverage": excluded})
     if args.json_out:
         print(json.dumps(summary))
     return code

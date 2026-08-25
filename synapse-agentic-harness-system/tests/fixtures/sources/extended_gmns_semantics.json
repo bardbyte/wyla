@@ -2,7 +2,7 @@
  {
   "metricName": "local_spend_method_a",
   "sqlExpression": "SUM(CASE WHEN issuer_country = merchant_country THEN trans_usd_am ELSE 0 END)",
-  "calculation": "Spend where issuer and merchant country match; sign per se_cr_dr_in.",
+  "calculation": "Spend where issuer and merchant country match.",
   "approvedDimensions": [
    "time_period",
    "region",
@@ -16,9 +16,9 @@
   "table": "gms_transaction"
  },
  {
-  "metricName": "inbound_spend_method_b",
-  "sqlExpression": "SUM(CASE WHEN issuer_region != merchant_region THEN trans_usd_am ELSE 0 END)",
-  "calculation": "Cross-region inbound volume.",
+  "metricName": "local_spend_method_b",
+  "sqlExpression": "SUM(CASE WHEN issuer_region = merchant_region THEN trans_usd_am ELSE 0 END)",
+  "calculation": "Spend where issuer and merchant REGION match (broader).",
   "approvedDimensions": [
    "time_period",
    "bank_partner"
