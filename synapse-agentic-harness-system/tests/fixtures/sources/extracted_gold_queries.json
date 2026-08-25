@@ -1,0 +1,62 @@
+[
+ {
+  "id": 1,
+  "prompt": "Total merchant spend in the US last quarter",
+  "sql": "SELECT SUM(trans_usd_am) FROM gms_transaction WHERE country_cd = 'US' AND part_dt BETWEEN '2026-04-01' AND '2026-06-30'"
+ },
+ {
+  "id": 2,
+  "prompt": "How many distinct merchants transacted in EMEA?",
+  "sql": "SELECT COUNT(DISTINCT se_no) FROM gms_transaction WHERE region_cd = 'EMEA'"
+ },
+ {
+  "id": 3,
+  "prompt": "Approval rate for small business applications",
+  "sql": "SELECT SAFE_DIVIDE(SUM(CASE WHEN approval_cd = 'A' THEN 1 ELSE 0 END), COUNT(1)) FROM sbs_new_accounts"
+ },
+ {
+  "id": 4,
+  "prompt": "Monthly hotel spend trend (CTE)",
+  "sql": "WITH base AS (SELECT * FROM gms_transaction) SELECT FORMAT_DATE('%Y-%m', part_dt) m, SUM(trans_usd_am) FROM base JOIN gms_merchant_char USING (se_no) WHERE se_typ = 'B' GROUP BY m"
+ },
+ {
+  "id": 5,
+  "prompt": "Latest status per card member (QUALIFY)",
+  "sql": "SELECT * FROM custins_cardmember QUALIFY ROW_NUMBER() OVER (PARTITION BY cm_id ORDER BY as_of_dt DESC) = 1"
+ },
+ {
+  "id": 6,
+  "prompt": "Declined authorizations by day",
+  "sql": "SELECT part_dt, COUNT(1) FROM wwcas_authorization WHERE approval_cd = 'D' GROUP BY part_dt"
+ },
+ {
+  "id": 7,
+  "prompt": "Average FICO of new accounts",
+  "sql": "SELECT AVG(fico_score) FROM risk_pers_acct WHERE vintage_yr = 2026"
+ },
+ {
+  "id": 8,
+  "prompt": "Net travel sales for air bookings",
+  "sql": "SELECT SUM(trans_usd_am) FROM tlsarpt_travel_sales WHERE product_typ = 'AIR' AND status_cd = 'ACTIVE'"
+ },
+ {
+  "id": 9,
+  "prompt": "Cardmember count by segment",
+  "sql": "SELECT segment_cd, COUNT(DISTINCT cm_id) FROM custins_cardmember GROUP BY segment_cd"
+ },
+ {
+  "id": 10,
+  "prompt": "Which merchants had chargebacks over $10k?",
+  "sql": ""
+ },
+ {
+  "id": 11,
+  "prompt": "Total loyalty points redeemed by region",
+  "sql": ""
+ },
+ {
+  "id": 12,
+  "prompt": "Fraud rate for card-not-present transactions",
+  "sql": ""
+ }
+]

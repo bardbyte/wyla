@@ -1,0 +1,5 @@
+checks:
+  - id: nonzero_denominator
+    rule: denominator > 0
+  - id: no_ratio_averaging
+    rule: never AVG() over precomputed rate columns

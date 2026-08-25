@@ -1,0 +1,52 @@
+{
+ "metric_catalog": [
+  {
+   "metricCatalogId": "101",
+   "metricName": "gmns_spend",
+   "businessFriendlyMetricName": "GMNS Merchant Spend",
+   "questionAnswered": "How much volume did our merchants process?",
+   "sqlExpression": "SUM(CASE WHEN se_cr_dr_in = 'C' THEN -trans_usd_am ELSE trans_usd_am END)",
+   "associatedDataProductNames": [
+    "gms_transaction"
+   ],
+   "status": "Published",
+   "author": "steward_a",
+   "metricDomain": "Merchant",
+   "lineOfBusiness": "GMNS",
+   "createdAt": "2025-11-01",
+   "updatedAt": "2026-07-15"
+  },
+  {
+   "metricCatalogId": "102",
+   "metricName": "txn_count",
+   "businessFriendlyMetricName": "Transaction Count",
+   "questionAnswered": "How many transactions did merchants process?",
+   "sqlExpression": "COUNT(1)",
+   "associatedDataProductNames": [
+    "gms_transaction"
+   ],
+   "status": "Published",
+   "author": "steward_a",
+   "metricDomain": "Merchant",
+   "lineOfBusiness": "GMNS",
+   "createdAt": "2025-11-01",
+   "updatedAt": "2026-07-15"
+  },
+  {
+   "metricCatalogId": "103",
+   "metricName": "approval_rate",
+   "businessFriendlyMetricName": "SBS Approval Rate",
+   "questionAnswered": "What share of small business applications are approved?",
+   "sqlExpression": "SAFE_DIVIDE(SUM(CASE WHEN approval_cd = 'A' THEN 1 ELSE 0 END), COUNT(1))",
+   "associatedDataProductNames": [
+    "sbs_new_accounts"
+   ],
+   "status": "Published",
+   "author": "steward_b",
+   "metricDomain": "Acquisition",
+   "lineOfBusiness": "SBS",
+   "createdAt": "2026-01-05",
+   "updatedAt": "2026-06-01"
+  }
+ ]
+}

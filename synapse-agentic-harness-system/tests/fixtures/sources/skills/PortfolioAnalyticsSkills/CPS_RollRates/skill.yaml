@@ -1,0 +1,4 @@
+id: CPS_RollRates
+description: Consumer delinquency roll rates.
+tables:
+  - risk_pers_acct

@@ -1,0 +1,26 @@
+Symbol,Definition,Business_Unit,Global_Region,Entry_Type
+ALIF,Active Locations in Force,GMNS,All,Acronym
+MCC,Merchant Category Code,GMNS,All,Acronym
+AA,Account Adjustment,Finance,US,Acronym
+AA,Adverse Action,Risk,US,Acronym
+AA,Account Acquisition,Marketing,EMEA,Acronym
+CM13,Card Member 13 Digit Number,All,All,Acronym
+TBB,Total Billed Business,Finance,All,Acronym
+POT,Point of Transaction,GMNS,All,Acronym
+A/R,Accounts Receivable,Finance,All,Acronym
+SE10,Service Establishment 10 Digit Number,GMNS,All,Acronym
+CNP,Card Not Present,GMNS,All,Acronym
+FICO,Fair Isaac Corporation Score,Risk,US,Acronym
+Roll Rate,Movement of balances between delinquency buckets month over month,Risk,All,Glossary Term
+Write-Off,Balance removed from receivables as uncollectible,Risk,All,Glossary Term
+Net Sales,Gross sales minus cancellations,TLS,All,Glossary Term
+ZX0,Fixture Term 0,Technology,All,Acronym
+ZX1,Fixture Term 1,Technology,All,Acronym
+ZX2,Fixture Term 2,Technology,All,Acronym
+ZX3,Fixture Term 3,Technology,All,Acronym
+ZX4,Fixture Term 4,Technology,All,Acronym
+ZX5,Fixture Term 5,Technology,All,Acronym
+ZX6,Fixture Term 6,Technology,All,Acronym
+ZX7,Fixture Term 7,Technology,All,Acronym
+ZX8,Fixture Term 8,Technology,All,Acronym
+,orphan definition without symbol,All,All,Acronym

@@ -1,0 +1,130 @@
+{
+ "canon_version": "1:30.15.0",
+ "goldens": {
+  "g01_plain": {
+   "fp_expr": "d2aafc88e6f1",
+   "fp_template": "d29a90fefb15",
+   "canonical_sql": "SELECT a, b FROM orders WHERE x = 1 AND y = 2"
+  },
+  "g02_qualify": {
+   "fp_expr": "41baa3f7058a",
+   "fp_template": "0e69e4544936",
+   "canonical_sql": "SELECT * EXCEPT (secret_col) FROM t QUALIFY row_number() OVER (PARTITION BY k ORDER BY d DESC) = 1"
+  },
+  "g03_safe_divide": {
+   "fp_expr": "d06e538654bf",
+   "fp_template": "d06e538654bf",
+   "canonical_sql": "SELECT safe_divide(num, den) AS rate FROM t"
+  },
+  "g04_unnest": {
+   "fp_expr": "9dc26072a878",
+   "fp_template": "d10d76e2d578",
+   "canonical_sql": "SELECT x FROM t CROSS JOIN UNNEST(items) AS item WHERE item.kind = 'A'"
+  },
+  "g05_date_literals": {
+   "fp_expr": "5f9b96716ee0",
+   "fp_template": "bf72d4ad2a97",
+   "canonical_sql": "SELECT CAST('2026-01-01' AS DATE) AS d, CAST('2026-01-01 00:00:00' AS TIMESTAMP) AS ts, INTERVAL '3' DAY AS iv"
+  },
+  "g06_backtick_mixed": {
+   "fp_expr": "b9c47212887a",
+   "fp_template": "b9c47212887a",
+   "canonical_sql": "SELECT `mixedcase`.`weird col` FROM `mixedcase`"
+  },
+  "g07_nested_case": {
+   "fp_expr": "f429cf757ec5",
+   "fp_template": "bd385db1eed4",
+   "canonical_sql": "SELECT CASE WHEN a = 1 THEN CASE WHEN b = 2 THEN 'x' ELSE 'y' END ELSE 'z' END FROM t"
+  },
+  "g08_window": {
+   "fp_expr": "817fdffd9de1",
+   "fp_template": "3b780756f9b3",
+   "canonical_sql": "SELECT k, sum(v) OVER (PARTITION BY k ORDER BY d ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t"
+  },
+  "g09_cte_inline": {
+   "fp_expr": "6b78fb29b461",
+   "fp_template": "6b78fb29b461",
+   "canonical_sql": "SELECT sum(x) FROM gms_transaction"
+  },
+  "g10_cte_mixed": {
+   "fp_expr": "1a03c7d653a5",
+   "fp_template": "1a03c7d653a5",
+   "canonical_sql": "WITH b AS (SELECT k, sum(v) AS s FROM t2 GROUP BY k) SELECT t1.x, b.s FROM t1 JOIN b ON b.k = t1.k"
+  },
+  "g11_self_join": {
+   "fp_expr": "3ef3d18eda2c",
+   "fp_template": "57ae974e099d",
+   "canonical_sql": "SELECT t1.id FROM emp AS t1 JOIN emp AS t2 ON t1.mgr = t2.id WHERE t2.lvl = 3"
+  },
+  "g12_in_list": {
+   "fp_expr": "882a480abc98",
+   "fp_template": "d0bc89c67110",
+   "canonical_sql": "SELECT * FROM t WHERE c IN ('a', 'b', 'c')"
+  },
+  "g13_predicate_wrap": {
+   "fp_expr": "c4862ae86d1e",
+   "fp_template": "d66faf71e41c",
+   "canonical_sql": "SELECT 1 FROM wwcas_authorization WHERE trim(business_unit_cd) IN ('1', '2')"
+  },
+  "g14_case_wrap": {
+   "fp_expr": "6eaaa217ad72",
+   "fp_template": "6a3f0e900d9a",
+   "canonical_sql": "SELECT CASE WHEN se_typ = 'B' THEN 'hotel' ELSE 'other' END FROM gms_merchant_char"
+  },
+  "g15_union": {
+   "fp_expr": "1aeb8023b9fd",
+   "fp_template": "1aeb8023b9fd",
+   "canonical_sql": "SELECT a FROM t1 UNION ALL SELECT a FROM t2"
+  },
+  "g16_group_having": {
+   "fp_expr": "50f8417f387b",
+   "fp_template": "ac8c2157c60a",
+   "canonical_sql": "SELECT k, count(DISTINCT id) AS n FROM t GROUP BY k HAVING count(DISTINCT id) > 10"
+  },
+  "g17_join_three": {
+   "fp_expr": "8ea91f5f5685",
+   "fp_template": "7df08a91ab06",
+   "canonical_sql": "SELECT orders.amt FROM orders JOIN customers ON customers.id = orders.cid JOIN regions ON customers.rid = regions.id WHERE regions.code = 'EMEA'"
+  },
+  "g18_agg_filters": {
+   "fp_expr": "378b1775bb65",
+   "fp_template": "c155092a08dc",
+   "canonical_sql": "SELECT sum(CASE WHEN status = 'A' THEN amt ELSE 0 END) FROM txns"
+  },
+  "g19_dotted_table": {
+   "fp_expr": "96a3d8963bbc",
+   "fp_template": "b84f82ea6e84",
+   "canonical_sql": "SELECT x FROM `axp-lumi`.dw.wwcas_authorization WHERE part_dt = '2026-08-01'"
+  },
+  "g20_between": {
+   "fp_expr": "7943d66a504b",
+   "fp_template": "ea101df1b5fd",
+   "canonical_sql": "SELECT * FROM t WHERE d <= '2026-03-31' AND d >= '2026-01-01'"
+  },
+  "g21_null_logic": {
+   "fp_expr": "626de6f62883",
+   "fp_template": "9f36fd0ceba8",
+   "canonical_sql": "SELECT * FROM t WHERE coalesce(y, 0) > 5 AND NOT x IS NULL"
+  },
+  "g22_numeric_forms": {
+   "fp_expr": "77246950a9c8",
+   "fp_template": "0f2ee49dfdfd",
+   "canonical_sql": "SELECT * FROM t WHERE x = 1 AND y = 0.5"
+  },
+  "g23_flip_literal": {
+   "fp_expr": "e759f059d365",
+   "fp_template": "4bb0abe57185",
+   "canonical_sql": "SELECT * FROM t WHERE c <> 'b' AND x = 5"
+  },
+  "g24_or_chain": {
+   "fp_expr": "55aef65db5a1",
+   "fp_template": "4e029a7fdd74",
+   "canonical_sql": "SELECT * FROM t WHERE x = 1 OR y = 2 OR z = 3"
+  },
+  "g25_subquery": {
+   "fp_expr": "ee68b189963b",
+   "fp_template": "474ae0df21b4",
+   "canonical_sql": "SELECT * FROM t WHERE id IN (SELECT id FROM approved WHERE region = 'US')"
+  }
+ }
+}

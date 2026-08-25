@@ -1,0 +1,10 @@
+# Builds are immutable compiled artifacts, rebuildable from graph/ — only the
+# review record stays in git: each build's manifest, census, and diff, plus the
+# CURRENT promotion pointer (E4).
+*
+!.gitignore
+!CURRENT
+!*/
+!*/manifest.json
+!*/census.json
+!*/DIFF_vs_prev.md
