@@ -1,0 +1,32 @@
+{
+ "columns": [
+  {
+   "name": "approval_cd",
+   "data_type": "STRING",
+   "business_name": "Approval Code",
+   "description": "Authorization decision.",
+   "is_pii": false
+  },
+  {
+   "name": "trans_usd_am",
+   "data_type": "FLOAT64",
+   "business_name": "Auth Amount",
+   "description": "Authorized amount USD.",
+   "is_pii": false
+  },
+  {
+   "name": "card_no",
+   "data_type": "STRING",
+   "business_name": "Card Number",
+   "description": "Card PAN (masked).",
+   "is_pii": true
+  },
+  {
+   "name": "part_dt",
+   "data_type": "DATE",
+   "business_name": "Partition Date",
+   "description": "Partition date.",
+   "is_pii": false
+  }
+ ]
+}

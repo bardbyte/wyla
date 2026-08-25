@@ -1,0 +1,8 @@
+{
+ "run_id": "mdm_46_fixture",
+ "mode": "focused",
+ "tables": [
+  "gms_transaction",
+  "wwcas_authorization"
+ ]
+}

@@ -1,0 +1,1 @@
+SELECT approval_cd, trans_usd_am, card_no, part_dt FROM `axp-lumi`.data.wwcas_authorization

@@ -1,0 +1,30 @@
+# E1 — per-assertion-type authority (pinned). The reconciler consults this
+# file; changing it is a reviewed diff, never a code edit.
+#
+# winner semantics: the named source's value is used everywhere
+# execution-facing; losers are KEPT with attribution (nothing erased).
+# union_most_restrictive: never precedence — any witness flagging
+# sensitivity makes the consensus sensitive.
+# tiebreak: latest retrieved_at.
+
+assertions:
+  existence:        {winner: bq}
+  ddl:              {winner: bq}
+  column_type:      {winner: bq}
+  partitioning:     {winner: bq}
+  constraints:      {winner: bq}
+  row_access:       {winner: bq}
+  description:      {winner: atlas, supplementary: lumi}
+  business_term_link: {winner: atlas}
+  glossary_meaning: {winner: atlas}
+  ownership:        {winner: lumi}
+  pipeline:         {winner: lumi}
+  appflow:          {winner: lumi}
+  lineage:          {winner: lumi}
+  lifecycle:        {winner: lumi}
+  environment:      {winner: lumi}
+  pii:              {winner: union_most_restrictive}
+  sensitivity:      {winner: union_most_restrictive}
+  cde:              {winner: union_most_restrictive}
+
+tiebreak: latest_retrieved_at

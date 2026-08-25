@@ -1,0 +1,2 @@
+fingerprint,normalized_sql,occurrences,distinct_users,first_seen,last_seen
+tpl3,SELECT COUNT(1) FROM wwcas_authorization WHERE approval_cd = ?,30,3,2026-07-25,2026-08-22

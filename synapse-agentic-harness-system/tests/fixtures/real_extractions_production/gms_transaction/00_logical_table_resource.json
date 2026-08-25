@@ -1,0 +1,10 @@
+{
+ "tableReference": {
+  "projectId": "axp-lumi",
+  "datasetId": "dw",
+  "tableId": "gms_transaction"
+ },
+ "type": "TABLE",
+ "creationTime": "1750000000000",
+ "description": "gms_transaction logical resource"
+}

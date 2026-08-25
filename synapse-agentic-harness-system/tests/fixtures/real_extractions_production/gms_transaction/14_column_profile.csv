@@ -1,0 +1,7 @@
+column_name,data_type,total_rows,null_count,approx_distinct,min_value,max_value,coverage_mode
+trans_usd_am,FLOAT64,1000,10,42,,,recent_partitions_budgeted
+se_no,STRING,1000,10,42,,,recent_partitions_budgeted
+cm13,STRING,1000,10,42,,,recent_partitions_budgeted
+country_cd,STRING,1000,10,42,,,recent_partitions_budgeted
+part_dt,DATE,1000,10,42,,,recent_partitions_budgeted
+bq_only_col,STRING,1000,10,42,,,recent_partitions_budgeted

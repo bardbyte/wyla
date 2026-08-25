@@ -1,0 +1,6 @@
+{
+ "pipeline_name": "wwcas_stream",
+ "business_unit": "CAS",
+ "feed_type": "stream",
+ "source_system": "WWCAS"
+}

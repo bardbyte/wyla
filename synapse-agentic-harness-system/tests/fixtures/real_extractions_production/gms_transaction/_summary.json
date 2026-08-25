@@ -1,0 +1,5 @@
+{
+ "table": "gms_transaction",
+ "logical_exists": true,
+ "physical_exists": true
+}

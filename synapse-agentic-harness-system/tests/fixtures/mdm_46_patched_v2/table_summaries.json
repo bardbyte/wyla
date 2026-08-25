@@ -1,0 +1,26 @@
+{
+ "tables": [
+  {
+   "table_name": "gms_transaction",
+   "execution_status": "complete",
+   "answerability": {
+    "structure": "strong",
+    "semantics": "strong",
+    "governance": "strong",
+    "lineage": "strong",
+    "operations": "strong"
+   }
+  },
+  {
+   "table_name": "wwcas_authorization",
+   "execution_status": "partial",
+   "answerability": {
+    "structure": "strong",
+    "semantics": "strong",
+    "governance": "strong",
+    "lineage": "partial",
+    "operations": "partial"
+   }
+  }
+ ]
+}

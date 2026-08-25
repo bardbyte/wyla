@@ -263,6 +263,84 @@ def cmd_make_tasks(args: argparse.Namespace, console: RunConsole) -> int:
     return EXIT_OK if tasks else EXIT_GATE_FAILURE
 
 
+def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
+    from sahs.canon.census import canonicalize_records
+    from sahs.graph.crosswalk import Crosswalk
+    from sahs.graph.quads import GraphDir
+    from sahs.graph.validate import validate_graph
+    from sahs.loaders.archives.bq_extraction import load_bq_archive
+    from sahs.loaders.archives.mdm46 import load_mdm_archive
+    from sahs.loaders.quads_emit import (
+        emit_expressions,
+        emit_std_tech,
+        emit_vocab,
+    )
+
+    graph_root = Path(args.graph)
+    crosswalk = Crosswalk.load(Path(args.crosswalk))
+    graph = GraphDir(graph_root)
+    run_id = console.run_id
+    blocking: list[str] = []
+    reports: dict[str, dict] = {}
+
+    if args.bq_archive:
+        console.phase("bq archive")
+        reports["bq"], blocked = load_bq_archive(
+            Path(args.bq_archive), graph, crosswalk, run_id)
+        blocking += blocked
+    if args.mdm_archive:
+        console.phase("mdm archive")
+        reports["mdm"], blocked = load_mdm_archive(
+            Path(args.mdm_archive), graph, crosswalk, run_id)
+        blocking += blocked
+    if not console.gate("crosswalk_resolution", not blocking,
+                        "; ".join(blocking[:5]) if blocking
+                        else "all archive tables resolved"):
+        console.finish(EXIT_VALIDATION_ERROR)
+        return EXIT_VALIDATION_ERROR
+
+    if args.sources_dir:
+        sources = Path(args.sources_dir)
+        registry = _registry(args)
+        console.phase("semantic sources → quads")
+        records, _quar, _backlog = _load_expressions(
+            sources, registry, console)
+        pairs, canon_quar = canonicalize_records(records)
+        for q in canon_quar:
+            console.item_quarantined(q.category, q.evidence_ref)
+        reports["expressions"] = emit_expressions(
+            pairs, graph, crosswalk, run_id)
+        glossary_path = sources / "data_cleaned.csv"
+        terms_path = sources / "business_terms.csv"
+        glossary = (load_glossary(glossary_path)[0]
+                    if glossary_path.exists() else [])
+        terms = (load_business_terms(terms_path)[0]
+                 if terms_path.exists() else [])
+        reports["vocab"] = emit_vocab(glossary, terms, graph, run_id)
+        std_dir = sources / "std_tech_metadata"
+        if std_dir.exists():
+            entries = load_std_tech_metadata(std_dir)[0]
+            reports["std_tech"] = emit_std_tech(
+                entries, terms, graph, crosswalk, run_id)
+
+    (graph_root / "runs" / run_id).mkdir(parents=True, exist_ok=True)
+    manifest = graph_root / "runs" / run_id / "manifest.json"
+    manifest.write_text(json.dumps({
+        "run_id": run_id, "archived": False, "reports": reports},
+        indent=1) + "\n", encoding="utf-8")
+    console.output(manifest)
+
+    console.phase("validate")
+    report = validate_graph(graph_root)
+    (graph_root / "runs" / run_id / "validation.json").write_text(
+        report.to_json() + "\n", encoding="utf-8")
+    console.output(graph_root / "runs" / run_id / "validation.json")
+    ok = console.gate("graph_valid", report.ok,
+                      f"{len(report.errors)} error(s), "
+                      f"{len(report.warnings)} warning(s)")
+    return EXIT_OK if ok else EXIT_VALIDATION_ERROR
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="laptop.py", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -278,6 +356,45 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--fresh", action="store_true",
                        help="ignore checkpoints; default is --resume")
         p.set_defaults(fn=fn)
+    def cmd_compile(args: argparse.Namespace, console: RunConsole) -> int:
+        from sahs.compiler.compile import compile_build
+        console.phase("compile")
+        build_dir, manifest, failures = compile_build(
+            Path(args.graph), Path(args.builds))
+        console.output(build_dir / "manifest.json")
+        console.output(build_dir / "DIFF_vs_prev.md")
+        console.emit("gate_result",
+                     detail=f"build {manifest['build_id']}")
+        ok = console.gate("compile_gates", not failures,
+                          "; ".join(failures[:5]) if failures
+                          else f"{manifest['build_id']} promoted "
+                               "(CURRENT moved)")
+        return EXIT_OK if ok else EXIT_GATE_FAILURE
+
+    p = sub.add_parser("compile")
+    p.add_argument("--graph", required=True)
+    p.add_argument("--builds", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--run-id", default="")
+    p.add_argument("--plain", action="store_true")
+    p.add_argument("--json", action="store_true", dest="json_out")
+    p.add_argument("--fresh", action="store_true")
+    p.set_defaults(fn=cmd_compile)
+
+    p = sub.add_parser("build-graph")
+    p.add_argument("--graph", required=True, help="graph/ root (L2)")
+    p.add_argument("--crosswalk", required=True,
+                   help="identity/crosswalk.jsonl (E1)")
+    p.add_argument("--bq-archive", default="")
+    p.add_argument("--mdm-archive", default="")
+    p.add_argument("--sources-dir", default="")
+    p.add_argument("--registry", default="")
+    p.add_argument("--out", required=True)
+    p.add_argument("--run-id", default="")
+    p.add_argument("--plain", action="store_true")
+    p.add_argument("--json", action="store_true", dest="json_out")
+    p.add_argument("--fresh", action="store_true")
+    p.set_defaults(fn=cmd_build_graph)
     args = parser.parse_args(argv)
 
     out = Path(args.out)
