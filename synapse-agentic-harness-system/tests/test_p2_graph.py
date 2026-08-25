@@ -65,25 +65,27 @@ def test_build_graph_end_to_end_fuses_three_witnesses(tmp_path):
 
     # E3 raw material: DENIED policy listing → unknown, never absence
     assert ("table:dw.wwcas_authorization", "has_policy",
-            "policy:unknown_denied") in edges
+            "policy:unknown_denied", "bq") in edges
     # confirmed-empty policies (gms 16 file = []) emit nothing
     assert not any(s == "table:dw.gms_transaction" and "unknown" in o
-                   for (s, r, o) in edges if r == "has_policy")
+                   for (s, r, o, _w) in edges if r == "has_policy")
 
     # governance seeds: all four initial states present
-    seeds = {o for (s, r, o), q in edges.items() if r == "certified_as"}
+    seeds = {o for (s, r, o, _w), q in edges.items()
+             if r == "certified_as"}
     assert {"status:certified", "status:pending", "status:team_candidate",
             "status:mined"} <= seeds
 
     # co-query support + domains + templates + lineage
     co = edges[("table:dw.gms_transaction", "co_queried_with",
-                "table:dw.wwcas_authorization")]
+                "table:dw.wwcas_authorization", "bq")]
     assert co.prov.support == 12
     assert "domain:dw.gms_transaction.country_cd" in nodes
     assert any(k.startswith("tmpl:") for k in nodes)
     assert ("table:data.raw_gms_feed", "upstream_of",
-            "table:dw.gms_transaction") in edges
-    derived = [(s, o) for (s, r, o) in edges if r == "derived_from"]
+            "table:dw.gms_transaction", "lumi") in edges
+    derived = [(s, o) for (s, r, o, _w) in edges
+               if r == "derived_from"]
     assert derived and derived[0][1].startswith("col:data.raw_gms_feed")
 
     # mdm 503 → lifecycle UNKNOWN, stated not omitted
@@ -165,7 +167,7 @@ def test_fold_last_wins_and_retraction(tmp_path):
     graph.append_edge(Quad(
         s="table:dw.t1", r="co_queried_with", o="table:dw.t1",
         prov=Prov(source="bq", run="r3", status="retracted")))
-    assert ("table:dw.t1", "co_queried_with", "table:dw.t1") \
+    assert ("table:dw.t1", "co_queried_with", "table:dw.t1", "bq") \
         not in graph.fold_edges()
 
 

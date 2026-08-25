@@ -73,7 +73,7 @@ def reconcile(graph: GraphDir) -> dict[str, TableConsensus]:
     edges = graph.fold_edges()
 
     columns_by_table: dict[str, list[str]] = defaultdict(list)
-    for (s, r, o), quad in edges.items():
+    for (s, r, o, _w), quad in edges.items():
         if r == "has_column":
             columns_by_table[s].append(o)
 
@@ -192,7 +192,7 @@ def build_acl(graph: GraphDir,
     the most-restrictive consensus."""
     acl: dict[str, Any] = {}
     edges = graph.fold_edges()
-    for (s, r, o), quad in edges.items():
+    for (s, r, o, _w), quad in edges.items():
         if r != "has_policy" or not s.startswith("table:"):
             continue
         physical = s.split(":", 1)[1]

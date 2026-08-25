@@ -141,6 +141,16 @@ def metric_card(metric: dict[str, Any],
         f"- id: {metric['id']} · status: **{metric['status']}** "
         f"[prov:{metric['source']}]",
     ]
+    if metric.get("support_by_witness"):
+        witnesses = " · ".join(
+            f"{family}:{n}" for family, n in sorted(
+                metric["support_by_witness"].items()))
+        lines.append(
+            f"- witnesses: {witnesses} · agreement "
+            f"{metric.get('witness_agreement', 0)}"
+            + (f" · recency from {metric['recency_source']}"
+               if metric.get("recency_source") else "")
+            + " [prov:witness]")
     if metric.get("question"):
         lines.append(f"- answers: “{metric['question']}” [prov:dmp]")
     lines += [

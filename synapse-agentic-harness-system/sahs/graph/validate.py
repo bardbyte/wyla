@@ -18,6 +18,10 @@ amendment pinned them):
     11. support ≥ 1 where present
     12. post-fold: every certified metric retains ≥ 1 active binding
         (measured_on) — a certified metric with no home is a lie
+    13. E12/A1: measure-plane quads carry prov.witness ∈ WITNESSES;
+        an unknown witness anywhere is an error
+    14. E12/A5: review nodes — kind/status enums, numeric priority,
+        a resolving `concerns` edge
     E7. prov.actor REQUIRED when source == "clerk"
 
 Warnings (never block): orphan nodes, unversioned valid_for.
@@ -35,7 +39,18 @@ from sahs.graph.ids import (
     STATUS_STATES,
     kind_of,
 )
-from sahs.graph.quads import QUAD_STATUSES, RELATIONS, GraphDir
+from sahs.graph.quads import (
+    QUAD_STATUSES,
+    RELATIONS,
+    REVIEW_KINDS,
+    REVIEW_STATUSES,
+    WITNESSES,
+    GraphDir,
+)
+
+# the relations where "who saw it" is load-bearing (E12/A1)
+_MEASURE_PLANE = {"bound_to", "member_of", "measured_on",
+                  "defines_metric", "variant_of", "certified_as"}
 
 
 @dataclass
@@ -144,16 +159,31 @@ def validate_graph(root: Path) -> ValidationReport:
             if (prov.get("valid_for") or ["unversioned"]) == ["unversioned"]:
                 report.warnings.append(f"[6w] {where}: unversioned")
             run = prov.get("run", "")
-            # dedup per (s,r,o,run,SOURCE): one source may not repeat
-            # itself within a run; independent witnesses may each testify
-            key = (s, r, o, run, prov.get("source", ""))
+            # dedup per (s,r,o,run,source,WITNESS): one witness family
+            # may not repeat itself within a run; independent witnesses
+            # each testify once (E12/A1)
+            key = (s, r, o, run, prov.get("source", ""),
+                   prov.get("witness", ""))
             if key in seen:
                 report.errors.append(
-                    f"[8] {where}: duplicate (s,r,o,run,source)")
+                    f"[8] {where}: duplicate (s,r,o,run,source,witness)")
             seen.add(key)
             if prov.get("source") == "clerk" and not prov.get("actor"):
                 report.errors.append(
                     f"[E7] {where}: clerk edge without prov.actor")
+            # [13] E12/A1 — measure-plane quads carry a legal witness
+            witness = prov.get("witness", "")
+            if r in _MEASURE_PLANE:
+                if not witness:
+                    report.errors.append(
+                        f"[13] {where}: measure-plane quad without "
+                        "prov.witness")
+                elif witness not in WITNESSES:
+                    report.errors.append(
+                        f"[13] {where}: unknown witness {witness!r}")
+            elif witness and witness not in WITNESSES:
+                report.errors.append(
+                    f"[13] {where}: unknown witness {witness!r}")
             evidence = prov.get("evidence", "")
             if evidence and run in manifests and manifests[run]:
                 if not (root / evidence).exists() \
@@ -177,14 +207,36 @@ def validate_graph(root: Path) -> ValidationReport:
 
     # 12 — every certified metric keeps an active home
     edges = graph.fold_edges()
-    certified = {s for (s, r, o), q in edges.items()
+    certified = {s for (s, r, o, _w), q in edges.items()
                  if r == "certified_as" and o == "status:certified"
                  and q.prov.status == "active" and s.startswith("metric:")}
-    homed = {s for (s, r, o), q in edges.items()
+    homed = {s for (s, r, o, _w), q in edges.items()
              if r == "measured_on" and q.prov.status == "active"}
     for metric in sorted(certified - homed):
         report.errors.append(
             f"[12] certified metric without active measured_on: {metric}")
+
+    # [14] E12/A5 — ReviewItem nodes: kind/status enums, numeric
+    # priority, and a resolving `concerns` subject
+    concerned = {s for (s, r, o, _w), q in edges.items()
+                 if r == "concerns"}
+    for node_id, record in graph.fold_nodes().items():
+        if not node_id.startswith("review:"):
+            continue
+        props = record.props
+        if props.get("kind") not in REVIEW_KINDS:
+            report.errors.append(
+                f"[14] {node_id}: unknown review kind "
+                f"{props.get('kind')!r}")
+        if props.get("status") not in REVIEW_STATUSES:
+            report.errors.append(
+                f"[14] {node_id}: bad review status "
+                f"{props.get('status')!r}")
+        if not isinstance(props.get("priority"), (int, float)):
+            report.errors.append(f"[14] {node_id}: non-numeric priority")
+        if node_id not in concerned:
+            report.errors.append(
+                f"[14] {node_id}: no `concerns` edge to its subject")
 
     # warnings — orphan nodes (no edge touches them)
     touched = {e for key in edges for e in (key[0], key[2])}

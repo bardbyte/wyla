@@ -25,7 +25,7 @@ from sahs.canon.census import norm_label
 from sahs.canon.fingerprint import fingerprint
 from sahs.graph.crosswalk import Crosswalk
 from sahs.graph.ids import acr_id, col_id, concept_id, table_id
-from sahs.graph.quads import GraphDir, NodeRecord, Prov, Quad
+from sahs.graph.quads import SOURCE_WITNESS, GraphDir, NodeRecord, Prov, Quad
 from sahs.loaders.records import (
     ExpressionRecord,
     StdTechEntry,
@@ -50,14 +50,19 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                      graph: GraphDir, crosswalk: Crosswalk,
                      run_id: str) -> dict:
     """Aggregate-then-write: sources sharing a fingerprint fuse into one
-    node, one edge per (s,r,o) with summed support, and ONE governance
-    seed per metric — the highest-authority initial state — so the E7
-    transition history never starts with an illegal sequence."""
+    node, one edge per (s,r,o,WITNESS) with support summed WITHIN the
+    family only (E12/A1 — cross-family aggregation is compiler output,
+    never store state), and ONE governance seed per metric — the
+    highest-authority initial state — so the E7 transition history never
+    starts with an illegal sequence."""
     report: dict = defaultdict(int)
     nodes: dict[str, dict] = {}
     node_prov: dict[str, tuple[str, int, str]] = {}
-    edges: dict[tuple[str, str, str], dict] = {}
+    edges: dict[tuple[str, str, str, str], dict] = {}
     states: dict[str, str] = {}
+
+    def witness_of(record: ExpressionRecord) -> str:
+        return record.witness or SOURCE_WITNESS.get(record.source, "")
 
     def merge_node(node_id: str, props: dict, record: ExpressionRecord
                    ) -> None:
@@ -74,10 +79,19 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
 
     def merge_edge(s: str, r: str, o: str, record: ExpressionRecord
                    ) -> None:
-        entry = edges.setdefault((s, r, o), {
+        entry = edges.setdefault((s, r, o, witness_of(record)), {
             "source": record.source, "authority": int(record.authority),
-            "support": 0, "evidence": record.evidence_ref})
+            "support": 0, "evidence": record.evidence_ref,
+            "first_seen": record.first_seen, "last_seen": record.last_seen,
+            "run_count": 0})
         entry["support"] += max(record.support, 1)
+        entry["run_count"] += int(record.extra.get("run_count") or 0)
+        if record.first_seen and (not entry["first_seen"]
+                                  or record.first_seen
+                                  < entry["first_seen"]):
+            entry["first_seen"] = record.first_seen
+        if record.last_seen and record.last_seen > entry["last_seen"]:
+            entry["last_seen"] = record.last_seen
         if int(record.authority) > entry["authority"]:
             entry.update(source=record.source,
                          authority=int(record.authority),
@@ -144,10 +158,14 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
         graph.append_node(NodeRecord(
             id=node_id, props=nodes[node_id],
             prov=Prov(source=source, run=run_id, evidence=evidence)))
-    for (s, r, o) in sorted(edges):
-        entry = edges[(s, r, o)]
-        graph.append_edge(Quad(s=s, r=r, o=o, prov=Prov(
-            source=entry["source"], run=run_id,
+    for (s, r, o, witness) in sorted(edges):
+        entry = edges[(s, r, o, witness)]
+        props = {k: v for k, v in (
+            ("first_seen", entry["first_seen"]),
+            ("last_seen", entry["last_seen"]),
+            ("run_count", entry["run_count"] or None)) if v}
+        graph.append_edge(Quad(s=s, r=r, o=o, props=props, prov=Prov(
+            source=entry["source"], run=run_id, witness=witness,
             support=entry["support"], evidence=entry["evidence"])))
     for metric in sorted(states):
         source, _authority, evidence = node_prov[metric]
@@ -159,7 +177,7 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
     # hang off the highest-authority member (the meridian line when one
     # exists); "off-meridian by: <expression delta>" renders from these
     by_intent: dict[tuple[str, str], list[str]] = defaultdict(list)
-    for (s, r, o) in edges:
+    for (s, r, o, _witness) in edges:
         if r == "measured_on" and s.startswith("metric:"):
             label = norm_label(str(nodes.get(s, {}).get("label") or ""))
             if label:
