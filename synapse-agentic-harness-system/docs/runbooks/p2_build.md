@@ -18,8 +18,8 @@ crosswalk.
 
 ```json
 {"physical": "dw.gms_transaction", "lumi_asset_id": "…",
- "atlas_entity_id": "…", "short": "gms_transaction",
- "verified_by": "<you>", "verified_on": "YYYY-MM-DD"}
+ "atlas_entity_id": "…", "verified_by": "<you>",
+ "verified_on": "YYYY-MM-DD", "notes": ""}
 ```
 
 The validator refuses archive quads whose table subject is not in this
