@@ -34,8 +34,10 @@ path flags. Two kinds of input:
     ├── extended_gmns_semantics.json   # GMNS pending metrics
     ├── data_cleaned.csv               # acropedia glossary
     ├── business_terms.csv             # Atlas/Collibra terms
-    ├── std_tech_metadata/             # 46 per-table Atlas JSONs
-    │   └── <table>.json
+    ├── std_tech_metadata/             # 46 per-table Atlas JSONs …
+    │   └── <table>.json               # … OR one combined export:
+    ├── std_tech_metadata_all.json     # accepted as an alternative —
+    │                                  # and it WINS when both exist
     └── skills/                        # packs: dirs holding skill.yaml
         └── <PackName>/                # (flat or one level nested)
             skill.yaml, metric_contracts.yaml, …
@@ -82,6 +84,9 @@ pip install google-auth                # P1+ only (dry-run token)
 python -m pytest tests/ -q             # 65 green = environment proven
 export DATA=~/meridian-data            # wherever you put the inputs
 ```
+
+`meridian-data/` may also live inside the repo checkout — the root
+`.gitignore` excludes it — but never `git add` archive data manually.
 
 Env (P1 onward — P0 needs no network at all): `LUMI_BQ_SA_KEY` (or
 `GOOGLE_APPLICATION_CREDENTIALS`), `BQ_PROJECT_ID` (or

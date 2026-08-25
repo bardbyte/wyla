@@ -111,6 +111,17 @@ def _load_expressions(sources: Path, registry: TableRegistry,
     return records, quarantined, backlog
 
 
+def _std_tech_path(sources: Path) -> Path | None:
+    """The Atlas std-tech feed ships as either a per-table directory or
+    one combined export; the combined file wins when both exist (a
+    partially-populated directory must not shadow the full export)."""
+    combined = sources / "std_tech_metadata_all.json"
+    if combined.exists():
+        return combined
+    directory = sources / "std_tech_metadata"
+    return directory if directory.is_dir() else None
+
+
 def _vocab_counts(sources: Path) -> tuple[dict[str, int],
                                           list[Quarantined]]:
     counts: dict[str, int] = {}
@@ -125,8 +136,8 @@ def _vocab_counts(sources: Path) -> tuple[dict[str, int],
         recs, quar = load_business_terms(p)
         counts["business_terms"] = len(recs)
         quarantined.extend(quar)
-    p = sources / "std_tech_metadata"
-    if p.exists():
+    p = _std_tech_path(sources)
+    if p is not None:
         recs, quar = load_std_tech_metadata(p)
         counts["std_tech_metadata"] = len(recs)
         quarantined.extend(quar)
@@ -317,9 +328,11 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
         terms = (load_business_terms(terms_path)[0]
                  if terms_path.exists() else [])
         reports["vocab"] = emit_vocab(glossary, terms, graph, run_id)
-        std_dir = sources / "std_tech_metadata"
-        if std_dir.exists():
-            entries = load_std_tech_metadata(std_dir)[0]
+        std_path = _std_tech_path(sources)
+        if std_path is not None:
+            console.emit("phase_start", phase="load:std_tech",
+                         detail=f"reading {std_path.name}")
+            entries = load_std_tech_metadata(std_path)[0]
             reports["std_tech"] = emit_std_tech(
                 entries, terms, graph, crosswalk, run_id)
 
