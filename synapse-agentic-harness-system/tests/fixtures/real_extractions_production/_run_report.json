@@ -1,0 +1,21 @@
+{
+ "run_id": "20260823T123456Z_fixture",
+ "status": "complete",
+ "tables": [
+  "gms_transaction",
+  "wwcas_authorization"
+ ],
+ "status_counts": {
+  "FETCHED": 40,
+  "DENIED": 1,
+  "EMPTY": 2
+ },
+ "denied_operations": [
+  {
+   "table": "wwcas_authorization",
+   "operation": "rowAccessPolicies.list",
+   "error": "Permission bigquery.rowAccessPolicies.list denied"
+  }
+ ],
+ "total_bytes_billed": 12345678901
+}

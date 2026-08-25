@@ -1,0 +1,46 @@
+{
+ "columns": [
+  {
+   "name": "trans_usd_am",
+   "data_type": "STRING",
+   "business_name": "Transaction USD Amount",
+   "description": "Signed transaction amount in US dollars.",
+   "is_pii": false
+  },
+  {
+   "name": "se_no",
+   "data_type": "STRING",
+   "business_name": "Service Establishment Number",
+   "description": "Merchant identifier.",
+   "is_pii": false
+  },
+  {
+   "name": "cm13",
+   "data_type": "STRING",
+   "business_name": "Card Member 13",
+   "description": "Card member number.",
+   "is_pii": true
+  },
+  {
+   "name": "country_cd",
+   "data_type": "STRING",
+   "business_name": "Country Code",
+   "description": "ISO country of the transaction.",
+   "is_pii": false
+  },
+  {
+   "name": "part_dt",
+   "data_type": "DATE",
+   "business_name": "Partition Date",
+   "description": "Partition date.",
+   "is_pii": false
+  },
+  {
+   "name": "mdm_only_col",
+   "data_type": "STRING",
+   "business_name": "Phantom Column",
+   "description": "Documented but not physical.",
+   "is_pii": false
+  }
+ ]
+}

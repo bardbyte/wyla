@@ -1,0 +1,4 @@
+{"physical": "dw.gms_transaction", "lumi_asset_id": "lumi-ds-001", "atlas_entity_id": "gms_transaction", "verified_by": "fixture", "verified_on": "2026-08-25", "notes": ""}
+{"physical": "dw.wwcas_authorization", "lumi_asset_id": "lumi-ds-002", "atlas_entity_id": "wwcas_authorization", "verified_by": "fixture", "verified_on": "2026-08-25", "notes": "view over data.wwcas"}
+{"physical": "data.raw_gms_feed", "lumi_asset_id": "lumi-ds-090", "atlas_entity_id": "", "verified_by": "fixture", "verified_on": "2026-08-25", "notes": "upstream feed (lineage endpoint)"}
+{"physical": "dw.sbs_new_accounts", "lumi_asset_id": "lumi-ds-003", "atlas_entity_id": "sbs_new_accounts", "verified_by": "fixture", "verified_on": "2026-08-25", "notes": "no archive fixture \u2014 semantic sources only"}

@@ -1,0 +1,10 @@
+{
+ "tableReference": {
+  "projectId": "axp-lumi",
+  "datasetId": "dw",
+  "tableId": "wwcas_authorization"
+ },
+ "type": "VIEW",
+ "creationTime": "1750000000000",
+ "description": "wwcas_authorization logical resource"
+}

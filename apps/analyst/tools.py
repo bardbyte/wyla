@@ -203,7 +203,8 @@ def build_analyst_tools() -> list[Callable[..., dict[str, Any]]]:
 # playbooks are how the agent UNDERSTANDS a question (definitions,
 # metric contracts, guardrails) before designing any answer.
 _CLASSIC_GRAPH_TOOLS = (
-    "search_entities", "list_tables_for_domain", "inspect_table",
+    "search_entities", "route_question", "list_tables_for_domain",
+    "inspect_table",
     "find_columns_for_concept", "get_join_path", "get_lineage",
     "get_metric", "get_skill", "get_dq_status", "disambiguate_term",
     "validate_sql_plan", "get_entity", "get_steward_review_queue",

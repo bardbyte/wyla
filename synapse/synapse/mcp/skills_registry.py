@@ -123,6 +123,7 @@ class SkillsRegistry:
         for b in self.skills:
             hay = " ".join([
                 str(b.get("skill_id", "")), str(b.get("domain", "")),
+                str(b.get("company_domain", "")),
                 str(b.get("description", "")),
                 " ".join(str(t) for t in b.get("tables_used") or []),
             ]).lower()

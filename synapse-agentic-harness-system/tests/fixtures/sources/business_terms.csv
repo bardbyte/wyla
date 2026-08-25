@@ -1,0 +1,22 @@
+businessTermId,businessTermName,businessTermStatus
+1,Merchant Submission Currency Code,Candidate
+2,Payment Applied By Plan To Principal Amount,Under Review
+3,Individual Applicant Primary Prefix,Rejected
+4,New Consumer Account Applicant Maximum Available Credit,Approved
+5,Individual Applicant Phone Number,Candidate
+6,Merchant Category Code,Under Review
+7,Card Member Account Balance,Rejected
+8,Transaction United States Dollar Amount,Approved
+9,Service Establishment Number,Candidate
+10,Authorization Approval Code,Under Review
+11,Delinquency Bucket,Rejected
+12,Card Member Tenure Months,Approved
+13,Travel Booking Count,Candidate
+14,Air Ticket Count,Under Review
+15,Net Sales Amount,Rejected
+16,Write Off Amount,Approved
+17,FICO Score,Candidate
+18,Business Unit Code,Under Review
+19,Country Code,Rejected
+20,Point of Sale Entry Mode,Approved
+99,Bad Status Term,Mystery

@@ -1,0 +1,6 @@
+{
+ "pipeline_name": "gms_daily_load",
+ "business_unit": "GMNS",
+ "feed_type": "batch",
+ "source_system": "GMS"
+}

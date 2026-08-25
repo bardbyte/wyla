@@ -1,0 +1,8 @@
+[
+ {
+  "source_table": "raw_gms_feed",
+  "source_column": "amt",
+  "target_column": "trans_usd_am",
+  "derivation_logic": "CAST(amt AS NUMERIC) * sign"
+ }
+]

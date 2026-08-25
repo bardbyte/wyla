@@ -225,6 +225,26 @@ python synapse/scripts/pipeline.py \
     --collibra-export your_collibra_export.json
 # then restart the server — known tables gain the new witness and
 # their tier recomputes; new tables appear in the sky as vapour.
+
+# 3b · the catalog exports: DMP curated metrics (weight 5) + mined
+#      measures (weight 2, user_count-scaled, JOINS_WITH co-occurrence
+#      edges). Same append flow — or a fresh recreate from ONLY the two
+#      files by swapping --append-to for --sources-dir <empty> --out.
+python synapse/scripts/pipeline.py \
+    --append-to /abs/path/to/your/graph_snapshot.json \
+    --dmp-export metrics_dmp.json \
+    --measures-catalog measures_catalog.json \
+    --table-aliases aliases.json          # {"offr_spelling": "offer_spelling"}
+# --measures-min-confidence low ingests all mined candidates (default
+# medium); join evidence counts from every row regardless.
+
+# 3c · experiment with the trust prior WITHOUT code edits — one build,
+#      retuned weights (env fallback: SYNAPSE_SOURCE_WEIGHTS). The
+#      console's witness ledger reads live weights, so the env var
+#      retunes the serving ledger too.
+python synapse/scripts/pipeline.py --append-to ... \
+    --measures-catalog measures_catalog.json \
+    --weights-override '{"usage_mined": 3}'
 ```
 
 Sanity checks: `GET /health` (runner + model), `GET /api/config`

@@ -24,17 +24,33 @@ from synapse.mcp.service import GraphService
 def build_adk_tools(service: GraphService) -> list[Callable[..., dict[str, Any]]]:
     """Named, docstring-carrying closures for every graph tool."""
 
-    def search_entities(query: str, top_k: int = 10) -> dict:
+    def search_entities(query: str, top_k: int = 10,
+                        domain: str = "") -> dict:
         """Resolve a business term to graph objects (tables, columns,
-        metrics, synonyms, skills). Call FIRST for any term whose schema
-        binding isn't obvious. Returns hits with confidence_tier + sources."""
-        return service.search_entities(query, top_k)
+        metrics, synonyms, skills, domains). Call FIRST for any term
+        whose schema binding isn't obvious. Pass domain to stay inside
+        the company domain route_question picked (membership is
+        overlap-aware). Returns hits with uri, confidence_tier +
+        sources."""
+        return service.search_entities(query, top_k, domain=domain)
+
+    def route_question(question: str, top_units: int = 3) -> dict:
+        """Which company domain is this question about? Ranks the
+        graph's domain layer against the question; returns each domain's
+        evidence profile, best-matching tables and metrics inside it,
+        overlap with other domains, and the skill playbooks covering it.
+        Call FIRST for broad or ambiguous questions, then work inside
+        the winning domain."""
+        return service.route_question(question, top_units)
 
     def list_tables_for_domain(data_domain: str = "",
-                               company_domain: str = "") -> dict:
-        """Browse tables by governance domain. For "what tables exist for
-        X?" — not free-text search."""
-        return service.list_tables_for_domain(data_domain, company_domain)
+                               company_domain: str = "",
+                               domain: str = "") -> dict:
+        """Browse tables by governance taxonomy or company domain
+        (overlap-aware, resolved via the domain layer). For "what tables
+        exist for X?" — not free-text search."""
+        return service.list_tables_for_domain(
+            data_domain, company_domain, domain=domain)
 
     def inspect_table(table: str, column_limit: int = 50) -> dict:
         """Everything known about one table (identity, columns, governance,
@@ -140,7 +156,8 @@ def build_adk_tools(service: GraphService) -> list[Callable[..., dict[str, Any]]
                                          statement, actor)
 
     return [
-        search_entities, list_tables_for_domain, inspect_table,
+        search_entities, route_question, list_tables_for_domain,
+        inspect_table,
         find_columns_for_concept, get_filter_values, resolve_code,
         get_join_path, get_lineage, get_metric, get_skill, get_guardrails,
         get_dq_status, explain_confidence, disambiguate_term,

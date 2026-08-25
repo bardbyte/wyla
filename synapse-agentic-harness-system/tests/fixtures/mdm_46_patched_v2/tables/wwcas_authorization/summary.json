@@ -1,0 +1,17 @@
+{
+ "table_name": "wwcas_authorization",
+ "discovery": {
+  "dataset_ids": [
+   "lumi-ds-002"
+  ],
+  "schema_ids": [
+   "lumi-ds-002-schema"
+  ],
+  "pipeline_ids": [
+   "lumi-ds-002-pipe"
+  ]
+ },
+ "answerability": {
+  "structure": "strong"
+ }
+}

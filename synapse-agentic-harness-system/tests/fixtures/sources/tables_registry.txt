@@ -1,0 +1,8 @@
+gms_transaction
+gms_merchant_char
+wwcas_authorization
+cas_authorization
+risk_pers_acct
+tlsarpt_travel_sales
+sbs_new_accounts
+custins_cardmember

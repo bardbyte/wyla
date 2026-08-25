@@ -1,0 +1,41 @@
+insight_name,sql_logic,table_name
+consumer,trim(business_unit_cd) in ('1'),wwcas_authorization
+consumer,business_unit_cd = '1',wwcas_authorization
+consumer,trim(business_unit_cd) in ('1'),risk_pers_acct
+hotel,se_typ = 'B',gms_merchant_char
+hotel,se_typ in ('B'),gms_merchant_char
+declined,approval_cd = 'D',wwcas_authorization
+declined,"approval_cd in ('D','X')",wwcas_authorization
+north_america,"country_cd in ('US','CA')",gms_transaction
+centurion_product,ia_cd = '005',risk_pers_acct
+age_band,CASE WHEN age < 30 THEN 'young' WHEN age < 60 THEN 'mid' ELSE 'senior' END,custins_cardmember
+spend_sign,CASE WHEN se_cr_dr_in = 'C' THEN -1 ELSE 1 END,gms_transaction
+active_card,card_status_cd = 'A',custins_cardmember
+high_fico,fico_score >= 720,risk_pers_acct
+small_business,segment_cd = '2',sbs_new_accounts
+air_product,product_typ = 'AIR',tlsarpt_travel_sales
+gb_market,country_cd in ('GB'),gms_transaction
+zero_auth,trans_usd_am = 0,wwcas_authorization
+card_present,"pos_entry_cd in ('01','02')",gms_transaction
+recent,part_dt >= '2026-01-01',gms_transaction
+writeoff,wo_am > 0,risk_pers_acct
+filter_0,col_0 = 0,gms_transaction
+filter_1,col_1 = 1,gms_transaction
+filter_2,col_2 = 2,gms_transaction
+filter_3,col_3 = 3,gms_transaction
+filter_4,col_4 = 4,gms_transaction
+filter_5,col_5 = 5,gms_transaction
+filter_6,col_6 = 6,gms_transaction
+filter_7,col_7 = 7,gms_transaction
+filter_8,col_8 = 8,gms_transaction
+filter_9,col_9 = 9,gms_transaction
+filter_10,col_10 = 10,gms_transaction
+filter_11,col_11 = 11,gms_transaction
+filter_12,col_12 = 12,gms_transaction
+filter_13,col_13 = 13,gms_transaction
+broken_1,se_typ = = 'B',gms_merchant_char
+broken_2,country_cd in ('US',gms_transaction
+broken_3,CASE WHEN THEN 'x',custins_cardmember
+broken_4,and or not,risk_pers_acct
+broken_5,>>>,sbs_new_accounts
+ambig_auth,flag = 1,authorization

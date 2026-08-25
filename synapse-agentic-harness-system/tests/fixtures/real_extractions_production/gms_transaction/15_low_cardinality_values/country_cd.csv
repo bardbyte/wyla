@@ -1,0 +1,4 @@
+column_name,value,value_count,pct_of_rows,rank
+country_cd,US,720,72.0,1
+country_cd,GB,63,6.3,2
+country_cd,CA,40,4.0,3

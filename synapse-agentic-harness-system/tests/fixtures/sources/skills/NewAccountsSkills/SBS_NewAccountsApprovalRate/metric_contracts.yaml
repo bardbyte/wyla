@@ -1,0 +1,14 @@
+metrics:
+  - name: approval_rate
+    business_name: SBS Approval Rate
+    table: sbs_new_accounts
+    grain: month
+    expression: "SAFE_DIVIDE(SUM(CASE WHEN approval_cd = 'A' THEN 1 ELSE 0 END), COUNT(1))"
+    numerator: "SUM(CASE WHEN approval_cd = 'A' THEN 1 ELSE 0 END)"
+    denominator: "COUNT(1)"
+    do_not_average_ratios: true
+  - name: apps_received
+    business_name: Applications Received
+    table: sbs_new_accounts
+    grain: month
+    expression: "COUNT(1)"

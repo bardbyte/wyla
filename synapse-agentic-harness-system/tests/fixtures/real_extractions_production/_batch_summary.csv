@@ -1,0 +1,3 @@
+table,logical_exists,physical_exists,profiled_columns,low_cardinality_columns,jobs_30d,audit_30d,distinct_query_users_30d
+gms_transaction,True,True,5,1,120,118,14
+wwcas_authorization,True,True,4,1,80,79,9

@@ -1,0 +1,7 @@
+column_name,ordinal_position,data_type,is_nullable,is_partitioning_column
+trans_usd_am,1,FLOAT64,YES,NO
+se_no,2,STRING,YES,NO
+cm13,3,STRING,YES,NO
+country_cd,4,STRING,YES,NO
+part_dt,5,DATE,YES,YES
+bq_only_col,6,STRING,YES,NO

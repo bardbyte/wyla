@@ -1,0 +1,5 @@
+{
+ "table": "wwcas_authorization",
+ "logical_exists": true,
+ "physical_exists": true
+}

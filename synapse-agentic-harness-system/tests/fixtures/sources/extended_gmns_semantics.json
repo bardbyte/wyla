@@ -1,0 +1,33 @@
+[
+ {
+  "metricName": "local_spend_method_a",
+  "sqlExpression": "SUM(CASE WHEN issuer_country = merchant_country THEN trans_usd_am ELSE 0 END)",
+  "calculation": "Spend where issuer and merchant country match.",
+  "approvedDimensions": [
+   "time_period",
+   "region",
+   "MCC"
+  ],
+  "metricGrain": "transaction",
+  "metricScope": "partner analytics",
+  "requestor": "gmns_lead",
+  "submittedForApproval": true,
+  "status": "Submitted",
+  "table": "gms_transaction"
+ },
+ {
+  "metricName": "local_spend_method_b",
+  "sqlExpression": "SUM(CASE WHEN issuer_region = merchant_region THEN trans_usd_am ELSE 0 END)",
+  "calculation": "Spend where issuer and merchant REGION match (broader).",
+  "approvedDimensions": [
+   "time_period",
+   "bank_partner"
+  ],
+  "metricGrain": "transaction",
+  "metricScope": "analysts",
+  "requestor": "gmns_lead",
+  "submittedForApproval": true,
+  "status": "Submitted",
+  "table": "gms_transaction"
+ }
+]

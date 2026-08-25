@@ -1,0 +1,6 @@
+id: SBS_NewAccountsApprovalRate
+description: Approval-rate analytics for small-business new accounts.
+when_to_use: approval rate, booking rate questions for SBS applications
+not_for: consumer approval rates
+tables:
+  - sbs_new_accounts

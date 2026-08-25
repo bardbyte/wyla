@@ -1,0 +1,10 @@
+{
+ "gms_transaction": {
+  "lifecycle": "FETCHED",
+  "ownership": "FETCHED"
+ },
+ "wwcas_authorization": {
+  "lifecycle": "HTTP_503",
+  "ownership": "FETCHED"
+ }
+}

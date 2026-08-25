@@ -1,0 +1,17 @@
+{
+ "table_name": "gms_transaction",
+ "discovery": {
+  "dataset_ids": [
+   "lumi-ds-001"
+  ],
+  "schema_ids": [
+   "lumi-ds-001-schema"
+  ],
+  "pipeline_ids": [
+   "lumi-ds-001-pipe"
+  ]
+ },
+ "answerability": {
+  "structure": "strong"
+ }
+}

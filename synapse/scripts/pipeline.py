@@ -23,6 +23,15 @@ Real run (any subset; missing sources are skipped, not fatal):
         --lumi-session lumi_final/data/session1_output.json \
         --mdm-cache-dir lumi_final/data/mdm_cache
 
+Catalog exports fuse as weighted witnesses — full builds AND appends:
+
+    python synapse/scripts/pipeline.py \
+        --append-to synapse/data/cache/graph_snapshot.json \
+        --dmp-export metrics_dmp.json \
+        --measures-catalog measures_catalog.json \
+        [--table-aliases aliases.json] [--measures-min-confidence low] \
+        [--weights-override '{"usage_mined": 3}']
+
 Then serve it:
 
     SYNAPSE_GRAPH_PATH=synapse/data/cache/graph_snapshot.json \
@@ -33,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -58,6 +68,24 @@ def _note(msg: str) -> None:
 
 def run_pipeline(args: argparse.Namespace) -> Path:
     sources_dir = Path(args.sources_dir).expanduser()
+
+    # ── 0a. Source-weights override (experiment knob) ────────
+    #    Storage stays Knowledge-Vault-shaped (every fact kept with its
+    #    calibrated score); experiments retune the WEIGHTS for one build.
+    #    Applied before any stage so every tier computes under the tuned
+    #    prior. Flag wins over the SYNAPSE_SOURCE_WEIGHTS env fallback.
+    overrides_raw = (getattr(args, "weights_override", "")
+                     or os.environ.get("SYNAPSE_SOURCE_WEIGHTS", ""))
+    if overrides_raw:
+        from synapse.graph.store import apply_weight_overrides
+        text = overrides_raw.strip()
+        if not text.startswith("{"):
+            text = Path(text).expanduser().read_text(encoding="utf-8")
+        overrides = json.loads(text)
+        _stage("Source-weights override (experiment)")
+        previous = apply_weight_overrides(overrides)
+        for name in sorted(overrides):
+            _note(f"{name}: {previous[name]} → {overrides[name]}")
 
     # ── 0. Append mode ───────────────────────────────────────
     #    Load an existing snapshot and fuse ONLY what this run stages on
@@ -295,7 +323,92 @@ def run_pipeline(args: argparse.Namespace) -> Path:
         stats = store.stats()
         _note(f"by tier now: {stats['nodes_by_confidence_tier']}")
 
-    # ── 6b. LLM enrichment (witness #5) — batched, opt-in, budgeted ──
+    # Shared alias map for the two catalog stages below — mined exports
+    # carry table-name spelling drift (e.g. offer/offr); one map serves
+    # both loaders so the drifted spellings fuse onto one node.
+    catalog_aliases = None
+    if getattr(args, "table_aliases", "") and (
+            getattr(args, "dmp_export", "")
+            or getattr(args, "measures_catalog", "")
+            or getattr(args, "domain_tags", "")):
+        from synapse.loaders.measures_catalog_loader import load_table_aliases
+        catalog_aliases = load_table_aliases(
+            Path(args.table_aliases).expanduser())
+
+    # ── 6b. DMP metric catalog (curated-family witness) ──────
+    #        Author-owned Data Marketplace metrics fuse BEFORE the mined
+    #        pass so curated wording lands first and discovery only fills
+    #        the gaps — order encodes authority, same as the full build.
+    if getattr(args, "dmp_export", ""):
+        _stage("DMP metric catalog → dmp witness (weight 5)")
+        from synapse.loaders.dmp_loader import load_dmp_export
+        if catalog_aliases:
+            _note(f"table aliases: {len(catalog_aliases)} mapping(s)")
+        dmp_res = load_dmp_export(
+            store, Path(args.dmp_export).expanduser(),
+            aliases=catalog_aliases)
+        _note(f"{dmp_res['metrics']} curated metric(s) fused · "
+              f"{dmp_res['tables_minted']} unknown table(s) minted")
+        for reason in dmp_res["skipped"][:8]:
+            _note(f"⚠ skipped: {reason}")
+        run_report["dmp"] = dmp_res
+        stats = store.stats()
+        _note(f"by tier now: {stats['nodes_by_confidence_tier']}")
+
+    # ── 6c. Mined measures catalog (behavioral witness) ──────
+    #        Metrics distilled from historical query execution: weight 2,
+    #        evidence-scaled by user_count, JOINS_WITH co-occurrence
+    #        edges. Below-threshold candidates are counted, never silent.
+    if getattr(args, "measures_catalog", ""):
+        _stage("Mined measures → usage_mined witness (weight 2)")
+        from synapse.loaders.measures_catalog_loader import (
+            load_measures_catalog)
+        if catalog_aliases:
+            _note(f"table aliases: {len(catalog_aliases)} mapping(s)")
+        mm_res = load_measures_catalog(
+            store, Path(args.measures_catalog).expanduser(),
+            min_confidence=args.measures_min_confidence,
+            aliases=catalog_aliases)
+        _note(f"{mm_res['metrics']} mined metric(s) at confidence ≥ "
+              f"{args.measures_min_confidence} fused across "
+              f"{mm_res['tables_witnessed']} table(s)")
+        _note(f"{mm_res['tables_minted']} unknown table(s) minted · "
+              f"{mm_res['join_edges']} JOINS_WITH co-occurrence edge(s)")
+        if mm_res["below_threshold"]:
+            _note("below threshold (not ingested as metrics; their join "
+                  f"evidence still counted): {mm_res['below_threshold']}")
+        for reason in mm_res["skipped"][:8]:
+            _note(f"⚠ skipped: {reason}")
+        run_report["measures"] = mm_res
+        stats = store.stats()
+        _note(f"by tier now: {stats['nodes_by_confidence_tier']}")
+
+    # ── 6c2. Steward domain tags (human_approval witness) ────
+    #         The curated Company Domain → tables map. COEXISTS with the
+    #         machine labels: minted as Domain nodes + membership edges,
+    #         never stamped onto table properties — what MDM said stays
+    #         as MDM said it. Overlap (one table, several domains) is
+    #         first-class. The rollup below fuses both witness families.
+    if getattr(args, "domain_tags", ""):
+        _stage("Steward domain tags → human_approval memberships")
+        from synapse.loaders.domain_tags_loader import load_domain_tags
+        dt_res = load_domain_tags(
+            store, Path(args.domain_tags).expanduser(),
+            aliases=catalog_aliases)
+        _note(f"{dt_res['domains']} domain(s) → "
+              f"{dt_res['memberships']} membership edge(s)")
+        if dt_res["overlapping_tables"]:
+            for t, ds in list(dt_res["overlapping_tables"].items())[:6]:
+                _note(f"overlap: {t} ∈ {', '.join(ds)}")
+        if dt_res["stubs_minted"]:
+            _note(f"{len(dt_res['stubs_minted'])} tagged table(s) not yet "
+                  f"crawled — minted as stubs: "
+                  f"{', '.join(dt_res['stubs_minted'][:6])}")
+        for reason in dt_res["skipped"][:8]:
+            _note(f"⚠ skipped: {reason}")
+        run_report["domain_tags"] = dt_res
+
+    # ── 6d. LLM enrichment (witness #5) — batched, opt-in, budgeted ──
     #        One Gemini call per ≤batch-size columns; wide tables get
     #        multiple calls, merged into one bundle per table. Facts land
     #        as `llm_generated` (tier-capped at inferred until other
@@ -490,7 +603,31 @@ def run_pipeline(args: argparse.Namespace) -> Path:
             _note(f"post-enrichment tiers: "
                   f"{stats['nodes_by_confidence_tier']}")
 
-    # ── 6c. Context-readiness scorecard ──────────────────────
+    # ── 6d2. Domain rollup — the layer on top, derived + steward ──
+    #         Always runs (cheap, idempotent): rebuilds the Domain layer
+    #         from the union of machine labels on tables (derived edges,
+    #         recomputed) and steward memberships (human_approval edges,
+    #         preserved verbatim), with per-domain evidence profiles.
+    from synapse.graph.rollup import rollup_domains
+    _stage("Domain rollup — the layer on top of the graph")
+    rollup_report = rollup_domains(store)
+    if rollup_report["domains"]:
+        for unit in rollup_report["units"]:
+            _note(f"{unit['domain'][:34]:34} "
+                  f"{unit['tables']:>3} table(s) "
+                  f"({unit['steward_members']} steward) "
+                  f"{unit['metrics']:>4} metric(s)  {unit['tier']}")
+        for t, ds in list(
+                rollup_report["overlapping_tables"].items())[:6]:
+            _note(f"overlap: {t} ∈ {', '.join(ds)}")
+        if rollup_report["tables_in_no_domain"]:
+            _note(f"{rollup_report['tables_in_no_domain']} "
+                  "table(s) in no domain — MDM crawl gap")
+    else:
+        _note("no domain evidence anywhere — layer empty")
+    run_report["domain_rollup"] = rollup_report
+
+    # ── 6e. Context-readiness scorecard ──────────────────────
     #        Node counts don't measure retrieval quality. Per manifest
     #        table: can the graph actually answer questions about it?
     #        Watch these numbers run over run — THIS is "rich enough".
@@ -612,6 +749,40 @@ def main() -> None:
                         help="Collibra asset export (JSON) fused as the "
                              "'collibra' witness (weight 5) — works in full "
                              "builds and appends")
+    parser.add_argument("--dmp-export", default="",
+                        help="Data Marketplace metric catalog (JSON, "
+                             "{'metric_catalog': [...]}) fused as the 'dmp' "
+                             "witness (weight 5) — works in full builds and "
+                             "appends")
+    parser.add_argument("--measures-catalog", default="",
+                        help="mined measures catalog (JSON, {'measures': "
+                             "[...]}) fused as the 'usage_mined' witness "
+                             "(weight 2, user_count-scaled, JOINS_WITH "
+                             "edges) — works in full builds and appends")
+    parser.add_argument("--measures-min-confidence", default="medium",
+                        choices=["low", "medium", "high"],
+                        help="ingest mined measures at or above this "
+                             "mining confidence (default medium; 'low' "
+                             "ingests everything — join evidence is "
+                             "counted from ALL rows regardless)")
+    parser.add_argument("--table-aliases", default="",
+                        help="JSON {alias: canonical} table-name map "
+                             "shared by --dmp-export/--measures-catalog/"
+                             "--domain-tags (fuses spelling drift like "
+                             "offer/offr onto one node)")
+    parser.add_argument("--domain-tags", default="",
+                        help="steward Company Domain → tables map (JSON: "
+                             "{'Credit Risk': ['tbl', ...]} or "
+                             "[{'company_domain', 'description', "
+                             "'tables'}]) stamped as the human_approval "
+                             "witness — overrides mined/crawled labels; "
+                             "the rollup derives steward-asserted "
+                             "BusinessUnit nodes from it")
+    parser.add_argument("--weights-override", default="",
+                        help="experiment knob: JSON object or path "
+                             "retuning SOURCE_WEIGHTS for THIS build "
+                             "(e.g. '{\"usage_mined\": 3}'); env fallback "
+                             "SYNAPSE_SOURCE_WEIGHTS")
     parser.add_argument("--sources-dir",
                         default=_DEFAULT_SOURCES_DIR,
                         help="staging dir for canonical artifacts")
@@ -619,7 +790,8 @@ def main() -> None:
     args = parser.parse_args()
     if not any([args.demo, args.skills_dir, args.gold_sql_dir,
                 args.bq_extract_dir, args.lumi_session, args.mdm_cache_dir,
-                args.mdm_crawl, args.mdm_manifest, args.collibra_export]):
+                args.mdm_crawl, args.mdm_manifest, args.collibra_export,
+                args.dmp_export, args.measures_catalog, args.domain_tags]):
         parser.error("nothing to load — pass --demo or at least one source")
     run_pipeline(args)
 

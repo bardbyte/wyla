@@ -1,0 +1,3 @@
+column_name,value,value_count,pct_of_rows,rank
+approval_cd,A,250,83.3,1
+approval_cd,D,50,16.7,2

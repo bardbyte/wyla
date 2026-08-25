@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sahs"
+version = "0.1.0"
+description = "Meridian — siloed agentic analytics platform: census → ground → truth graph → compiled builds → serving tools"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+# Tight pin: fingerprints embed the sqlglot version via canon_version; an
+# upgrade is a deliberate remint migration, never an accidental drift.
+sql = ["sqlglot==30.15.*"]
+mcp = ["mcp[cli]"]
+# L5-ready (out of scope for the L4 plan; the extra exists so the silo owns
+# its own model connectivity when the agent loop lands).
+adk = ["google-adk", "google-genai>=0.5"]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
+addopts = "-q --tb=short"
+
+[tool.setuptools.packages.find]
+include = ["sahs*"]

@@ -1,0 +1,5 @@
+column_name,ordinal_position,data_type,is_nullable,is_partitioning_column
+approval_cd,1,STRING,YES,NO
+trans_usd_am,2,FLOAT64,YES,NO
+card_no,3,STRING,YES,NO
+part_dt,4,DATE,YES,YES

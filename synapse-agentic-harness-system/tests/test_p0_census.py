@@ -1,0 +1,159 @@
+"""P0 gate: adapters, census determinism, CLI end-to-end on fixtures."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+SILO = Path(__file__).resolve().parents[1]
+FX = SILO / "tests" / "fixtures" / "sources"
+REGISTRY = FX / "tables_registry.txt"
+
+sys.path.insert(0, str(SILO))
+
+from sahs.canon.census import build_census, canonicalize_records  # noqa: E402
+from sahs.loaders.registry import TableRegistry                    # noqa: E402
+from sahs.loaders.sources.blue_insights import load_blue_insights  # noqa: E402
+from sahs.loaders.sources.catalogs import (                        # noqa: E402
+    load_extended_gmns,
+    load_measures_catalog,
+    load_metrics_dmp,
+)
+from sahs.loaders.sources.gold_queries import load_gold_queries    # noqa: E402
+from sahs.loaders.sources.skills import load_skill_contracts       # noqa: E402
+from sahs.loaders.sources.vocab import (                           # noqa: E402
+    load_business_terms,
+    load_glossary,
+    load_std_tech_metadata,
+)
+
+
+def _cli(*argv: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(SILO / "scripts" / "laptop.py"), *argv],
+        capture_output=True, text=True, cwd=SILO)
+
+
+def test_registry_suffix_and_ambiguity():
+    reg = TableRegistry.from_list_file(REGISTRY)
+    assert reg.resolve("gms_transaction") == ("gms_transaction", "exact")
+    assert reg.resolve("transaction")[1] == "suffix"
+    assert reg.resolve("authorization") == (None, "ambiguous")
+    assert reg.resolve("nope_table") == (None, "unknown")
+
+
+def test_blue_insights_quarantines_ambiguous_and_missing():
+    reg = TableRegistry.from_list_file(REGISTRY)
+    records, quar = load_blue_insights(
+        FX / "blue_business_insights.csv", reg)
+    assert len(records) == 39            # 40 rows − 1 ambiguous table
+    cats = {q.category for q in quar}
+    assert "ambiguous_table" in cats
+    kinds = {r.kind for r in records}
+    assert kinds == {"predicate", "case"}
+
+
+def test_gold_split_and_backlog():
+    records, quar, backlog = load_gold_queries(
+        FX / "extracted_gold_queries.json")
+    assert len(records) == 9 and len(backlog) == 3 and not quar
+    assert all(r.prompt for r in records)
+
+
+def test_catalog_adapters_counts():
+    dmp, q1 = load_metrics_dmp(FX / "metrics_dmp.json")
+    gmns, q2 = load_extended_gmns(FX / "extended_gmns_semantics.json")
+    mined, q3 = load_measures_catalog(FX / "measures_catalog.json")
+    assert (len(dmp), len(gmns), len(mined)) == (3, 2, 30)
+    assert not (q1 or q2 or q3)
+    assert dmp[0].extra["question_answered"]
+    assert mined[0].support > 1          # user_count scaling
+
+
+def test_skills_contracts_extracted_knowledge_only_pack_skipped():
+    records, quar = load_skill_contracts(FX / "skills")
+    ids = {r.metric_ref for r in records}
+    assert "skill:SBS_NewAccountsApprovalRate:approval_rate" in ids
+    assert len(records) == 2 and not quar   # CPS pack has no contracts
+
+
+def test_vocab_adapters_and_degenerates():
+    glossary, gq = load_glossary(FX / "data_cleaned.csv")
+    assert len(glossary) == 24 and len(gq) == 1      # orphan row
+    dups = [g for g in glossary if g.symbol == "AA"]
+    assert len(dups) == 3                             # BU-scoped meanings
+    assert any(g.region == "EMEA" for g in dups)      # Global_Region header
+    terms, tq = load_business_terms(FX / "business_terms.csv")
+    assert len(terms) == 20 and len(tq) == 1          # bad-status row
+    assert {t.status for t in terms} == {
+        "Approved", "Candidate", "Under Review", "Rejected"}
+    entries, sq = load_std_tech_metadata(FX / "std_tech_metadata")
+    assert len(entries) == 2 and not sq
+    gms = next(e for e in entries if e.table == "gms_transaction")
+    assert gms.layer_type == "SOR" and gms.has_pii
+    assert gms.columns[0].linked_terms[0]["sourceName"] == "LumiMDM"
+
+
+def test_census_finds_seeded_conflicts_and_meta_is_honest():
+    reg = TableRegistry.from_list_file(REGISTRY)
+    records = []
+    records += load_blue_insights(FX / "blue_business_insights.csv", reg)[0]
+    records += load_measures_catalog(FX / "measures_catalog.json")[0]
+    records += load_metrics_dmp(FX / "metrics_dmp.json")[0]
+    done, quar = canonicalize_records(records)
+    census, tail = build_census(done, quar)
+    assert census["summary"]["concept_conflicts"] == 2
+    consumer = census["concepts"]["consumer@wwcas_authorization"]
+    assert consumer["n_classes"] == 2 and consumer["entropy"] == 1.0
+    # certified beats mined in class ranking for the same intent
+    spend = census["metrics"]["total spend@gms_transaction"]
+    assert spend["conflict"]
+    assert "NOT alias/acronym-dedup" in census["meta"][
+        "label_normalization"]
+    assert census["meta"]["quarantine_by_category"]["parse_error"] == 5
+
+
+def test_cli_census_gates_fire_and_outputs_written(tmp_path: Path):
+    r = _cli("census", "--sources-dir", str(FX), "--registry",
+             str(REGISTRY), "--out", str(tmp_path), "--plain", "--json",
+             "--fresh")
+    assert r.returncode == 1              # seeded blue failures trip the gate
+    summary = json.loads(r.stdout)
+    gates = {g["gate"]: g["passed"] for g in summary["gates"]}
+    assert gates["blue_canon_rate"] is False
+    assert gates["blocker_sources_100pct"] is True
+    for name in ("census.json", "census_tail.jsonl", "quarantine.jsonl",
+                 "coverage_crosstab.json", "events.jsonl"):
+        assert (tmp_path / name).exists(), name
+    events = [json.loads(x) for x in
+              (tmp_path / "events.jsonl").read_text().splitlines()]
+    assert events[0]["ev"] == "run_start"
+    assert events[-1]["ev"] == "run_end"
+    assert all(e["schema"] == "meridian.event/1" for e in events)
+
+
+def test_cli_census_deterministic(tmp_path: Path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    for out in (a, b):
+        _cli("census", "--sources-dir", str(FX), "--registry",
+             str(REGISTRY), "--out", str(out), "--plain", "--fresh")
+    assert (a / "census.json").read_bytes() == (b / "census.json").read_bytes()
+
+
+def test_cli_make_tasks(tmp_path: Path):
+    r = _cli("make-tasks", "--sources-dir", str(FX), "--registry",
+             str(REGISTRY), "--out", str(tmp_path), "--plain")
+    assert r.returncode == 0
+    tasks = [json.loads(x) for x in
+             (tmp_path / "tasks" / "gold.jsonl").read_text().splitlines()]
+    assert len(tasks) == 9
+    assert all(t["schema"] == "meridian.task/1" for t in tasks)
+    assert all(t["gold"]["canonical_fp"] in t["grading"]["accepted_fps"]
+               for t in tasks)
+    assert all(t["grading"]["dry_run"] == "required" for t in tasks)
+    backlog = (tmp_path / "triage" / "empty_sql_backlog.jsonl"
+               ).read_text().splitlines()
+    assert len(backlog) == 3
+    assert all(json.loads(x)["triage"] == "pending" for x in backlog)

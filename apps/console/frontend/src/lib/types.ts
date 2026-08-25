@@ -72,7 +72,8 @@ export interface GraphMapNode {
 
 export interface GraphMapEdge {
   source: string; target: string;
-  kind: "equivalent_to" | "identifies" | "computed_from" | "applies_to";
+  kind: "equivalent_to" | "identifies" | "computed_from" | "applies_to"
+    | "joins_with";
   tier: Tier;
 }
 
