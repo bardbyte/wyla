@@ -25,6 +25,17 @@ from sahs.loaders.records import (
 _TERM_STATUSES = {"Approved", "Candidate", "Under Review", "Rejected"}
 
 
+def _opt_str(value) -> str | None:
+    """Loose-feed normalizer: None / False / "" mean ABSENT; True means
+    a bare flag; anything else is the value as text. The real Atlas
+    export sends ``sde_group: false`` for "not in an SDE group"."""
+    if value is None or value is False or value == "":
+        return None
+    if value is True:
+        return "true"
+    return str(value)
+
+
 def load_glossary(path: Path) -> tuple[list[VocabRecord], list[Quarantined]]:
     records, quarantined = [], []
     with Path(path).open(encoding="utf-8-sig", newline="") as f:
@@ -156,29 +167,44 @@ def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                     source="std_tech_metadata", category="missing_field",
                     detail="entry without dataset", evidence_ref=path.name))
                 continue
-            attr = entry.get("datasetAttribute") or {}
-            columns = []
-            for pde in entry.get("pde") or []:
-                pattr = pde.get("pdeAttribute") or {}
-                columns.append(StdTechColumn(
-                    name=str(pde.get("pdeRelPath") or "").lower(),
-                    description=str(pattr.get("description") or ""),
-                    business_name=str(pattr.get("business_name") or ""),
-                    data_type=str(pattr.get("data_type_name") or ""),
-                    pii_role_id=pattr.get("pii_role_id"),
-                    sde_group=pattr.get("sde_group"),
-                    linked_terms=list(pde.get("businessMetadata") or [])))
-            records.append(StdTechEntry(
-                table=table,
-                description=str(attr.get("description") or ""),
-                business_name=str(attr.get("business_name") or ""),
-                data_category=str(attr.get("data_category") or ""),
-                data_sub_category=str(attr.get("data_sub_category") or ""),
-                layer_type=str(attr.get("data_type_name") or ""),
-                has_pii=bool(attr.get("has_pii")),
-                has_oncop=bool(attr.get("has_oncop")),
-                has_gdpr=bool(attr.get("has_gdpr")),
-                ownership=dict(attr.get("ownership") or {}),
-                columns=columns,
-                evidence_ref=path.name))
+            # the real feed types loosely: sde_group / pii_role_id come
+            # back as `false` for "none" — normalize, never crash
+            try:
+                attr = entry.get("datasetAttribute") or {}
+                columns = []
+                for pde in entry.get("pde") or []:
+                    pattr = pde.get("pdeAttribute") or {}
+                    columns.append(StdTechColumn(
+                        name=str(pde.get("pdeRelPath") or "").lower(),
+                        description=str(pattr.get("description") or ""),
+                        business_name=str(
+                            pattr.get("business_name") or ""),
+                        data_type=str(pattr.get("data_type_name") or ""),
+                        pii_role_id=_opt_str(pattr.get("pii_role_id")),
+                        sde_group=_opt_str(pattr.get("sde_group")),
+                        linked_terms=[t for t in
+                                      (pde.get("businessMetadata") or [])
+                                      if isinstance(t, dict)]))
+                ownership = attr.get("ownership")
+                records.append(StdTechEntry(
+                    table=table,
+                    description=str(attr.get("description") or ""),
+                    business_name=str(attr.get("business_name") or ""),
+                    data_category=str(attr.get("data_category") or ""),
+                    data_sub_category=str(
+                        attr.get("data_sub_category") or ""),
+                    layer_type=str(attr.get("data_type_name") or ""),
+                    has_pii=bool(attr.get("has_pii")),
+                    has_oncop=bool(attr.get("has_oncop")),
+                    has_gdpr=bool(attr.get("has_gdpr")),
+                    ownership=(ownership
+                               if isinstance(ownership, dict) else {}),
+                    columns=columns,
+                    evidence_ref=path.name))
+            except Exception as e:      # one weird entry ≠ a dead run
+                quarantined.append(Quarantined(
+                    source="std_tech_metadata",
+                    category="schema_mismatch",
+                    detail=f"{table}: {str(e)[:180]}",
+                    evidence_ref=path.name))
     return records, quarantined
