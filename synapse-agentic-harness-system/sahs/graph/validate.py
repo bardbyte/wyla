@@ -62,11 +62,37 @@ class ValidationReport:
     def ok(self) -> bool:
         return not self.errors
 
+    @staticmethod
+    def _check_of(line: str) -> str:
+        return (line.split("]", 1)[0].lstrip("[")
+                if line.startswith("[") else "?")
+
     def to_json(self) -> str:
+        """Counts per CHECK plus capped samples per check — a flat
+        head-sample hides the distribution when one check fires 18k
+        times and another fires 4."""
+        def by_check(lines: list[str]) -> dict[str, int]:
+            out: dict[str, int] = {}
+            for line in lines:
+                key = self._check_of(line)
+                out[key] = out.get(key, 0) + 1
+            return dict(sorted(out.items()))
+
+        def samples(lines: list[str]) -> dict[str, list[str]]:
+            capped: dict[str, list[str]] = {}
+            for line in lines:
+                bucket = capped.setdefault(self._check_of(line), [])
+                if len(bucket) < 25:
+                    bucket.append(line)
+            return capped
+
         return json.dumps({"ok": self.ok, "n_errors": len(self.errors),
                            "n_warnings": len(self.warnings),
-                           "errors": self.errors[:200],
-                           "warnings": self.warnings[:200]}, indent=1)
+                           "errors_by_check": by_check(self.errors),
+                           "warnings_by_check": by_check(self.warnings),
+                           "error_samples": samples(self.errors),
+                           "warning_samples": samples(self.warnings)},
+                          indent=1)
 
 
 def validate_graph(root: Path) -> ValidationReport:

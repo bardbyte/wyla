@@ -206,6 +206,14 @@ def test_build_graph_end_to_end_fuses_three_witnesses(tmp_path):
     assert nodes[slugged].props["group_key"] == \
         "mined:count_distinct_post_visitor_id_hi||post_visitor_id_low"
 
+    # gms's DOUBLE registration folds at emit: entries counted, facts
+    # emitted once — [8] dedup stays meaningful (rc==0 proves no dupes)
+    manifest = json.loads((tmp_path / "g" / "runs" / "test_r1" /
+                           "manifest.json").read_text())
+    std = manifest["reports"]["std_tech"]
+    assert std["entries"] == 3 and std["tables"] == 2
+    assert std["repeat_registrations"] == 1
+
     # a dir missing its 00 resource resolves by UNIQUE short name —
     # views and denied resource calls ship without the file, and the
     # crosswalk row is identity enough; its schema still lands

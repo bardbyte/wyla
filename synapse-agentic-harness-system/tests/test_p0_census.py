@@ -117,7 +117,11 @@ def test_vocab_adapters_and_degenerates():
     assert {t.status for t in terms} == {
         "Approved", "Candidate", "Under Review", "Rejected"}
     entries, sq = load_std_tech_metadata(FX / "std_tech_metadata")
-    assert len(entries) == 2 and not sq
+    # the real feed registers a table more than once: gms carries TWO
+    # registrations in one envelope (46 files → 70 entries on the
+    # first real run) — the loader reports the feed as it is
+    assert len(entries) == 3 and not sq
+    assert sum(1 for e in entries if e.table == "gms_transaction") == 2
     gms = next(e for e in entries if e.table == "gms_transaction")
     assert gms.layer_type == "SOR" and gms.has_pii
     assert gms.columns[0].linked_terms[0]["sourceName"] == "LumiMDM"
