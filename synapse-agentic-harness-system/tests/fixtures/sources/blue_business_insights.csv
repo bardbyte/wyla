@@ -39,3 +39,6 @@ broken_3,CASE WHEN THEN 'x',custins_cardmember
 broken_4,and or not,risk_pers_acct
 broken_5,>>>,sbs_new_accounts
 ambig_auth,flag = 1,authorization
+cheque_cashing,Cheque Cashing,gms_transaction
+enterprise_wide,site_visits > 100,ent_site_metrics
+active_flag,is_active_flag,custins_cardmember

@@ -44,13 +44,23 @@ def test_registry_suffix_and_ambiguity():
     assert reg.resolve("nope_table") == (None, "unknown")
 
 
-def test_blue_insights_quarantines_ambiguous_and_missing():
+def test_blue_insights_quarantine_categories_tell_the_truth():
     reg = TableRegistry.from_list_file(REGISTRY)
     records, quar = load_blue_insights(
         FX / "blue_business_insights.csv", reg)
-    assert len(records) == 39            # 40 rows − 1 ambiguous table
-    cats = {q.category for q in quar}
-    assert "ambiguous_table" in cats
+    assert len(records) == 40      # 43 rows − ambiguous − oos − prose
+    by_cat: dict[str, list] = {}
+    for q in quar:
+        by_cat.setdefault(q.category, []).append(q)
+    assert set(by_cat) == {"ambiguous_table", "out_of_scope", "not_sql"}
+    # out-of-registry is a scope statement, not a missing field
+    assert "unknown" in by_cat["out_of_scope"][0].detail
+    assert "Cheque Cashing" in by_cat["not_sql"][0].detail
+    # one bare word may be a boolean column — the parser judges those —
+    # and signal-bearing junk (broken_1..5) must reach canon untouched
+    assert any("is_active_flag" in r.raw_sql for r in records)
+    assert any("and or not" in r.raw_sql for r in records)
+    assert any(">>>" in r.raw_sql for r in records)
     kinds = {r.kind for r in records}
     assert kinds == {"predicate", "case"}
 
