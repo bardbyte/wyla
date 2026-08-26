@@ -1,57 +1,70 @@
-[
- {
-  "dataset": "gms_transaction",
-  "datasource": "axp-lumi",
-  "technology": "BigQuery",
-  "isActive": true,
-  "isLatest": true,
-  "datasetAttribute": {
-   "description": "Global merchant transaction spine.",
-   "business_name": "Merchant Transactions",
-   "data_category": "Merchant Services",
-   "data_sub_category": "Payments",
-   "data_type_name": "SOR",
-   "load_type": "LOAD_APPEND",
-   "has_pii": true,
-   "pii_columns": [
+{
+ "dataset": "gms_transaction",
+ "appl_id": "600001868",
+ "page_info": {
+  "total_pages": 1,
+  "downloaded_elements": 1
+ },
+ "tech_metadata_list": [
+  {
+   "datasource": "axp-lumi",
+   "technology": "BigQuery",
+   "isActive": true,
+   "isLatest": true,
+   "datasetAttribute": {
+    "description": "Global merchant transaction spine.",
+    "business_name": "Merchant Transactions",
+    "data_category": "Merchant Services",
+    "data_sub_category": "Payments",
+    "data_type_name": "SOR",
+    "load_type": "LOAD_APPEND",
+    "has_pii": true,
+    "pii_columns": [
+     {
+      "column": "cm13",
+      "pii_role_id": "R3"
+     }
+    ],
+    "ownership": {
+     "business_owner": "own_a@corp",
+     "vp": "vp_a@corp",
+     "car_id": "CAR-1"
+    },
+    "has_oncop": false,
+    "has_gdpr": false
+   },
+   "pde": [
     {
-     "column": "cm13",
-     "pii_role_id": "R3"
+     "pdeRelPath": "trans_usd_am",
+     "pdeAttribute": {
+      "description": "Transaction amount in USD.",
+      "business_name": "Transaction USD Amount",
+      "data_type_name": "FLOAT64"
+     },
+     "businessMetadata": [
+      {
+       "businessTermName": "Transaction United States Dollar Amount",
+       "businessTermDescription": "USD amount of a transaction",
+       "sourceName": "LumiMDM",
+       "sourceType": "Declared"
+      }
+     ]
+    },
+    {
+     "pdeRelPath": "cm13",
+     "pdeAttribute": {
+      "description": "Card member number.",
+      "business_name": "Card Member 13",
+      "data_type_name": "STRING",
+      "pii_role_id": "R3",
+      "sde_group": "SDE1"
+     }
     }
    ],
-   "ownership": {
-    "business_owner": "own_a@corp",
-    "vp": "vp_a@corp",
-    "car_id": "CAR-1"
-   }
-  },
-  "pde": [
-   {
-    "pdeRelPath": "trans_usd_am",
-    "pdeAttribute": {
-     "description": "Transaction amount in USD.",
-     "business_name": "Transaction USD Amount",
-     "data_type_name": "FLOAT64"
-    },
-    "businessMetadata": [
-     {
-      "businessTermName": "Transaction United States Dollar Amount",
-      "businessTermDescription": "USD amount of a transaction",
-      "sourceName": "LumiMDM",
-      "sourceType": "Declared"
-     }
-    ]
-   },
-   {
-    "pdeRelPath": "cm13",
-    "pdeAttribute": {
-     "description": "Card member number.",
-     "business_name": "Card Member 13",
-     "data_type_name": "STRING",
-     "pii_role_id": "R3",
-     "sde_group": "SDE1"
-    }
-   }
-  ]
- }
-]
+   "datasetGroup": "data",
+   "dataserver": "Lumi",
+   "isLineageExist": "Y",
+   "datasystem": "NGBD - Lumi Metadata Management"
+  }
+ ]
+}

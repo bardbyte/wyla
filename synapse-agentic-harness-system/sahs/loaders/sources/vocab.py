@@ -79,11 +79,56 @@ def load_business_terms(path: Path) -> tuple[list[TermRecord],
     return records, quarantined
 
 
+def _harvest_std_tech_entries(payload) -> list[dict]:
+    """Find entry-shaped objects ANYWHERE in the export — the loader
+    adapts to the file, never the file to the loader. Two shapes match
+    (see docs/contracts/std_tech_metadata_layout.md):
+
+    - a FLAT entry: dict carrying ``dataset`` + ``pde``/
+      ``datasetAttribute`` in one object;
+    - the REAL per-table ENVELOPE: ``{dataset, appl_id, page_info,
+      tech_metadata_list: [{datasource…, datasetAttribute, pde}]}`` —
+      the table name lives at the envelope, the payload one level
+      down; each qualifying list item is flattened with the
+      envelope's ``dataset``.
+
+    Every wrapper Atlas might add on top — a plain list, ``{"data":
+    [...]}``, a dict keyed by table — parses identically,
+    deterministically (document order). A matched entry is collected
+    whole, never descended into."""
+    found: list[dict] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            if "dataset" in node and ("pde" in node
+                                      or "datasetAttribute" in node):
+                found.append(node)
+                return
+            if "dataset" in node and isinstance(
+                    node.get("tech_metadata_list"), list):
+                for item in node["tech_metadata_list"]:
+                    if isinstance(item, dict) and (
+                            "pde" in item or "datasetAttribute" in item):
+                        found.append({**item, "dataset":
+                                      item.get("dataset")
+                                      or node["dataset"]})
+                return
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(payload)
+    return found
+
+
 def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                                                 list[Quarantined]]:
     """``root`` is either the per-table directory of JSONs or the single
     combined export (``std_tech_metadata_all.json``) — the Atlas feed
-    ships both shapes, and each file already parses as list-or-one."""
+    ships both shapes, in whatever wrapper; entries are harvested by
+    signature (see ``_harvest_std_tech_entries``)."""
     records, quarantined = [], []
     root = Path(root)
     paths = [root] if root.is_file() else sorted(root.glob("*.json"))
@@ -95,7 +140,15 @@ def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                 source="std_tech_metadata", category="missing_field",
                 detail=f"unreadable JSON: {e}", evidence_ref=path.name))
             continue
-        entries = payload if isinstance(payload, list) else [payload]
+        entries = _harvest_std_tech_entries(payload)
+        if not entries:
+            quarantined.append(Quarantined(
+                source="std_tech_metadata", category="missing_field",
+                detail="no entry-shaped objects found (a std-tech entry "
+                       "is a dict with 'dataset' + 'pde'/"
+                       "'datasetAttribute') — send the file's shape",
+                evidence_ref=path.name))
+            continue
         for entry in entries:
             table = str(entry.get("dataset") or "").strip().lower()
             if not table:
@@ -123,6 +176,8 @@ def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                 data_sub_category=str(attr.get("data_sub_category") or ""),
                 layer_type=str(attr.get("data_type_name") or ""),
                 has_pii=bool(attr.get("has_pii")),
+                has_oncop=bool(attr.get("has_oncop")),
+                has_gdpr=bool(attr.get("has_gdpr")),
                 ownership=dict(attr.get("ownership") or {}),
                 columns=columns,
                 evidence_ref=path.name))

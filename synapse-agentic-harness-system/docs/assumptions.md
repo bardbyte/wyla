@@ -107,3 +107,29 @@ time a trigger fires. Status: `active` | `expired` | `resolved`.
   shows the anomaly gate refusing legitimate work or waving through
   waste.
 - **status**: active
+
+## A7 — run-1 graph is two-witness structural (MDM archive deferred)
+
+- **component**: build-graph inputs; E1 reconciliation; the first real
+  compile
+- **bet**: run 1 builds WITHOUT `--mdm-archive`: std_tech (Atlas) is a
+  relay of the same Lumi MDM declarations (`datasystem: NGBD – Lumi
+  Metadata Management`, `sourceType: Declared`), so the sensitivity,
+  description, type, ownership, and term-link planes are fully served
+  by bq + atlas — and skipping the 305,955-file MDM response tree cuts
+  build-graph time dramatically (and removes the OneDrive-hydration
+  risk). KNOWN LOSSES for run 1, accepted: table/column lineage
+  (`upstream_of`/`derived_from`), lifecycle_status (incl. the honest
+  `unknown_unavailable` pattern), `business_unit` from pipeline
+  metadata, and structural witness_agreement capped at 2 (bq+atlas)
+  instead of 3.
+- **evidence**: reconcile.py consumes `data_type_atlas`,
+  `description_atlas`, and `pii_role_id` as first-class witnesses;
+  cards read `ownership_atlas`; user decision 2026-08-26.
+- **date**: 2026-08-26
+- **revisit_trigger**: run 2 adds `--mdm-archive` (hydrated, local) —
+  the append-only store lands lumi as its own witness and
+  `DIFF_vs_prev.md` IS the acceptance test for what MDM adds (lineage
+  edges, lifecycle fill-in, agreement 2→3). Crosswalk `lumi_asset_id`
+  may stay blank in run 1 and be backfilled then.
+- **status**: active

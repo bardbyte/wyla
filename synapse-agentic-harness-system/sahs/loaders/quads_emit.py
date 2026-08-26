@@ -252,9 +252,21 @@ def emit_std_tech(entries: list[StdTechEntry], terms: list[TermRecord],
                    "data_category": entry.data_category,
                    "layer_type": entry.layer_type,
                    "has_pii_atlas": entry.has_pii,
+                   "has_oncop_atlas": entry.has_oncop,
+                   "has_gdpr_atlas": entry.has_gdpr,
                    "ownership_atlas": entry.ownership},
             prov=Prov(source="atlas", run=run_id,
                       evidence=entry.evidence_ref)))
+        # sensitivity is union-most-restrictive (E1): every compliance
+        # flag the feed asserts becomes an explicit policy edge
+        for flag, policy in ((entry.has_oncop, "policy:oncop"),
+                             (entry.has_gdpr, "policy:gdpr")):
+            if flag:
+                graph.append_edge(Quad(
+                    s=tid, r="has_policy", o=policy,
+                    prov=Prov(source="atlas", run=run_id,
+                              evidence=entry.evidence_ref)))
+                report["policy_flags"] += 1
         report["tables"] += 1
         for column in entry.columns:
             cid = col_id(physical, column.name)
