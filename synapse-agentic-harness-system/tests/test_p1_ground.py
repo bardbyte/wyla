@@ -148,8 +148,8 @@ def test_abstain_and_disambiguate_grading():
 
 
 def test_resolve_bind_grading():
-    task = read_tasks(CURATED)[-1]
-    assert task.kind == "resolve_bind"
+    task = next(t for t in read_tasks(CURATED)
+                if t.kind == "resolve_bind")
     good = SutAnswer(kind="bindings",
                      bindings=dict(task.gold.expected_bindings))
     assert grade(task, good, None).verdict == "pass"

@@ -65,14 +65,16 @@ def emit_review_item(graph: GraphDir, *, kind: str, subject: str,
                      support_effective: int = 1,
                      usage_recency_weight: float = 1.0,
                      blast_radius: int = 1,
-                     agent_recommendation: str = "") -> str:
-    """The one sanctioned writer — every stream funnels through here."""
+                     agent_recommendation: str = "",
+                     actor: str | None = None) -> str:
+    """The one sanctioned writer — every stream funnels through here.
+    ``actor`` is REQUIRED whenever source == "clerk" (E7)."""
     assert kind in REVIEW_KINDS, kind
     item = review_id(kind, subject, proposal)
     priority = review_priority(support_effective, usage_recency_weight,
                                blast_radius)
     prov = Prov(source=source, run=run_id, witness=witness,
-                evidence=evidence[0] if evidence else "")
+                actor=actor, evidence=evidence[0] if evidence else "")
     graph.append_node(NodeRecord(id=item, props={
         "kind": kind, "subject": subject, "evidence": evidence,
         "proposal": proposal,

@@ -181,6 +181,10 @@ def load_jobs_30d(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                 "raw_sql": raw_sql, "kind": kind, "label": label,
                 "job_ids": set(), "runs": 0,
                 "first_seen": "", "last_seen": ""})
+            # deterministic label pick: smallest non-empty alias — the
+            # label decorates; the FINGERPRINT aggregates
+            if label and (not entry["label"] or label < entry["label"]):
+                entry["label"] = label
             entry["job_ids"].add(str(job.get("job_id") or ""))
             entry["runs"] += 1
             stamp = str(job.get("creation_time") or "")[:10]
@@ -207,7 +211,10 @@ def load_jobs_30d(root: Path, graph: GraphDir, crosswalk: Crosswalk,
             understood += 1
             measures, predicates, join_eqs = _extract(tree, short)
             for label, expr_sql in measures:
-                _seen(("measure", label.lower(), expr_sql), expr_sql,
+                # support is per FINGERPRINT (pinned) — the alias never
+                # splits the count; two queries computing the same
+                # expression are one measure seen twice
+                _seen(("measure", "", expr_sql), expr_sql,
                       "metric_expr", label, job)
             for conjunct in predicates:
                 from sqlglot import expressions as exp, parse_one
