@@ -77,8 +77,17 @@ def col_id(physical_table: str, column: str) -> str:
     return f"col:{physical_table.strip().lower()}.{column.strip().lower()}"
 
 
+_ID_SAFE = re.compile(r"[^a-z0-9_ \-]")
+
+
 def concept_id(label_norm: str, physical_table: str) -> str:
-    return f"concept:{label_norm}@{table_id(physical_table)}"
+    """The node id is a DERIVATION, not the label: E9 keeps the concept
+    label verbatim on the record, while the id slugs every character the
+    grammar forbids to ``_`` (real tribal labels carry ``/ . ::``).
+    Deterministic; punctuation-only variants may fold — their provs
+    both survive the fold."""
+    safe = _ID_SAFE.sub("_", label_norm)
+    return f"concept:{safe}@{table_id(physical_table)}"
 
 
 def acr_id(symbol: str, bu: str, region: str) -> str:

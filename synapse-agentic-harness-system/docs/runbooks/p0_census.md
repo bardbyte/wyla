@@ -41,6 +41,10 @@ python scripts/laptop.py census \
   Cashing") quarantines as `not_sql` — both counted in
   `quarantine.jsonl`, neither in the gate. Borderline rows (any SQL
   signal at all) still go to the parser and fail the gate honestly.
+  Rows the export ships with SWAPPED columns (SQL in insight_name, the
+  label in sql_logic) are recovered deterministically — one side
+  parses, the other doesn't — flagged `extra.column_swap`; rows broken
+  on both sides stay in the gate as parse failures.
 - `blocker_sources_100pct`: zero canon failures across gold non-empty
   pairs, metrics_dmp, extended_gmns, skill contracts — any miss is a
   release blocker, not a statistic.
