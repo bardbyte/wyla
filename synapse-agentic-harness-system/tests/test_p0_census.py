@@ -181,3 +181,34 @@ def test_cli_make_tasks(tmp_path: Path):
                ).read_text().splitlines()
     assert len(backlog) == 3
     assert all(json.loads(x)["triage"] == "pending" for x in backlog)
+
+
+def test_std_tech_harvest_survives_any_wrapper(tmp_path: Path):
+    """The real Atlas export may wrap entries in any envelope — the
+    loader harvests by SIGNATURE (dataset + pde/datasetAttribute), so
+    every wrapper shape parses identically to the per-table directory."""
+    entries = []
+    for p in sorted((FX / "std_tech_metadata").glob("*.json")):
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        entries.extend(payload if isinstance(payload, list) else [payload])
+    baseline, _ = load_std_tech_metadata(FX / "std_tech_metadata")
+    shapes = {
+        "plain_list.json": entries,
+        "data_wrapper.json": {"data": entries, "total": len(entries)},
+        "keyed_by_table.json": {e["dataset"]: e for e in entries},
+        "deep_envelope.json": [{"searchResults": {"page": 1,
+                                                  "items": entries}}],
+    }
+    for name, payload in shapes.items():
+        f = tmp_path / name
+        f.write_text(json.dumps(payload), encoding="utf-8")
+        got, quarantined = load_std_tech_metadata(f)
+        assert not quarantined, (name, quarantined)
+        assert [(e.table, len(e.columns)) for e in got] == \
+            [(e.table, len(e.columns)) for e in baseline], name
+    # a shape with NO entry-signature objects fails LOUDLY, never silently
+    bad = tmp_path / "opaque.json"
+    bad.write_text(json.dumps({"summary": {"count": 46}}))
+    got, quarantined = load_std_tech_metadata(bad)
+    assert not got and len(quarantined) == 1
+    assert "no entry-shaped objects" in quarantined[0].detail

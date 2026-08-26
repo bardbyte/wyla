@@ -79,11 +79,38 @@ def load_business_terms(path: Path) -> tuple[list[TermRecord],
     return records, quarantined
 
 
+def _harvest_std_tech_entries(payload) -> list[dict]:
+    """Find entry-shaped objects ANYWHERE in the export — the loader
+    adapts to the file, never the file to the loader. An entry is
+    unmistakable: a dict carrying ``dataset`` plus ``pde`` or
+    ``datasetAttribute``. This makes every wrapper shape Atlas might
+    ship — a plain list, ``{"data": [...]}``, a dict keyed by table,
+    a nested envelope — parse identically, deterministically (document
+    order). A matched entry is collected whole, never descended into."""
+    found: list[dict] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            if "dataset" in node and ("pde" in node
+                                      or "datasetAttribute" in node):
+                found.append(node)
+                return
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(payload)
+    return found
+
+
 def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                                                 list[Quarantined]]:
     """``root`` is either the per-table directory of JSONs or the single
     combined export (``std_tech_metadata_all.json``) — the Atlas feed
-    ships both shapes, and each file already parses as list-or-one."""
+    ships both shapes, in whatever wrapper; entries are harvested by
+    signature (see ``_harvest_std_tech_entries``)."""
     records, quarantined = [], []
     root = Path(root)
     paths = [root] if root.is_file() else sorted(root.glob("*.json"))
@@ -95,7 +122,15 @@ def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                 source="std_tech_metadata", category="missing_field",
                 detail=f"unreadable JSON: {e}", evidence_ref=path.name))
             continue
-        entries = payload if isinstance(payload, list) else [payload]
+        entries = _harvest_std_tech_entries(payload)
+        if not entries:
+            quarantined.append(Quarantined(
+                source="std_tech_metadata", category="missing_field",
+                detail="no entry-shaped objects found (a std-tech entry "
+                       "is a dict with 'dataset' + 'pde'/"
+                       "'datasetAttribute') — send the file's shape",
+                evidence_ref=path.name))
+            continue
         for entry in entries:
             table = str(entry.get("dataset") or "").strip().lower()
             if not table:

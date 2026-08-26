@@ -130,8 +130,26 @@ src_check metrics_dmp.json "DMP certified";                   DMPN=$CNT
 src_check extended_gmns_semantics.json "GMNS pending";        GMNS=$CNT
 src_check data_cleaned.csv "glossary rows";                   GLOSS=$CNT
 src_check business_terms.csv "atlas terms";                   TERMS=$CNT
+count_std_tech() { $PY - "$1" <<'EOF' 2>/dev/null || echo 0
+import json, sys
+def walk(node, found):
+    if isinstance(node, dict):
+        if "dataset" in node and ("pde" in node
+                                  or "datasetAttribute" in node):
+            found.append(node)
+            return
+        for v in node.values():
+            walk(v, found)
+    elif isinstance(node, list):
+        for item in node:
+            walk(item, found)
+found = []
+walk(json.load(open(sys.argv[1])), found)
+print(len(found))
+EOF
+}
 if [ -f "$SRC/std_tech_metadata_all.json" ]; then
-  STDTECH=$(count_json "$SRC/std_tech_metadata_all.json")
+  STDTECH=$(count_std_tech "$SRC/std_tech_metadata_all.json")
   ok "std_tech_metadata_all.json         $STDTECH entries (combined form — wins over the dir)"
 elif [ -d "$SRC/std_tech_metadata" ]; then
   STDTECH=$(find "$SRC/std_tech_metadata" -name '*.json' | wc -l | tr -d ' ')
