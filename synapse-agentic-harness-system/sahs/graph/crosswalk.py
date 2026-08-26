@@ -44,7 +44,7 @@ class Crosswalk:
     def load(cls, path: Path) -> "Crosswalk":
         rows = [CrosswalkRow.model_validate(json.loads(line))
                 for line in Path(path).read_text(
-                    encoding="utf-8").splitlines() if line.strip()]
+                    encoding="utf-8").split("\n") if line.strip()]
         return cls(rows)
 
     def physical_for_bq(self, dataset: str, table: str) -> str | None:

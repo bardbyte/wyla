@@ -16,7 +16,7 @@ from typing import Any
 def _jsonl(path: Path) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
+        for line in path.read_text(encoding="utf-8").split("\n"):
             if line.strip():
                 row = json.loads(line)
                 out[str(row.get("id") or row.get("fp") or "")] = row
