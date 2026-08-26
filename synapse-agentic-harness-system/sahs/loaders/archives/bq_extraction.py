@@ -52,7 +52,7 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
 
     report = {"tables": 0, "columns": 0, "domains": 0, "templates": 0,
               "co_query_edges": 0, "policies_unknown": 0}
-    run_report = _json(root / "_run_report.json") or {}
+    run_report = _json(track(root / "_run_report.json")) or {}
     denied = {(d.get("table"), d.get("operation"))
               for d in run_report.get("denied_operations", [])}
 

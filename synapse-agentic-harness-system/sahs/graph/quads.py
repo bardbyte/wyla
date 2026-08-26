@@ -75,6 +75,7 @@ SOURCE_WITNESS = {
     "std_tech_metadata": "atlas",
     "glossary": "atlas",
     "clerk": "steward",
+    "jobs_30d": "jobs_30d",
 }
 
 # ReviewItem lattice (E12/A5, pinned) — schemas land BEFORE the first

@@ -36,6 +36,7 @@ class Build:
     joins: list[dict[str, Any]]
     acl: dict[str, Any]
     schema: dict[str, dict[str, str]]
+    cost_priors: dict[str, dict[str, Any]] = field(default_factory=dict)
     _db: sqlite3.Connection | None = field(default=None, repr=False)
 
     @classmethod
@@ -59,6 +60,9 @@ class Build:
             if (path / "acl.json").exists() else {},
             schema=json.loads((path / "schema.json").read_text())
             if (path / "schema.json").exists() else {},
+            cost_priors=json.loads(
+                (path / "indexes" / "cost_priors.json").read_text())
+            if (path / "indexes" / "cost_priors.json").exists() else {},
         )
 
     @property

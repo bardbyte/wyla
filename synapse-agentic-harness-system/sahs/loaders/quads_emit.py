@@ -131,7 +131,15 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
             merge_node(metric, {
                 "canonical_sql": canon.canonical_sql,
                 "canon_version": CANON_VERSION,
-                "label": record.concept_label or "",
+                # a usage alias is a WEAK name: it groups (mgroup key)
+                # but never claims the metric node's label — a fold is
+                # last-wins on props, and a jobs alias must not clobber
+                # a catalog name
+                "label": ("" if record.extra.get("label_is_weak")
+                          else record.concept_label or ""),
+                "label_usage": (record.concept_label or ""
+                                if record.extra.get("label_is_weak")
+                                else ""),
                 "grain": grain,
                 "question_answered":
                     record.extra.get("question_answered") or "",
@@ -167,7 +175,14 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
         graph.append_edge(Quad(s=s, r=r, o=o, props=props, prov=Prov(
             source=entry["source"], run=run_id, witness=witness,
             support=entry["support"], evidence=entry["evidence"])))
+    # seed-aware across CALLS: a metric already governed in the graph
+    # (an earlier emit or a clerk edge) is never re-seeded — a second
+    # witness of a metric is testimony, not a governance transition,
+    # and a late lower seed would forge an illegal E7 sequence
+    already_governed = {q.s for q in graph.iter_edges("certified_as")}
     for metric in sorted(states):
+        if metric in already_governed:
+            continue
         source, _authority, evidence = node_prov[metric]
         graph.append_edge(Quad(
             s=metric, r="certified_as", o=f"status:{states[metric]}",

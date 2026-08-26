@@ -38,6 +38,7 @@ _EXPR_AUTHORITY = {
     "skill_contract": Authority.SKILL_CONTRACT,
     "gold_queries": Authority.SKILL_CONTRACT,
     "measures_catalog": Authority.MINED,
+    "jobs_30d": Authority.MINED,
     "blue_insights": Authority.SNIPPET,
 }
 
@@ -379,6 +380,17 @@ def compile_build(graph_root: Path, builds_root: Path
     (build_dir / "indexes" / "domains.jsonl").write_text(
         "".join(json.dumps(d, sort_keys=True) + "\n"
                 for d in domain_rows), encoding="utf-8")
+
+    # E12/A3 — per-table cost priors (jobs witness) for the sandbox's
+    # anomaly gate; the global budget ceiling lives in the environment
+    cost_priors = {
+        c.physical: nodes[tid].props["cost_prior"]
+        for tid, c in consensus.items()
+        if nodes.get(tid) is not None
+        and nodes[tid].props.get("cost_prior")}
+    (build_dir / "indexes" / "cost_priors.json").write_text(
+        json.dumps(cost_priors, indent=1, sort_keys=True) + "\n",
+        encoding="utf-8")
 
     # ── manifest (no wall-clock — determinism) ──
     manifest = {

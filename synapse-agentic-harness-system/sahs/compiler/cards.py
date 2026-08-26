@@ -51,6 +51,10 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
     lines["grain"] = [
         f"- partitioned: latest {partition or 'n/a'} · "
         f"schema {node_props.get('schema_fingerprint', '?')} {prov}"]
+    if node_props.get("usage_rhythm"):
+        lines["grain"].append(
+            "- usage rhythm: " + " · ".join(node_props["usage_rhythm"])
+            + " [prov:jobs_30d]")
 
     column_rows = []
     for column in consensus.columns.values():

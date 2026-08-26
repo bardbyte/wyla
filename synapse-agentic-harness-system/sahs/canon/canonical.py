@@ -243,6 +243,13 @@ def _sort_commutative(tree: exp.Expression) -> exp.Expression:
 
 def _canonical_numbers(tree: exp.Expression) -> exp.Expression:
     def _norm(node: exp.Expression) -> exp.Expression:
+        # ruleset 2: COUNT(*) ≡ COUNT(1) — BigQuery treats them
+        # identically; two fingerprints for one function is a lie the
+        # jobs witness exposed (catalog said COUNT(1), jobs said
+        # COUNT(*), and the same metric refused to fuse)
+        if isinstance(node, exp.Count) and isinstance(node.this,
+                                                      exp.Star):
+            return exp.Count(this=exp.Literal.number("1"))
         if isinstance(node, exp.Literal) and node.is_number:
             raw = node.name
             try:

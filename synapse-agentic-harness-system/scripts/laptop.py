@@ -296,6 +296,7 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
     reports: dict[str, dict] = {}
 
     ledger = UtilizationLedger()
+    jobs_gate_failures: list[str] = []
     if args.bq_archive:
         console.phase("bq archive")
         reports["bq"], blocked = load_bq_archive(
@@ -340,6 +341,20 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
             reports["std_tech"] = emit_std_tech(
                 entries, terms, graph, crosswalk, run_id)
 
+    # jobs witness AFTER the semantic catalogs: a jobs sighting of an
+    # already-governed metric is testimony, never a fresh seed (E7)
+    jobs_gate = True
+    if args.bq_archive:
+        console.phase("jobs 30d witness")
+        from sahs.loaders.archives.jobs_30d import load_jobs_30d
+        reports["jobs_30d"], jobs_gate_failures = load_jobs_30d(
+            Path(args.bq_archive), graph, crosswalk, run_id,
+            ledger=ledger)
+        jobs_gate = console.gate(
+            "jobs_canon_rate", not jobs_gate_failures,
+            "; ".join(jobs_gate_failures[:5]) if jobs_gate_failures
+            else "every table ≥90% canonicalized-or-understood")
+
     # E12/A2 — the utilization ledger: every file under every input
     # root accounted for (consumed | deferred(reason) | inventoried)
     ledger_roots = [Path(p) for p in (args.bq_archive, args.mdm_archive,
@@ -383,6 +398,8 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
     ok = console.gate("graph_valid", report.ok,
                       f"{len(report.errors)} error(s), "
                       f"{len(report.warnings)} warning(s)")
+    if not jobs_gate:
+        return EXIT_GATE_FAILURE
     return EXIT_OK if ok else EXIT_VALIDATION_ERROR
 
 

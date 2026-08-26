@@ -28,6 +28,7 @@ SOURCE_AUTHORITY: dict[str, Authority] = {
     "extended_gmns": Authority.PENDING,
     "skill_contract": Authority.SKILL_CONTRACT,
     "measures_catalog": Authority.MINED,
+    "jobs_30d": Authority.MINED,
     "blue_insights": Authority.SNIPPET,
     "gold_queries": Authority.SKILL_CONTRACT,  # human-verified references
 }
