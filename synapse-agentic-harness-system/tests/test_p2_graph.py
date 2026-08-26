@@ -182,3 +182,44 @@ def test_crosswalk_lookup_paths():
     assert crosswalk.physical_for_atlas("gms_transaction") \
         == "dw.gms_transaction"
     assert crosswalk.physical_for_atlas("nope") is None
+
+
+def test_utilization_ledger_accounts_for_every_file(tmp_path):
+    """E12/A2: no archive artifact absent from the ledger; the
+    inventoried set contains ONLY files we knowingly do nothing with."""
+    graph_dir, out_dir = tmp_path / "g", tmp_path / "run"
+    result = _build(graph_dir, out_dir)
+    assert result.returncode == 0, result.stderr[-800:]
+    manifest = json.loads(next(
+        (graph_dir / "runs").glob("*/manifest.json")).read_text())
+    rows = manifest["utilization"]
+    on_disk = sum(1 for root in ("real_extractions_production",
+                                 "mdm_46_patched_v2", "sources")
+                  for p in (FX / root).rglob("*") if p.is_file())
+    assert len(rows) == on_disk          # nothing unledgered, ever
+    assert all(r["sha256_12"] for r in rows)
+    by_path = {f"{r['root']}/{r['path']}": r for r in rows}
+    assert by_path["real_extractions_production/gms_transaction/"
+                   "02_logical_columns.csv"]["status"] == "consumed"
+    assert by_path["mdm_46_patched_v2/coverage.json"][
+        "status"] == "consumed"
+    assert by_path["sources/blue_business_insights.csv"][
+        "status"] == "consumed"
+    tls = by_path["sources/tls_reference.md"]
+    assert tls["status"] == "deferred" and "doc evidence" in tls["reason"]
+    assert all(r.get("reason") for r in rows
+               if r["status"] == "deferred")
+    allowed_inventoried = {
+        "real_extractions_production/_batch_summary.csv",
+        "real_extractions_production/_run_report.json",
+        "mdm_46_patched_v2/run_manifest.json",
+    }
+    inventoried = {p for p, r in by_path.items()
+                   if r["status"] == "inventoried"}
+    unexpected = {p for p in inventoried
+                  if p not in allowed_inventoried
+                  and not p.endswith(("_summary.json", "summary.json",
+                                      "qa_checks.yaml",
+                                      "chart_contract.yaml",
+                                      "data_specs.md", "discovery.json"))}
+    assert not unexpected, unexpected

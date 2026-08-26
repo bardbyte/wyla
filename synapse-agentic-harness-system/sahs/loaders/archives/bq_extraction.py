@@ -41,10 +41,15 @@ def _json(path: Path) -> dict | list | None:
 
 
 def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
-                    run_id: str) -> tuple[dict, list[str]]:
+                    run_id: str, ledger=None) -> tuple[dict, list[str]]:
     """→ (report, blocking_errors)."""
     root = Path(root)
     blocking: list[str] = []
+    def track(path: Path):
+        if ledger is not None:
+            ledger.consumed(path)
+        return path
+
     report = {"tables": 0, "columns": 0, "domains": 0, "templates": 0,
               "co_query_edges": 0, "policies_unknown": 0}
     run_report = _json(root / "_run_report.json") or {}
@@ -58,7 +63,7 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
         d for d in root.iterdir()
         if d.is_dir() and not d.name.startswith("_"))
     for d in table_dirs:
-        resource = _json(d / "00_logical_table_resource.json") or {}
+        resource = _json(track(d / "00_logical_table_resource.json")) or {}
         ref = resource.get("tableReference", {})
         dataset, name = ref.get("datasetId", ""), ref.get("tableId", d.name)
         physical = crosswalk.physical_for_bq(dataset, name)
@@ -70,17 +75,17 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
         tid = table_id(physical)
         evidence = f"{d.name}/00_logical_table_resource.json"
 
-        columns = _csv_rows(d / "02_logical_columns.csv")
+        columns = _csv_rows(track(d / "02_logical_columns.csv"))
         column_set = ",".join(sorted(
             f"{r['column_name']}:{r['data_type']}" for r in columns))
         schema_version = ("v1_" + hashlib.sha256(
             column_set.encode()).hexdigest()[:8])
         schema_node = f"schema:{physical}@v1"
 
-        metrics = _csv_rows(d / "13_table_metrics.csv")
+        metrics = _csv_rows(track(d / "13_table_metrics.csv"))
         total_rows = int(metrics[0]["total_rows"]) if metrics else None
-        partitions = _csv_rows(d / "10_physical_partitions.csv")
-        users = _csv_rows(d / "17_queries_30d" / "jobs_top_users.csv")
+        partitions = _csv_rows(track(d / "10_physical_partitions.csv"))
+        users = _csv_rows(track(d / "17_queries_30d" / "jobs_top_users.csv"))
         graph.append_node(NodeRecord(
             id=tid,
             props={
@@ -110,13 +115,13 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
             doc = f"doc:view_sql_{physical.replace('.', '_')}"
             graph.append_node(NodeRecord(
                 id=doc, props={"kind": "view_sql",
-                               "sql": view_sql.read_text(encoding="utf-8")},
+                               "sql": track(view_sql).read_text(encoding="utf-8")},
                 prov=prov(evidence=f"{d.name}/05_view_definition.sql")))
             graph.append_edge(Quad(s=tid, r="described_by", o=doc,
                                    prov=prov()))
 
         profile = {r["column_name"]: r
-                   for r in _csv_rows(d / "14_column_profile.csv")}
+                   for r in _csv_rows(track(d / "14_column_profile.csv"))}
         for row in columns:
             cid = col_id(physical, row["column_name"])
             p = profile.get(row["column_name"], {})
@@ -140,7 +145,7 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
 
         lc_dir = d / "15_low_cardinality_values"
         if lc_dir.exists():
-            for value_file in sorted(lc_dir.glob("*.csv")):
+            for value_file in map(track, sorted(lc_dir.glob("*.csv"))):
                 rows = _csv_rows(value_file)
                 if not rows:
                     continue
@@ -161,7 +166,7 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                     prov=prov()))
                 report["domains"] += 1
 
-        policies = _json(d / "16_row_access_policies.json")
+        policies = _json(track(d / "16_row_access_policies.json"))
         if policies is None:
             if (name, "rowAccessPolicies.list") in denied \
                     or any(t == name for t, _ in denied):
@@ -177,7 +182,7 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                         evidence=f"{d.name}/16_row_access_policies.json")))
 
         for row in _csv_rows(
-                d / "17_queries_30d" / "jobs_co_queried_tables.csv"):
+                track(d / "17_queries_30d" / "jobs_co_queried_tables.csv")):
             other_physical = crosswalk.physical_for_lumi(row["other_table"])
             if other_physical is None:
                 continue                 # co-query partner outside scope
@@ -189,7 +194,7 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
             report["co_query_edges"] += 1
 
         for row in _csv_rows(
-                d / "17_queries_30d" / "jobs_query_templates.csv"):
+                track(d / "17_queries_30d" / "jobs_query_templates.csv")):
             tmpl = ("tmpl:" + hashlib.sha256(
                 row["normalized_sql"].encode()).hexdigest()[:12])
             graph.append_node(NodeRecord(

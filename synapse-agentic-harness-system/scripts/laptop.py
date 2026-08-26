@@ -39,6 +39,7 @@ from sahs.evals.schema import (                                   # noqa: E402
     TaskProvenance,
     write_tasks,
 )
+from sahs.loaders.ledger import UtilizationLedger                 # noqa: E402
 from sahs.loaders.records import ExpressionRecord, Quarantined    # noqa: E402
 from sahs.loaders.registry import TableRegistry                   # noqa: E402
 from sahs.loaders.sources.blue_insights import load_blue_insights  # noqa: E402
@@ -294,15 +295,18 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
     blocking: list[str] = []
     reports: dict[str, dict] = {}
 
+    ledger = UtilizationLedger()
     if args.bq_archive:
         console.phase("bq archive")
         reports["bq"], blocked = load_bq_archive(
-            Path(args.bq_archive), graph, crosswalk, run_id)
+            Path(args.bq_archive), graph, crosswalk, run_id,
+            ledger=ledger)
         blocking += blocked
     if args.mdm_archive:
         console.phase("mdm archive")
         reports["mdm"], blocked = load_mdm_archive(
-            Path(args.mdm_archive), graph, crosswalk, run_id)
+            Path(args.mdm_archive), graph, crosswalk, run_id,
+            ledger=ledger)
         blocking += blocked
     if not console.gate("crosswalk_resolution", not blocking,
                         "; ".join(blocking[:5]) if blocking
@@ -336,10 +340,38 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
             reports["std_tech"] = emit_std_tech(
                 entries, terms, graph, crosswalk, run_id)
 
+    # E12/A2 — the utilization ledger: every file under every input
+    # root accounted for (consumed | deferred(reason) | inventoried)
+    ledger_roots = [Path(p) for p in (args.bq_archive, args.mdm_archive,
+                                      args.sources_dir) if p]
+    if args.registry:
+        ledger.consumed(Path(args.registry))
+    if args.sources_dir:
+        sources = Path(args.sources_dir)
+        for name in ("blue_business_insights.csv",
+                     "extracted_gold_queries.json", "metrics_dmp.json",
+                     "extended_gmns_semantics.json",
+                     "measures_catalog.json", "data_cleaned.csv",
+                     "business_terms.csv"):
+            ledger.consumed(sources / name)
+        for pack_file in sorted(sources.glob("skills/**/skill.yaml")) + \
+                sorted(sources.glob("skills/**/metric_contracts.yaml")):
+            ledger.consumed(pack_file)
+        std_path = _std_tech_path(sources)
+        if std_path is not None:
+            for p in ([std_path] if std_path.is_file()
+                      else sorted(std_path.glob("*.json"))):
+                ledger.consumed(p)
+    utilization = ledger.build(ledger_roots)
+    reports["utilization"] = UtilizationLedger.summary(utilization)
+    console.emit("phase_start", phase="utilization ledger",
+                 detail=json.dumps(reports["utilization"]))
+
     (graph_root / "runs" / run_id).mkdir(parents=True, exist_ok=True)
     manifest = graph_root / "runs" / run_id / "manifest.json"
     manifest.write_text(json.dumps({
-        "run_id": run_id, "archived": False, "reports": reports},
+        "run_id": run_id, "archived": False, "reports": reports,
+        "utilization": utilization},
         indent=1) + "\n", encoding="utf-8")
     console.output(manifest)
 
