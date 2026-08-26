@@ -54,6 +54,10 @@ file with one table name per line.
 synapse-agentic-harness-system/
 ├── graph/                             # L2 truth store (build-graph)
 │   ├── identity/crosswalk.jsonl       # YOU author — 46 verified rows
+│   ├── identity/aliases.jsonl         # YOU author — alternative names
+│   │   # (data-product display names, skill-pack nicknames) mapping
+│   │   # onto crosswalk rows: {"alias": ..., "physical": "dw.<t>", …}.
+│   │   # An alias to a non-crosswalk physical refuses to load.
 │   ├── nodes/  edges/                 # append-only JSONL quads
 │   └── runs/<run_name>/               # every run's committed record:
 │       events.jsonl · census.json · census_tail.jsonl ·

@@ -47,6 +47,20 @@
    "lineOfBusiness": "SBS",
    "createdAt": "2026-01-05",
    "updatedAt": "2026-06-01"
+  },
+  {
+   "metricCatalogId": "prodhint-0001",
+   "metricName": "acquirer_net_spend",
+   "businessFriendlyMetricName": "Acquirer Net Spend",
+   "sqlExpression": "SUM(trans_usd_am)",
+   "associatedDataProductNames": [
+    "Acquirer Product X"
+   ],
+   "questionAnswered": "What is total acquirer net spend?",
+   "status": "Certified",
+   "author": "fixture",
+   "createdAt": "2026-06-01",
+   "updatedAt": "2026-08-01"
   }
  ]
 }

@@ -104,15 +104,35 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                          authority=int(record.authority),
                          evidence=record.evidence_ref)
 
+    def _resolve(raw: str) -> tuple[str | None, bool]:
+        direct = (crosswalk.physical_for_atlas(raw)
+                  or crosswalk.physical_for_lumi(raw))
+        if direct:
+            return direct, False
+        hit = crosswalk.physical_for_alias(raw)
+        return (hit, True) if hit else (None, False)
+
     for record, canon in pairs:
-        raw_table = record.table_hint or (
-            canon.tables[0] if canon.tables else "")
-        physical = (crosswalk.physical_for_atlas(raw_table)
-                    or crosswalk.physical_for_lumi(raw_table)
-                    if raw_table else None)
+        # attribution chain: the declared hint (catalogs attribute by
+        # data-product/display names — the alias sidecar maps those),
+        # then the tables the metric's OWN SQL references. Nothing
+        # resolvable → counted skip, never a guess.
+        physical, via_alias, via_sql = None, False, False
+        if record.table_hint:
+            physical, via_alias = _resolve(record.table_hint)
+        if physical is None:
+            for t in canon.tables:
+                physical, via_alias = _resolve(t)
+                if physical:
+                    via_sql = bool(record.table_hint)
+                    break
         if physical is None:
             report["skipped_unresolvable_table"] += 1
             continue
+        if via_alias:
+            report["resolved_via_alias"] += 1
+        if via_sql:
+            report["resolved_via_sql_table"] += 1
         tid = table_id(physical)
         # the catalog attesting a metric/predicate attests the table
         # exists — mint the endpoint (fold merges with archive detail)
