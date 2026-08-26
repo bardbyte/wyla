@@ -246,69 +246,88 @@ def emit_vocab(glossary: list[VocabRecord], terms: list[TermRecord],
 def emit_std_tech(entries: list[StdTechEntry], terms: list[TermRecord],
                   graph: GraphDir, crosswalk: Crosswalk,
                   run_id: str) -> dict:
+    """The real feed registers the SAME table more than once — one
+    envelope's tech_metadata_list can hold several registrations (46
+    files yielded 70 entries on the first real run). A registration is
+    testimony about the same facts, not new facts: nodes and edges emit
+    ONCE (document order, first registration wins), repeats are counted,
+    and the dedup keeps validator check [8] meaningful."""
     report: dict = defaultdict(int)
     term_by_name = {t.name.strip().lower(): t.term_id for t in terms}
+    seen_nodes: set[str] = set()
+    seen_edges: set[tuple[str, str, str]] = set()
+
+    def put_node(node_id: str, props: dict, evidence: str) -> bool:
+        if node_id in seen_nodes:
+            return False
+        seen_nodes.add(node_id)
+        graph.append_node(NodeRecord(
+            id=node_id, props=props,
+            prov=Prov(source="atlas", run=run_id, evidence=evidence)))
+        return True
+
+    def put_edge(s: str, r: str, o: str, evidence: str,
+                 props: dict | None = None) -> bool:
+        if (s, r, o) in seen_edges:
+            return False
+        seen_edges.add((s, r, o))
+        graph.append_edge(Quad(
+            s=s, r=r, o=o, props=props or {},
+            prov=Prov(source="atlas", run=run_id, evidence=evidence)))
+        return True
+
     for entry in entries:
+        report["entries"] += 1
         physical = crosswalk.physical_for_atlas(entry.table)
         if physical is None:
             report["skipped_unresolvable_table"] += 1
             continue
         tid = table_id(physical)
-        graph.append_node(NodeRecord(
-            id=tid,
-            props={"description_atlas": entry.description,
-                   "business_name_atlas": entry.business_name,
-                   "data_category": entry.data_category,
-                   "layer_type": entry.layer_type,
-                   "has_pii_atlas": entry.has_pii,
-                   "has_oncop_atlas": entry.has_oncop,
-                   "has_gdpr_atlas": entry.has_gdpr,
-                   "ownership_atlas": entry.ownership},
-            prov=Prov(source="atlas", run=run_id,
-                      evidence=entry.evidence_ref)))
+        if put_node(tid, {"description_atlas": entry.description,
+                          "business_name_atlas": entry.business_name,
+                          "data_category": entry.data_category,
+                          "layer_type": entry.layer_type,
+                          "has_pii_atlas": entry.has_pii,
+                          "has_oncop_atlas": entry.has_oncop,
+                          "has_gdpr_atlas": entry.has_gdpr,
+                          "ownership_atlas": entry.ownership},
+                    entry.evidence_ref):
+            report["tables"] += 1
+        else:
+            report["repeat_registrations"] += 1
         # sensitivity is union-most-restrictive (E1): every compliance
         # flag the feed asserts becomes an explicit policy edge
         for flag, policy in ((entry.has_oncop, "policy:oncop"),
                              (entry.has_gdpr, "policy:gdpr")):
-            if flag:
-                graph.append_edge(Quad(
-                    s=tid, r="has_policy", o=policy,
-                    prov=Prov(source="atlas", run=run_id,
-                              evidence=entry.evidence_ref)))
+            if flag and put_edge(tid, "has_policy", policy,
+                                 entry.evidence_ref):
                 report["policy_flags"] += 1
-        report["tables"] += 1
         for column in entry.columns:
             cid = col_id(physical, column.name)
-            graph.append_node(NodeRecord(
-                id=cid,
-                props={"description_atlas": column.description,
-                       "business_name_atlas": column.business_name,
-                       "data_type_atlas": column.data_type,
-                       "pii_role_id": column.pii_role_id,
-                       "sde_group": column.sde_group},
-                prov=Prov(source="atlas", run=run_id,
-                          evidence=entry.evidence_ref)))
-            graph.append_edge(Quad(
-                s=tid, r="has_column", o=cid,
-                prov=Prov(source="atlas", run=run_id,
-                          evidence=entry.evidence_ref)))
-            report["columns"] += 1
+            if put_node(cid, {"description_atlas": column.description,
+                              "business_name_atlas": column.business_name,
+                              "data_type_atlas": column.data_type,
+                              "pii_role_id": column.pii_role_id,
+                              "sde_group": column.sde_group},
+                        entry.evidence_ref):
+                report["columns"] += 1
+            else:
+                report["columns_repeated"] += 1
+            put_edge(tid, "has_column", cid, entry.evidence_ref)
             if column.pii_role_id:
-                graph.append_edge(Quad(
-                    s=cid, r="has_policy", o="policy:pii",
-                    prov=Prov(source="atlas", run=run_id,
-                              evidence=entry.evidence_ref)))
+                put_edge(cid, "has_policy", "policy:pii",
+                         entry.evidence_ref)
             for link in column.linked_terms:
                 name = str(link.get("businessTermName") or "").strip()
                 term_id = term_by_name.get(name.lower())
                 if term_id is None:
                     report["term_links_unmatched"] += 1
                     continue
-                graph.append_edge(Quad(
-                    s=cid, r="mapped_term", o=term_node_id(term_id),
-                    props={"mapping_source": link.get("sourceName", ""),
-                           "mapping_type": link.get("sourceType", "")},
-                    prov=Prov(source="atlas", run=run_id,
-                              evidence=entry.evidence_ref)))
-                report["term_links"] += 1
+                if put_edge(cid, "mapped_term", term_node_id(term_id),
+                            entry.evidence_ref,
+                            props={"mapping_source":
+                                   link.get("sourceName", ""),
+                                   "mapping_type":
+                                   link.get("sourceType", "")}):
+                    report["term_links"] += 1
     return dict(report)
