@@ -42,3 +42,6 @@ ambig_auth,flag = 1,authorization
 cheque_cashing,Cheque Cashing,gms_transaction
 enterprise_wide,site_visits > 100,ent_site_metrics
 active_flag,is_active_flag,custins_cardmember
+se_typ = 'G',SH On Card/ CNTR CHEQ.,wwcas_authorization
+case_setup_type in ('4407'),case setup type,gms_transaction
+trim(junk((,BUS Unit :: prose/ thing,risk_pers_acct

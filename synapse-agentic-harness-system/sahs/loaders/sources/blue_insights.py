@@ -14,13 +14,21 @@ does not carry), while prose in the sql_logic column ("Cheque Cashing")
 is `not_sql`, caught BEFORE canon so `blue_canon_rate` measures the
 pipeline on rows that claim to be SQL. The prose test is deliberately
 conservative — borderline rows still go to the parser and fail there
-honestly, where the gate can see them."""
+honestly, where the gate can see them.
+
+Some export rows arrive with the two columns SWAPPED — SQL in
+insight_name, the label in sql_logic. Detection is deterministic (this
+side fails to parse, that side parses) and the row is recovered with
+`extra.column_swap=True`; a row broken on BOTH sides still reaches
+canon so the gate counts it."""
 
 from __future__ import annotations
 
 import csv
 import re
 from pathlib import Path
+
+import sqlglot
 
 from sahs.canon.authority import Authority
 from sahs.canon.canonical import wrap_case, wrap_predicate
@@ -46,6 +54,22 @@ def _is_prose(logic: str) -> bool:
     A single bare word may be a boolean column (`WHERE is_active_flag`)
     — the parser judges those, not a heuristic."""
     return not _SQL_SIGNAL.search(logic) and len(logic.split()) >= 2
+
+
+def _wrap(logic: str, table: str) -> tuple[str, str]:
+    """CASE-expression vs predicate wrapping. `CASE ` with the space —
+    a predicate on a column NAMED case_* is not a CASE expression."""
+    if logic.upper().lstrip().startswith("CASE "):
+        return wrap_case(logic, table), "case"
+    return wrap_predicate(logic, table), "predicate"
+
+
+def _parses(sql: str) -> bool:
+    try:
+        sqlglot.parse_one(sql, read="bigquery")
+        return True
+    except Exception:               # every flavor of "won't parse"
+        return False
 
 
 def load_blue_insights(path: Path, registry: TableRegistry
@@ -81,12 +105,26 @@ def load_blue_insights(path: Path, registry: TableRegistry
                     detail=f"prose in sql_logic: {logic[:80]!r}",
                     evidence_ref=ref))
                 continue
-            is_case = logic.upper().lstrip().startswith("CASE")
-            wrapped = (wrap_case(logic, table) if is_case
-                       else wrap_predicate(logic, table))
+            wrapped, kind = _wrap(logic, table)
+            if not _parses(wrapped) and _SQL_SIGNAL.search(label):
+                # the export swaps the two columns in some rows: SQL in
+                # insight_name, the human label in sql_logic. Detection
+                # is deterministic — this side fails to parse, that side
+                # parses — and lives in the loader so it survives every
+                # re-export. Rows broken on BOTH sides fall through to
+                # canon: the gate must keep seeing rows that claim to be
+                # SQL and are not.
+                alt, alt_kind = _wrap(label, table)
+                if _parses(alt):
+                    records.append(ExpressionRecord(
+                        raw_sql=alt, kind=alt_kind, source=SOURCE,
+                        authority=Authority.SNIPPET,
+                        concept_label=logic, table_hint=table,
+                        evidence_ref=ref,
+                        extra={"column_swap": True}))
+                    continue
             records.append(ExpressionRecord(
-                raw_sql=wrapped,
-                kind="case" if is_case else "predicate",
+                raw_sql=wrapped, kind=kind,
                 source=SOURCE, authority=Authority.SNIPPET,
                 concept_label=label, table_hint=table,
                 evidence_ref=ref))

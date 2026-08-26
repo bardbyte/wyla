@@ -48,7 +48,7 @@ def test_blue_insights_quarantine_categories_tell_the_truth():
     reg = TableRegistry.from_list_file(REGISTRY)
     records, quar = load_blue_insights(
         FX / "blue_business_insights.csv", reg)
-    assert len(records) == 40      # 43 rows − ambiguous − oos − prose
+    assert len(records) == 43      # 46 rows − ambiguous − oos − prose
     by_cat: dict[str, list] = {}
     for q in quar:
         by_cat.setdefault(q.category, []).append(q)
@@ -63,6 +63,17 @@ def test_blue_insights_quarantine_categories_tell_the_truth():
     assert any(">>>" in r.raw_sql for r in records)
     kinds = {r.kind for r in records}
     assert kinds == {"predicate", "case"}
+    # swapped-column rows recover: SQL from insight_name, label from
+    # sql_logic, provenance flagged; both-broken rows still reach canon
+    swapped = [r for r in records if r.extra.get("column_swap")]
+    assert len(swapped) == 2
+    assert {r.kind for r in swapped} == {"predicate"}
+    assert any(r.concept_label == "SH On Card/ CNTR CHEQ."
+               and "se_typ = 'G'" in r.raw_sql for r in swapped)
+    assert any("case_setup_type in ('4407')" in r.raw_sql
+               for r in swapped)          # predicate, not CASE-wrapped
+    assert any("BUS Unit :: prose/ thing" in r.raw_sql
+               for r in records)          # sql_logic side goes to canon
 
 
 def test_gold_split_and_backlog():
@@ -146,7 +157,7 @@ def test_census_finds_seeded_conflicts_and_meta_is_honest():
     assert spend["conflict"]
     assert "NOT alias/acronym-dedup" in census["meta"][
         "label_normalization"]
-    assert census["meta"]["quarantine_by_category"]["parse_error"] == 5
+    assert census["meta"]["quarantine_by_category"]["parse_error"] == 6
 
 
 def test_cli_census_gates_fire_and_outputs_written(tmp_path: Path):
