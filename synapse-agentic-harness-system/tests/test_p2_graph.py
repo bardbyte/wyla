@@ -81,7 +81,13 @@ def test_build_graph_end_to_end_fuses_three_witnesses(tmp_path):
                 "table:dw.wwcas_authorization", "bq")]
     assert co.prov.support == 12
     assert "domain:dw.gms_transaction.country_cd" in nodes
-    assert any(k.startswith("tmpl:") for k in nodes)
+    # template headers drift across extractor versions: gms uses the
+    # canonical normalized_sql, wwcas the drifted query_template/count —
+    # both adapt into the same canonical node shape
+    tmpls = {k: v for k, v in nodes.items() if k.startswith("tmpl:")}
+    assert len(tmpls) == 3
+    assert any("wwcas_authorization" in v.props["normalized_sql"]
+               and v.props["occurrences"] == 30 for v in tmpls.values())
     assert ("table:data.raw_gms_feed", "upstream_of",
             "table:dw.gms_transaction", "lumi") in edges
     derived = [(s, o) for (s, r, o, _w) in edges

@@ -40,6 +40,29 @@ def _json(path: Path) -> dict | list | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+_SQLISH = ("select", "from", "insert", "merge", "with ", "create")
+
+
+def _sql_column(rows: list[dict]) -> str | None:
+    """jobs_query_templates.csv names its SQL column differently across
+    extractor versions — the loader adapts to the file. Known names are
+    tried first (pinned priority), then the VALUE signature decides: the
+    first column, in header order, whose text looks like SQL. Both rules
+    are deterministic for a given file."""
+    if not rows:
+        return None
+    names = [n for n in rows[0] if n]
+    for cand in ("normalized_sql", "query_template", "template_sql",
+                 "sql_template", "normalized_query", "sql", "query"):
+        if cand in names:
+            return cand
+    for n in names:
+        sample = next((str(r.get(n) or "") for r in rows if r.get(n)), "")
+        if any(k in sample.lower() for k in _SQLISH):
+            return n
+    return None
+
+
 def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                     run_id: str, ledger=None) -> tuple[dict, list[str]]:
     """→ (report, blocking_errors)."""
@@ -51,6 +74,7 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
         return path
 
     report = {"tables": 0, "columns": 0, "domains": 0, "templates": 0,
+              "template_rows_skipped": 0,
               "co_query_edges": 0, "policies_unknown": 0}
     run_report = _json(track(root / "_run_report.json")) or {}
     denied = {(d.get("table"), d.get("operation"))
@@ -193,16 +217,28 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                                    "jobs_co_queried_tables.csv")))
             report["co_query_edges"] += 1
 
-        for row in _csv_rows(
-                track(d / "17_queries_30d" / "jobs_query_templates.csv")):
+        t_rows = _csv_rows(
+            track(d / "17_queries_30d" / "jobs_query_templates.csv"))
+        sql_col = _sql_column(t_rows)
+        if t_rows and sql_col is None:
+            # no column looks like SQL — counted, never a dead run
+            report["template_rows_skipped"] += len(t_rows)
+        for row in (t_rows if sql_col else []):
+            sql_text = str(row.get(sql_col) or "").strip()
+            if not sql_text:
+                report["template_rows_skipped"] += 1
+                continue
+            occurrences = int(row.get("occurrences")
+                              or row.get("count")
+                              or row.get("query_count") or 1)
             tmpl = ("tmpl:" + hashlib.sha256(
-                row["normalized_sql"].encode()).hexdigest()[:12])
+                sql_text.encode()).hexdigest()[:12])
             graph.append_node(NodeRecord(
                 id=tmpl,
-                props={"normalized_sql": row["normalized_sql"],
-                       "occurrences": int(row.get("occurrences") or 1),
+                props={"normalized_sql": sql_text,
+                       "occurrences": occurrences,
                        "table": physical},
-                prov=prov(support=max(int(row.get("occurrences") or 1), 1),
+                prov=prov(support=max(occurrences, 1),
                           evidence=f"{d.name}/17_queries_30d/"
                                    "jobs_query_templates.csv")))
             report["templates"] += 1
