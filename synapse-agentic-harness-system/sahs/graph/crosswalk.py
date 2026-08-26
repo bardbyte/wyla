@@ -58,6 +58,14 @@ class Crosswalk:
         hits = self.by_short.get(table_name.lower(), [])
         return hits[0].physical.lower() if len(hits) == 1 else None
 
+    def physical_for_short(self, table_name: str) -> str | None:
+        """UNIQUE short-name resolution — the fallback identity when an
+        archive artifact names its table without a dataset (e.g. a
+        missing 00 resource file). Ambiguity returns None: two crosswalk
+        rows sharing a short name are never guessed between."""
+        hits = self.by_short.get(table_name.lower(), [])
+        return hits[0].physical.lower() if len(hits) == 1 else None
+
     def physical_for_atlas(self, entity: str) -> str | None:
         hit = self.by_atlas.get(entity.lower())
         if hit:

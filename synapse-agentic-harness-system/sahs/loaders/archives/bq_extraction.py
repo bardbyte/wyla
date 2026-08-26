@@ -98,10 +98,18 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
         ref = resource.get("tableReference", {})
         dataset, name = ref.get("datasetId", ""), ref.get("tableId", d.name)
         physical = crosswalk.physical_for_bq(dataset, name)
+        if physical is None and not dataset:
+            # a dir missing its 00 resource still names its table — the
+            # crosswalk's UNIQUE short name is identity enough (views
+            # and denied resource calls ship without the 00 file);
+            # ambiguity still blocks below
+            physical = crosswalk.physical_for_short(name)
         if physical is None:
             blocking.append(
                 f"crosswalk: no row for bq table {dataset}.{name} "
-                f"(archive dir {d.name})")
+                f"(archive dir {d.name})"
+                + ("" if dataset else " — 00 resource absent and short "
+                   "name not uniquely in crosswalk"))
             continue
         tid = table_id(physical)
         evidence = f"{d.name}/00_logical_table_resource.json"

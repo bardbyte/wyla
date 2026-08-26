@@ -1,0 +1,3 @@
+column_name,ordinal_position,data_type,is_nullable,is_partitioning_column
+approval_cd,1,STRING,YES,NO
+segment_cd,2,STRING,YES,NO
