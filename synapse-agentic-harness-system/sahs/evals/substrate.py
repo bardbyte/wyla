@@ -53,13 +53,15 @@ class BQDryRun:
         if self._token_provider is not None:
             return str(self._token_provider())
         # google-auth is present wherever the laptop already runs BQ; kept
-        # as a runtime import so fixture CI never needs it.
+        # as a runtime import so fixture CI never needs it. The refresh
+        # session honors the connection's verify/CA settings and the
+        # NO_PROXY injection done at from_env (the bq_connect contract).
         from google.auth.transport.requests import Request     # type: ignore
         from google.oauth2 import service_account              # type: ignore
         creds = service_account.Credentials.from_service_account_file(
             str(self.connection.key_path),
             scopes=["https://www.googleapis.com/auth/bigquery"])
-        creds.refresh(Request())
+        creds.refresh(Request(session=self.connection.token_session()))
         return creds.token
 
     def dry_run(self, sql: str) -> DryRunOutcome:
@@ -74,7 +76,9 @@ class BQDryRun:
                      "Content-Type": "application/json"},
             method="POST")
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(
+                    request, timeout=30,
+                    context=self.connection.ssl_context()) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             try:
