@@ -104,3 +104,20 @@ def test_authority_lattice_order_and_unknown():
     assert authority_for("metrics_dmp") is Authority.CERTIFIED
     with pytest.raises(ValueError):
         authority_for("mystery_source")
+
+
+def test_try_canon_never_raises_on_tokenizer_junk():
+    """The real corpus killed the first census with an unterminated
+    backtick (sqlglot TokenError, a sibling of ParseError). Every
+    flavor of junk quarantines; try_canon NEVER raises."""
+    from sahs.canon.canonical import try_canon
+    junk = [
+        "SELECT `ort_dt BETWEEN '2024-06-01' AND '2024-06-30'",  # open `
+        "SELECT 'unterminated string FROM t",
+        "SELECT \"unterminated dquote",
+        "SELECT ((((((",
+    ]
+    for sql in junk:
+        result, err = try_canon(sql)
+        assert result is None and err is not None, sql
+        assert err.category in ("parse_error", "fragment", "transform")

@@ -306,7 +306,10 @@ def c(sql: str, *, schema: dict[str, dict[str, str]] | None = None,
         raise CanonError("fragment", "empty statement")
     try:
         tree = sqlglot.parse_one(text, read=dialect)
-    except sqlglot.errors.ParseError as e:
+    except (sqlglot.errors.SqlglotError, RecursionError) as e:
+        # SqlglotError covers ParseError AND TokenError — the real
+        # corpus contains unterminated backticks and worse; every
+        # flavor of "won't parse" is one quarantine category
         raise CanonError("parse_error", str(e)) from e
     if tree is None:
         raise CanonError("parse_error", "parser returned nothing")
@@ -368,11 +371,18 @@ def c(sql: str, *, schema: dict[str, dict[str, str]] | None = None,
 
 def try_canon(sql: str, **kwargs: Any) -> tuple[CanonResult | None,
                                                 CanonError | None]:
-    """The quarantine-friendly wrapper adapters use."""
+    """The quarantine-friendly wrapper adapters use. GUARANTEE: never
+    raises — the P0 promise is categorized quarantine, and one junk
+    snippet in a 35K corpus must never kill a run. Anything a transform
+    or generator throws that c() didn't map becomes a 'transform'
+    quarantine with the exception text."""
     try:
         return c(sql, **kwargs), None
     except CanonError as e:
         return None, e
+    except Exception as e:          # the belt under the belt
+        return None, CanonError("transform",
+                                f"{type(e).__name__}: {str(e)[:180]}")
 
 
 def wrap_predicate(fragment: str, table: str) -> str:
