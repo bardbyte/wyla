@@ -116,18 +116,21 @@ python scripts/run_evals.py \
   --out graph/runs/p1_ground_oracle --json
 
 # P2 — truth graph + first real compile              → p2_build.md
-# (E12: this run also mines jobs_30d.jsonl.gz per table — the jobs
-#  witness — and writes the utilization ledger into the run manifest;
-#  gates: jobs_canon_rate ≥90%/table, 0 unledgered files)
 # human: author graph/identity/crosswalk.jsonl (46 rows) FIRST
 # RUN 1 (A7): omit --mdm-archive — std_tech relays the same MDM
 # declarations; run 2 adds it back and the DIFF measures what it adds
+# RUN 1 (A8): --no-jobs-30d — the 30-day query history was judged
+# incorrect; nothing derived from it (jobs witness, cost priors,
+# top_users, co_queried, templates) enters the graph. The files stay
+# ledgered as deferred. A corrected extract re-enables the witness
+# (drop the flag) and the DIFF measures what real usage adds.
 python scripts/laptop.py build-graph \
   --graph graph \
   --crosswalk graph/identity/crosswalk.jsonl \
   --bq-archive $DATA/real_extractions_production \
   --sources-dir $DATA/sources \
   --registry $DATA/real_extractions_production/_batch_summary.csv \
+  --no-jobs-30d \
   --out graph/runs/p2_build --json
 python scripts/laptop.py compile \
   --graph graph --builds builds \

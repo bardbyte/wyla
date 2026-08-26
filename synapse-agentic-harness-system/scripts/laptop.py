@@ -296,12 +296,21 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
     reports: dict[str, dict] = {}
 
     ledger = UtilizationLedger()
+    no_jobs = bool(getattr(args, "no_jobs_30d", False))
+    if no_jobs:
+        # A8: the 30-day query history is judged incorrect for this run —
+        # nothing derived from it may witness the graph, and the ledger
+        # says so instead of leaving the files unaccounted for
+        ledger.defer_dir(
+            "17_queries_30d",
+            "jobs witness disabled this run (A8) — 30-day query history "
+            "judged incorrect; re-enable when a corrected extract lands")
     jobs_gate_failures: list[str] = []
     if args.bq_archive:
         console.phase("bq archive")
         reports["bq"], blocked = load_bq_archive(
             Path(args.bq_archive), graph, crosswalk, run_id,
-            ledger=ledger)
+            ledger=ledger, include_jobs_digests=not no_jobs)
         blocking += blocked
     if args.mdm_archive:
         console.phase("mdm archive")
@@ -344,7 +353,10 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
     # jobs witness AFTER the semantic catalogs: a jobs sighting of an
     # already-governed metric is testimony, never a fresh seed (E7)
     jobs_gate = True
-    if args.bq_archive:
+    if args.bq_archive and no_jobs:
+        console.emit("phase_start", phase="jobs 30d witness",
+                     detail="disabled (--no-jobs-30d, A8)")
+    elif args.bq_archive:
         console.phase("jobs 30d witness")
         from sahs.loaders.archives.jobs_30d import load_jobs_30d
         reports["jobs_30d"], jobs_gate_failures = load_jobs_30d(
@@ -451,6 +463,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--mdm-archive", default="")
     p.add_argument("--sources-dir", default="")
     p.add_argument("--registry", default="")
+    p.add_argument("--no-jobs-30d", action="store_true",
+                   help="A8: exclude every fact derived from the 30-day "
+                        "query history (jobs witness, cost priors, "
+                        "top_users, co_queried, templates) — files are "
+                        "ledgered deferred, never unaccounted")
     p.add_argument("--out", required=True)
     p.add_argument("--run-id", default="")
     p.add_argument("--plain", action="store_true")

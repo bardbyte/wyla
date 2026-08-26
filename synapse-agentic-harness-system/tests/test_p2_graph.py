@@ -21,7 +21,8 @@ CROSSWALK = FX / "identity" / "crosswalk.jsonl"
 
 
 def _build(graph_dir: Path, out_dir: Path,
-           crosswalk: Path = CROSSWALK) -> subprocess.CompletedProcess:
+           crosswalk: Path = CROSSWALK,
+           *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SILO / "scripts" / "laptop.py"), "build-graph",
          "--graph", str(graph_dir), "--crosswalk", str(crosswalk),
@@ -29,8 +30,33 @@ def _build(graph_dir: Path, out_dir: Path,
          "--mdm-archive", str(FX / "mdm_46_patched_v2"),
          "--sources-dir", str(FX / "sources"),
          "--registry", str(FX / "sources" / "tables_registry.txt"),
-         "--out", str(out_dir), "--plain", "--run-id", "test_r1"],
+         "--out", str(out_dir), "--plain", "--run-id", "test_r1",
+         *extra],
         capture_output=True, text=True, cwd=SILO)
+
+
+def test_no_jobs_30d_excludes_the_witness_and_ledgers_deferred(tmp_path):
+    """A8: an incorrect 30-day history witnesses NOTHING — no jobs
+    quads, no digests — while every 17_queries_30d file stays
+    accounted for as deferred, never silently unread."""
+    graph_dir, out_dir = tmp_path / "g", tmp_path / "run"
+    result = _build(graph_dir, out_dir, CROSSWALK, "--no-jobs-30d")
+    assert result.returncode == 0, result.stderr[-800:]
+    graph = GraphDir(graph_dir)
+    nodes = graph.fold_nodes()
+    edges = graph.fold_edges()
+    assert not any(k.startswith("tmpl:") for k in nodes)
+    assert not any(r == "co_queried_with" for (_s, r, _o, _w) in edges)
+    assert not any(w == "jobs_30d" for (_s, _r, _o, w) in edges)
+    assert nodes["table:dw.gms_transaction"].props["top_users"] == []
+    manifest = json.loads((graph_dir / "runs" / "test_r1" /
+                           "manifest.json").read_text())
+    assert "jobs_30d" not in manifest["reports"]
+    jobs_rows = [r for r in manifest["utilization"]
+                 if "17_queries_30d" in r["path"]]
+    assert jobs_rows
+    assert all(r["status"] == "deferred" and "A8" in r.get("reason", "")
+               for r in jobs_rows)
 
 
 def test_id_grammar():

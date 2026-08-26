@@ -64,8 +64,15 @@ def _sql_column(rows: list[dict]) -> str | None:
 
 
 def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
-                    run_id: str, ledger=None) -> tuple[dict, list[str]]:
-    """→ (report, blocking_errors)."""
+                    run_id: str, ledger=None,
+                    include_jobs_digests: bool = True
+                    ) -> tuple[dict, list[str]]:
+    """→ (report, blocking_errors).
+
+    ``include_jobs_digests=False`` (A8) skips every fact derived from the
+    30-day query history — top_users, co_queried_with, query templates —
+    because an incorrect history must not witness anything; the caller
+    defers the ``17_queries_30d`` files in the ledger."""
     root = Path(root)
     blocking: list[str] = []
     def track(path: Path):
@@ -109,7 +116,9 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
         metrics = _csv_rows(track(d / "13_table_metrics.csv"))
         total_rows = int(metrics[0]["total_rows"]) if metrics else None
         partitions = _csv_rows(track(d / "10_physical_partitions.csv"))
-        users = _csv_rows(track(d / "17_queries_30d" / "jobs_top_users.csv"))
+        users = (_csv_rows(track(d / "17_queries_30d"
+                                 / "jobs_top_users.csv"))
+                 if include_jobs_digests else [])
         graph.append_node(NodeRecord(
             id=tid,
             props={
@@ -205,8 +214,9 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                     prov=prov(
                         evidence=f"{d.name}/16_row_access_policies.json")))
 
-        for row in _csv_rows(
-                track(d / "17_queries_30d" / "jobs_co_queried_tables.csv")):
+        for row in (_csv_rows(track(
+                d / "17_queries_30d" / "jobs_co_queried_tables.csv"))
+                if include_jobs_digests else []):
             other_physical = crosswalk.physical_for_lumi(row["other_table"])
             if other_physical is None:
                 continue                 # co-query partner outside scope
@@ -217,8 +227,9 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                                    "jobs_co_queried_tables.csv")))
             report["co_query_edges"] += 1
 
-        t_rows = _csv_rows(
-            track(d / "17_queries_30d" / "jobs_query_templates.csv"))
+        t_rows = (_csv_rows(track(
+            d / "17_queries_30d" / "jobs_query_templates.csv"))
+            if include_jobs_digests else [])
         sql_col = _sql_column(t_rows)
         if t_rows and sql_col is None:
             # no column looks like SQL — counted, never a dead run
