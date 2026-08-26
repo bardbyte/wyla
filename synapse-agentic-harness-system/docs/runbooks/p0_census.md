@@ -47,7 +47,13 @@ python scripts/laptop.py census \
   on both sides stay in the gate as parse failures.
 - `blocker_sources_100pct`: zero canon failures across gold non-empty
   pairs, metrics_dmp, extended_gmns, skill contracts — any miss is a
-  release blocker, not a statistic.
+  release blocker, not a statistic. Source-file repairs go through
+  `scripts/repair_sources.py <sources-dir>`: gold markdown fences strip
+  automatically (transport artifacts, every row re-verified); a broken
+  certified DMP expression is shown with parse-verified mechanical
+  candidates but writes ONLY on your explicit choice — a parseable
+  repair can still be semantically wrong, and the catalog owner should
+  hear about the defect either way.
 
 ## Then materialize the gold tasks
 
