@@ -78,7 +78,7 @@ def validate_graph(root: Path) -> ValidationReport:
     schema_ids: set[str] = set()
     for path in sorted((root / "nodes").glob("*.jsonl")):
         for line_no, line in enumerate(
-                path.read_text(encoding="utf-8").splitlines(), start=1):
+                path.read_text(encoding="utf-8").split("\n"), start=1):
             if not line.strip():
                 continue
             where = f"{path.name}:{line_no}"
@@ -114,7 +114,7 @@ def validate_graph(root: Path) -> ValidationReport:
             continue
         allowed_s, allowed_o = signature
         for line_no, line in enumerate(
-                path.read_text(encoding="utf-8").splitlines(), start=1):
+                path.read_text(encoding="utf-8").split("\n"), start=1):
             if not line.strip():
                 continue
             where = f"{path.name}:{line_no}"

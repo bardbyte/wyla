@@ -79,6 +79,30 @@ def test_torn_tail_repairs_on_next_append(tmp_path):
     assert "t_two" in torn                   # evidence preserved
 
 
+def test_line_separator_chars_never_tear_records(tmp_path):
+    """Real Atlas/BQ descriptions carry U+2028/U+2029/NEL. json.dumps
+    writes them RAW and splitlines() treats them as line breaks — a
+    valid record read back as two fragments ('Unterminated string').
+    The writer escapes them; the reader splits on real newlines only,
+    so even a LEGACY raw line parses whole."""
+    hostile = "spend across markets\x85daily"
+    g = GraphDir(tmp_path)
+    g.append_node(NodeRecord(id="table:dw.t_one",
+                             props={"description_bq": hostile},
+                             prov=Prov(source="bq", run="r1")))
+    p = tmp_path / "nodes" / "table.jsonl"
+    raw = p.read_text(encoding="utf-8")
+    assert raw.count("\n") == 1 and " " not in raw   # one clean line
+    # legacy line written by the OLD writer: separator raw inside JSON
+    with p.open("a", encoding="utf-8") as f:
+        f.write('{"id": "table:dw.t_two", '
+                '"props": {"d": "a b"}, '
+                '"prov": {"source": "bq", "run": "r0"}}\n')
+    folded = GraphDir(tmp_path).fold_nodes()
+    assert folded["table:dw.t_one"].props["description_bq"] == hostile
+    assert folded["table:dw.t_two"].props["d"] == "a b"
+
+
 def test_mid_file_corruption_raises_named_error(tmp_path):
     g = GraphDir(tmp_path)
     g.append_node(NodeRecord(id="table:dw.t_one", props={},

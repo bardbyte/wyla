@@ -76,7 +76,7 @@ def write_tasks(tasks: list[Task], path: Path) -> Path:
 
 def read_tasks(path: Path) -> list[Task]:
     tasks = []
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
+    for line in Path(path).read_text(encoding="utf-8").split("\n"):
         if line.strip():
             tasks.append(Task.model_validate(json.loads(line)))
     return tasks

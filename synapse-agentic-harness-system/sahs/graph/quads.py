@@ -186,9 +186,16 @@ class GraphDir:
         if path not in self._tail_checked:
             self._repair_torn_tail(path)
             self._tail_checked.add(path)
+        line = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        # json.dumps passes U+2028/U+2029/NEL through RAW, and every
+        # line-based tool (str.splitlines included) treats them as line
+        # breaks — real Atlas/BQ descriptions carry them. Escape so one
+        # record is always one physical line.
+        line = (line.replace(" ", "\\u2028")
+                    .replace(" ", "\\u2029")
+                    .replace("\x85", "\\u0085"))
         with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False,
-                               sort_keys=True) + "\n")
+            f.write(line + "\n")
 
     @staticmethod
     def _repair_torn_tail(path: Path) -> None:
@@ -210,8 +217,11 @@ class GraphDir:
 
     @staticmethod
     def _lines(path: Path):
+        # split on REAL newlines only — splitlines() also splits on
+        # U+2028/U+2029/NEL, which legacy lines may carry raw inside
+        # JSON strings, tearing a valid record into fragments
         for n, line in enumerate(
-                path.read_text(encoding="utf-8").splitlines(), 1):
+                path.read_text(encoding="utf-8").split("\n"), 1):
             if not line.strip():
                 continue
             try:

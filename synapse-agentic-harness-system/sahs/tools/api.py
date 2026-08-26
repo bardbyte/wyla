@@ -23,7 +23,7 @@ def _jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     return [json.loads(line) for line in
-            path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            path.read_text(encoding="utf-8").split("\n") if line.strip()]
 
 
 @dataclass
