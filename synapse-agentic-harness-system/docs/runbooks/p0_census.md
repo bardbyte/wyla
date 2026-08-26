@@ -34,7 +34,13 @@ python scripts/laptop.py census \
 
 ## Gates (the run enforces these; exit 1 names the failure)
 
-- `blue_canon_rate` ≥ 95% of ~35.7K snippets canonicalized.
+- `blue_canon_rate` ≥ 95% of in-scope snippets canonicalized. The
+  denominator is rows that CLAIM to be SQL on tables this run carries:
+  enterprise-wide rows naming tables outside the registry quarantine as
+  `out_of_scope` and zero-signal prose in the sql_logic column ("Cheque
+  Cashing") quarantines as `not_sql` — both counted in
+  `quarantine.jsonl`, neither in the gate. Borderline rows (any SQL
+  signal at all) still go to the parser and fail the gate honestly.
 - `blocker_sources_100pct`: zero canon failures across gold non-empty
   pairs, metrics_dmp, extended_gmns, skill contracts — any miss is a
   release blocker, not a statistic.

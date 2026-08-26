@@ -38,7 +38,9 @@ class ExpressionRecord(BaseModel):
 class Quarantined(BaseModel):
     source: str
     category: str                   # parse_error|fragment|dialect|transform|
-    #                                 ambiguous_table|missing_field
+    #                                 ambiguous_table|missing_field|
+    #                                 out_of_scope|not_sql|schema_mismatch|
+    #                                 nested|ambiguous_attribution
     detail: str
     evidence_ref: str = ""
 
