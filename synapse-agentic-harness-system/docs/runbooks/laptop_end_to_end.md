@@ -120,11 +120,12 @@ python scripts/run_evals.py \
 #  witness — and writes the utilization ledger into the run manifest;
 #  gates: jobs_canon_rate ≥90%/table, 0 unledgered files)
 # human: author graph/identity/crosswalk.jsonl (46 rows) FIRST
+# RUN 1 (A7): omit --mdm-archive — std_tech relays the same MDM
+# declarations; run 2 adds it back and the DIFF measures what it adds
 python scripts/laptop.py build-graph \
   --graph graph \
   --crosswalk graph/identity/crosswalk.jsonl \
   --bq-archive $DATA/real_extractions_production \
-  --mdm-archive $DATA/mdm_46_patched_v2 \
   --sources-dir $DATA/sources \
   --registry $DATA/real_extractions_production/_batch_summary.csv \
   --out graph/runs/p2_build --json
