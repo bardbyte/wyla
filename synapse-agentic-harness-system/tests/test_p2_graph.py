@@ -124,6 +124,13 @@ def test_build_graph_end_to_end_fuses_three_witnesses(tmp_path):
     wwcas = nodes["table:dw.wwcas_authorization"]
     assert wwcas.props["lifecycle_status"] == "unknown_unavailable"
 
+    # a dir missing its 00 resource resolves by UNIQUE short name —
+    # views and denied resource calls ship without the file, and the
+    # crosswalk row is identity enough; its schema still lands
+    assert "table:dw.sbs_new_accounts" in nodes
+    assert ("table:dw.sbs_new_accounts", "has_schema",
+            "schema:dw.sbs_new_accounts@v1", "bq") in edges
+
 
 def test_crosswalk_blocking_is_a_build_error(tmp_path):
     broken = tmp_path / "broken.jsonl"

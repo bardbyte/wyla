@@ -46,7 +46,10 @@ def test_reconcile_d1_to_d5_counts_and_handlers(tmp_path):
     _, build_dir, manifest = _compiled(tmp_path)
     census = json.loads((build_dir / "census.json").read_text())
     totals = census["structural"]["totals"]
-    assert totals == {"D1": 1, "D2": 1, "D3": 1, "D4": 2, "D5": 1}
+    # D2 = 3: gms bq_only_col + the two sbs_new_accounts columns (a
+    # bq-only table — no 00 resource, no atlas/mdm plane — is honestly
+    # all coverage gap)
+    assert totals == {"D1": 1, "D2": 3, "D3": 1, "D4": 2, "D5": 1}
     tickets = [json.loads(x) for x in
                (build_dir / "tickets.jsonl").read_text().splitlines()]
     kinds = {t["ticket"] for t in tickets}
