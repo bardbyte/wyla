@@ -130,13 +130,19 @@ src_check metrics_dmp.json "DMP certified";                   DMPN=$CNT
 src_check extended_gmns_semantics.json "GMNS pending";        GMNS=$CNT
 src_check data_cleaned.csv "glossary rows";                   GLOSS=$CNT
 src_check business_terms.csv "atlas terms";                   TERMS=$CNT
-count_std_tech() { $PY - "$1" <<'EOF' 2>/dev/null || echo 0
-import json, sys
+count_std_tech() { $PY - "$@" <<'EOF' 2>/dev/null || echo 0
+import glob, json, sys
 def walk(node, found):
     if isinstance(node, dict):
         if "dataset" in node and ("pde" in node
                                   or "datasetAttribute" in node):
             found.append(node)
+            return
+        if "dataset" in node and isinstance(
+                node.get("tech_metadata_list"), list):
+            found.extend(i for i in node["tech_metadata_list"]
+                         if isinstance(i, dict)
+                         and ("pde" in i or "datasetAttribute" in i))
             return
         for v in node.values():
             walk(v, found)
@@ -144,16 +150,22 @@ def walk(node, found):
         for item in node:
             walk(item, found)
 found = []
-walk(json.load(open(sys.argv[1])), found)
+for path in sys.argv[1:]:
+    try:
+        walk(json.load(open(path)), found)
+    except Exception:
+        pass
 print(len(found))
 EOF
 }
 if [ -f "$SRC/std_tech_metadata_all.json" ]; then
   STDTECH=$(count_std_tech "$SRC/std_tech_metadata_all.json")
   ok "std_tech_metadata_all.json         $STDTECH entries (combined form — wins over the dir)"
+  [ -d "$SRC/std_tech_metadata" ] \
+    && warn "per-table std_tech_metadata/ is SHADOWED by the combined file — delete the stale one"
 elif [ -d "$SRC/std_tech_metadata" ]; then
-  STDTECH=$(find "$SRC/std_tech_metadata" -name '*.json' | wc -l | tr -d ' ')
-  ok "std_tech_metadata/                 $STDTECH per-table files"
+  STDTECH=$(count_std_tech "$SRC/std_tech_metadata"/*.json)
+  ok "std_tech_metadata/                 $STDTECH entries across $(find "$SRC/std_tech_metadata" -name '*.json' | wc -l | tr -d ' ') per-table files"
 else
   bad "std_tech (neither _all.json nor directory)"
 fi

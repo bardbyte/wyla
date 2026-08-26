@@ -1,32 +1,45 @@
-[
- {
-  "dataset": "wwcas_authorization",
-  "datasetAttribute": {
-   "description": "Worldwide auth events.",
-   "business_name": "Authorizations",
-   "data_category": "Payments",
-   "data_type_name": "ODL",
-   "has_pii": false,
-   "ownership": {
-    "business_owner": "own_b@corp"
-   }
-  },
-  "pde": [
-   {
-    "pdeRelPath": "approval_cd",
-    "pdeAttribute": {
-     "description": "Approval decision code.",
-     "business_name": "Approval Code",
-     "data_type_name": "STRING"
+{
+ "dataset": "wwcas_authorization",
+ "appl_id": "600001868",
+ "page_info": {
+  "total_pages": 1,
+  "downloaded_elements": 1
+ },
+ "tech_metadata_list": [
+  {
+   "datasetAttribute": {
+    "description": "Worldwide auth events.",
+    "business_name": "Authorizations",
+    "data_category": "Payments",
+    "data_type_name": "ODL",
+    "has_pii": false,
+    "ownership": {
+     "business_owner": "own_b@corp"
     },
-    "businessMetadata": [
-     {
-      "businessTermName": "Authorization Approval Code",
-      "sourceName": "Atlas",
-      "sourceType": "Declared"
-     }
-    ]
-   }
-  ]
- }
-]
+    "has_oncop": true,
+    "has_gdpr": false
+   },
+   "pde": [
+    {
+     "pdeRelPath": "approval_cd",
+     "pdeAttribute": {
+      "description": "Approval decision code.",
+      "business_name": "Approval Code",
+      "data_type_name": "STRING"
+     },
+     "businessMetadata": [
+      {
+       "businessTermName": "Authorization Approval Code",
+       "sourceName": "Atlas",
+       "sourceType": "Declared"
+      }
+     ]
+    }
+   ],
+   "datasetGroup": "data",
+   "dataserver": "Lumi",
+   "isLineageExist": "Y",
+   "datasystem": "NGBD - Lumi Metadata Management"
+  }
+ ]
+}

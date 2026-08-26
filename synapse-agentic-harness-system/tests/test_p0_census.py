@@ -212,3 +212,56 @@ def test_std_tech_harvest_survives_any_wrapper(tmp_path: Path):
     got, quarantined = load_std_tech_metadata(bad)
     assert not got and len(quarantined) == 1
     assert "no entry-shaped objects" in quarantined[0].detail
+
+
+def test_std_tech_real_envelope_shape(tmp_path: Path):
+    """The REAL per-table file (contract: docs/contracts/
+    std_tech_metadata_layout.md): table name at the envelope, payload
+    under tech_metadata_list[i] — incl. multi-element lists and the
+    oncop/gdpr sensitivity flags."""
+    envelope = {
+        "dataset": "acqdw_acquisition_us",
+        "appl_id": "600001868",
+        "page_info": {"total_pages": 1, "downloaded_elements": 2},
+        "tech_metadata_list": [
+            {"datasource": "axp-lumi", "technology": "BigQuery",
+             "isActive": "Y",
+             "datasetAttribute": {
+                 "business_name": "Acquisitions data for US market",
+                 "description": "Acquisition data of Consumer and Open.",
+                 "data_category": "Cobrand & Partners",
+                 "data_type_name": "ODL",
+                 "has_pii": True, "has_oncop": True, "has_gdpr": False,
+                 "ownership": {"business_owner": "own@corp"}},
+             "pde": [
+                 {"pdeRelPath": "acct_open_dt",
+                  "pdeAttribute": {"data_type_name": "DATE",
+                                   "description": "account open date",
+                                   "business_name": "Account Open Date",
+                                   "pii_role_id": None},
+                  "businessMetadata": [
+                      {"businessTermName": "Account Open Date",
+                       "businessTermId": None,
+                       "sourceName": "LumiMDM",
+                       "sourceType": "Declared"}]},
+                 {"pdeRelPath": "cm_dob",
+                  "pdeAttribute": {"data_type_name": "STRING",
+                                   "pii_role_id":
+                                       "NGBD-SDE-Date-of-Birth"}}]},
+            {"datasource": "axp-lumi",
+             "datasetAttribute": {"data_type_name": "ODL",
+                                  "has_pii": False},
+             "pde": []},
+        ]}
+    f = tmp_path / "acqdw_acquisition_us.json"
+    f.write_text(json.dumps(envelope), encoding="utf-8")
+    entries, quarantined = load_std_tech_metadata(f)
+    assert not quarantined
+    assert len(entries) == 2                  # every tech entry harvested
+    first = entries[0]
+    assert first.table == "acqdw_acquisition_us"   # envelope name flows down
+    assert first.layer_type == "ODL" and first.has_pii
+    assert first.has_oncop is True and first.has_gdpr is False
+    assert [c.name for c in first.columns] == ["acct_open_dt", "cm_dob"]
+    assert first.columns[1].pii_role_id == "NGBD-SDE-Date-of-Birth"
+    assert first.columns[0].linked_terms[0]["sourceName"] == "LumiMDM"
