@@ -133,3 +133,31 @@ time a trigger fires. Status: `active` | `expired` | `resolved`.
   edges, lifecycle fill-in, agreement 2→3). Crosswalk `lumi_asset_id`
   may stay blank in run 1 and be backfilled then.
 - **status**: active
+
+## A8 — run-1 graph excludes the 30-day query history entirely
+
+- **component**: build-graph `--no-jobs-30d`; jobs_30d adapter;
+  bq_extraction jobs digests; sandbox cost priors
+- **bet**: the extracted 30-day query history is judged INCORRECT by the
+  steward, and incorrect history must not witness anything — so run 1
+  builds with `--no-jobs-30d`: no jobs_30d witness quads, no joins_via
+  harvest, no cost_prior/usage_rhythm props, no audit corroboration
+  ReviewItems, and none of the bq-archive jobs digests (top_users,
+  co_queried_with, query templates). KNOWN LOSSES, accepted: recency
+  falls back to catalog dates everywhere (`recency_source: catalog`),
+  witness_agreement loses the jobs family, the sandbox anomaly gate has
+  no per-table priors (the global budget ceiling alone applies — the A6
+  thin-prior fallback, now for every table), and co-query structure is
+  absent. Metric mining rests on the catalogs (measures_catalog,
+  metrics_dmp, gmns, skill contracts) — the catalog was mined upstream
+  from a longer horizon and remains the mined-metric witness.
+  The 17_queries_30d files stay LEDGERED as deferred with this
+  assumption named — deliberately unread, never unaccounted.
+- **evidence**: user decision 2026-08-26 ("past 30 days queries we have
+  are incorrect — turn the adapter off").
+- **date**: 2026-08-26
+- **revisit_trigger**: a corrected history extract lands — run N+1
+  re-enables the witness (drop the flag) and `DIFF_vs_prev.md` IS the
+  acceptance test for what real usage adds (support corroboration, true
+  recency, joins_via, cost priors), exactly the A7 pattern.
+- **status**: active

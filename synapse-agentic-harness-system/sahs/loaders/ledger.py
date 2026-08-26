@@ -55,16 +55,24 @@ class UtilizationLedger:
 
     def __init__(self) -> None:
         self._consumed: set[Path] = set()
+        self._run_deferred_dirs: list[tuple[str, str]] = []
 
     def consumed(self, path: Path) -> None:
         path = Path(path)
         if path.exists():
             self._consumed.add(path.resolve())
 
+    def defer_dir(self, segment: str, reason: str) -> None:
+        """Run-scoped deliberate deferral (e.g. a witness disabled for
+        this run by assumption) — same semantics as the pinned
+        DEFERRED_DIRS, decided per invocation instead of forever."""
+        self._run_deferred_dirs.append((segment, reason))
+
     def _status(self, path: Path) -> tuple[str, str]:
         if path.resolve() in self._consumed:
             return "consumed", ""
-        for segment, reason in DEFERRED_DIRS:
+        for segment, reason in (tuple(self._run_deferred_dirs)
+                                + DEFERRED_DIRS):
             if segment in path.parts:
                 return "deferred", reason
         for suffix, reason in DEFERRALS:
