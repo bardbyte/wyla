@@ -80,8 +80,8 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
             ledger.consumed(path)
         return path
 
-    report = {"tables": 0, "columns": 0, "domains": 0, "templates": 0,
-              "template_rows_skipped": 0,
+    report = {"tables": 0, "columns": 0, "columns_from_profile_only": 0,
+              "domains": 0, "templates": 0, "template_rows_skipped": 0,
               "co_query_edges": 0, "policies_unknown": 0}
     run_report = _json(track(root / "_run_report.json")) or {}
     denied = {(d.get("table"), d.get("operation"))
@@ -186,11 +186,30 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
 
         lc_dir = d / "15_low_cardinality_values"
         if lc_dir.exists():
+            known_cols = {r["column_name"].lower() for r in columns}
             for value_file in map(track, sorted(lc_dir.glob("*.csv"))):
                 rows = _csv_rows(value_file)
                 if not rows:
                     continue
                 column = rows[0]["column_name"]
+                if column.lower() not in known_cols:
+                    # the profiler saw a column the 02 schema listing
+                    # didn't carry (a truncated export on wide tables).
+                    # Observed VALUES attest the column exists — mint
+                    # the endpoint from the profile evidence, counted
+                    # so the 02-vs-15 drift stays visible
+                    known_cols.add(column.lower())
+                    ev15 = (f"{d.name}/15_low_cardinality_values/"
+                            f"{value_file.name}")
+                    graph.append_node(NodeRecord(
+                        id=col_id(physical, column),
+                        props={"observed_via": "low_cardinality_profile"},
+                        prov=prov(evidence=ev15)))
+                    graph.append_edge(Quad(
+                        s=tid, r="has_column",
+                        o=col_id(physical, column),
+                        prov=prov(evidence=ev15)))
+                    report["columns_from_profile_only"] += 1
                 domain = f"domain:{physical}.{column.lower()}"
                 graph.append_node(NodeRecord(
                     id=domain,
