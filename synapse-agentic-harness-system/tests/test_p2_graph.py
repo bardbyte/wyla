@@ -59,6 +59,43 @@ def test_no_jobs_30d_excludes_the_witness_and_ledgers_deferred(tmp_path):
                for r in jobs_rows)
 
 
+def test_torn_tail_repairs_on_next_append(tmp_path):
+    """A run killed mid-append leaves a torn final line; the next
+    appender truncates it to the .torn sidecar instead of gluing new
+    records onto the fragment — the crash residue self-heals."""
+    g = GraphDir(tmp_path)
+    g.append_node(NodeRecord(id="table:dw.t_one", props={},
+                             prov=Prov(source="bq", run="r1")))
+    p = tmp_path / "nodes" / "table.jsonl"
+    with p.open("a", encoding="utf-8") as f:
+        f.write('{"id": "table:dw.t_two", "props": {"x": "trunca')
+    g2 = GraphDir(tmp_path)
+    g2.append_node(NodeRecord(id="table:dw.t_three", props={},
+                              prov=Prov(source="bq", run="r2")))
+    folded = g2.fold_nodes()
+    assert "table:dw.t_one" in folded and "table:dw.t_three" in folded
+    assert "table:dw.t_two" not in folded
+    torn = (tmp_path / "nodes" / "table.jsonl.torn").read_text()
+    assert "t_two" in torn                   # evidence preserved
+
+
+def test_mid_file_corruption_raises_named_error(tmp_path):
+    g = GraphDir(tmp_path)
+    g.append_node(NodeRecord(id="table:dw.t_one", props={},
+                             prov=Prov(source="bq", run="r1")))
+    p = tmp_path / "nodes" / "table.jsonl"
+    with p.open("a", encoding="utf-8") as f:
+        f.write('{"id": "table:dw.t_two", "broken\n')   # complete line
+    g.append_node(NodeRecord(id="table:dw.t_three", props={},
+                             prov=Prov(source="bq", run="r1")))
+    try:
+        list(g.iter_nodes())
+        raise AssertionError("corrupt line must not pass silently")
+    except ValueError as e:
+        assert "nodes/table.jsonl:2" in str(e)
+        assert "build-graph" in str(e)       # recovery named, not vague
+
+
 def test_id_slugging_for_source_embedded_strings():
     """Ids embedding source-provided text slug hostile characters to
     `_` at the mint — a real mined catalog id carries `||` in itself."""

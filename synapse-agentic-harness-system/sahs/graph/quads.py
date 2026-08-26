@@ -19,6 +19,7 @@ validator (validate.py) is the foreign-key story.
 from __future__ import annotations
 
 import json
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterator
@@ -148,13 +149,23 @@ class Quad(BaseModel):
 
 
 class GraphDir:
-    """The single-writer handle. Appends only; never rewrites."""
+    """The single-writer handle. Appends only; never rewrites.
+
+    Crash hygiene: a run killed mid-append can leave a torn final line
+    (no trailing newline). Before the first append to a file this
+    process, the tail is checked — torn bytes move to a ``.torn``
+    sidecar (evidence, never deleted) and the file truncates back to
+    its last complete line, so the next append never glues onto a
+    fragment. Corruption anywhere ELSE is refused loudly by the readers
+    with file+line named — the store is derivable from the archives, so
+    the honest recovery is rebuild, never silent skipping."""
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
         (self.root / "nodes").mkdir(parents=True, exist_ok=True)
         (self.root / "edges").mkdir(parents=True, exist_ok=True)
         (self.root / "runs").mkdir(parents=True, exist_ok=True)
+        self._tail_checked: set[Path] = set()
 
     # ── writes ──
 
@@ -171,19 +182,52 @@ class GraphDir:
         self._append(self.root / "edges" / f"{quad.r}.jsonl",
                      quad.model_dump(exclude_none=True))
 
-    @staticmethod
-    def _append(path: Path, payload: dict) -> None:
+    def _append(self, path: Path, payload: dict) -> None:
+        if path not in self._tail_checked:
+            self._repair_torn_tail(path)
+            self._tail_checked.add(path)
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False,
                                sort_keys=True) + "\n")
 
+    @staticmethod
+    def _repair_torn_tail(path: Path) -> None:
+        if not path.exists() or path.stat().st_size == 0:
+            return
+        data = path.read_bytes()
+        if data.endswith(b"\n"):
+            return
+        cut = data.rfind(b"\n") + 1          # 0 when no newline at all
+        torn = data[cut:]
+        with path.with_suffix(path.suffix + ".torn").open("ab") as f:
+            f.write(torn + b"\n")
+        with path.open("wb") as f:
+            f.write(data[:cut])
+        print(f"graph store: repaired torn tail in {path.name} "
+              f"({len(torn)} bytes -> {path.name}.torn)", file=sys.stderr)
+
     # ── reads ──
+
+    @staticmethod
+    def _lines(path: Path):
+        for n, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"graph store corrupt at {path.parent.name}/"
+                    f"{path.name}:{n} ({e.msg}) — the append-only store "
+                    "is derivable: remove graph/nodes and graph/edges "
+                    "(KEEP graph/identity and graph/runs) and re-run "
+                    "build-graph") from e
 
     def iter_nodes(self) -> Iterator[NodeRecord]:
         for path in sorted((self.root / "nodes").glob("*.jsonl")):
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    yield NodeRecord.model_validate(json.loads(line))
+            for payload in self._lines(path):
+                yield NodeRecord.model_validate(payload)
 
     def iter_edges(self, relation: str | None = None) -> Iterator[Quad]:
         paths = (sorted((self.root / "edges").glob("*.jsonl"))
@@ -192,9 +236,8 @@ class GraphDir:
         for path in paths:
             if not path.exists():
                 continue
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    yield Quad.model_validate(json.loads(line))
+            for payload in self._lines(path):
+                yield Quad.model_validate(payload)
 
     # ── fold: current state ──
 
