@@ -10,10 +10,32 @@ defect, not a model problem (there is no model yet).
 
 - P0 complete: `graph/runs/p0_census/tasks/gold.jsonl` committed and the
   empty-SQL backlog triaged.
-- SVC-ID env (same contract the extraction laptop already uses):
-  `LUMI_BQ_SA_KEY` (key file), `BQ_PROJECT_ID`, optional
-  `BIGQUERY_API_BASE_URL`, `BQ_LOCATION`. `google-auth` installed.
-  Missing/broken env exits **3** before any request is made.
+- SVC-ID env — same contract as the proven bq_connect flow. Put the
+  three variables in `synapse-agentic-harness-system/.env` (gitignored;
+  shell exports always win over it):
+
+  ```
+  GOOGLE_APPLICATION_CREDENTIALS=/path/to/prj-p-lumi-gpt.json
+  BQ_PROJECT_ID=prj-p-lumi-gpt
+  BIGQUERY_URL=https://bigquery-prod.p.googleapis.com
+  ```
+
+  The bootstrap injects the Google hostnames into NO_PROXY (direct
+  connection past the corporate proxy — overrides: `BQ_FORCE_PROXY=1`,
+  `BQ_DISABLE_PROXY=1`) and honors `REQUESTS_CA_BUNDLE`/`SSL_CERT_FILE`
+  for corporate TLS inspection; `BQ_SSL_NO_VERIFY=1` disables TLS
+  verification entirely (explicit last resort — prefer the CA bundle).
+  `google-auth` installed. Missing/broken env exits **3** before any
+  request is made.
+
+## Prove connectivity FIRST
+
+```bash
+python scripts/bq_check.py            # one dry-run of SELECT 1
+```
+
+Prints the resolved configuration (never secrets) and the dry-run
+outcome; exit 0 means P1 is go.
 
 ## Run — calibrate the ground on itself
 

@@ -23,8 +23,10 @@ env/auth — per the E10 console contract), never a stack trace.
 from __future__ import annotations
 
 import os
+import ssl
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 DEFAULT_BQ_ENDPOINT = "https://bigquery-prod.p.googleapis.com"
 DEFAULT_VERTEX_ENDPOINT = "https://aiplatform.googleapis.com"
@@ -33,6 +35,77 @@ DEFAULT_BQ_LOCATION = "US"
 
 class AuthError(RuntimeError):
     """Environment/auth misconfiguration — maps to exit code 3."""
+
+
+def load_dotenv(path: Path | None = None) -> list[str]:
+    """Read a ``.env`` file into ``os.environ`` (the laptop keeps its
+    three BQ variables there — same flow as the proven bq_connect.py).
+    NEVER overrides variables already exported in the shell. Search
+    order: explicit path → $SAHS_ENV_FILE → <silo root>/.env → ./.env.
+    Returns the variable names that were loaded."""
+    candidates = [path] if path else []
+    if os.environ.get("SAHS_ENV_FILE"):
+        candidates.append(Path(os.environ["SAHS_ENV_FILE"]))
+    candidates += [Path(__file__).resolve().parents[2] / ".env",
+                   Path(".env")]
+    loaded: list[str] = []
+    for candidate in candidates:
+        if candidate is None or not candidate.is_file():
+            continue
+        for line in candidate.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip().removeprefix("export ").strip()
+            value = value.strip().strip("'\"")
+            if key and key not in os.environ:
+                os.environ[key] = value
+                loaded.append(key)
+        break                       # first .env found wins
+    return loaded
+
+
+def configure_network(endpoint: str) -> dict[str, str]:
+    """Corporate-proxy handling, same contract as the laptop's
+    bq_connect.py: inject the Google hostnames into NO_PROXY so BQ and
+    OAuth calls go DIRECT (the corporate proxy breaks the handshake
+    against Google's private endpoints). Overrides: BQ_FORCE_PROXY=1
+    skips the injection (everything through the proxy);
+    BQ_DISABLE_PROXY=1 drops the proxy entirely for this process.
+    Returns a summary for display."""
+    summary: dict[str, str] = {}
+    if os.environ.get("BQ_DISABLE_PROXY") == "1":
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy",
+                     "https_proxy"):
+            os.environ.pop(name, None)
+        summary["proxy"] = "disabled (BQ_DISABLE_PROXY=1)"
+        return summary
+    if os.environ.get("BQ_FORCE_PROXY") == "1":
+        summary["proxy"] = "forced through proxy (BQ_FORCE_PROXY=1)"
+        return summary
+    host = urlparse(endpoint).hostname or ""
+    hosts = {host, "oauth2.googleapis.com", "www.googleapis.com",
+             "googleapis.com"}
+    hosts.discard("")
+    for name in ("NO_PROXY", "no_proxy"):
+        existing = [h for h in os.environ.get(name, "").split(",") if h]
+        merged = existing + sorted(h for h in hosts if h not in existing)
+        os.environ[name] = ",".join(merged)
+    summary["proxy"] = f"direct for: {', '.join(sorted(hosts))}"
+    return summary
+
+
+def resolve_ssl() -> tuple[bool, str | None]:
+    """→ (verify, ca_bundle). ``BQ_SSL_NO_VERIFY=1`` disables TLS
+    verification entirely (explicit opt-in for corporate TLS
+    interception when the CA bundle isn't available — the CA-bundle
+    route via REQUESTS_CA_BUNDLE / SSL_CERT_FILE is always preferred
+    when you have the cert)."""
+    if os.environ.get("BQ_SSL_NO_VERIFY") == "1":
+        return False, None
+    bundle = _first_env("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE")
+    return True, bundle
 
 
 def _first_env(*names: str) -> str | None:
@@ -80,16 +153,52 @@ class BQConnection:
     endpoint: str
     location: str
     key_path: Path | None
+    ssl_verify: bool = True
+    ca_bundle: str | None = None
 
     @classmethod
     def from_env(cls) -> "BQConnection":
+        """The full laptop bootstrap, mirroring the proven bq_connect
+        flow: .env → validate → resolve endpoint → NO_PROXY injection →
+        SSL settings. Fails fast with a typed error (exit 3)."""
+        load_dotenv()
         project = resolve_bq_project()
         if not project:
             raise AuthError(
                 "no BigQuery project configured — set BQ_PROJECT_ID (or "
-                "LUMI_BQ_PROJECT / GOOGLE_CLOUD_PROJECT)")
+                "LUMI_BQ_PROJECT / GOOGLE_CLOUD_PROJECT), e.g. in .env")
         key = resolve_bq_key_path()
-        if key is not None and not key.exists():
-            raise AuthError(f"BigQuery SA key not found: {key}")
-        return cls(project=project, endpoint=resolve_bq_endpoint(),
-                   location=resolve_bq_location(), key_path=key)
+        if key is None:
+            raise AuthError(
+                "no SA key configured — set GOOGLE_APPLICATION_"
+                "CREDENTIALS (or LUMI_BQ_SA_KEY) to the key-file path, "
+                "e.g. in .env")
+        if not key.exists():
+            raise AuthError(f"BigQuery SA key not found on disk: {key}")
+        endpoint = resolve_bq_endpoint()
+        configure_network(endpoint)
+        verify, bundle = resolve_ssl()
+        return cls(project=project, endpoint=endpoint,
+                   location=resolve_bq_location(), key_path=key,
+                   ssl_verify=verify, ca_bundle=bundle)
+
+    def ssl_context(self) -> ssl.SSLContext:
+        """Context for urllib calls: default verified (with the custom
+        CA bundle when configured), or unverified under the explicit
+        BQ_SSL_NO_VERIFY=1 opt-in."""
+        if not self.ssl_verify:
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            return context
+        return ssl.create_default_context(cafile=self.ca_bundle)
+
+    def token_session(self):
+        """requests.Session for the OAuth token refresh, honoring the
+        same verify/CA settings (used only against oauth2.googleapis.com
+        — the laptop contract's Step 6)."""
+        import requests                          # ships with google-auth
+        session = requests.Session()
+        session.verify = (self.ca_bundle or True) if self.ssl_verify \
+            else False
+        return session

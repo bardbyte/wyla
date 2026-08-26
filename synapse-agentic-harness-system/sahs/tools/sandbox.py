@@ -65,7 +65,7 @@ class BQJobRunner:
         creds = service_account.Credentials.from_service_account_file(
             str(self.connection.key_path),
             scopes=["https://www.googleapis.com/auth/bigquery"])
-        creds.refresh(Request())
+        creds.refresh(Request(session=self.connection.token_session()))
         return creds.token
 
     def run(self, sql: str, limit: int) -> dict[str, Any]:
@@ -79,7 +79,9 @@ class BQJobRunner:
             headers={"Authorization": f"Bearer {self._token()}",
                      "Content-Type": "application/json"},
             method="POST")
-        with urllib.request.urlopen(request, timeout=90) as response:
+        with urllib.request.urlopen(
+                request, timeout=90,
+                context=self.connection.ssl_context()) as response:
             payload = json.loads(response.read().decode("utf-8"))
         fields = (payload.get("schema") or {}).get("fields") or []
         names = [f.get("name", "") for f in fields]
