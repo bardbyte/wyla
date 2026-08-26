@@ -96,6 +96,30 @@ def test_vocab_adapters_and_degenerates():
     assert gms.columns[0].linked_terms[0]["sourceName"] == "LumiMDM"
 
 
+def test_std_tech_combined_export_parity(tmp_path: Path):
+    """The real Atlas feed can ship as ONE std_tech_metadata_all.json —
+    a file path must load identically to the per-table directory."""
+    combined = []
+    for p in sorted((FX / "std_tech_metadata").glob("*.json")):
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        combined.extend(payload if isinstance(payload, list) else [payload])
+    all_file = tmp_path / "std_tech_metadata_all.json"
+    all_file.write_text(json.dumps(combined), encoding="utf-8")
+    from_file, fq = load_std_tech_metadata(all_file)
+    from_dir, _ = load_std_tech_metadata(FX / "std_tech_metadata")
+    assert not fq
+    assert [(e.table, len(e.columns)) for e in from_file] == \
+        [(e.table, len(e.columns)) for e in from_dir]
+    # discovery: the combined file WINS over a (possibly partial) dir
+    from scripts.laptop import _std_tech_path
+    sources = tmp_path / "sources"
+    (sources / "std_tech_metadata").mkdir(parents=True)
+    assert _std_tech_path(sources) == sources / "std_tech_metadata"
+    (sources / "std_tech_metadata_all.json").write_text("[]")
+    assert _std_tech_path(sources) == \
+        sources / "std_tech_metadata_all.json"
+
+
 def test_census_finds_seeded_conflicts_and_meta_is_honest():
     reg = TableRegistry.from_list_file(REGISTRY)
     records = []

@@ -108,3 +108,6 @@ review_queue/
 CORPUS_PROBE_REPORT.md
 node_modules/
 *.tsbuildinfo
+
+# laptop input data — never commit
+meridian-data/

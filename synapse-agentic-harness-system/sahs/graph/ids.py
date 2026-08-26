@@ -45,6 +45,7 @@ ID_PATTERNS: dict[str, re.Pattern] = {
     "run": re.compile(r"^run:[A-Za-z0-9_\-]+$"),
     "policy": re.compile(r"^policy:[a-z0-9_\-]+$"),
     "owner": re.compile(r"^owner:[a-z0-9_\-\.@]+$"),
+    "review": re.compile(rf"^review:{_FP}$"),        # E12/A5
 }
 
 # E7 governance lattice — legal transitions, anything else blocks.

@@ -81,8 +81,13 @@ def load_business_terms(path: Path) -> tuple[list[TermRecord],
 
 def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                                                 list[Quarantined]]:
+    """``root`` is either the per-table directory of JSONs or the single
+    combined export (``std_tech_metadata_all.json``) — the Atlas feed
+    ships both shapes, and each file already parses as list-or-one."""
     records, quarantined = [], []
-    for path in sorted(Path(root).glob("*.json")):
+    root = Path(root)
+    paths = [root] if root.is_file() else sorted(root.glob("*.json"))
+    for path in paths:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:

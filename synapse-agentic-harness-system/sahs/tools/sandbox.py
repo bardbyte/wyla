@@ -35,6 +35,7 @@ from sahs.tools.validate_sql import _DML_DDL, _QUERY_KINDS
 
 DEFAULT_MAX_BYTES = 1_000_000_000
 DEFAULT_ROW_CAP = 1000
+MIN_PRIOR_JOBS = 20        # A6: thinner priors are anecdotes, not gates
 
 
 class LiveRunner(Protocol):
@@ -217,15 +218,39 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
             "rows": None,
             "note": "snapshot mode = dry-run: shape and cost, no rows"})
 
-    # 5. live: cost gate → row cap → run
+    # 5. live: TWO cost gates answering two different questions,
+    # never substitutable (E12/A3 amended). The budget ceiling asks
+    # "can any query be worth this much?"; the anomaly gate asks "is
+    # this query normal for THIS table?" (3× its observed p95, jobs
+    # witness). A prior may TIGHTEN the cap below global, never loosen
+    # it above — effective cap = min(both). Thin priors are no priors:
+    # <20 canonicalized jobs and the p95 is an anecdote in a
+    # percentile's clothes, so global alone applies. Constants are
+    # assumption A6, revisited from denied-query triage.
+    observed = outcome.bytes_processed or 0
     max_bytes = int(env.get("SAHS_LIVE_MAX_BYTES", DEFAULT_MAX_BYTES))
-    if (outcome.bytes_processed or 0) > max_bytes:
+    if observed > max_bytes:
         return _finish(
             "denied",
-            error=f"cost_gate: dry-run predicts "
-                  f"{outcome.bytes_processed:,} bytes > cap "
-                  f"{max_bytes:,} — add a partition filter "
-                  "(see the table card's grain line)")
+            error=f"cost_gate_budget: dry-run predicts {observed:,} "
+                  f"bytes > the live-mode ceiling {max_bytes:,} — add "
+                  "a partition filter (see the table card's grain "
+                  "line)")
+    for physical in meta["tables"]:
+        prior = build.cost_priors.get(physical) or {}
+        if int(prior.get("n_jobs") or 0) < MIN_PRIOR_JOBS:
+            continue
+        anomaly_cap = 3 * int(prior.get("p95_bytes") or 0)
+        if anomaly_cap and observed > anomaly_cap:
+            meta["anomaly_cap_bytes"] = anomaly_cap
+            return _finish(
+                "denied",
+                error=f"cost_gate_anomaly: dry-run predicts "
+                      f"{observed:,} bytes — over 3× {physical}'s "
+                      f"observed p95 of {prior['p95_bytes']:,} bytes "
+                      f"({prior['n_jobs']} jobs, 30d). Normal usage "
+                      "bounds normal queries; narrow the scan or "
+                      "justify the outlier to a steward.")
     if runner is None:
         runner = BQJobRunner()
     capped = _cap_limit(sql, limit)

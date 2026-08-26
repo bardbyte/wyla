@@ -1,0 +1,17 @@
+[
+ {
+  "job_id": "f001",
+  "error": "Unrecognized name: trans_usd_amt at [1:12]",
+  "query": "SELECT SUM(trans_usd_amt) FROM dw.gms_transaction WHERE part_dt='2026-08-20'"
+ },
+ {
+  "job_id": "f002",
+  "error": "Syntax error: Expected \")\" but got end of statement",
+  "query": "SELECT sum(trans_usd_am FROM dw.gms_transaction"
+ },
+ {
+  "job_id": "f003",
+  "error": "Cannot query over table 'dw.gms_transactions' without a filter",
+  "query": "SELECT COUNT(*) FROM dw.gms_transactions"
+ }
+]

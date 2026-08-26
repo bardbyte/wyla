@@ -8,4 +8,6 @@ both implemented fresh.
 """
 
 __version__ = "0.1.0"
-CANON_RULESET = 1
+CANON_RULESET = 2       # 2: COUNT(*) ≡ COUNT(1) (E12 — the jobs
+                        # witness exposed the split; BigQuery treats
+                        # them identically, so canon must too)

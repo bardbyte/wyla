@@ -29,6 +29,7 @@ from typing import Any, Callable
 
 from sahs.canon.authority import Authority
 from sahs.canon.canonical import CANON_VERSION, CanonResult, try_canon
+from sahs.graph.quads import RANKING_WITNESSES, SOURCE_WITNESS
 from sahs.loaders.records import ExpressionRecord, Quarantined
 
 _MAX_CLASSES_PER_CELL = 10
@@ -75,15 +76,29 @@ def _cell_report(members: list[tuple[ExpressionRecord, CanonResult]]
             "fp": canon.fp_expr,
             "canonical_sql": canon.canonical_sql,
             "support": 0,
+            "support_by_witness": {},
             "authority_max": 0,
             "sources": set(),
             "last_seen": "",
         })
-        entry["support"] += max(record.support, 1)
+        family = (record.witness
+                  or SOURCE_WITNESS.get(record.source, "unknown"))
+        entry["support_by_witness"][family] = (
+            entry["support_by_witness"].get(family, 0)
+            + max(record.support, 1))
         entry["authority_max"] = max(entry["authority_max"],
                                      int(record.authority))
         entry["sources"].add(record.source)
         entry["last_seen"] = max(entry["last_seen"], record.last_seen or "")
+    for entry in classes.values():
+        # E12/A1 combiner: effective = MAX over ranking families (the
+        # catalog was mined from a superset of the same history — a sum
+        # double-counts); gold_attested/audit stay visible per-witness
+        # but never in the effective number
+        ranking = {f: n for f, n in entry["support_by_witness"].items()
+                   if f in RANKING_WITNESSES}
+        entry["support"] = max(ranking.values(), default=0)
+        entry["witness_agreement"] = len(ranking)
     ranked = sorted(
         classes.values(),
         key=lambda e: (-e["authority_max"], -e["support"], e["fp"]))
@@ -170,6 +185,13 @@ def build_census(
         "canon_version": CANON_VERSION,
         "meta": {
             "label_normalization": E9_NOTE,
+            "support_combiner": (
+                "per-class support = MAX over ranking witness families "
+                "(never summed across families — the upstream catalog "
+                "was mined from a superset of the same query history); "
+                "gold_attested and audit_30d are shown per-witness but "
+                "excluded from the effective number and from "
+                "witness_agreement"),
             "records_canonicalized": len(canonical),
             "records_quarantined": len(quarantined),
             "quarantine_by_category": dict(sorted(

@@ -304,7 +304,7 @@ def test_run_evals_prints_excluded_count_and_gates(build):
          "--fail-under", "0.9", "--plain", "--json"],
         capture_output=True, text=True, cwd=SILO)
     assert result.returncode == 0, result.stderr[-500:]
-    assert "excluded (coverage=external): 0 of 8" in result.stderr
+    assert "excluded (coverage=external): 0 of 10" in result.stderr
     summary = json.loads(result.stdout.splitlines()[-1])
     assert summary["excluded_out_of_coverage"] == 0
 

@@ -29,6 +29,9 @@ class ExpressionRecord(BaseModel):
     first_seen: str = ""
     last_seen: str = ""
     evidence_ref: str = ""
+    witness: str = ""               # E12/A1: evidence family; derived
+                                    # from source when a loader leaves it
+                                    # empty (jobs_30d always sets it)
     extra: dict = Field(default_factory=dict)
 
 

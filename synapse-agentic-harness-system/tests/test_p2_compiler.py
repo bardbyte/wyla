@@ -124,7 +124,7 @@ def test_compile_deterministic_and_current_atomic(tmp_path):
 def test_diff_shows_semantic_change_after_clerk_promotion(tmp_path):
     graph_dir, build_dir, manifest = _compiled(tmp_path)
     graph = GraphDir(graph_dir)
-    mined = next(s for (s, r, o), q in graph.fold_edges().items()
+    mined = next(s for (s, r, o, _w), q in graph.fold_edges().items()
                  if r == "certified_as" and o == "status:mined")
     ok, _ = set_status(graph_dir, mined, "team_candidate", "jane")
     assert ok

@@ -32,14 +32,20 @@ def _json(path: Path) -> dict | list | None:
 
 
 def load_mdm_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
-                     run_id: str) -> tuple[dict, list[str]]:
+                     run_id: str, ledger=None) -> tuple[dict, list[str]]:
     root = Path(root)
+
+    def track(path: Path):
+        if ledger is not None:
+            ledger.consumed(path)
+        return path
+
     blocking: list[str] = []
     report = {"tables": 0, "columns": 0, "lineage_edges": 0,
               "attr_lineage_edges": 0, "lifecycle_unknown": 0}
-    coverage = _json(root / "coverage.json") or {}
+    coverage = _json(track(root / "coverage.json")) or {}
     summaries = {t.get("table_name"): t for t in
-                 (_json(root / "table_summaries.json") or {}).get(
+                 (_json(track(root / "table_summaries.json")) or {}).get(
                      "tables", [])}
 
     def prov(**kw) -> Prov:
@@ -49,7 +55,7 @@ def load_mdm_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
         if not d.is_dir():
             continue
         name = d.name
-        summary = _json(d / "summary.json") or {}
+        summary = _json(track(d / "summary.json")) or {}
         asset_ids = (summary.get("discovery") or {}).get("dataset_ids", [])
         physical = crosswalk.physical_for_lumi(
             name, asset_ids[0] if asset_ids else "")
@@ -60,9 +66,9 @@ def load_mdm_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
         responses = d / "responses"
         rel_ev = f"tables/{name}/responses"
 
-        ownership = _json(responses / "ownership.json") or {}
-        pipeline = _json(responses / "pipeline.json") or {}
-        lifecycle = _json(responses / "lifecycle.json")
+        ownership = _json(track(responses / "ownership.json")) or {}
+        pipeline = _json(track(responses / "pipeline.json")) or {}
+        lifecycle = _json(track(responses / "lifecycle.json"))
         table_coverage = coverage.get(name, {})
         lifecycle_status = None
         if lifecycle is not None:
@@ -97,7 +103,7 @@ def load_mdm_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                     s=tid, r="owned_by", o=f"owner:{owner}",
                     prov=prov(evidence=f"{rel_ev}/ownership.json")))
 
-        schema = _json(responses / "schema.json") or {}
+        schema = _json(track(responses / "schema.json")) or {}
         for column in schema.get("columns", []):
             cname = str(column.get("name") or "").strip()
             if not cname:
@@ -128,7 +134,7 @@ def load_mdm_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                 prov=prov(evidence=evidence)))
             return stub
 
-        for up in _json(responses / "lineage_up.json") or []:
+        for up in _json(track(responses / "lineage_up.json")) or []:
             up_physical = crosswalk.physical_for_lumi(
                 str(up.get("source_table") or ""))
             if up_physical is None:
@@ -139,7 +145,7 @@ def load_mdm_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                 prov=prov(evidence=f"{rel_ev}/lineage_up.json")))
             report["lineage_edges"] += 1
 
-        for row in _json(responses / "attr_lineage.json") or []:
+        for row in _json(track(responses / "attr_lineage.json")) or []:
             src_physical = crosswalk.physical_for_lumi(
                 str(row.get("source_table") or ""))
             target_col = str(row.get("target_column") or "")

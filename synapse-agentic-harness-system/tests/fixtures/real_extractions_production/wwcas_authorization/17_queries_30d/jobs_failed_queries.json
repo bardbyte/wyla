@@ -1,0 +1,7 @@
+[
+ {
+  "job_id": "f101",
+  "error": "Column name part_dt is ambiguous at [1:70]",
+  "query": "SELECT part_dt FROM dw.wwcas_authorization w JOIN dw.gms_transaction t ON w.part_dt = t.part_dt"
+ }
+]

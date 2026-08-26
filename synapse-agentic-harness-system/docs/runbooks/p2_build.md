@@ -41,10 +41,28 @@ python scripts/laptop.py build-graph \
 ```
 
 Order inside the run (pinned): crosswalk gate → BQ archive → MDM
-archive → semantic quads → run manifest → **validator gate** (the
-12-check catalog; any error exits 2 and nothing downstream runs).
-Interrupted? Re-run; checkpoints resume. DENIED/503 archive responses
-become explicit `unknown_*` quads — absence is never silence.
+archive → semantic quads → **jobs 30d witness** (raw history mined
+in-silo; runs AFTER the catalogs so a jobs sighting of a governed
+metric is testimony, never a fresh seed) → utilization ledger → run
+manifest → **validator gate** (the 14-check catalog; any error exits 2
+and nothing downstream runs). Interrupted? Re-run; checkpoints resume.
+DENIED/503 archive responses become explicit `unknown_*` quads —
+absence is never silence.
+
+Three E12 gates to read in the summary:
+
+- `jobs_canon_rate` — every table must reach ≥90% of its 30-day jobs
+  canonicalized-or-understood (nested counts as understood; parse/
+  dialect breakage does not). The per-table accounting is in the run
+  manifest under `reports.jobs_30d.tables` — **commit it; it is the
+  per-table canonicalization report** the exit criteria require.
+- `utilization` — the manifest's `utilization[]` accounts for EVERY
+  file under all three input roots as consumed | deferred(reason) |
+  inventoried. Read the inventoried list; anything you don't recognize
+  is a file we're silently not using — that's a finding, not a detail.
+- jobs-vs-audit divergences arrive as
+  `ReviewItem(kind=witness_divergence)` quads — they fold into the
+  review queue, not into features.
 
 ## 3. Compile
 

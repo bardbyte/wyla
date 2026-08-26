@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from sahs.canon.authority import SOURCE_AUTHORITY, Authority
+from sahs.graph.quads import RANKING_WITNESSES
 from sahs.compiler.cards import concept_card, metric_card, table_card
 from sahs.compiler.diff import build_diff
 from sahs.compiler.indexes import build_indexes
@@ -37,8 +38,48 @@ _EXPR_AUTHORITY = {
     "skill_contract": Authority.SKILL_CONTRACT,
     "gold_queries": Authority.SKILL_CONTRACT,
     "measures_catalog": Authority.MINED,
+    "jobs_30d": Authority.MINED,
     "blue_insights": Authority.SNIPPET,
 }
+
+
+def _merge_witness_maps(held: dict[str, Any],
+                        incoming: dict[str, Any]) -> None:
+    """Cross-quad merge is MAX within a family (E12/A1) — the same
+    witness corroborating from two directions is one witness, not two."""
+    for family, value in incoming.items():
+        if family not in held or value > held[family]:
+            held[family] = value
+
+
+# Gold contamination guard (pinned): the gold pairs are the eval answer
+# key — a full graph citizen (census, cards, evidence) that must never
+# feed a feature the resolver ranks on. audit_30d corroborates, never
+# votes. The SUT must not contain its own test set.
+assert "gold_attested" not in RANKING_WITNESSES
+assert "audit_30d" not in RANKING_WITNESSES
+
+
+def _finish_witness_features(row: dict[str, Any]) -> None:
+    """support_effective = max over RANKING witnesses (never a sum —
+    the catalog was mined from a superset of the same history);
+    agreement = ranking families attesting; recency from the jobs
+    witness alone when present (the only true timestamps), else the
+    catalog-provided dates, flagged."""
+    ranking = {family: value
+               for family, value in row["support_by_witness"].items()
+               if family in RANKING_WITNESSES}
+    row["support"] = max(ranking.values(), default=0)
+    row["witness_agreement"] = len(ranking)
+    seen = row.get("seen_by_witness") or {}
+    if seen.get("jobs_30d"):
+        row["last_seen"] = seen["jobs_30d"]
+        row["recency_source"] = "jobs_30d"
+    else:
+        catalog_dates = [d for family, d in seen.items()
+                         if family in RANKING_WITNESSES and d]
+        row["last_seen"] = max(catalog_dates, default="")
+        row["recency_source"] = "catalog" if catalog_dates else ""
 
 
 def graph_hash(graph_root: Path) -> str:
@@ -68,25 +109,36 @@ def compile_build(graph_root: Path, builds_root: Path
 
     # ── metric rows ──
     status_by_metric: dict[str, str] = {}
-    for (s, r, o), quad in edges.items():
+    table_of_metric: dict[str, str] = {}
+    for (s, r, o, _w), quad in edges.items():
         if r == "certified_as" and quad.prov.status == "active":
             status_by_metric[s] = o.split(":", 1)[1]
+        elif r == "measured_on" and s not in table_of_metric:
+            table_of_metric[s] = o.split(":", 1)[1]
     metric_rows: list[dict[str, Any]] = []
     members_by_group: dict[str, list[str]] = defaultdict(list)
-    for (s, r, o), quad in sorted(edges.items()):
-        if r != "member_of":
+    # per-witness member_of quads for the same (metric, mgroup) fuse
+    # here — support_by_witness is COMPILER OUTPUT, never store state
+    membership: dict[tuple[str, str], dict[str, Any]] = {}
+    for (s, r, o, witness), quad in sorted(edges.items()):
+        if r != "member_of" or nodes.get(s) is None:
             continue
-        record = nodes.get(s)
-        if record is None:
-            continue
-        table = next((obj.split(":", 1)[1]
-                      for (s2, r2, obj), q2 in edges.items()
-                      if s2 == s and r2 == "measured_on"), "")
+        entry = membership.setdefault((s, o), {
+            "support_by_witness": {}, "seen_by_witness": {}})
+        family = witness or "unknown"
+        entry["support_by_witness"][family] = (
+            entry["support_by_witness"].get(family, 0)
+            + (quad.prov.support or 1))
+        seen = str(quad.props.get("last_seen") or "")
+        if seen > entry["seen_by_witness"].get(family, ""):
+            entry["seen_by_witness"][family] = seen
+    for (s, o), entry in sorted(membership.items()):
+        record = nodes[s]
         source = record.prov.source
         metric_rows.append({
             "id": s, "mgroup": o,
             "label": record.props.get("label", ""),
-            "table": table,
+            "table": table_of_metric.get(s, ""),
             "grain": record.props.get("grain", ""),
             "status": status_by_metric.get(s, "mined"),
             "question": record.props.get("question_answered", ""),
@@ -94,7 +146,8 @@ def compile_build(graph_root: Path, builds_root: Path
             "fp": s.split(":", 1)[1],
             "authority": int(_EXPR_AUTHORITY.get(
                 source, Authority.SNIPPET)),
-            "support": quad.prov.support or 1,
+            "support_by_witness": entry["support_by_witness"],
+            "seen_by_witness": entry["seen_by_witness"],
             "source": source,
             "approved_dimensions":
                 record.props.get("approved_dimensions") or [],
@@ -103,7 +156,7 @@ def compile_build(graph_root: Path, builds_root: Path
         members_by_group[o].append(s)
     # collapse per metric id: a metric fused across catalogs (same fp)
     # holds SEVERAL mgroup memberships — one row, groups merged, max
-    # status/authority, support summed
+    # status/authority, per-witness support merged (max within family)
     _STATUS_RANK = {"mined": 1, "team_candidate": 2, "pending": 3,
                     "certified": 4, "rejected": 0, "deprecated": 0}
     collapsed: dict[str, dict[str, Any]] = {}
@@ -114,7 +167,10 @@ def compile_build(graph_root: Path, builds_root: Path
             collapsed[row["id"]] = row
             continue
         held["mgroups"].append(row["mgroup"])
-        held["support"] += row["support"]
+        _merge_witness_maps(held["support_by_witness"],
+                            row["support_by_witness"])
+        _merge_witness_maps(held["seen_by_witness"],
+                            row["seen_by_witness"])
         if row["authority"] > held["authority"]:
             held.update(authority=row["authority"], source=row["source"])
         if _STATUS_RANK.get(row["status"], 0) > _STATUS_RANK.get(
@@ -124,6 +180,8 @@ def compile_build(graph_root: Path, builds_root: Path
             held[key] = held[key] or row[key]
         if row["approved_dimensions"] and not held["approved_dimensions"]:
             held["approved_dimensions"] = row["approved_dimensions"]
+    for row in collapsed.values():
+        _finish_witness_features(row)
     metric_rows = sorted(collapsed.values(),
                          key=lambda r: (-r["authority"], -r["support"],
                                         r["id"]))
@@ -140,9 +198,9 @@ def compile_build(graph_root: Path, builds_root: Path
         row["mgroups"] = sorted(row["mgroups"])
         row["mgroup"] = min(row["mgroups"], key=_primacy)
 
-    # ── binding rows ──
-    binding_rows: list[dict[str, Any]] = []
-    for (s, r, o), quad in sorted(edges.items()):
+    # ── binding rows: per-witness quads collapse per (label,table,fp) ──
+    bound: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for (s, r, o, witness), quad in sorted(edges.items()):
         if r != "bound_to":
             continue
         concept = nodes.get(s)
@@ -152,15 +210,26 @@ def compile_build(graph_root: Path, builds_root: Path
         label = concept.props.get("label", "").strip().lower()
         table = s.split("@table:", 1)[1]
         source = quad.prov.source
-        binding_rows.append({
-            "label": label, "table": table,
-            "fp": o.split(":", 1)[1],
+        authority = int(_EXPR_AUTHORITY.get(source, Authority.SNIPPET))
+        row = bound.setdefault((label, table, o.split(":", 1)[1]), {
+            "label": label, "table": table, "fp": o.split(":", 1)[1],
             "canonical_sql": pred.props.get("canonical_sql", ""),
-            "authority": int(_EXPR_AUTHORITY.get(
-                source, Authority.SNIPPET)),
-            "support": quad.prov.support or 1,
-            "source": source, "agreement": 1,
+            "authority": authority, "source": source,
+            "support_by_witness": {}, "seen_by_witness": {},
+            "agreement": 1,
         })
+        family = witness or "unknown"
+        row["support_by_witness"][family] = (
+            row["support_by_witness"].get(family, 0)
+            + (quad.prov.support or 1))
+        seen = str(quad.props.get("last_seen") or "")
+        if seen > row["seen_by_witness"].get(family, ""):
+            row["seen_by_witness"][family] = seen
+        if authority > row["authority"]:
+            row.update(authority=authority, source=source)
+    binding_rows: list[dict[str, Any]] = list(bound.values())
+    for row in binding_rows:
+        _finish_witness_features(row)
     binding_rows.sort(key=lambda r: (r["label"], r["table"],
                                      -r["authority"], -r["support"],
                                      r["fp"]))
@@ -204,7 +273,7 @@ def compile_build(graph_root: Path, builds_root: Path
     # ── cards ──
     budget: dict[str, Any] = {"over_budget": 0, "dropped": {}}
     co_by_table: dict[str, list[tuple[str, int]]] = defaultdict(list)
-    for (s, r, o), quad in sorted(edges.items()):
+    for (s, r, o, _w), quad in sorted(edges.items()):
         if r == "co_queried_with":
             co_by_table[s.split(":", 1)[1]].append(
                 (o.split(":", 1)[1], quad.prov.support or 1))
@@ -236,7 +305,7 @@ def compile_build(graph_root: Path, builds_root: Path
 
     children_of: dict[str, list[str]] = defaultdict(list)
     parent_of: dict[str, str] = {}
-    for (s, r, o), quad in sorted(edges.items()):
+    for (s, r, o, _w), quad in sorted(edges.items()):
         if r == "variant_of" and quad.prov.status == "active":
             children_of[o].append(s)
             parent_of[s] = o
@@ -298,7 +367,7 @@ def compile_build(graph_root: Path, builds_root: Path
     join_rows = [
         {"a": s.split(":", 1)[1], "b": o.split(":", 1)[1],
          "support": quad.prov.support or 1}
-        for (s, r, o), quad in sorted(edges.items())
+        for (s, r, o, _w), quad in sorted(edges.items())
         if r == "co_queried_with"]
     (build_dir / "indexes" / "joins.jsonl").write_text(
         "".join(json.dumps(j, sort_keys=True) + "\n" for j in join_rows),
@@ -311,6 +380,17 @@ def compile_build(graph_root: Path, builds_root: Path
     (build_dir / "indexes" / "domains.jsonl").write_text(
         "".join(json.dumps(d, sort_keys=True) + "\n"
                 for d in domain_rows), encoding="utf-8")
+
+    # E12/A3 — per-table cost priors (jobs witness) for the sandbox's
+    # anomaly gate; the global budget ceiling lives in the environment
+    cost_priors = {
+        c.physical: nodes[tid].props["cost_prior"]
+        for tid, c in consensus.items()
+        if nodes.get(tid) is not None
+        and nodes[tid].props.get("cost_prior")}
+    (build_dir / "indexes" / "cost_priors.json").write_text(
+        json.dumps(cost_priors, indent=1, sort_keys=True) + "\n",
+        encoding="utf-8")
 
     # ── manifest (no wall-clock — determinism) ──
     manifest = {

@@ -39,6 +39,7 @@ from sahs.evals.schema import (                                   # noqa: E402
     TaskProvenance,
     write_tasks,
 )
+from sahs.loaders.ledger import UtilizationLedger                 # noqa: E402
 from sahs.loaders.records import ExpressionRecord, Quarantined    # noqa: E402
 from sahs.loaders.registry import TableRegistry                   # noqa: E402
 from sahs.loaders.sources.blue_insights import load_blue_insights  # noqa: E402
@@ -111,6 +112,17 @@ def _load_expressions(sources: Path, registry: TableRegistry,
     return records, quarantined, backlog
 
 
+def _std_tech_path(sources: Path) -> Path | None:
+    """The Atlas std-tech feed ships as either a per-table directory or
+    one combined export; the combined file wins when both exist (a
+    partially-populated directory must not shadow the full export)."""
+    combined = sources / "std_tech_metadata_all.json"
+    if combined.exists():
+        return combined
+    directory = sources / "std_tech_metadata"
+    return directory if directory.is_dir() else None
+
+
 def _vocab_counts(sources: Path) -> tuple[dict[str, int],
                                           list[Quarantined]]:
     counts: dict[str, int] = {}
@@ -125,8 +137,8 @@ def _vocab_counts(sources: Path) -> tuple[dict[str, int],
         recs, quar = load_business_terms(p)
         counts["business_terms"] = len(recs)
         quarantined.extend(quar)
-    p = sources / "std_tech_metadata"
-    if p.exists():
+    p = _std_tech_path(sources)
+    if p is not None:
         recs, quar = load_std_tech_metadata(p)
         counts["std_tech_metadata"] = len(recs)
         quarantined.extend(quar)
@@ -283,15 +295,19 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
     blocking: list[str] = []
     reports: dict[str, dict] = {}
 
+    ledger = UtilizationLedger()
+    jobs_gate_failures: list[str] = []
     if args.bq_archive:
         console.phase("bq archive")
         reports["bq"], blocked = load_bq_archive(
-            Path(args.bq_archive), graph, crosswalk, run_id)
+            Path(args.bq_archive), graph, crosswalk, run_id,
+            ledger=ledger)
         blocking += blocked
     if args.mdm_archive:
         console.phase("mdm archive")
         reports["mdm"], blocked = load_mdm_archive(
-            Path(args.mdm_archive), graph, crosswalk, run_id)
+            Path(args.mdm_archive), graph, crosswalk, run_id,
+            ledger=ledger)
         blocking += blocked
     if not console.gate("crosswalk_resolution", not blocking,
                         "; ".join(blocking[:5]) if blocking
@@ -317,16 +333,60 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
         terms = (load_business_terms(terms_path)[0]
                  if terms_path.exists() else [])
         reports["vocab"] = emit_vocab(glossary, terms, graph, run_id)
-        std_dir = sources / "std_tech_metadata"
-        if std_dir.exists():
-            entries = load_std_tech_metadata(std_dir)[0]
+        std_path = _std_tech_path(sources)
+        if std_path is not None:
+            console.emit("phase_start", phase="load:std_tech",
+                         detail=f"reading {std_path.name}")
+            entries = load_std_tech_metadata(std_path)[0]
             reports["std_tech"] = emit_std_tech(
                 entries, terms, graph, crosswalk, run_id)
+
+    # jobs witness AFTER the semantic catalogs: a jobs sighting of an
+    # already-governed metric is testimony, never a fresh seed (E7)
+    jobs_gate = True
+    if args.bq_archive:
+        console.phase("jobs 30d witness")
+        from sahs.loaders.archives.jobs_30d import load_jobs_30d
+        reports["jobs_30d"], jobs_gate_failures = load_jobs_30d(
+            Path(args.bq_archive), graph, crosswalk, run_id,
+            ledger=ledger)
+        jobs_gate = console.gate(
+            "jobs_canon_rate", not jobs_gate_failures,
+            "; ".join(jobs_gate_failures[:5]) if jobs_gate_failures
+            else "every table ≥90% canonicalized-or-understood")
+
+    # E12/A2 — the utilization ledger: every file under every input
+    # root accounted for (consumed | deferred(reason) | inventoried)
+    ledger_roots = [Path(p) for p in (args.bq_archive, args.mdm_archive,
+                                      args.sources_dir) if p]
+    if args.registry:
+        ledger.consumed(Path(args.registry))
+    if args.sources_dir:
+        sources = Path(args.sources_dir)
+        for name in ("blue_business_insights.csv",
+                     "extracted_gold_queries.json", "metrics_dmp.json",
+                     "extended_gmns_semantics.json",
+                     "measures_catalog.json", "data_cleaned.csv",
+                     "business_terms.csv"):
+            ledger.consumed(sources / name)
+        for pack_file in sorted(sources.glob("skills/**/skill.yaml")) + \
+                sorted(sources.glob("skills/**/metric_contracts.yaml")):
+            ledger.consumed(pack_file)
+        std_path = _std_tech_path(sources)
+        if std_path is not None:
+            for p in ([std_path] if std_path.is_file()
+                      else sorted(std_path.glob("*.json"))):
+                ledger.consumed(p)
+    utilization = ledger.build(ledger_roots)
+    reports["utilization"] = UtilizationLedger.summary(utilization)
+    console.emit("phase_start", phase="utilization ledger",
+                 detail=json.dumps(reports["utilization"]))
 
     (graph_root / "runs" / run_id).mkdir(parents=True, exist_ok=True)
     manifest = graph_root / "runs" / run_id / "manifest.json"
     manifest.write_text(json.dumps({
-        "run_id": run_id, "archived": False, "reports": reports},
+        "run_id": run_id, "archived": False, "reports": reports,
+        "utilization": utilization},
         indent=1) + "\n", encoding="utf-8")
     console.output(manifest)
 
@@ -338,6 +398,8 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
     ok = console.gate("graph_valid", report.ok,
                       f"{len(report.errors)} error(s), "
                       f"{len(report.warnings)} warning(s)")
+    if not jobs_gate:
+        return EXIT_GATE_FAILURE
     return EXIT_OK if ok else EXIT_VALIDATION_ERROR
 
 

@@ -51,6 +51,10 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
     lines["grain"] = [
         f"- partitioned: latest {partition or 'n/a'} · "
         f"schema {node_props.get('schema_fingerprint', '?')} {prov}"]
+    if node_props.get("usage_rhythm"):
+        lines["grain"].append(
+            "- usage rhythm: " + " · ".join(node_props["usage_rhythm"])
+            + " [prov:jobs_30d]")
 
     column_rows = []
     for column in consensus.columns.values():
@@ -141,6 +145,16 @@ def metric_card(metric: dict[str, Any],
         f"- id: {metric['id']} · status: **{metric['status']}** "
         f"[prov:{metric['source']}]",
     ]
+    if metric.get("support_by_witness"):
+        witnesses = " · ".join(
+            f"{family}:{n}" for family, n in sorted(
+                metric["support_by_witness"].items()))
+        lines.append(
+            f"- witnesses: {witnesses} · agreement "
+            f"{metric.get('witness_agreement', 0)}"
+            + (f" · recency from {metric['recency_source']}"
+               if metric.get("recency_source") else "")
+            + " [prov:witness]")
     if metric.get("question"):
         lines.append(f"- answers: “{metric['question']}” [prov:dmp]")
     lines += [

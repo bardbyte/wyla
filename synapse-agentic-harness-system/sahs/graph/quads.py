@@ -10,9 +10,10 @@ Layout (pinned):
 
 Discipline replaces the database: single writer, append-only (nobody
 edits history), current state = a fold where the LAST line wins per
-identity — (id) for nodes, (s, r, o) for edges. The relation registry
-types every edge's endpoints; the validator (validate.py) is the
-foreign-key story.
+identity — (id) for nodes, (s, r, o, witness) for edges (E12/A1: one
+quad per witness family; independent testimony never collapses at the
+store). The relation registry types every edge's endpoints; the
+validator (validate.py) is the foreign-key story.
 """
 
 from __future__ import annotations
@@ -22,11 +23,67 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterator
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from sahs.graph.ids import kind_of
 
 QUAD_STATUSES = ("active", "superseded", "retracted")
+
+# ── witness families (E12/A1, pinned) ──────────────────────────
+# A witness is WHO SAW IT — the independent evidence family behind an
+# assertion. One quad per (s, r, o, witness); per-witness support
+# arrays exist only as compiler output (fold), never mutated in place.
+WITNESSES = (
+    "catalog_mined",    # upstream measures_catalog mining
+    "jobs_30d",         # in-silo mining of raw 30-day job history
+    "audit_30d",        # audit-log corroboration (never a feature source)
+    "dmp",
+    "gmns",
+    "skill_contract",
+    "snippet",          # blue insights fragments
+    "atlas",            # governed vocabulary (atlas/business_terms/std_tech/glossary)
+    "lumi",
+    "bq",
+    "steward",          # clerk-written human decisions
+    "user_variant",     # Alice/Bob on-the-fly variants
+    "llm_enriched",     # enricher output (Part B)
+    "gold_attested",    # the 158 gold pairs — the answer key
+)
+
+# Gold contamination guard (pinned): gold_attested is a full graph
+# citizen — census, cards, steward evidence — but the gold pairs ARE the
+# eval answer key, so they must never feed a feature the resolver ranks
+# on (support_effective, witness_agreement, recency). The SUT must not
+# contain its own test set. audit_30d likewise corroborates but never
+# votes (two witnesses of the same events don't count twice).
+RANKING_WITNESSES = tuple(w for w in WITNESSES
+                          if w not in ("gold_attested", "audit_30d"))
+
+# prov.source → default witness family; writers may set witness
+# explicitly (jobs_30d/audit_30d/user_variant/llm_enriched always do).
+SOURCE_WITNESS = {
+    "measures_catalog": "catalog_mined",
+    "blue_insights": "snippet",
+    "metrics_dmp": "dmp",
+    "extended_gmns": "gmns",
+    "skill_contract": "skill_contract",
+    "gold_queries": "gold_attested",
+    "bq": "bq",
+    "lumi": "lumi",
+    "atlas": "atlas",
+    "business_terms": "atlas",
+    "std_tech_metadata": "atlas",
+    "glossary": "atlas",
+    "clerk": "steward",
+    "jobs_30d": "jobs_30d",
+}
+
+# ReviewItem lattice (E12/A5, pinned) — schemas land BEFORE the first
+# real build so day-one quads never remint; the queue tooling is Part B.
+REVIEW_KINDS = ("naming", "metric_conflict", "structural_d1", "structural_d2",
+                "structural_d3", "structural_d4", "structural_d5", "variant",
+                "witness_divergence", "enrichment_correction")
+REVIEW_STATUSES = ("open", "decided", "spawned_task")
 
 # relation → (allowed subject kinds, allowed object kinds)
 RELATIONS: dict[str, tuple[set[str], set[str]]] = {
@@ -52,6 +109,8 @@ RELATIONS: dict[str, tuple[set[str], set[str]]] = {
     "valid_in":        ({"pred", "metric", "col"}, {"schema"}),
     "member_of":       ({"metric"}, {"mgroup"}),
     "described_by":    ({"table", "col"}, {"doc"}),
+    # E12/A5: ReviewItem → the node it is about (any kind incl. review)
+    "concerns":        ({"review"}, ID_KINDS | {"review", "run"}),
 }
 
 
@@ -64,6 +123,14 @@ class Prov(BaseModel):
     support: int | None = None
     evidence: str = ""
     actor: str | None = None       # REQUIRED when source == "clerk" (E7)
+    witness: str = ""              # ∈ WITNESSES (E12/A1); derived from
+                                   # source when a writer doesn't set it
+
+    @model_validator(mode="after")
+    def _default_witness(self) -> "Prov":
+        if not self.witness:
+            self.witness = SOURCE_WITNESS.get(self.source, "")
+        return self
 
 
 class NodeRecord(BaseModel):
@@ -145,10 +212,15 @@ class GraphDir:
                 state[record.id] = record
         return state
 
-    def fold_edges(self) -> dict[tuple[str, str, str], Quad]:
-        state: dict[tuple[str, str, str], Quad] = {}
+    def fold_edges(self) -> dict[tuple[str, str, str, str], Quad]:
+        """Current state per (s, r, o, WITNESS) — E12/A1: each witness
+        family testifies independently, and a retraction by one witness
+        never erases another's testimony. Aggregation across witnesses
+        (support arrays, max-combiner) is compiler output, never fold
+        state."""
+        state: dict[tuple[str, str, str, str], Quad] = {}
         for quad in self.iter_edges():
-            key = (quad.s, quad.r, quad.o)
+            key = (quad.s, quad.r, quad.o, quad.prov.witness)
             if quad.prov.status == "retracted":
                 state.pop(key, None)
             else:

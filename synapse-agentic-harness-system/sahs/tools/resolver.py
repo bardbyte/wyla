@@ -92,6 +92,13 @@ def _slot_result(candidates: list[dict[str, Any]], constants: dict
         "fuzzy_reach_forces_ask"]
     features = {"tier": top["tier"], **top["rest"], "margin": margin,
                 "via": top["via"]}
+    # E12/E6 exposure ONLY — witness features are readable in every
+    # trace but NOT in the score. Never change the ranker and the
+    # measurement in the same week: constants move on floor-triage
+    # evidence (A2), not on the excitement of new features.
+    for extra in ("witness_agreement", "recency_source"):
+        if extra in top:
+            features[extra] = top[extra]
     if margin < constants["margin_threshold"] or fuzzy_only:
         options = [{
             "id": c["id"], "label": c["option_label"],
@@ -176,6 +183,8 @@ def resolve(build: Build, question: str,
                             f"::{row['canonical_sql'][:60]}",
             "mgroup": row.get("mgroup", ""),
             "mgroups": row.get("mgroups", [row.get("mgroup", "")]),
+            "witness_agreement": row.get("witness_agreement", 1),
+            "recency_source": row.get("recency_source", ""),
             "exact_q": exact_question,
         })
     # a curated DMP question matching VERBATIM is definitional — prune
@@ -203,6 +212,8 @@ def resolve(build: Build, question: str,
             "via": "exact",
             "prov": r["source"],
             "option_label": f"{label}::{r['canonical_sql']}",
+            "witness_agreement": r.get("witness_agreement", 1),
+            "recency_source": r.get("recency_source", ""),
         } for r in rows]
         concept_slots[label] = _slot_result(candidates, constants)
 
