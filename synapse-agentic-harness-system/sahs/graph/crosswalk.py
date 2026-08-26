@@ -29,7 +29,8 @@ class CrosswalkRow(BaseModel):
 
 
 class Crosswalk:
-    def __init__(self, rows: list[CrosswalkRow]) -> None:
+    def __init__(self, rows: list[CrosswalkRow],
+                 aliases: dict[str, str] | None = None) -> None:
         self.rows = rows
         self.by_physical = {r.physical.lower(): r for r in rows}
         self.by_lumi = {r.lumi_asset_id: r for r in rows if r.lumi_asset_id}
@@ -39,13 +40,32 @@ class Crosswalk:
         for r in rows:
             short = r.physical.split(".")[-1].lower()
             self.by_short.setdefault(short, []).append(r)
+        self.aliases: dict[str, str] = {}
+        for alias, physical in (aliases or {}).items():
+            physical = physical.strip().lower()
+            if physical not in self.by_physical:
+                # an alias RESOLVES an identity, it never mints one —
+                # a typo here corrupts attribution, so it dies loudly
+                raise ValueError(
+                    f"aliases.jsonl: {alias!r} -> {physical!r} is not a "
+                    "crosswalk row — fix the alias or add the table")
+            self.aliases[alias.strip().lower()] = physical
 
     @classmethod
     def load(cls, path: Path) -> "Crosswalk":
+        path = Path(path)
         rows = [CrosswalkRow.model_validate(json.loads(line))
-                for line in Path(path).read_text(
+                for line in path.read_text(
                     encoding="utf-8").split("\n") if line.strip()]
-        return cls(rows)
+        aliases: dict[str, str] = {}
+        sidecar = path.parent / "aliases.jsonl"
+        if sidecar.exists():
+            for line in sidecar.read_text(
+                    encoding="utf-8").split("\n"):
+                if line.strip():
+                    row = json.loads(line)
+                    aliases[str(row["alias"])] = str(row["physical"])
+        return cls(rows, aliases)
 
     def physical_for_bq(self, dataset: str, table: str) -> str | None:
         hit = self.by_physical.get(f"{dataset}.{table}".lower())
@@ -57,6 +77,12 @@ class Crosswalk:
             return self.by_lumi[asset_id].physical.lower()
         hits = self.by_short.get(table_name.lower(), [])
         return hits[0].physical.lower() if len(hits) == 1 else None
+
+    def physical_for_alias(self, name: str) -> str | None:
+        """Human-verified alternative names — data-product display
+        names, skill-pack table nicknames — mapping onto crosswalked
+        identities (graph/identity/aliases.jsonl)."""
+        return self.aliases.get((name or "").strip().lower())
 
     def physical_for_short(self, table_name: str) -> str | None:
         """UNIQUE short-name resolution — the fallback identity when an

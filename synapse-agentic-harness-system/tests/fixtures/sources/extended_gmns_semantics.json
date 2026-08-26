@@ -29,5 +29,15 @@
   "submittedForApproval": true,
   "status": "Submitted",
   "table": "gms_transaction"
+ },
+ {
+  "metricName": "declined_auth_share",
+  "sqlExpression": "SELECT SAFE_DIVIDE(SUM(CASE WHEN approval_cd = 'D' THEN 1 ELSE 0 END), COUNT(1)) FROM wwcas_authorization",
+  "table": "authorization data product",
+  "calculation": "declined over total",
+  "metricGrain": "daily",
+  "metricScope": "network",
+  "requestor": "fixture",
+  "status": "Submitted"
  }
 ]

@@ -133,10 +133,10 @@ def test_id_slugging_for_source_embedded_strings():
     assert kind_of(owner_id("William Lentz II")) == "owner"
 
 
-def manifest_reports_bq_profile_only(tmp_path: Path) -> int:
+def manifest_reports(tmp_path: Path) -> dict:
     manifest = json.loads((tmp_path / "g" / "runs" / "test_r1" /
                            "manifest.json").read_text())
-    return manifest["reports"]["bq"]["columns_from_profile_only"]
+    return manifest["reports"]
 
 
 def test_id_grammar():
@@ -219,7 +219,17 @@ def test_build_graph_end_to_end_fuses_three_witnesses(tmp_path):
     assert ("table:dw.gms_transaction", "has_column",
             "col:dw.gms_transaction.zz_profile_only", "bq") in edges
     assert "domain:dw.gms_transaction.zz_profile_only" in nodes
-    assert manifest_reports_bq_profile_only(tmp_path) == 1
+    assert manifest_reports(tmp_path)["bq"][
+        "columns_from_profile_only"] == 1
+
+    # catalogs attribute by data-product names: the alias sidecar maps
+    # them onto crosswalked identities, and a metric whose hint fails
+    # falls back to the tables its OWN SQL references — so the
+    # certified plane lands instead of being scope-skipped
+    expr = manifest_reports(tmp_path)["expressions"]
+    assert expr["resolved_via_alias"] >= 1        # dmp product hint
+    assert expr["resolved_via_sql_table"] >= 1    # gmns FROM fallback
+    assert "mgroup:dmp:prodhint-0001" in nodes    # certified plane lands
 
     # gms's DOUBLE registration folds at emit: entries counted, facts
     # emitted once — [8] dedup stays meaningful (rc==0 proves no dupes)
@@ -235,6 +245,23 @@ def test_build_graph_end_to_end_fuses_three_witnesses(tmp_path):
     assert "table:dw.sbs_new_accounts" in nodes
     assert ("table:dw.sbs_new_accounts", "has_schema",
             "schema:dw.sbs_new_accounts@v1", "bq") in edges
+
+
+def test_alias_to_unknown_physical_dies_at_load(tmp_path):
+    """An alias resolves an identity, it never mints one — a typo'd
+    physical corrupts attribution, so the load refuses it loudly."""
+    cw = tmp_path / "crosswalk.jsonl"
+    cw.write_text(json.dumps({
+        "physical": "dw.gms_transaction", "verified_by": "t",
+        "verified_on": "2026-08-26"}) + "\n", encoding="utf-8")
+    (tmp_path / "aliases.jsonl").write_text(json.dumps({
+        "alias": "Some Product", "physical": "dw.not_a_table"}) + "\n",
+        encoding="utf-8")
+    try:
+        Crosswalk.load(cw)
+        raise AssertionError("unknown alias target must not load")
+    except ValueError as e:
+        assert "not a crosswalk row" in str(e)
 
 
 def test_crosswalk_blocking_is_a_build_error(tmp_path):
