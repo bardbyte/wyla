@@ -77,6 +77,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unknown sut {args.sut!r}", file=sys.stderr)
         return EXIT_VALIDATION_ERROR
 
+    # a SUT that declares its answerable kinds is measured on THOSE —
+    # grading a binding resolver on generation tasks measures a
+    # category error, not the floor. Excluded loudly, never silently;
+    # the nl2sql ground stays intact for generation-capable SUTs.
+    answerable = getattr(sut, "answerable_kinds", None)
+    excluded_kind = 0
+    if answerable:
+        in_kind = [t for t in tasks if t.kind in answerable]
+        excluded_kind = len(tasks) - len(in_kind)
+        tasks = in_kind
+    print(f"excluded (kind outside sut capability): {excluded_kind}",
+          file=sys.stderr)
+    if not tasks:
+        print("no tasks answerable by this sut", file=sys.stderr)
+        return EXIT_VALIDATION_ERROR
+
     out = Path(args.out) if args.out else None
     run_id = (_dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
               + "_" + uuid.uuid4().hex[:8])
@@ -94,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
                             else console.item_quarantined(t.verdict,
                                                           t.reason)))
     report["excluded_out_of_coverage"] = excluded
+    report["excluded_kind_not_answerable"] = excluded_kind
     print(format_report(report), file=sys.stderr)
     if out:
         console.output(write_report(report, out / "eval_report.json"))
@@ -130,7 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     code = EXIT_OK if ok else EXIT_GATE_FAILURE
     summary = console.finish(code, extra={
         "overall": report["overall"],
-        "excluded_out_of_coverage": excluded})
+        "excluded_out_of_coverage": excluded,
+        "excluded_kind_not_answerable": excluded_kind})
     if args.json_out:
         print(json.dumps(summary))
     return code

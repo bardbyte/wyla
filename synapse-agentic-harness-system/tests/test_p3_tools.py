@@ -309,6 +309,28 @@ def test_run_evals_prints_excluded_count_and_gates(build):
     assert summary["excluded_out_of_coverage"] == 0
 
 
+def test_resolver_excludes_kinds_it_cannot_answer(build, tmp_path):
+    """The deterministic resolver BINDS — grading it on nl2sql
+    generation tasks measures a category error, not the floor. Those
+    tasks exclude LOUDLY and the binding floor still reads clean."""
+    row = json.loads(
+        CURATED.read_text(encoding="utf-8").split("\n")[0])
+    row["id"] = "nl_synthetic_0001"
+    row["kind"] = "nl2sql"
+    nl = tmp_path / "nl.jsonl"
+    nl.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(SILO / "scripts" / "run_evals.py"),
+         "--tasks", str(CURATED), "--tasks", str(nl),
+         "--sut", f"resolver:{build.root.parent}",
+         "--fail-under", "0.9", "--plain", "--json"],
+        capture_output=True, text=True, cwd=SILO)
+    assert result.returncode == 0, result.stderr[-500:]
+    assert "excluded (kind outside sut capability): 1" in result.stderr
+    summary = json.loads(result.stdout.splitlines()[-1])
+    assert summary["excluded_kind_not_answerable"] == 1
+
+
 def test_floor_failures_emit_triage_table(tmp_path):
     """E5: a failing floor run writes the pending-triage table."""
     result = subprocess.run(

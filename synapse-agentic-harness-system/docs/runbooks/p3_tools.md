@@ -24,8 +24,13 @@ python scripts/run_evals.py \
   --out graph/runs/p3_floor --json
 ```
 
-- The excluded line prints on every run — copy
+- The excluded lines print on every run — copy
   `excluded (coverage=external): N of M` into the commit message.
+- The deterministic resolver BINDS; it never generates SQL. nl2sql
+  gold tasks are excluded loudly (`excluded (kind outside sut
+  capability): N`) — they are the ground for generation-capable SUTs
+  (the agent with tools), not the binding floor. The floor number is
+  pass@1 over resolve_bind / disambiguate / abstain.
 - **0.90 pass@1 is a tripwire, not a gate**: below it, triage is
   mandatory before exit; above it, spot-triage 10 failures anyway.
 - **The abstention floor is hard**: `disambiguate` and `abstain` must

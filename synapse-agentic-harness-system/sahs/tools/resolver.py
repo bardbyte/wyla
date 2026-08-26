@@ -326,4 +326,8 @@ def resolver_sut(build: Build):
             return SutAnswer(kind="abstain", reason="nothing_resolved")
         return SutAnswer(kind="bindings", bindings=bindings)
 
+    # the deterministic resolver BINDS — it never generates SQL. The
+    # harness measures it on binding kinds only; nl2sql gold stays the
+    # ground for generation-capable SUTs.
+    _sut.answerable_kinds = {"resolve_bind", "disambiguate", "abstain"}
     return _sut
