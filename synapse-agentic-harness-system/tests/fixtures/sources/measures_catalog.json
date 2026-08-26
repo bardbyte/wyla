@@ -546,6 +546,15 @@
    "common_filters": [],
    "business_unit": "GMNS",
    "data_category": "Merchant"
+  },
+  {
+   "id": "count_distinct_post_visitor_id_hi||post_visitor_id_low",
+   "name": "distinct visitors (composite key)",
+   "expression": "COUNT(DISTINCT post_visitor_id_hi || post_visitor_id_low)",
+   "table": "gms_transaction",
+   "user_count": 4,
+   "first_seen": "2026-07-01",
+   "last_seen": "2026-08-20"
   }
  ]
 }

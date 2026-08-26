@@ -94,3 +94,29 @@ def acr_id(symbol: str, bu: str, region: str) -> str:
     clean = lambda v, d: (v or d).strip().lower().replace("@", "_") or d
     return (f"acr:{clean(symbol, '?')}@{clean(bu, 'all')}"
             f"@{clean(region, 'all')}")
+
+
+# Ids that EMBED source-provided strings slug grammar-hostile characters
+# to `_` at their single mint site — same contract as concept_id: the id
+# is a derivation, the verbatim value lives in props, and punctuation
+# variants may fold (their provs both survive the fold).
+_MGROUP_SAFE = re.compile(r"[^a-z0-9_:@\-\. ]")
+_TERM_SAFE = re.compile(r"[^a-z0-9_\-]")
+_OWNER_SAFE = re.compile(r"[^a-z0-9_\-\.@]")
+
+
+def mgroup_id(group_key: str) -> str:
+    """A mined catalog id can carry the expression text itself —
+    ``…count_distinct_a_hi||a_lo`` is a real one."""
+    return f"mgroup:{_MGROUP_SAFE.sub('_', group_key.lower())}"
+
+
+def term_node_id(term_id: str) -> str:
+    """The term node and every mapped_term edge must derive the id
+    IDENTICALLY — mint here only."""
+    return f"term:atlas:{_TERM_SAFE.sub('_', term_id.strip().lower())}"
+
+
+def owner_id(owner: str) -> str:
+    """MDM ownership values are sometimes display names, not slugs."""
+    return f"owner:{_OWNER_SAFE.sub('_', owner.strip().lower())}"

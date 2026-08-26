@@ -19,7 +19,7 @@ import json
 from pathlib import Path
 
 from sahs.graph.crosswalk import Crosswalk
-from sahs.graph.ids import col_id, table_id
+from sahs.graph.ids import col_id, owner_id, table_id
 from sahs.graph.quads import GraphDir, NodeRecord, Prov, Quad
 
 SOURCE = "lumi"
@@ -97,10 +97,11 @@ def load_mdm_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
             owner = str(ownership.get(key) or "").strip().lower()
             if owner:
                 graph.append_node(NodeRecord(
-                    id=f"owner:{owner}", props={"role": key},
+                    id=owner_id(owner),
+                    props={"role": key, "owner": owner},
                     prov=prov(evidence=f"{rel_ev}/ownership.json")))
                 graph.append_edge(Quad(
-                    s=tid, r="owned_by", o=f"owner:{owner}",
+                    s=tid, r="owned_by", o=owner_id(owner),
                     prov=prov(evidence=f"{rel_ev}/ownership.json")))
 
         schema = _json(track(responses / "schema.json")) or {}
