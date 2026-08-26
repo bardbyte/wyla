@@ -24,7 +24,14 @@ from sahs.canon.canonical import CANON_VERSION, CanonResult
 from sahs.canon.census import norm_label
 from sahs.canon.fingerprint import fingerprint
 from sahs.graph.crosswalk import Crosswalk
-from sahs.graph.ids import acr_id, col_id, concept_id, table_id
+from sahs.graph.ids import (
+    acr_id,
+    col_id,
+    concept_id,
+    mgroup_id,
+    table_id,
+    term_node_id,
+)
 from sahs.graph.quads import SOURCE_WITNESS, GraphDir, NodeRecord, Prov, Quad
 from sahs.loaders.records import (
     ExpressionRecord,
@@ -150,8 +157,9 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
             group_key = (record.metric_ref
                          or f"{norm_label(record.concept_label or '?')}"
                             f"@{physical}").lower()
-            mgroup = f"mgroup:{group_key}"
-            merge_node(mgroup, {"label": record.concept_label or ""},
+            mgroup = mgroup_id(group_key)
+            merge_node(mgroup, {"label": record.concept_label or "",
+                                "group_key": group_key},
                        record)
             merge_edge(metric, "member_of", mgroup, record)
             merge_edge(metric, "measured_on", tid, record)
@@ -227,8 +235,9 @@ def emit_vocab(glossary: list[VocabRecord], terms: list[TermRecord],
         report["acronyms"] += 1
     for t in terms:
         graph.append_node(NodeRecord(
-            id=f"term:atlas:{t.term_id}",
-            props={"name": t.name, "status": t.status},
+            id=term_node_id(t.term_id),
+            props={"name": t.name, "status": t.status,
+                   "term_id": t.term_id},
             prov=Prov(source="atlas", run=run_id, evidence=t.evidence_ref)))
         report["terms"] += 1
     return dict(report)
@@ -296,7 +305,7 @@ def emit_std_tech(entries: list[StdTechEntry], terms: list[TermRecord],
                     report["term_links_unmatched"] += 1
                     continue
                 graph.append_edge(Quad(
-                    s=cid, r="mapped_term", o=f"term:atlas:{term_id}",
+                    s=cid, r="mapped_term", o=term_node_id(term_id),
                     props={"mapping_source": link.get("sourceName", ""),
                            "mapping_type": link.get("sourceType", "")},
                     prov=Prov(source="atlas", run=run_id,

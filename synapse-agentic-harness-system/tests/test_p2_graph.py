@@ -59,6 +59,19 @@ def test_no_jobs_30d_excludes_the_witness_and_ledgers_deferred(tmp_path):
                for r in jobs_rows)
 
 
+def test_id_slugging_for_source_embedded_strings():
+    """Ids embedding source-provided text slug hostile characters to
+    `_` at the mint — a real mined catalog id carries `||` in itself."""
+    from sahs.graph.ids import mgroup_id, owner_id, term_node_id
+    m = mgroup_id("mined:count_distinct_a_hi||a_low")
+    assert m == "mgroup:mined:count_distinct_a_hi__a_low"
+    assert kind_of(m) == "mgroup"
+    assert mgroup_id("mined:m_gms_spend_usd") == \
+        "mgroup:mined:m_gms_spend_usd"          # clean keys untouched
+    assert kind_of(term_node_id("BT-0017/X")) == "term"
+    assert kind_of(owner_id("William Lentz II")) == "owner"
+
+
 def test_id_grammar():
     assert kind_of("table:dw.gms_transaction") == "table"
     assert kind_of("col:dw.gms_transaction.cm13") == "col"
@@ -123,6 +136,14 @@ def test_build_graph_end_to_end_fuses_three_witnesses(tmp_path):
     # mdm 503 → lifecycle UNKNOWN, stated not omitted
     wwcas = nodes["table:dw.wwcas_authorization"]
     assert wwcas.props["lifecycle_status"] == "unknown_unavailable"
+
+    # the ||-bearing mined id lands as a slugged mgroup with the raw
+    # key preserved in props
+    slugged = "mgroup:mined:count_distinct_post_visitor_id_hi" \
+              "__post_visitor_id_low"
+    assert slugged in nodes
+    assert nodes[slugged].props["group_key"] == \
+        "mined:count_distinct_post_visitor_id_hi||post_visitor_id_low"
 
     # a dir missing its 00 resource resolves by UNIQUE short name —
     # views and denied resource calls ship without the file, and the

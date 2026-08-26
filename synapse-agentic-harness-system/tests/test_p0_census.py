@@ -93,7 +93,7 @@ def test_catalog_adapters_counts():
     dmp, q1 = load_metrics_dmp(FX / "metrics_dmp.json")
     gmns, q2 = load_extended_gmns(FX / "extended_gmns_semantics.json")
     mined, q3 = load_measures_catalog(FX / "measures_catalog.json")
-    assert (len(dmp), len(gmns), len(mined)) == (3, 2, 30)
+    assert (len(dmp), len(gmns), len(mined)) == (3, 2, 31)
     assert not (q1 or q2 or q3)
     assert dmp[0].extra["question_answered"]
     assert mined[0].support > 1          # user_count scaling
