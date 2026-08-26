@@ -42,6 +42,12 @@ def test_registry_suffix_and_ambiguity():
     assert reg.resolve("transaction")[1] == "suffix"
     assert reg.resolve("authorization") == (None, "ambiguous")
     assert reg.resolve("nope_table") == (None, "unknown")
+    # real queries reference tables FULLY QUALIFIED — they resolve by
+    # their table component; ambiguity still never guesses
+    assert reg.resolve("`axp-lumi`.dw.gms_transaction") == \
+        ("gms_transaction", "qualified")
+    assert reg.resolve("dw.authorization") == (None, "ambiguous")
+    assert reg.resolve("dw.nope_table") == (None, "unknown")
 
 
 def test_blue_insights_quarantine_categories_tell_the_truth():
@@ -79,7 +85,7 @@ def test_blue_insights_quarantine_categories_tell_the_truth():
 def test_gold_split_and_backlog():
     records, quar, backlog = load_gold_queries(
         FX / "extracted_gold_queries.json")
-    assert len(records) == 9 and len(backlog) == 3 and not quar
+    assert len(records) == 10 and len(backlog) == 3 and not quar
     assert all(r.prompt for r in records)
 
 
@@ -193,8 +199,12 @@ def test_cli_make_tasks(tmp_path: Path):
     assert r.returncode == 0
     tasks = [json.loads(x) for x in
              (tmp_path / "tasks" / "gold.jsonl").read_text().splitlines()]
-    assert len(tasks) == 9
+    assert len(tasks) == 10
     assert all(t["schema"] == "meridian.task/1" for t in tasks)
+    # a gold query on a FULLY QUALIFIED registry table is in-coverage —
+    # the real answer key writes project.dataset.table, never bare names
+    qual = next(t for t in tasks if t["provenance"]["source_id"] == "13")
+    assert "coverage=internal" in qual["tags"]
     assert all(t["gold"]["canonical_fp"] in t["grading"]["accepted_fps"]
                for t in tasks)
     assert all(t["grading"]["dry_run"] == "required" for t in tasks)

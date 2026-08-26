@@ -32,15 +32,27 @@ class TableRegistry:
         return cls(Path(path).read_text(encoding="utf-8").splitlines())
 
     def resolve(self, raw: str) -> tuple[str | None, str]:
-        """→ (resolved_name | None, reason). Reasons: exact | suffix |
-        ambiguous | unknown."""
-        name = (raw or "").strip().lower()
+        """→ (resolved_name | None, reason). Reasons: exact | qualified |
+        suffix | ambiguous | unknown.
+
+        Real query references arrive FULLY QUALIFIED
+        (``project.dataset.table``) while this registry holds bare
+        extracted-table names — a qualified reference resolves by its
+        table component (real identity is the crosswalk's job, E1).
+        Ambiguity still quarantines: two registry tables sharing the
+        short name never get guessed between."""
+        name = (raw or "").strip().lower().replace("`", "")
         if not name:
             return None, "unknown"
         if name in self.names:
             return name, "exact"
+        short = name.split(".")[-1].strip()
+        if not short:
+            return None, "unknown"
+        if short != name and short in self.names:
+            return short, "qualified"
         hits = [n for n in self.names
-                if n.endswith(name) or n.split(".")[-1] == name]
+                if n.endswith(short) or n.split(".")[-1] == short]
         uniq = sorted(set(hits))
         if len(uniq) == 1:
             return uniq[0], "suffix"

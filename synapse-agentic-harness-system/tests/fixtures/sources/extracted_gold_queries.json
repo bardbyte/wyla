@@ -58,5 +58,12 @@
   "id": 12,
   "prompt": "Fraud rate for card-not-present transactions",
   "sql": ""
+ },
+ {
+  "id": 13,
+  "prompt": "total US spend in january 2026 from the fully qualified table",
+  "sql": "SELECT SUM(trans_usd_am) FROM `axp-lumi`.dw.gms_transaction WHERE part_dt BETWEEN '2026-01-01' AND '2026-01-31'",
+  "source_row": 13,
+  "difficulty": "easy"
  }
 ]
