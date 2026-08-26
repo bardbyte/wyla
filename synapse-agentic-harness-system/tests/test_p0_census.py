@@ -265,3 +265,44 @@ def test_std_tech_real_envelope_shape(tmp_path: Path):
     assert [c.name for c in first.columns] == ["acct_open_dt", "cm_dob"]
     assert first.columns[1].pii_role_id == "NGBD-SDE-Date-of-Birth"
     assert first.columns[0].linked_terms[0]["sourceName"] == "LumiMDM"
+
+
+def test_std_tech_loose_types_never_crash(tmp_path: Path):
+    """The real feed sends sde_group/pii_role_id as `false` for absent
+    (crashed the first laptop census); loose values normalize and a
+    genuinely malformed entry QUARANTINES instead of killing the run."""
+    envelope = {
+        "dataset": "t_loose", "tech_metadata_list": [
+            {"datasetAttribute": {"data_type_name": "ODL",
+                                  "has_pii": False},
+             "pde": [{"pdeRelPath": "col_a",
+                      "pdeAttribute": {"data_type_name": "STRING",
+                                       "sde_group": False,
+                                       "pii_role_id": False}},
+                     {"pdeRelPath": "col_b",
+                      "pdeAttribute": {"sde_group": True,
+                                       "pii_role_id": "R9"}}]},
+            {"datasetAttribute": {"ownership": "not-a-dict",
+                                  "has_pii": False},
+             "pde": [{"pdeRelPath": "x",
+                      "pdeAttribute": {},
+                      "businessMetadata": ["not-a-dict-term"]}]},
+        ]}
+    f = tmp_path / "t_loose.json"
+    f.write_text(json.dumps(envelope), encoding="utf-8")
+    entries, quarantined = load_std_tech_metadata(f)
+    assert len(entries) == 2 and not quarantined
+    a, b = entries[0].columns
+    assert a.sde_group is None and a.pii_role_id is None   # false → absent
+    assert b.sde_group == "true" and b.pii_role_id == "R9"
+    assert entries[1].ownership == {}          # non-dict → empty, counted
+    assert entries[1].columns[0].linked_terms == []
+    # a truly unparsable entry quarantines, never raises
+    poison = {"dataset": "t_bad",
+              "tech_metadata_list": [
+                  {"datasetAttribute": {"has_pii": False}, "pde": "nope"}]}
+    f2 = tmp_path / "t_bad.json"
+    f2.write_text(json.dumps(poison), encoding="utf-8")
+    entries2, quarantined2 = load_std_tech_metadata(f2)
+    assert not entries2 and len(quarantined2) == 1
+    assert quarantined2[0].category == "schema_mismatch"

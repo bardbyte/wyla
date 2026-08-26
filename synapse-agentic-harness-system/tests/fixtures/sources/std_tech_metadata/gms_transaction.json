@@ -39,7 +39,9 @@
      "pdeAttribute": {
       "description": "Transaction amount in USD.",
       "business_name": "Transaction USD Amount",
-      "data_type_name": "FLOAT64"
+      "data_type_name": "FLOAT64",
+      "sde_group": false,
+      "pii_role_id": null
      },
      "businessMetadata": [
       {
