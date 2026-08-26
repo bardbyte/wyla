@@ -116,6 +116,9 @@ python scripts/run_evals.py \
   --out graph/runs/p1_ground_oracle --json
 
 # P2 — truth graph + first real compile              → p2_build.md
+# (E12: this run also mines jobs_30d.jsonl.gz per table — the jobs
+#  witness — and writes the utilization ledger into the run manifest;
+#  gates: jobs_canon_rate ≥90%/table, 0 unledgered files)
 # human: author graph/identity/crosswalk.jsonl (46 rows) FIRST
 python scripts/laptop.py build-graph \
   --graph graph \

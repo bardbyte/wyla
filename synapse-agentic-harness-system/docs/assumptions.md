@@ -52,3 +52,58 @@ time a trigger fires. Status: `active` | `expired` | `resolved`.
 - **revisit_trigger**: governance becomes interactive-concurrent, OR the
   corpus grows materially past the 46-table scope.
 - **status**: active
+
+## A4 — the floor baseline includes self-mined witnesses (E12)
+
+- **component**: loaders/archives/jobs_30d.py, compiler witness features,
+  the P3 resolver floor
+- **bet**: raw-history mining landed BEFORE the first real graph build
+  (user sequencing decision), so the P3 floor baseline includes jobs-
+  witness support/recency from day one — witness mining is never
+  separately delta-measured against a pre-witness floor. INCLUDED PIN:
+  `gold_attested` never feeds a resolver-ranked feature
+  (support_effective, witness_agreement, recency) — the 158 gold pairs
+  are the answer key, and the answer key must not rank the answers;
+  gold-only classes rank at the support floor by design. audit_30d
+  likewise corroborates but never votes.
+- **evidence**: E12 spec ("Consequence, accepted and logged");
+  RANKING_WITNESSES guard-asserts in compile; the gold-exclusion test.
+- **date**: 2026-08-26
+- **revisit_trigger**: the floor misses the 0.90 tripwire AND triage
+  implicates support/recency features.
+- **status**: active
+
+## A5 — enricher confidence thresholds are initial bets (E13, Part B)
+
+- **component**: the metric enrichment agent (Part B — not yet built;
+  thresholds registered NOW so Part B lands against a committed bet)
+- **bet**: blind-test recovery ≥80% ⇒ batch-tier review eligible;
+  60–80% ⇒ item-review only; <60% ⇒ do not run at scale, iterate the
+  prompt. The 80/60 split is judgment, not measurement.
+- **evidence**: none yet — the blind test (strip names from the 35 DMP +
+  14 GMNS certified metrics, enricher renames from expression + cards
+  alone) produces the first number.
+- **date**: 2026-08-26
+- **revisit_trigger**: the first steward review cycle's approve/correct
+  rates per tier.
+- **status**: active
+
+## A6 — cost-gate constants: 3× p95 anomaly multiplier, 20-job floor
+
+- **component**: tools/sandbox.py (cost_gate_anomaly), jobs_30d cost
+  priors
+- **bet**: a query scanning more than 3× its table's observed p95
+  bytes-per-job is an anomaly worth refusing; a p95 computed from fewer
+  than 20 canonicalized jobs in the 30-day window is an anecdote in a
+  percentile's clothes, so the prior is discarded and the global budget
+  ceiling governs alone. The prior may TIGHTEN the effective cap below
+  the global ceiling, never loosen it above (a relative gate must not
+  raise an absolute one — this warehouse has billed ~35 TiB in a single
+  extraction run).
+- **evidence**: none yet — both constants chosen by judgment; the deny
+  ledger records every gate decision with the observed bytes.
+- **date**: 2026-08-26
+- **revisit_trigger**: denied-query triage (from the sandbox ledger)
+  shows the anomaly gate refusing legitimate work or waving through
+  waste.
+- **status**: active
