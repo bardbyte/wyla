@@ -133,6 +133,12 @@ def test_id_slugging_for_source_embedded_strings():
     assert kind_of(owner_id("William Lentz II")) == "owner"
 
 
+def manifest_reports_bq_profile_only(tmp_path: Path) -> int:
+    manifest = json.loads((tmp_path / "g" / "runs" / "test_r1" /
+                           "manifest.json").read_text())
+    return manifest["reports"]["bq"]["columns_from_profile_only"]
+
+
 def test_id_grammar():
     assert kind_of("table:dw.gms_transaction") == "table"
     assert kind_of("col:dw.gms_transaction.cm13") == "col"
@@ -205,6 +211,15 @@ def test_build_graph_end_to_end_fuses_three_witnesses(tmp_path):
     assert slugged in nodes
     assert nodes[slugged].props["group_key"] == \
         "mined:count_distinct_post_visitor_id_hi||post_visitor_id_low"
+
+    # a column the 02 schema listing missed but the profiler saw:
+    # observed values attest existence — minted from profile evidence
+    zz = nodes["col:dw.gms_transaction.zz_profile_only"]
+    assert zz.props["observed_via"] == "low_cardinality_profile"
+    assert ("table:dw.gms_transaction", "has_column",
+            "col:dw.gms_transaction.zz_profile_only", "bq") in edges
+    assert "domain:dw.gms_transaction.zz_profile_only" in nodes
+    assert manifest_reports_bq_profile_only(tmp_path) == 1
 
     # gms's DOUBLE registration folds at emit: entries counted, facts
     # emitted once — [8] dedup stays meaningful (rc==0 proves no dupes)
