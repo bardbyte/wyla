@@ -404,6 +404,15 @@ def test_utilization_ledger_accounts_for_every_file(tmp_path):
                   "11_logical_constraints.json"):
         assert by_path[f"real_extractions_production/gms_transaction/"
                        f"{wired}"]["status"] == "consumed", wired
+    # run-2 audit findings: the value-profile manifests defer with a
+    # reason; a view shipping its SQL only as a csv twin is CONSUMED
+    manifest_row = by_path["real_extractions_production/"
+                           "gms_transaction/"
+                           "15_low_cardinality_manifest.csv"]
+    assert manifest_row["status"] == "deferred" \
+        and "profiling coverage" in manifest_row["reason"]
+    assert by_path["real_extractions_production/sbs_new_accounts/"
+                   "05_view_definition.csv"]["status"] == "consumed"
 
 
 def test_lob_layer_steward_declares_catalogs_corroborate(tmp_path):
@@ -479,6 +488,12 @@ def test_constraints_meta_and_field_paths_wired(tmp_path):
     assert bq["cols_minted_from_constraints"] == 1
     assert bq["nested_columns"] == 1
     assert bq["constraints_unrecognized"] == 0
+    # a view whose SQL ships only as a csv twin still lands its doc
+    assert bq["view_sql_from_twin"] == 1
+    twin_doc = nodes["doc:view_sql_dw_sbs_new_accounts"]
+    assert "FROM dw.sbs_new_accounts_raw" in twin_doc.props["sql"]
+    assert ("table:dw.sbs_new_accounts", "described_by",
+            "doc:view_sql_dw_sbs_new_accounts", "bq") in edges
 
 
 def test_csv_reader_tolerates_giant_fields(tmp_path):

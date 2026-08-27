@@ -1,0 +1,3 @@
+column_name,profiled,distinct_estimate
+country_cd,YES,24
+zz_profile_only,YES,3
