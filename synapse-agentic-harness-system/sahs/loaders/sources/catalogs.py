@@ -60,16 +60,54 @@ def load_metrics_dmp(path: Path) -> tuple[list[ExpressionRecord],
     return records, quarantined
 
 
+def _looks_like_metric_specs(value) -> bool:
+    if not (isinstance(value, list) and value
+            and isinstance(value[0], dict)):
+        return False
+    keys = " ".join(k.lower() for k in value[0])
+    return (("metric" in keys or "name" in keys)
+            and ("sql" in keys or "calculation" in keys
+                 or "expression" in keys))
+
+
 def load_extended_gmns(path: Path) -> tuple[list[ExpressionRecord],
                                             list[Quarantined]]:
+    """The real export wraps its list under a key that is NOT
+    "metrics" (run-2 finding: the loader yielded ZERO records and the
+    14 pending specs silently never existed). The loader adapts to the
+    file: known wrapper keys first, then the first list-of-dicts value
+    that LOOKS like metric specs; an unrecognizable shape quarantines
+    loudly instead of returning nothing."""
     payload = _read(path)
-    rows = payload if isinstance(payload, list) else \
-        payload.get("metrics", [])
+    if isinstance(payload, list):
+        rows = payload
+    else:
+        rows = []
+        for key in ("metrics", "metric_catalog", "semantics",
+                    "extended_metrics", "extendedMetrics",
+                    "definitions", "metricDefinitions"):
+            if _looks_like_metric_specs(payload.get(key)):
+                rows = payload[key]
+                break
+        else:
+            rows = next((v for v in payload.values()
+                         if _looks_like_metric_specs(v)), [])
     records, quarantined = [], []
+    if not rows and payload:
+        top = (sorted(payload)[:8] if isinstance(payload, dict)
+               else type(payload).__name__)
+        quarantined.append(Quarantined(
+            source="extended_gmns", category="missing_field",
+            detail=f"no metric list found in the file — top-level "
+                   f"shape: {top}",
+            evidence_ref=Path(path).name))
     for row in rows:
-        name = str(row.get("metricName") or "?")
+        name = str(row.get("metricName") or row.get("metric_name")
+                   or row.get("name") or "?")
         ref = f"{Path(path).name}#metric={name}"
-        sql = str(row.get("sqlExpression") or "").strip()
+        sql = str(row.get("sqlExpression") or row.get("sql_expression")
+                  or row.get("sql") or row.get("expression")
+                  or "").strip()
         if not sql:
             quarantined.append(Quarantined(
                 source="extended_gmns", category="missing_field",
@@ -80,7 +118,9 @@ def load_extended_gmns(path: Path) -> tuple[list[ExpressionRecord],
             raw_sql=sql, kind="metric_expr", source="extended_gmns",
             authority=Authority.PENDING,
             metric_ref=f"gmns:{name}", concept_label=name,
-            table_hint=str(row.get("table") or "gms_transaction").lower(),
+            table_hint=str(row.get("table") or row.get("tableName")
+                           or row.get("associatedTable")
+                           or "gms_transaction").lower(),
             evidence_ref=ref,
             extra={"calculation": row.get("calculation"),
                    "approved_dimensions": row.get("approvedDimensions"),

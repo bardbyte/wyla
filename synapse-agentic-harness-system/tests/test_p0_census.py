@@ -341,3 +341,33 @@ def test_std_tech_loose_types_never_crash(tmp_path: Path):
     entries2, quarantined2 = load_std_tech_metadata(f2)
     assert not entries2 and len(quarantined2) == 1
     assert quarantined2[0].category == "schema_mismatch"
+
+
+def test_extended_gmns_adapts_to_unknown_wrapper_key(tmp_path):
+    """Run-2 finding: the real export wraps its specs under a key that
+    is not "metrics" — the old loader returned ZERO records and the
+    pending plane silently never existed. The loader adapts by
+    signature; a truly unrecognizable shape quarantines loudly."""
+    from sahs.loaders.sources.catalogs import load_extended_gmns
+    p = tmp_path / "extended_gmns_semantics.json"
+    p.write_text(json.dumps({
+        "generatedAt": "2026-08-01",
+        "pendingSpecs": [
+            {"metric_name": "local_spend_x",
+             "sql": "SUM(trans_usd_am)",
+             "tableName": "gms_transaction",
+             "metricGrain": "daily"}]}), encoding="utf-8")
+    records, quarantined = load_extended_gmns(p)
+    assert not quarantined
+    assert len(records) == 1
+    assert records[0].concept_label == "local_spend_x"
+    assert records[0].raw_sql == "SUM(trans_usd_am)"
+    assert records[0].table_hint == "gms_transaction"
+    assert records[0].extra["line_of_business"] == "GMNS"
+
+    p.write_text(json.dumps({"nothing": {"useful": True}}),
+                 encoding="utf-8")
+    records, quarantined = load_extended_gmns(p)
+    assert not records
+    assert quarantined and quarantined[0].category == "missing_field"
+    assert "no metric list" in quarantined[0].detail
