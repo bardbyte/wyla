@@ -479,3 +479,28 @@ def test_constraints_meta_and_field_paths_wired(tmp_path):
     assert bq["cols_minted_from_constraints"] == 1
     assert bq["nested_columns"] == 1
     assert bq["constraints_unrecognized"] == 0
+
+
+def test_csv_reader_tolerates_giant_fields(tmp_path):
+    """Python's csv module refuses any field over 128KB by default —
+    real 01_logical_table_meta exports carry multi-hundred-KB cells
+    (labels/options blobs). The loader adapts to the file: the raised
+    limit reads the row whole, and the props harvest truncates the
+    giant cell with byte count + hash instead of shipping it verbatim
+    into the append-only store."""
+    from sahs.loaders.archives.bq_extraction import (
+        _csv_rows,
+        _first_row_props,
+    )
+    big = "x" * 300_000
+    p = tmp_path / "01_logical_table_meta.csv"
+    p.write_text(
+        f'table_name,options\ngms_transaction,"{big}"\n',
+        encoding="utf-8")
+    rows = _csv_rows(p)                       # would raise _csv.Error
+    assert rows[0]["options"] == big          # read whole, untouched
+    props = _first_row_props(rows)
+    assert props["table_name"] == "gms_transaction"
+    assert len(props["options"]) < 3000
+    assert "truncated: 300000 bytes" in props["options"]
+    assert "sha256_12=" in props["options"]

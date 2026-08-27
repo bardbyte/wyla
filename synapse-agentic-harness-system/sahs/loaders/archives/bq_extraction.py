@@ -19,6 +19,7 @@ import csv
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
 
 from sahs.graph.crosswalk import Crosswalk
@@ -26,6 +27,19 @@ from sahs.graph.ids import col_id, kind_of, table_id
 from sahs.graph.quads import GraphDir, NodeRecord, Prov, Quad
 
 SOURCE = "bq"
+
+# Python's csv module refuses any single field over 128KB ("field
+# larger than field limit") — real 01/04 exports carry multi-hundred-KB
+# cells (labels/options blobs, embedded DDL). The loader adapts to the
+# file: raise the cap to the platform maximum, halving on the rare
+# platform where maxsize overflows the underlying C long.
+_limit = sys.maxsize
+while True:
+    try:
+        csv.field_size_limit(_limit)
+        break
+    except OverflowError:
+        _limit //= 2
 
 
 def _csv_rows(path: Path) -> list[dict]:
@@ -64,12 +78,26 @@ def _sql_column(rows: list[dict]) -> str | None:
     return None
 
 
+_PROP_FIELD_CAP = 8192
+
+
 def _first_row_props(rows: list[dict]) -> dict:
     """Whole-first-row harvest (01 table meta, full 13 metrics): the
     loader adapts to whatever columns the extractor wrote — every
-    non-empty cell of row one rides along verbatim."""
-    return {k: v for k, v in (rows[0] if rows else {}).items()
-            if k and v not in ("", None)}
+    non-empty cell of row one rides along. A cell past 8KB (real 01
+    exports carry multi-hundred-KB option blobs) is truncated with its
+    byte count and content hash — the store stays lean, the evidence
+    stays checkable against the archive."""
+    out: dict = {}
+    for k, v in (rows[0] if rows else {}).items():
+        if not k or v in ("", None):
+            continue
+        if isinstance(v, str) and len(v) > _PROP_FIELD_CAP:
+            digest = hashlib.sha256(v.encode()).hexdigest()[:12]
+            v = (v[:2048] + f" …[truncated: {len(v)} bytes, "
+                 f"sha256_12={digest} — full text in the archive]")
+        out[k] = v
+    return out
 
 
 _PATH_RE = re.compile(r"^[A-Za-z_][\w]*(\.[A-Za-z_][\w]*)+$")
