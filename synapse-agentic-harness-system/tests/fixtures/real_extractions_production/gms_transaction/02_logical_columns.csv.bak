@@ -1,0 +1,2 @@
+column_name,ordinal_position,data_type,is_nullable,is_partitioning_column
+trans_usd_am,1,FLOAT64,YES,NO

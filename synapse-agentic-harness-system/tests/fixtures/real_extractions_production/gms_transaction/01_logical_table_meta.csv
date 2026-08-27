@@ -1,0 +1,2 @@
+table_name,description,application,environment,created,last_modified
+gms_transaction,Global merchant transactions,lumi,prod,2024-01-01,2026-08-01

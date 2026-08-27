@@ -18,10 +18,11 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from sahs.graph.crosswalk import Crosswalk
-from sahs.graph.ids import col_id, table_id
+from sahs.graph.ids import col_id, kind_of, table_id
 from sahs.graph.quads import GraphDir, NodeRecord, Prov, Quad
 
 SOURCE = "bq"
@@ -63,6 +64,159 @@ def _sql_column(rows: list[dict]) -> str | None:
     return None
 
 
+def _first_row_props(rows: list[dict]) -> dict:
+    """Whole-first-row harvest (01 table meta, full 13 metrics): the
+    loader adapts to whatever columns the extractor wrote — every
+    non-empty cell of row one rides along verbatim."""
+    return {k: v for k, v in (rows[0] if rows else {}).items()
+            if k and v not in ("", None)}
+
+
+_PATH_RE = re.compile(r"^[A-Za-z_][\w]*(\.[A-Za-z_][\w]*)+$")
+
+
+def _field_path_rows(d: Path, track) -> tuple[list[dict], str]:
+    """03_logical_column_field_paths ships as csv or json — read
+    whichever exists (csv preferred); → (rows, evidence_name)."""
+    path = d / "03_logical_column_field_paths.csv"
+    rows = _csv_rows(track(path))
+    if rows:
+        return rows, path.name
+    path = d / "03_logical_column_field_paths.json"
+    payload = _json(track(path))
+    if isinstance(payload, list) and payload \
+            and isinstance(payload[0], dict):
+        return payload, path.name
+    return [], path.name
+
+
+def _field_path_column(rows: list[dict]) -> str | None:
+    """Which column holds the dotted field path? Names containing
+    "path" first (pinned priority), then the VALUE signature: the first
+    column whose text looks like a dotted identifier path."""
+    if not rows:
+        return None
+    names = [n for n in rows[0] if n]
+    for cand in ("field_path", "column_field_path", "field_paths",
+                 "path"):
+        if cand in names:
+            return cand
+    for n in names:
+        if "path" in n.lower():
+            return n
+    for n in names:
+        if any(_PATH_RE.match(str(r.get(n) or "")) and "."
+               in str(r.get(n) or "") for r in rows[:50]):
+            return n
+    return None
+
+
+def _as_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [v.strip() for v in re.split(r"[,;]\s*", value.strip())
+                if v.strip()]
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    return [str(value)]
+
+
+def _cols_of(block: dict) -> list[str]:
+    for key, value in block.items():
+        k = key.lower()
+        if "column" in k and "ref" not in k and "target" not in k:
+            return _as_list(value)
+    return []
+
+
+def _fk_of(block: dict) -> dict | None:
+    columns: list[str] = []
+    ref_table = ""
+    ref_columns: list[str] = []
+    name = str(block.get("name") or block.get("constraint_name") or "")
+    ref_block = block.get("referenced") or block.get("references")
+    if isinstance(ref_block, dict):
+        ref_table = next((str(v) for k, v in ref_block.items()
+                          if "table" in k.lower() and v), "")
+        ref_columns = _cols_of(ref_block)
+    for key, value in block.items():
+        k = key.lower()
+        if "column" in k and ("ref" in k or "target" in k):
+            ref_columns = ref_columns or _as_list(value)
+        elif "column" in k:
+            columns = columns or _as_list(value)
+        elif "table" in k and ("ref" in k or "target" in k):
+            ref_table = ref_table or str(value or "")
+    if columns and ref_table and ref_columns:
+        return {"columns": columns, "ref_table": ref_table,
+                "ref_columns": ref_columns, "name": name}
+    return None
+
+
+def _constraint_units(payload):
+    """Whatever shape 11_logical_constraints ships — a wrapper dict, a
+    row list, nested blocks — yield the candidate constraint dicts."""
+    if isinstance(payload, dict):
+        for key in ("constraints", "table_constraints",
+                    "tableConstraints"):
+            if isinstance(payload.get(key), (list, dict)):
+                yield from _constraint_units(payload[key])
+                return
+        yield payload
+    elif isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, (dict, list)):
+                yield from _constraint_units(item)
+
+
+def _parse_constraints(payload) -> tuple[list[str], list[dict], int]:
+    """→ (pk_columns, fks, unrecognized_units). Defensive by design:
+    an unrecognized shape is COUNTED and skipped, never a crash — the
+    real file's shape gets learned from the first run's report."""
+    pks: list[str] = []
+    fks: list[dict] = []
+    unrecognized = 0
+    for unit in _constraint_units(payload):
+        handled = False
+        for key in ("primary_key", "primaryKey"):
+            block = unit.get(key)
+            if isinstance(block, dict):
+                pks += _cols_of(block)
+                handled = True
+            elif isinstance(block, list):
+                pks += _as_list(block)
+                handled = True
+        for key in ("foreign_keys", "foreignKeys"):
+            block = unit.get(key)
+            if isinstance(block, list):
+                for fk in block:
+                    parsed = _fk_of(fk) if isinstance(fk, dict) else None
+                    if parsed:
+                        fks.append(parsed)
+                        handled = True
+                    else:
+                        unrecognized += 1
+        if handled:
+            continue
+        # row-per-constraint shapes: the type lives in a string value
+        text = " ".join(str(v) for v in unit.values()
+                        if isinstance(v, str)).upper()
+        if "PRIMARY" in text:
+            cols = _cols_of(unit)
+            if cols:
+                pks += cols
+                handled = True
+        elif "FOREIGN" in text:
+            parsed = _fk_of(unit)
+            if parsed:
+                fks.append(parsed)
+                handled = True
+        if not handled:
+            unrecognized += 1
+    return pks, fks, unrecognized
+
+
 def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                     run_id: str, ledger=None,
                     include_jobs_digests: bool = True
@@ -82,7 +236,16 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
 
     report = {"tables": 0, "columns": 0, "columns_from_profile_only": 0,
               "domains": 0, "templates": 0, "template_rows_skipped": 0,
-              "co_query_edges": 0, "policies_unknown": 0}
+              "co_query_edges": 0, "policies_unknown": 0,
+              "nested_columns": 0, "field_path_rows_skipped": 0,
+              "field_paths_unmintable": 0, "pk_columns": 0,
+              "fk_edges": 0, "fk_out_of_scope": 0,
+              "cols_minted_from_constraints": 0,
+              "constraints_unrecognized": 0}
+    # constraint-declared FKs resolve AFTER the walk — the referenced
+    # table's own columns must have minted first, whatever dir order
+    minted_cols: set[str] = set()
+    fk_pending: list[tuple[str, str, str, str, str, str]] = []
     run_report = _json(track(root / "_run_report.json")) or {}
     denied = {(d.get("table"), d.get("operation"))
               for d in run_report.get("denied_operations", [])}
@@ -123,6 +286,8 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
 
         metrics = _csv_rows(track(d / "13_table_metrics.csv"))
         total_rows = int(metrics[0]["total_rows"]) if metrics else None
+        table_meta = _first_row_props(
+            _csv_rows(track(d / "01_logical_table_meta.csv")))
         partitions = _csv_rows(track(d / "10_physical_partitions.csv"))
         users = (_csv_rows(track(d / "17_queries_30d"
                                  / "jobs_top_users.csv"))
@@ -134,6 +299,10 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                 "object_type": resource.get("type", "TABLE"),
                 "description_bq": resource.get("description", ""),
                 "total_rows": total_rows,
+                # the rest of row one — size/modified/freshness context
+                # the old loader discarded past total_rows
+                "table_metrics": _first_row_props(metrics) or None,
+                "table_meta_logical": table_meta or None,
                 "n_partitions": len(partitions) or None,
                 "partition_latest": max(
                     (r["partition_id"] for r in partitions), default=None),
@@ -182,7 +351,77 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                           evidence=f"{d.name}/02_logical_columns.csv")))
             graph.append_edge(Quad(s=tid, r="has_column", o=cid,
                                    prov=prov(valid_for=[schema_node])))
+            minted_cols.add(cid)
             report["columns"] += 1
+
+        # 03 — nested field paths: STRUCT members the flat 02 listing
+        # can't carry become col nodes of their own (dotted ids); top-
+        # level rows are skipped — 02 is authoritative for those
+        fp_rows, fp_name = _field_path_rows(d, track)
+        path_col = _field_path_column(fp_rows)
+        if fp_rows and path_col is None:
+            report["field_path_rows_skipped"] += len(fp_rows)
+        if path_col:
+            names = [n for n in fp_rows[0] if n]
+            desc_key = next((n for n in names
+                             if "description" in n.lower()), None)
+            type_key = next((n for n in names if n != path_col
+                             and "type" in n.lower()), None)
+            seen_paths: set[str] = set()
+            ev03 = f"{d.name}/{fp_name}"
+            for row in fp_rows:
+                path_value = str(row.get(path_col) or "").strip()
+                if "." not in path_value or path_value in seen_paths:
+                    continue
+                seen_paths.add(path_value)
+                cid = col_id(physical, path_value)
+                if kind_of(cid) != "col":
+                    report["field_paths_unmintable"] += 1
+                    continue
+                nested_props: dict = {"nested_path": True}
+                if type_key and row.get(type_key):
+                    nested_props["data_type"] = str(row[type_key])
+                if desc_key and row.get(desc_key):
+                    nested_props["description_bq"] = str(row[desc_key])
+                graph.append_node(NodeRecord(
+                    id=cid, props=nested_props,
+                    prov=prov(valid_for=[schema_node], evidence=ev03)))
+                graph.append_edge(Quad(
+                    s=tid, r="has_column", o=cid,
+                    prov=prov(valid_for=[schema_node], evidence=ev03)))
+                minted_cols.add(cid)
+                report["nested_columns"] += 1
+
+        # 11 — declared constraints: PRIMARY KEY lands on the col node,
+        # FOREIGN KEYs queue for post-walk resolution (both endpoint
+        # tables must have walked). A constraint naming a column the 02
+        # export missed still attests it exists — minted, counted.
+        constraints = _json(track(d / "11_logical_constraints.json"))
+        if constraints is not None:
+            pks, fks, unrecognized = _parse_constraints(constraints)
+            report["constraints_unrecognized"] += unrecognized
+            ev11 = f"{d.name}/11_logical_constraints.json"
+            for pk in dict.fromkeys(pks):
+                cid = col_id(physical, pk)
+                if kind_of(cid) != "col":
+                    report["constraints_unrecognized"] += 1
+                    continue
+                pk_props: dict = {"is_primary_key": True}
+                if cid not in minted_cols:
+                    minted_cols.add(cid)
+                    pk_props["observed_via"] = "constraint_declaration"
+                    report["cols_minted_from_constraints"] += 1
+                    graph.append_edge(Quad(s=tid, r="has_column", o=cid,
+                                           prov=prov(evidence=ev11)))
+                graph.append_node(NodeRecord(
+                    id=cid, props=pk_props, prov=prov(evidence=ev11)))
+                report["pk_columns"] += 1
+            for fk in fks:
+                for src_col, ref_col in zip(fk["columns"],
+                                            fk["ref_columns"]):
+                    fk_pending.append((physical, src_col,
+                                       fk["ref_table"], ref_col,
+                                       fk["name"], ev11))
 
         lc_dir = d / "15_low_cardinality_values"
         if lc_dir.exists():
@@ -209,6 +448,7 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                         s=tid, r="has_column",
                         o=col_id(physical, column),
                         prov=prov(evidence=ev15)))
+                    minted_cols.add(col_id(physical, column))
                     report["columns_from_profile_only"] += 1
                 domain = f"domain:{physical}.{column.lower()}"
                 graph.append_node(NodeRecord(
@@ -280,4 +520,45 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                           evidence=f"{d.name}/17_queries_30d/"
                                    "jobs_query_templates.csv")))
             report["templates"] += 1
+
+    # ── post-walk: declared FKs → fk_references edges ──
+    # The referenced table resolves through the crosswalk or the edge is
+    # a counted skip (identity never guessed); a referenced column the
+    # 02 export missed is minted from the constraint's own declaration.
+    seen_fk: set[tuple[str, str]] = set()
+    for src_physical, src_col, ref_raw, ref_col, name, ev in fk_pending:
+        parts = [p for p in ref_raw.lower().strip().split(".") if p]
+        ref_physical = None
+        if len(parts) >= 2:
+            ref_physical = crosswalk.physical_for_bq(parts[-2], parts[-1])
+        if ref_physical is None and parts:
+            ref_physical = crosswalk.physical_for_short(parts[-1])
+        if ref_physical is None:
+            report["fk_out_of_scope"] += 1
+            continue
+        s_cid = col_id(src_physical, src_col)
+        o_cid = col_id(ref_physical, ref_col)
+        if kind_of(s_cid) != "col" or kind_of(o_cid) != "col":
+            report["constraints_unrecognized"] += 1
+            continue
+        if (s_cid, o_cid) in seen_fk:
+            continue
+        seen_fk.add((s_cid, o_cid))
+        for cid, owner in ((s_cid, src_physical),
+                           (o_cid, ref_physical)):
+            if cid not in minted_cols:
+                minted_cols.add(cid)
+                graph.append_node(NodeRecord(
+                    id=cid,
+                    props={"observed_via": "constraint_declaration"},
+                    prov=prov(evidence=ev)))
+                graph.append_edge(Quad(
+                    s=table_id(owner), r="has_column", o=cid,
+                    prov=prov(evidence=ev)))
+                report["cols_minted_from_constraints"] += 1
+        graph.append_edge(Quad(
+            s=s_cid, r="fk_references", o=o_cid,
+            props={"constraint": name} if name else {},
+            prov=prov(evidence=ev)))
+        report["fk_edges"] += 1
     return report, blocking

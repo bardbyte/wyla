@@ -1,0 +1,4 @@
+table_name,field_path,data_type,description
+gms_transaction,trans_usd_am,FLOAT64,Top-level twin — 02 is authoritative
+gms_transaction,payment_detail.card.network,STRING,Card network of the payment
+gms_transaction,payment_detail.card.network,STRING,duplicate row — deduped

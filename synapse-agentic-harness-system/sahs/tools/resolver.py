@@ -185,6 +185,7 @@ def resolve(build: Build, question: str,
             "mgroups": row.get("mgroups", [row.get("mgroup", "")]),
             "witness_agreement": row.get("witness_agreement", 1),
             "recency_source": row.get("recency_source", ""),
+            "line_of_business": row.get("line_of_business", ""),
             "exact_q": exact_question,
         })
     # a curated DMP question matching VERBATIM is definitional — prune
@@ -275,6 +276,10 @@ def resolve(build: Build, question: str,
                       "mgroups": metric_slot["bound"]["mgroups"],
                       "label": metric_slot["bound"]["label"],
                       "table": metric_slot["bound"]["table"],
+                      # exposure only (E6) — a hint the agent reads,
+                      # never a feature the ranker scores
+                      "line_of_business":
+                          metric_slot["bound"]["line_of_business"],
                       "confidence": metric_slot["confidence"]}]
                     if metric_slot["bound"] else []),
         "concepts": [{"label": label,

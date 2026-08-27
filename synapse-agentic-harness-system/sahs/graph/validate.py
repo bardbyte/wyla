@@ -48,9 +48,12 @@ from sahs.graph.quads import (
     GraphDir,
 )
 
-# the relations where "who saw it" is load-bearing (E12/A1)
+# the relations where "who saw it" is load-bearing (E12/A1) — the LOB
+# classification lives or dies by witness separation (steward declares,
+# dmp corroborates, mined only ever corroborates), so it belongs here
 _MEASURE_PLANE = {"bound_to", "member_of", "measured_on",
-                  "defines_metric", "variant_of", "certified_as"}
+                  "defines_metric", "variant_of", "certified_as",
+                  "in_lob", "in_domain"}
 
 
 @dataclass

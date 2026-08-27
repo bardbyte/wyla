@@ -37,6 +37,7 @@ class Build:
     acl: dict[str, Any]
     schema: dict[str, dict[str, str]]
     cost_priors: dict[str, dict[str, Any]] = field(default_factory=dict)
+    lob: list[dict[str, Any]] = field(default_factory=list)
     _db: sqlite3.Connection | None = field(default=None, repr=False)
 
     @classmethod
@@ -63,6 +64,7 @@ class Build:
             cost_priors=json.loads(
                 (path / "indexes" / "cost_priors.json").read_text())
             if (path / "indexes" / "cost_priors.json").exists() else {},
+            lob=_jsonl(path / "indexes" / "lob.jsonl"),
         )
 
     @property
@@ -104,6 +106,8 @@ def search_metrics(build: Build, intent: str, top_k: int = 8) -> dict:
         "status": r["status"], "grain": r.get("grain", ""),
         "table": r["table"], "question": r.get("question", ""),
         "source": r["source"],
+        "line_of_business": r.get("line_of_business", ""),
+        "domain": r.get("domain", ""),
         "conflict": any(groups.get(g, 0) > 1
                         for g in r.get("mgroups", [r.get("mgroup", "")])),
     } for _, _, _, r in scored[:top_k]],

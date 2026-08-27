@@ -28,6 +28,8 @@ from sahs.graph.ids import (
     acr_id,
     col_id,
     concept_id,
+    lob_id,
+    mdom_id,
     mgroup_id,
     table_id,
     term_node_id,
@@ -55,18 +57,37 @@ _STATE_RANK = {"mined": 1, "team_candidate": 2, "pending": 3,
 
 def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                      graph: GraphDir, crosswalk: Crosswalk,
-                     run_id: str) -> dict:
+                     run_id: str,
+                     known_lobs: set[str] | None = None) -> dict:
     """Aggregate-then-write: sources sharing a fingerprint fuse into one
     node, one edge per (s,r,o,WITNESS) with support summed WITHIN the
     family only (E12/A1 — cross-family aggregation is compiler output,
     never store state), and ONE governance seed per metric — the
     highest-authority initial state — so the E7 transition history never
-    starts with an illegal sequence."""
+    starts with an illegal sequence.
+
+    ``known_lobs``: lob node ids the steward map already minted. LOB
+    minting is an authority privilege — a certified/pending catalog's
+    declared lineOfBusiness mints the lob node; a MINED business_unit
+    only ever corroborates an existing one (steward or catalog-declared)
+    and anything else is counted ``lob_unmatched``, never guessed into
+    the graph."""
     report: dict = defaultdict(int)
     nodes: dict[str, dict] = {}
     node_prov: dict[str, tuple[str, int, str]] = {}
     edges: dict[tuple[str, str, str, str], dict] = {}
     states: dict[str, str] = {}
+
+    # authority pre-scan so a mined record processed BEFORE the catalog
+    # that declares its LOB still corroborates deterministically
+    declared_lobs: set[str] = set()
+    for record, _canon in pairs:
+        if record.kind == "metric_expr" \
+                and int(record.authority) >= int(Authority.PENDING):
+            raw = str(record.extra.get("line_of_business") or "").strip()
+            if raw:
+                declared_lobs.add(lob_id(raw))
+    corroboratable = (known_lobs or set()) | declared_lobs
 
     def witness_of(record: ExpressionRecord) -> str:
         return record.witness or SOURCE_WITNESS.get(record.source, "")
@@ -173,7 +194,53 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                 "approved_dimensions":
                     record.extra.get("approved_dimensions") or [],
                 "sign_convention": record.extra.get("calculation") or "",
+                # full-utilization props pass — everything the source
+                # catalogs say about a metric rides on the node (first
+                # non-empty wins per key; a fused metric keeps both its
+                # certified pedigree and its mined usage texture)
+                "author": record.extra.get("author") or "",
+                "domain": record.extra.get("domain") or "",
+                "line_of_business":
+                    record.extra.get("line_of_business") or "",
+                "scope": record.extra.get("metric_scope") or "",
+                "requestor": record.extra.get("requestor") or "",
+                "products": record.extra.get("products") or [],
+                "confidence": record.extra.get("confidence"),
+                "execution_count": record.extra.get("execution_count"),
+                "group_by_patterns":
+                    record.extra.get("group_by_patterns") or [],
+                "common_filters":
+                    record.extra.get("common_filters") or [],
+                "joined_tables":
+                    record.extra.get("joined_tables") or [],
+                "business_unit": record.extra.get("business_unit") or "",
+                "data_category": record.extra.get("data_category") or "",
             }, record)
+            # ── LOB layer (witnessed classification, never guessed) ──
+            lob_raw = str(record.extra.get("line_of_business")
+                          or "").strip()
+            dom_raw = str(record.extra.get("domain") or "").strip()
+            bu_raw = str(record.extra.get("business_unit") or "").strip()
+            if int(record.authority) >= int(Authority.PENDING):
+                if lob_raw:
+                    lid = lob_id(lob_raw)
+                    merge_node(lid, {"code": lob_raw}, record)
+                    merge_edge(tid, "in_lob", lid, record)
+                    report["lob_edges"] += 1
+                if dom_raw:
+                    mid = mdom_id(dom_raw)
+                    merge_node(mid, {"name": dom_raw}, record)
+                    merge_edge(metric, "in_domain", mid, record)
+                    if lob_raw:
+                        merge_edge(mid, "in_lob", lob_id(lob_raw), record)
+                    report["domain_edges"] += 1
+            elif bu_raw:
+                lid = lob_id(bu_raw)
+                if lid in corroboratable:
+                    merge_edge(tid, "in_lob", lid, record)
+                    report["lob_corroborated_mined"] += 1
+                else:
+                    report["lob_unmatched"] += 1
             group_key = (record.metric_ref
                          or f"{norm_label(record.concept_label or '?')}"
                             f"@{physical}").lower()

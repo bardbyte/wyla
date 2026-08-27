@@ -25,6 +25,18 @@ crosswalk.
 The validator refuses archive quads whose table subject is not in this
 file — a missing row is a loud stop, not a silent skip.
 
+Two optional sidecars sit beside it, same strictness (a row naming a
+non-crosswalk physical refuses to load):
+
+- `aliases.jsonl` — alternative names (data-product display names,
+  pack nicknames): `{"alias": "…", "physical": "dw.<t>", …}`;
+- `lob_map.jsonl` — line-of-business membership, one row per
+  (LOB, table): `{"lob_code": "GMNS", "lob_name": "…", "physical":
+  "dw.<t>", "verified_by": "…", "verified_on": "…", "notes": ""}`.
+  Steward witness; dmp/gmns declarations corroborate with their own
+  witnesses; mined `business_unit` values only corroborate an existing
+  lob node (`lob_unmatched` counts the rest — mined noise never mints).
+
 ## 2. Build the graph
 
 ```bash
@@ -41,7 +53,8 @@ python scripts/laptop.py build-graph \
 ```
 
 Order inside the run (pinned): crosswalk gate → BQ archive → MDM
-archive → semantic quads → **jobs 30d witness** (raw history mined
+archive → LOB map (steward first, so mined values have something to
+corroborate) → semantic quads → **jobs 30d witness** (raw history mined
 in-silo; runs AFTER the catalogs so a jobs sighting of a governed
 metric is testimony, never a fresh seed) → utilization ledger → run
 manifest → **validator gate** (the 14-check catalog; any error exits 2

@@ -17,6 +17,8 @@ what they appear to mean.
     domain:<dataset>.<table>.<column>   low-cardinality value domain
     status:<state>                   governance lattice states (E7)
     doc:<slug>   run:<run_id>   policy:<slug>   owner:<slug>
+    lob:<slug>                       line of business (steward/dmp-declared)
+    mdom:<slug>                      metric domain (dmp metricDomain)
 """
 
 from __future__ import annotations
@@ -46,6 +48,8 @@ ID_PATTERNS: dict[str, re.Pattern] = {
     "policy": re.compile(r"^policy:[a-z0-9_\-]+$"),
     "owner": re.compile(r"^owner:[a-z0-9_\-\.@]+$"),
     "review": re.compile(rf"^review:{_FP}$"),        # E12/A5
+    "lob": re.compile(r"^lob:[a-z0-9_\-]+$"),
+    "mdom": re.compile(r"^mdom:[a-z0-9_\-]+$"),
 }
 
 # E7 governance lattice — legal transitions, anything else blocks.
@@ -120,3 +124,20 @@ def term_node_id(term_id: str) -> str:
 def owner_id(owner: str) -> str:
     """MDM ownership values are sometimes display names, not slugs."""
     return f"owner:{_OWNER_SAFE.sub('_', owner.strip().lower())}"
+
+
+_CLASS_SAFE = re.compile(r"[^a-z0-9_\-]")
+
+
+def lob_id(code: str) -> str:
+    """LOB identity is the slug of its CODE — "GMNS" (a dmp
+    lineOfBusiness value) and "gmns" (a steward lob_map code) are the
+    same node, so the two declarations corroborate instead of forking.
+    A display name used as a code slugs to a DIFFERENT node — divergence
+    stays visible in the graph rather than being guessed away."""
+    return f"lob:{_CLASS_SAFE.sub('_', code.strip().lower())}"
+
+
+def mdom_id(name: str) -> str:
+    """Metric domain (dmp metricDomain) — same slug contract."""
+    return f"mdom:{_CLASS_SAFE.sub('_', name.strip().lower())}"

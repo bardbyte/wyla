@@ -77,6 +77,7 @@ SOURCE_WITNESS = {
     "glossary": "atlas",
     "clerk": "steward",
     "jobs_30d": "jobs_30d",
+    "lob_map": "steward",       # graph/identity/lob_map.jsonl (human)
 }
 
 # ReviewItem lattice (E12/A5, pinned) — schemas land BEFORE the first
@@ -106,12 +107,23 @@ RELATIONS: dict[str, tuple[set[str], set[str]]] = {
     "has_domain":      ({"col"}, {"domain"}),
     "evidenced_by":    (set(ID_KINDS := {
         "table", "col", "pred", "tmpl", "metric", "mgroup", "concept",
-        "term", "acr", "skill", "schema", "domain", "doc"}), {"doc", "run"}),
+        "term", "acr", "skill", "schema", "domain", "doc", "lob",
+        "mdom"}), {"doc", "run"}),
     "valid_in":        ({"pred", "metric", "col"}, {"schema"}),
     "member_of":       ({"metric"}, {"mgroup"}),
     "described_by":    ({"table", "col"}, {"doc"}),
     # E12/A5: ReviewItem → the node it is about (any kind incl. review)
     "concerns":        ({"review"}, ID_KINDS | {"review", "run"}),
+    # LOB layer — steward lob_map declares, dmp corroborates+mints,
+    # mined measures ONLY corroborate existing lob nodes (never mint).
+    # Multi-membership is legal: one edge per (subject, lob, witness).
+    "in_lob":          ({"table", "mdom"}, {"lob"}),
+    "in_domain":       ({"metric"}, {"mdom"}),
+    # declared constraints (11_logical_constraints) — the referenced
+    # column resolves through the crosswalk or the edge is a counted
+    # skip; a declared join key beats a co-query digest at telling the
+    # agent HOW two tables relate
+    "fk_references":   ({"col"}, {"col"}),
 }
 
 
