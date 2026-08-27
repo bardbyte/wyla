@@ -479,3 +479,42 @@ def test_constraints_meta_and_field_paths_wired(tmp_path):
     assert bq["cols_minted_from_constraints"] == 1
     assert bq["nested_columns"] == 1
     assert bq["constraints_unrecognized"] == 0
+
+
+def test_csv_reader_tolerates_giant_fields(tmp_path):
+    """Python's csv module refuses any field over 128KB by default —
+    real 01_logical_table_meta exports carry multi-hundred-KB cells
+    (labels/options blobs). The loader adapts to the file AND loses
+    nothing: the raised limit reads the row whole, and a giant cell
+    moves VERBATIM into a doc node (the view-SQL pattern) while the
+    inline prop keeps a preview + doc pointer + content hash."""
+    from sahs.loaders.archives.bq_extraction import (
+        _csv_rows,
+        _first_row_props,
+        _offload_giant_cells,
+    )
+    big = "x" * 300_000
+    p = tmp_path / "01_logical_table_meta.csv"
+    p.write_text(
+        f'table_name,options\ngms_transaction,"{big}"\n',
+        encoding="utf-8")
+    rows = _csv_rows(p)                       # would raise _csv.Error
+    assert rows[0]["options"] == big          # read whole, untouched
+
+    graph = GraphDir(tmp_path / "g")
+    props = _first_row_props(rows)
+    report = {"giant_cells_offloaded": 0}
+    _offload_giant_cells(
+        graph, "table:dw.gms_transaction", "dw.gms_transaction",
+        "table_meta_logical", props,
+        lambda **kw: Prov(source="bq", run="r1", **kw),
+        "gms_transaction/01_logical_table_meta.csv", report)
+    assert report["giant_cells_offloaded"] == 1
+    assert props["table_name"] == "gms_transaction"   # small cell as-is
+    doc_id = "doc:table_meta_logical_dw_gms_transaction_options"
+    assert doc_id in props["options"]                 # preview points
+    assert "300000 bytes" in props["options"]
+    nodes = graph.fold_nodes()
+    assert nodes[doc_id].props["text"] == big         # VERBATIM, whole
+    assert ("table:dw.gms_transaction", "described_by", doc_id,
+            "bq") in graph.fold_edges()
