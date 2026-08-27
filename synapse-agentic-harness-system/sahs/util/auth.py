@@ -141,6 +141,23 @@ def resolve_vertex_endpoint() -> str:
     return (v or DEFAULT_VERTEX_ENDPOINT).rstrip("/")
 
 
+def resolve_vertex_project() -> str | None:
+    """DELIBERATELY never falls back to the BQ project: the laptop's
+    Vertex SVC-ID lives in a DIFFERENT project than the BQ dry-run one,
+    and a silent fallback would bill (and fail) against the wrong
+    project. Missing → typed error naming the variable."""
+    return _first_env("VERTEX_PROJECT_ID", "LUMI_VERTEX_PROJECT")
+
+
+def resolve_vertex_location() -> str:
+    return _first_env("VERTEX_LOCATION", "LUMI_VERTEX_LOCATION") \
+        or "us-central1"
+
+
+def resolve_vertex_model() -> str | None:
+    return _first_env("VERTEX_MODEL", "LUMI_VERTEX_MODEL")
+
+
 def resolve_bq_location() -> str:
     return _first_env("BQ_LOCATION") or DEFAULT_BQ_LOCATION
 
@@ -197,6 +214,74 @@ class BQConnection:
         """requests.Session for the OAuth token refresh, honoring the
         same verify/CA settings (used only against oauth2.googleapis.com
         — the laptop contract's Step 6)."""
+        import requests                          # ships with google-auth
+        session = requests.Session()
+        session.verify = (self.ca_bundle or True) if self.ssl_verify \
+            else False
+        return session
+
+
+@dataclass(frozen=True)
+class VertexConnection:
+    """Everything the B1 enricher needs to reach the Vertex model.
+
+    A SEPARATE contract from BQConnection on purpose: the laptop's
+    Vertex SVC-ID and project are different from the BQ dry-run ones.
+    The key resolution keeps GOOGLE_APPLICATION_CREDENTIALS as a
+    fallback (one shared key file is a valid setup), but project and
+    model never borrow from the BQ side."""
+
+    project: str
+    location: str
+    model: str
+    endpoint: str
+    key_path: Path | None
+    ssl_verify: bool = True
+    ca_bundle: str | None = None
+
+    @classmethod
+    def from_env(cls) -> "VertexConnection":
+        """Same bootstrap shape as BQConnection: .env → validate →
+        resolve endpoint → NO_PROXY injection → SSL settings. Fails
+        fast with a typed error (exit 3)."""
+        load_dotenv()
+        project = resolve_vertex_project()
+        if not project:
+            raise AuthError(
+                "no Vertex project configured — set VERTEX_PROJECT_ID "
+                "(or LUMI_VERTEX_PROJECT), e.g. in .env. This is a "
+                "DIFFERENT project than the BQ one and is never "
+                "borrowed from it")
+        model = resolve_vertex_model()
+        if not model:
+            raise AuthError(
+                "no Vertex model configured — set VERTEX_MODEL (or "
+                "LUMI_VERTEX_MODEL) to the model id your project "
+                "serves, e.g. gemini-2.5-pro / gemini-2.0-flash")
+        key = resolve_vertex_key_path()
+        if key is None:
+            raise AuthError(
+                "no Vertex SA key configured — set LUMI_VERTEX_SA_KEY "
+                "(or GOOGLE_APPLICATION_CREDENTIALS) to the key-file "
+                "path, e.g. in .env")
+        if not key.exists():
+            raise AuthError(f"Vertex SA key not found on disk: {key}")
+        endpoint = resolve_vertex_endpoint()
+        configure_network(endpoint)
+        verify, bundle = resolve_ssl()
+        return cls(project=project, location=resolve_vertex_location(),
+                   model=model, endpoint=endpoint, key_path=key,
+                   ssl_verify=verify, ca_bundle=bundle)
+
+    def ssl_context(self) -> ssl.SSLContext:
+        if not self.ssl_verify:
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            return context
+        return ssl.create_default_context(cafile=self.ca_bundle)
+
+    def token_session(self):
         import requests                          # ships with google-auth
         session = requests.Session()
         session.verify = (self.ca_bundle or True) if self.ssl_verify \

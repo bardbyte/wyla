@@ -78,6 +78,7 @@ SOURCE_WITNESS = {
     "clerk": "steward",
     "jobs_30d": "jobs_30d",
     "lob_map": "steward",       # graph/identity/lob_map.jsonl (human)
+    "llm_enricher": "llm_enriched",   # B1 loop (E13)
 }
 
 # ReviewItem lattice (E12/A5, pinned) — schemas land BEFORE the first

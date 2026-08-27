@@ -192,10 +192,16 @@ def metric_card(metric: dict[str, Any],
         lines.append(f"- {' · '.join(pedigree)} "
                      f"[prov:{metric['source']}]")
     if metric.get("question"):
-        lines.append(f"- answers: “{metric['question']}” [prov:dmp]")
+        q_src = metric.get("question_source") or "dmp"
+        lines.append(f"- answers: “{metric['question']}” "
+                     + ("[prov:llm_enriched·unreviewed]"
+                        if q_src == "llm_enriched" else "[prov:dmp]"))
+    grain_prov = ("llm_enriched·unreviewed"
+                  if metric.get("grain_source") == "llm_enriched"
+                  else metric["source"])
     lines += [
         f"- grain: {metric.get('grain') or 'unspecified'} "
-        f"[prov:{metric['source']}]",
+        f"[prov:{grain_prov}]",
         f"- expression: `{metric['canonical_sql']}` "
         f"[prov:{metric['source']}·fp={metric['fp']}]",
         f"- table: {metric['table']} [prov:{metric['source']}]",
@@ -226,10 +232,18 @@ def metric_card(metric: dict[str, Any],
     return "\n".join(lines)
 
 
-def concept_card(label: str, bindings: list[dict[str, Any]]) -> str:
+def concept_card(label: str, bindings: list[dict[str, Any]],
+                 enriched: dict[str, str] | None = None) -> str:
     lines = [f"# concept {label}"]
     tables = sorted({b["table"] for b in bindings})
     lines.append(f"- bound on: {', '.join(tables)}")
+    if enriched and enriched.get("description"):
+        lines.append(f"- meaning: {enriched['description']} "
+                     "[prov:llm_enriched·unreviewed]")
+        if enriched.get("disambiguation"):
+            lines.append(f"- disambiguation: "
+                         f"{enriched['disambiguation']} "
+                         "[prov:llm_enriched·unreviewed]")
     lines.append("## bindings (ranked: authority ≻ support ≻ recency)")
     for b in bindings:
         lines.append(

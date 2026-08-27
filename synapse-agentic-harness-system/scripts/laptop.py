@@ -56,6 +56,7 @@ from sahs.loaders.sources.vocab import (                          # noqa: E402
     load_std_tech_metadata,
 )
 from sahs.util.console import (                                   # noqa: E402
+    EXIT_ENV_AUTH,
     EXIT_GATE_FAILURE,
     EXIT_OK,
     EXIT_VALIDATION_ERROR,
@@ -468,6 +469,68 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true", dest="json_out")
     p.add_argument("--fresh", action="store_true")
     p.set_defaults(fn=cmd_compile)
+
+    def cmd_enrich(args: argparse.Namespace, console: RunConsole) -> int:
+        from sahs.enrich.client import EnrichTransportError
+        from sahs.enrich.loop import run_enrich
+        from sahs.util.auth import AuthError
+        console.phase("enrich (B1)")
+        targets = tuple(t.strip() for t in args.targets.split(",")
+                        if t.strip())
+        try:
+            report = run_enrich(
+                graph_root=Path(args.graph),
+                builds_root=Path(args.builds),
+                out_dir=Path(args.out), run_id=console.run_id,
+                limit=args.limit, targets=targets,
+                plan_only=args.plan, blind_sample=args.blind_sample,
+                fresh=args.fresh,
+                log=lambda m: console.emit("phase_start",
+                                           phase="enrich", detail=m))
+        except AuthError as e:
+            console.gate("vertex_env", False, str(e))
+            return EXIT_ENV_AUTH
+        except EnrichTransportError as e:
+            console.gate("vertex_reachable", False, str(e))
+            return EXIT_GATE_FAILURE
+        console.output(Path(args.out) / "enrich_report.json")
+        if args.plan:
+            console.output(Path(args.out) / "plan.jsonl")
+            console.gate("enrich_plan", True,
+                         f"{report['planned_metrics']} metric + "
+                         f"{report['planned_concepts']} concept items "
+                         "planned (no model calls)")
+            return EXIT_OK
+        blind = report.get("blind") or {}
+        ok = console.gate(
+            "blind_gate_a5", blind.get("tier") != "halt",
+            f"recovery {blind.get('rate', 0):.0%} on "
+            f"{blind.get('n', 0)} certified → tier "
+            f"{blind.get('tier', '?')}")
+        console.gate(
+            "enrich_writes", True,
+            f"metrics {report['metrics_enriched']} · concepts "
+            f"{report['concepts_enriched']} · collisions→review "
+            f"{report['collisions']} · invalid_json "
+            f"{report['invalid_json']}")
+        return EXIT_OK if ok else EXIT_GATE_FAILURE
+
+    p = sub.add_parser("enrich")
+    p.add_argument("--graph", required=True)
+    p.add_argument("--builds", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--limit", type=int, default=200,
+                   help="max items per target this run")
+    p.add_argument("--targets", default="metrics,concepts")
+    p.add_argument("--plan", action="store_true",
+                   help="write the plan only — no model calls")
+    p.add_argument("--blind-sample", type=int, default=0,
+                   help="cap the A5 blind set (0 = all certified)")
+    p.add_argument("--run-id", default="")
+    p.add_argument("--plain", action="store_true")
+    p.add_argument("--json", action="store_true", dest="json_out")
+    p.add_argument("--fresh", action="store_true")
+    p.set_defaults(fn=cmd_enrich)
 
     p = sub.add_parser("build-graph")
     p.add_argument("--graph", required=True, help="graph/ root (L2)")

@@ -135,13 +135,25 @@ def compile_build(graph_root: Path, builds_root: Path
     for (s, o), entry in sorted(membership.items()):
         record = nodes[s]
         source = record.prov.source
+        # E13: the catalog answer wins FOREVER; enrichment only fills
+        # blanks, and the source flag keeps the provenance readable
+        question = record.props.get("question_answered", "")
+        question_source = "dmp" if question else ""
+        if not question and record.props.get("question_enriched"):
+            question = record.props["question_enriched"]
+            question_source = "llm_enriched"
+        grain = record.props.get("grain", "")
+        grain_source = "catalog" if grain else ""
+        if not grain and record.props.get("grain_enriched"):
+            grain = record.props["grain_enriched"]
+            grain_source = "llm_enriched"
         metric_rows.append({
             "id": s, "mgroup": o,
             "label": record.props.get("label", ""),
             "table": table_of_metric.get(s, ""),
-            "grain": record.props.get("grain", ""),
+            "grain": grain, "grain_source": grain_source,
             "status": status_by_metric.get(s, "mined"),
-            "question": record.props.get("question_answered", ""),
+            "question": question, "question_source": question_source,
             "canonical_sql": record.props.get("canonical_sql", ""),
             "fp": s.split(":", 1)[1],
             "authority": int(_EXPR_AUTHORITY.get(
@@ -183,7 +195,8 @@ def compile_build(graph_root: Path, builds_root: Path
         if _STATUS_RANK.get(row["status"], 0) > _STATUS_RANK.get(
                 held["status"], 0):
             held["status"] = row["status"]
-        for key in ("question", "grain", "label", "sign_convention",
+        for key in ("question", "question_source", "grain",
+                    "grain_source", "label", "sign_convention",
                     "author", "domain", "line_of_business", "scope"):
             held[key] = held[key] or row[key]
         if row["approved_dimensions"] and not held["approved_dimensions"]:
@@ -373,10 +386,24 @@ def compile_build(graph_root: Path, builds_root: Path
     bindings_by_label: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in binding_rows:
         bindings_by_label[row["label"]].append(row)
+    # enriched concept meaning (B1) — first folded description per label
+    concept_notes: dict[str, dict[str, str]] = {}
+    for node_id, record in sorted(nodes.items()):
+        if not node_id.startswith("concept:") \
+                or not record.props.get("description_enriched"):
+            continue
+        label = record.props.get("label", "").strip().lower()
+        if label and label not in concept_notes:
+            concept_notes[label] = {
+                "description": record.props["description_enriched"],
+                "disambiguation":
+                    record.props.get("disambiguation_enriched", "")}
     for label, rows in sorted(bindings_by_label.items()):
         slug = label.replace(" ", "_").replace("/", "_")[:60]
         (build_dir / "cards" / "concepts" / f"{slug}.md").write_text(
-            concept_card(label, rows) + "\n", encoding="utf-8")
+            concept_card(label, rows,
+                         enriched=concept_notes.get(label)) + "\n",
+            encoding="utf-8")
 
     # ── census (compiled view + E1 structural) ──
     concept_conflicts = sum(
