@@ -435,7 +435,9 @@ def test_lob_layer_steward_declares_catalogs_corroborate(tmp_path):
                and o == "lob:gmns"}
     assert gms_lob["steward"].prov.source == "lob_map"   # human declares
     assert "dmp" in gms_lob                # certified catalog testifies
-    assert "catalog_mined" in gms_lob      # mined corroborates
+    # ownership is steward+catalog testimony ONLY — the mined witness
+    # moved to the usage plane (used_by), never in_lob
+    assert "catalog_mined" not in gms_lob
     # declared equivalence: the DMP display name ("Global Merchant &
     # Network Svcs", fixture metric 102) resolves onto the steward's
     # canonical lob:gmns via the lob_map alias — NO parallel node forks
@@ -445,15 +447,25 @@ def test_lob_layer_steward_declares_catalogs_corroborate(tmp_path):
     assert any(r == "in_domain" and o == "mdom:merchant"
                for (s, r, o, _w) in edges)
     assert ("mdom:merchant", "in_lob", "lob:gmns", "dmp") in edges
-    # mined never mints: CRO measures land in the counter, not the graph
-    assert "lob:cro" not in nodes
+    # the usage plane: mined business_unit names WHO QUERIES — GMNS
+    # measures → used_by the LOB's own org; CRO measures → used_by the
+    # steward-declared org unit (child of SBS), never ownership
+    assert ("table:dw.gms_transaction", "used_by", "lob:gmns",
+            "catalog_mined") in edges
+    assert ("table:dw.wwcas_authorization", "used_by", "lob:cro",
+            "catalog_mined") in edges
+    cro = nodes["lob:cro"]
+    assert cro.props["kind"] == "org_unit"
+    assert cro.props["parent"] == "SBS"
+    assert ("lob:cro", "in_lob", "lob:sbs", "steward") in edges
     manifest = json.loads((graph_dir / "runs" / "test_r1" /
                            "manifest.json").read_text())
     assert manifest["reports"]["lob_map"] == {
         "lobs": 2, "memberships": 3, "duplicate_rows": 0}
+    assert manifest["reports"]["org_map"] == {"org_units": 1}
     ex = manifest["reports"]["expressions"]
-    assert ex["lob_corroborated_mined"] >= 1
-    assert ex["lob_unmatched"] >= 1
+    assert ex["used_by_edges"] >= 2
+    assert ex.get("usage_unmatched", 0) == 0   # every fixture value maps
 
 
 def test_constraints_meta_and_field_paths_wired(tmp_path):

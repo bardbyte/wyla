@@ -167,6 +167,7 @@ def compile_build(graph_root: Path, builds_root: Path
             # full-utilization pedigree (dmp/gmns) + usage texture
             # (mined) — serving-facing, never ranked on (E6/rc1)
             "author": record.props.get("author", ""),
+            "description": record.props.get("description", ""),
             "domain": record.props.get("domain", ""),
             "line_of_business":
                 record.props.get("line_of_business", ""),
@@ -197,7 +198,8 @@ def compile_build(graph_root: Path, builds_root: Path
             held["status"] = row["status"]
         for key in ("question", "question_source", "grain",
                     "grain_source", "label", "sign_convention",
-                    "author", "domain", "line_of_business", "scope"):
+                    "author", "description", "domain",
+                    "line_of_business", "scope"):
             held[key] = held[key] or row[key]
         if row["approved_dimensions"] and not held["approved_dimensions"]:
             held["approved_dimensions"] = row["approved_dimensions"]
@@ -309,16 +311,42 @@ def compile_build(graph_root: Path, builds_root: Path
             cell[family] = cell.get(family, 0) + (quad.prov.support or 1)
         elif s.startswith("mdom:"):
             lob_domains.setdefault(o, set()).add(s.split(":", 1)[1])
+    # usage plane (used_by): who RUNS the queries — aggregated per
+    # target org/LOB for the index and per table for the cards
+    usage_tables: dict[str, dict[str, int]] = {}
+    usage_by_table: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for (s, r, o, _w), quad in sorted(edges.items()):
+        if r != "used_by" or quad.prov.status != "active":
+            continue
+        physical = s.split(":", 1)[1]
+        cell = usage_tables.setdefault(o, {})
+        cell[physical] = cell.get(physical, 0) + (quad.prov.support or 1)
+    for lid, per_table in sorted(usage_tables.items()):
+        rec = lob_nodes.get(lid)
+        for physical, support in sorted(per_table.items()):
+            usage_by_table[physical].append({
+                "code": ((rec.props.get("code") if rec else "")
+                         or lid.split(":", 1)[1]),
+                "name": (rec.props.get("name", "") if rec else ""),
+                "parent": (rec.props.get("parent", "") if rec else ""),
+                "support": support,
+            })
+    for entries in usage_by_table.values():
+        entries.sort(key=lambda e: (-e["support"], e["code"]))
     lob_rows = []
     for lid in sorted(set(lob_nodes) | set(lob_tables)
-                      | set(lob_domains)):
+                      | set(lob_domains) | set(usage_tables)):
         rec = lob_nodes.get(lid)
         lob_rows.append({
             "lob": lid.split(":", 1)[1],
             "code": (rec.props.get("code", "") if rec else ""),
             "name": (rec.props.get("name", "") if rec else ""),
+            "kind": (rec.props.get("kind", "lob") if rec else "lob"),
+            "parent": (rec.props.get("parent", "") if rec else ""),
             "tables": sorted(lob_tables.get(lid, {})),
             "domains": sorted(lob_domains.get(lid, set())),
+            "used_tables": sorted(usage_tables.get(lid, {})),
+            "usage_support": sum(usage_tables.get(lid, {}).values()),
         })
     lob_by_table: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for lid, per_table in sorted(lob_tables.items()):
@@ -357,7 +385,8 @@ def compile_build(graph_root: Path, builds_root: Path
             sorted(co_by_table.get(physical, []),
                    key=lambda x: -x[1]),
             acl.get(physical, {"restricted": None, "pii_columns": []}),
-            lob_info=lob_by_table.get(physical, []))
+            lob_info=lob_by_table.get(physical, []),
+            usage_info=usage_by_table.get(physical, []))
         (build_dir / "cards" / "tables"
          / f"{physical.replace('.', '__')}.md").write_text(
             text + "\n", encoding="utf-8")

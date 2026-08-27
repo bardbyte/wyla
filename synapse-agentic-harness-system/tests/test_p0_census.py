@@ -371,3 +371,37 @@ def test_extended_gmns_adapts_to_unknown_wrapper_key(tmp_path):
     assert not records
     assert quarantined and quarantined[0].category == "missing_field"
     assert "no metric list" in quarantined[0].detail
+
+    # the REAL export shape (metric_catalog wrapper, DMP-sibling
+    # fields): friendly name wins, products carry the table hint,
+    # and the hand-written guidance + domain + question all ride
+    p.write_text(json.dumps({"metric_catalog": [{
+        "metricCatalogId": "e1a2-uuid",
+        "metricName": "local_spend_by_se_subm_ctry_cd",
+        "businessFriendlyMetricName":
+            "Local Spend - Submitted Country Code Method",
+        "associatedDataProductNames":
+            ["Acquirer (Merchant) — MERCHANT (Transactions)"],
+        "metricDomain": "Merchant Analytics",
+        "lineOfBusiness": "Global Merchant & Network Svcs",
+        "questionAnswered": "How much eligible local spend occurred?",
+        "metricDescription": "Measures eligible USD spend. Do not use "
+                             "for international spend.",
+        "sqlExpression": "SUM(se_trans_usd_am)",
+        "metricGrain": "transaction", "status": "Submitted",
+        "author": "Devarshi Vashishtha", "authorId": "dvashi",
+        "requestor": "Kartik Tyagi",
+        "createdAt": "2026-08-23", "updatedAt": "2026-08-23"}]}),
+        encoding="utf-8")
+    records, quarantined = load_extended_gmns(p)
+    assert not quarantined and len(records) == 1
+    r = records[0]
+    assert r.concept_label == "Local Spend - Submitted Country Code Method"
+    assert r.table_hint == \
+        "acquirer (merchant) — merchant (transactions)"
+    assert r.extra["question_answered"].startswith("How much")
+    assert "Do not use" in r.extra["description"]
+    assert r.extra["domain"] == "Merchant Analytics"
+    assert r.extra["author_id"] == "dvashi"
+    assert r.extra["line_of_business"] == "Global Merchant & Network Svcs"
+    assert r.last_seen == "2026-08-23"

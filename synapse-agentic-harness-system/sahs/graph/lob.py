@@ -60,6 +60,90 @@ def lob_alias_map(rows: list[LobRow]) -> dict[str, str]:
     return out
 
 
+class OrgRow(BaseModel):
+    """Sub-LOB / org unit (graph/identity/org_map.jsonl) — WHO QUERIES,
+    as distinct from who owns. The mined ``business_unit`` names the
+    org that runs the queries (CFR's 1,062 patterns sit 96% on GMNS
+    tables) — so org units feed ``used_by`` edges, never ``in_lob``
+    ownership. Each org has a parent LOB (must be a lob_map code)."""
+
+    org_code: str
+    org_name: str = ""
+    parent_lob: str                     # MUST be a lob_map code
+    aliases: list[str] = []
+    verified_by: str
+    verified_on: str
+    notes: str = ""
+
+
+def load_org_map(path: Path, lob_rows: list[LobRow]) -> list[OrgRow]:
+    lob_codes = {r.lob_code for r in lob_rows}
+    rows: list[OrgRow] = []
+    for line in Path(path).read_text(encoding="utf-8").split("\n"):
+        if not line.strip():
+            continue
+        row = OrgRow.model_validate(json.loads(line))
+        if row.parent_lob not in lob_codes:
+            raise ValueError(
+                f"org_map.jsonl: {row.org_code!r} -> parent_lob "
+                f"{row.parent_lob!r} is not a lob_map code "
+                f"({sorted(lob_codes)}) — fix the parent or add the "
+                "LOB first")
+        rows.append(row)
+    return rows
+
+
+def emit_org_map(rows: list[OrgRow], graph: GraphDir,
+                 run_id: str) -> dict:
+    """Org-unit nodes (lob kind, ``kind: org_unit``) + a steward
+    ``in_lob`` edge to the parent LOB. Usage edges (``used_by``) come
+    from the mined witness at emit time, resolved through
+    ``usage_target_map``."""
+    report = {"org_units": 0}
+    seen: set[str] = set()
+    for row in rows:
+        oid = lob_id(row.org_code)
+        if oid in seen:
+            continue
+        seen.add(oid)
+        graph.append_node(NodeRecord(
+            id=oid,
+            props={"code": row.org_code, "name": row.org_name,
+                   "kind": "org_unit", "parent": row.parent_lob},
+            prov=Prov(source="lob_map", run=run_id,
+                      actor=row.verified_by,
+                      evidence="identity/org_map.jsonl")))
+        graph.append_edge(Quad(
+            s=oid, r="in_lob", o=lob_id(row.parent_lob),
+            prov=Prov(source="lob_map", run=run_id,
+                      actor=row.verified_by,
+                      evidence="identity/org_map.jsonl")))
+        report["org_units"] += 1
+    return report
+
+
+def usage_target_map(lob_rows: list[LobRow],
+                     org_rows: list["OrgRow"]) -> dict[str, str]:
+    """slug → node id for every spelling a mined ``business_unit`` may
+    legally resolve to: LOB codes + aliases (usage BY the LOB's own
+    org) and org codes + aliases. Org entries win on collision (more
+    specific). Anything outside this map is counted, never guessed."""
+    out: dict[str, str] = {}
+    for row in lob_rows:
+        canonical = lob_id(row.lob_code)
+        out[canonical] = canonical
+        for alias in row.aliases:
+            if alias.strip():
+                out[lob_id(alias)] = canonical
+    for row in org_rows:
+        oid = lob_id(row.org_code)
+        out[oid] = oid
+        for alias in row.aliases:
+            if alias.strip():
+                out[lob_id(alias)] = oid
+    return out
+
+
 def load_lob_map(path: Path, crosswalk: Crosswalk) -> list[LobRow]:
     rows: list[LobRow] = []
     for line in Path(path).read_text(encoding="utf-8").split("\n"):

@@ -58,8 +58,8 @@ _STATE_RANK = {"mined": 1, "team_candidate": 2, "pending": 3,
 def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                      graph: GraphDir, crosswalk: Crosswalk,
                      run_id: str,
-                     known_lobs: set[str] | None = None,
-                     lob_aliases: dict[str, str] | None = None) -> dict:
+                     lob_aliases: dict[str, str] | None = None,
+                     usage_targets: dict[str, str] | None = None) -> dict:
     """Aggregate-then-write: sources sharing a fingerprint fuse into one
     node, one edge per (s,r,o,WITNESS) with support summed WITHIN the
     family only (E12/A1 — cross-family aggregation is compiler output,
@@ -67,12 +67,13 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
     highest-authority initial state — so the E7 transition history never
     starts with an illegal sequence.
 
-    ``known_lobs``: lob node ids the steward map already minted. LOB
-    minting is an authority privilege — a certified/pending catalog's
-    declared lineOfBusiness mints the lob node; a MINED business_unit
-    only ever corroborates an existing one (steward or catalog-declared)
-    and anything else is counted ``lob_unmatched``, never guessed into
-    the graph."""
+    LOB discipline: a certified/pending catalog's declared
+    lineOfBusiness mints/corroborates OWNERSHIP (``in_lob``), resolved
+    through the steward's ``lob_aliases``. A MINED business_unit names
+    who RUNS the queries — it resolves through ``usage_targets`` (LOB +
+    org-unit codes and aliases) to a ``used_by`` edge, never an
+    ownership edge; anything outside the map is counted
+    ``usage_unmatched``, never guessed into the graph."""
     report: dict = defaultdict(int)
     nodes: dict[str, dict] = {}
     node_prov: dict[str, tuple[str, int, str]] = {}
@@ -87,17 +88,6 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
     def canonical_lob(raw: str) -> str:
         lid = lob_id(raw)
         return aliases.get(lid, lid)
-
-    # authority pre-scan so a mined record processed BEFORE the catalog
-    # that declares its LOB still corroborates deterministically
-    declared_lobs: set[str] = set()
-    for record, _canon in pairs:
-        if record.kind == "metric_expr" \
-                and int(record.authority) >= int(Authority.PENDING):
-            raw = str(record.extra.get("line_of_business") or "").strip()
-            if raw:
-                declared_lobs.add(canonical_lob(raw))
-    corroboratable = (known_lobs or set()) | declared_lobs
 
     def witness_of(record: ExpressionRecord) -> str:
         return record.witness or SOURCE_WITNESS.get(record.source, "")
@@ -209,6 +199,8 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                 # non-empty wins per key; a fused metric keeps both its
                 # certified pedigree and its mined usage texture)
                 "author": record.extra.get("author") or "",
+                "author_id": record.extra.get("author_id") or "",
+                "description": record.extra.get("description") or "",
                 "domain": record.extra.get("domain") or "",
                 "line_of_business":
                     record.extra.get("line_of_business") or "",
@@ -249,12 +241,17 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                                    canonical_lob(lob_raw), record)
                     report["domain_edges"] += 1
             elif bu_raw:
-                lid = canonical_lob(bu_raw)
-                if lid in corroboratable:
-                    merge_edge(tid, "in_lob", lid, record)
-                    report["lob_corroborated_mined"] += 1
+                # usage, never ownership: the mined business_unit names
+                # who RUNS the queries — resolved through the steward's
+                # usage-target map (LOB + org-unit codes and aliases)
+                # to a used_by edge; anything outside the map is
+                # counted, never guessed
+                target = (usage_targets or {}).get(lob_id(bu_raw))
+                if target:
+                    merge_edge(tid, "used_by", target, record)
+                    report["used_by_edges"] += 1
                 else:
-                    report["lob_unmatched"] += 1
+                    report["usage_unmatched"] += 1
             group_key = (record.metric_ref
                          or f"{norm_label(record.concept_label or '?')}"
                             f"@{physical}").lower()

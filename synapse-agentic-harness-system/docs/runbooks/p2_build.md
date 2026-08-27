@@ -37,6 +37,13 @@ non-crosswalk physical refuses to load):
   the OTHER spellings the catalogs use for the same LOB (DMP declares
   by display name, codes are short) — declared equivalence, so the two
   never fork into parallel lob nodes.
+- `org_map.jsonl` — org units (sub-LOBs): `{"org_code": "CFR",
+  "org_name": "Credit & Fraud Risk", "parent_lob": "Finance",
+  "aliases": [], …}`. Ownership and usage are DIFFERENT facts: the
+  mined `business_unit` names who RUNS the queries, and it resolves
+  through the LOB+org codes/aliases into `used_by` edges — never into
+  `in_lob` ownership. Unmapped values are counted
+  (`usage_unmatched`), never guessed.
   Steward witness; dmp/gmns declarations corroborate with their own
   witnesses; mined `business_unit` values only corroborate an existing
   lob node (`lob_unmatched` counts the rest — mined noise never mints).

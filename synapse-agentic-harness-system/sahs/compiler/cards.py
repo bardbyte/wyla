@@ -46,12 +46,32 @@ def _lob_line(lob_info: list[dict[str, Any]]) -> str:
             + " [prov:in_lob]")
 
 
+def _usage_line(usage_info: list[dict[str, Any]]) -> str:
+    """Who RUNS the queries (mined witness) — distinct from ownership.
+    `used by: CFR — Credit & Fraud Risk (Finance) · 1062` tells the
+    agent a cross-LOB join with risk data is normal here, not a
+    mistake."""
+    rendered = []
+    for entry in usage_info[:5]:
+        label = entry["code"]
+        if entry.get("name"):
+            label += f" — {entry['name']}"
+        if entry.get("parent"):
+            label += f" ({entry['parent']})"
+        rendered.append(f"{label} · {entry['support']}")
+    more = len(usage_info) - 5
+    return ("- used by: " + " · ".join(rendered)
+            + (f" · +{more} more" if more > 0 else "")
+            + " [prov:used_by·catalog_mined]")
+
+
 def table_card(consensus: TableConsensus, node_props: dict[str, Any],
                metrics_here: list[dict[str, Any]],
                filters_here: list[dict[str, Any]],
                co_queried: list[tuple[str, int]],
                acl_entry: dict[str, Any],
-               lob_info: list[dict[str, Any]] | None = None
+               lob_info: list[dict[str, Any]] | None = None,
+               usage_info: list[dict[str, Any]] | None = None
                ) -> tuple[str, dict[str, Any]]:
     """→ (markdown, budget_report)."""
     physical = consensus.physical
@@ -72,6 +92,8 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
     ]
     if lob_info:
         lines["header"].append(_lob_line(lob_info))
+    if usage_info:
+        lines["header"].append(_usage_line(usage_info))
     purpose = (node_props.get("description_atlas")
                or node_props.get("description_bq") or "")
     if purpose:
@@ -196,6 +218,12 @@ def metric_card(metric: dict[str, Any],
         lines.append(f"- answers: “{metric['question']}” "
                      + ("[prov:llm_enriched·unreviewed]"
                         if q_src == "llm_enriched" else "[prov:dmp]"))
+    if metric.get("description"):
+        # the catalog's own hand-written guidance — what it measures,
+        # the "do not use for…" list, disambiguation instructions.
+        # Verbatim: this text IS the serving payload
+        lines.append(f"- guidance: {metric['description']} "
+                     f"[prov:{metric['source']}]")
     grain_prov = ("llm_enriched·unreviewed"
                   if metric.get("grain_source") == "llm_enriched"
                   else metric["source"])

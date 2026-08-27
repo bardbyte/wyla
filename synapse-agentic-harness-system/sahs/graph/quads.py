@@ -115,11 +115,16 @@ RELATIONS: dict[str, tuple[set[str], set[str]]] = {
     "described_by":    ({"table", "col"}, {"doc"}),
     # E12/A5: ReviewItem → the node it is about (any kind incl. review)
     "concerns":        ({"review"}, ID_KINDS | {"review", "run"}),
-    # LOB layer — steward lob_map declares, dmp corroborates+mints,
-    # mined measures ONLY corroborate existing lob nodes (never mint).
-    # Multi-membership is legal: one edge per (subject, lob, witness).
-    "in_lob":          ({"table", "mdom"}, {"lob"}),
+    # LOB layer — steward lob_map declares ownership, dmp/gmns
+    # corroborate+mint (through declared aliases); org units (sub-LOBs)
+    # link to their parent LOB. Multi-membership is legal: one edge per
+    # (subject, lob, witness).
+    "in_lob":          ({"table", "mdom", "lob"}, {"lob"}),
     "in_domain":       ({"metric"}, {"mdom"}),
+    # usage is a DIFFERENT fact from ownership: the mined
+    # business_unit names who RUNS the queries (CFR's patterns sit on
+    # GMNS tables) — it feeds used_by, never in_lob
+    "used_by":         ({"table"}, {"lob"}),
     # declared constraints (11_logical_constraints) — the referenced
     # column resolves through the crosswalk or the edge is a counted
     # skip; a declared join key beats a co-query digest at telling the

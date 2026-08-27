@@ -54,8 +54,17 @@ def load_metrics_dmp(path: Path) -> tuple[list[ExpressionRecord],
             extra={"question_answered": row.get("questionAnswered"),
                    "status": row.get("status"),
                    "author": row.get("author"),
+                   "author_id": row.get("authorId"),
+                   "requestor": row.get("requestor"),
                    "domain": row.get("metricDomain"),
                    "line_of_business": row.get("lineOfBusiness"),
+                   # the buried treasure: hand-written usage guidance
+                   # ("do not use for…") + disambiguation instructions
+                   "description": row.get("metricDescription"),
+                   "calculation": row.get("calculation"),
+                   "approved_dimensions": row.get("approvedDimensions"),
+                   "metric_grain": row.get("metricGrain"),
+                   "metric_scope": row.get("metricScope"),
                    "products": [str(p) for p in products]}))
     return records, quarantined
 
@@ -114,19 +123,36 @@ def load_extended_gmns(path: Path) -> tuple[list[ExpressionRecord],
                 detail=f"pending metric {name} without SQL",
                 evidence_ref=ref))
             continue
+        # the real export is DMP's sibling — same schema plus
+        # calculation prose. Products resolve through the SAME alias
+        # chain, friendly names win, and every documented field rides.
+        products = [str(p) for p in
+                    (row.get("associatedDataProductNames") or [])]
+        hint = (products[0] if products else
+                str(row.get("table") or row.get("tableName")
+                    or row.get("associatedTable")
+                    or "gms_transaction"))
         records.append(ExpressionRecord(
             raw_sql=sql, kind="metric_expr", source="extended_gmns",
             authority=Authority.PENDING,
-            metric_ref=f"gmns:{name}", concept_label=name,
-            table_hint=str(row.get("table") or row.get("tableName")
-                           or row.get("associatedTable")
-                           or "gms_transaction").lower(),
+            metric_ref=f"gmns:{name}",
+            concept_label=str(row.get("businessFriendlyMetricName")
+                              or name),
+            table_hint=hint.lower(),
+            first_seen=str(row.get("createdAt") or ""),
+            last_seen=str(row.get("updatedAt") or ""),
             evidence_ref=ref,
-            extra={"calculation": row.get("calculation"),
+            extra={"question_answered": row.get("questionAnswered"),
+                   "calculation": row.get("calculation"),
                    "approved_dimensions": row.get("approvedDimensions"),
                    "metric_grain": row.get("metricGrain"),
                    "metric_scope": row.get("metricScope"),
                    "requestor": row.get("requestor"),
+                   "author": row.get("author"),
+                   "author_id": row.get("authorId"),
+                   "domain": row.get("metricDomain"),
+                   "description": row.get("metricDescription"),
+                   "products": products,
                    "status": row.get("status", "Submitted"),
                    # the catalog's own name declares its scope: every
                    # pending spec in this file is a GMNS metric

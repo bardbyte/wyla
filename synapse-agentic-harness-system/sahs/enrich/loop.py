@@ -115,6 +115,9 @@ def plan_metric_items(build: Build, folded_nodes: dict,
         props = record.props if record is not None else {}
         if props.get("question_answered") and props.get("grain"):
             continue
+        if props.get("description"):
+            continue        # the catalog documented it by hand —
+                            # never ask the model to redo a steward
         if props.get("question_enriched") or props.get("grain_enriched"):
             continue                     # enriched in a prior run
         if not row.get("canonical_sql"):

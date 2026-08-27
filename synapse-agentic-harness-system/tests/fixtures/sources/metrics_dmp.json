@@ -14,7 +14,8 @@
    "metricDomain": "Merchant",
    "lineOfBusiness": "GMNS",
    "createdAt": "2025-11-01",
-   "updatedAt": "2026-07-15"
+   "updatedAt": "2026-07-15",
+   "metricDescription": "Measures signed merchant spend using the approved sign convention. Do not use for authorization counts or approval rates. If the user asks for local spend, clarify whether they want the country-code method or the region method."
   },
   {
    "metricCatalogId": "102",

@@ -100,10 +100,16 @@ def _slot_result(candidates: list[dict[str, Any]], constants: dict
         if extra in top:
             features[extra] = top[extra]
     if margin < constants["margin_threshold"] or fuzzy_only:
+        # when the catalog wrote its own disambiguation guidance
+        # ("clarify whether they want the submitted-country-code
+        # method or…"), the ask carries it — the steward's words, not
+        # a generated question
         options = [{
             "id": c["id"], "label": c["option_label"],
             "why": f"tier={c['tier']} rest={c['rest']['rest']}",
             "prov": c["prov"],
+            **({"guidance": c["description"][:240]}
+               if c.get("description") else {}),
         } for c in ranked[:4]]
         return {"bound": None, "confidence": 0.0, "features": features,
                 "ambiguity": {"options": options,
@@ -135,7 +141,12 @@ def resolve(build: Build, question: str,
         if symbol in (question or "").lower().split() \
                 or symbol in tokens:
             bu = (context.get("bu") or "").lower()
-            if row.get("bu", "all") in ("all", bu or row.get("bu")):
+            # real acropedia rows carry comma-joined multi-BU scopes
+            # ("GMNS,Technology") — an acronym matches when ANY of its
+            # scopes matches the question's bu context
+            scopes = {b.strip() for b in
+                      str(row.get("bu", "all")).lower().split(",")}
+            if "all" in scopes or not bu or bu in scopes:
                 expanded |= _tokens(row.get("definition", ""))
                 acronym_hits.append(row)
 
@@ -186,6 +197,7 @@ def resolve(build: Build, question: str,
             "witness_agreement": row.get("witness_agreement", 1),
             "recency_source": row.get("recency_source", ""),
             "line_of_business": row.get("line_of_business", ""),
+            "description": row.get("description", ""),
             "exact_q": exact_question,
         })
     # a curated DMP question matching VERBATIM is definitional — prune

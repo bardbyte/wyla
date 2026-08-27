@@ -329,21 +329,29 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
     # aliases.jsonl: strict, local, never guessed). Emitted BEFORE the
     # semantic catalogs so mined business_unit values can corroborate
     # steward-declared lob nodes.
-    known_lobs: set[str] = set()
     lob_aliases: dict[str, str] = {}
+    usage_targets: dict[str, str] = {}
     lob_path = Path(args.crosswalk).parent / "lob_map.jsonl"
     if lob_path.exists():
-        from sahs.graph.ids import lob_id
         from sahs.graph.lob import (
             emit_lob_map,
+            emit_org_map,
             load_lob_map,
+            load_org_map,
             lob_alias_map,
+            usage_target_map,
         )
         console.phase("lob map")
         lob_rows = load_lob_map(lob_path, crosswalk)
         reports["lob_map"] = emit_lob_map(lob_rows, graph, run_id)
-        known_lobs = {lob_id(r.lob_code) for r in lob_rows}
         lob_aliases = lob_alias_map(lob_rows)
+        # org units (sub-LOBs, WHO QUERIES) — optional second sidecar
+        org_rows = []
+        org_path = Path(args.crosswalk).parent / "org_map.jsonl"
+        if org_path.exists():
+            org_rows = load_org_map(org_path, lob_rows)
+            reports["org_map"] = emit_org_map(org_rows, graph, run_id)
+        usage_targets = usage_target_map(lob_rows, org_rows)
 
     if args.sources_dir:
         sources = Path(args.sources_dir)
@@ -355,8 +363,8 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
         for q in canon_quar:
             console.item_quarantined(q.category, q.evidence_ref)
         reports["expressions"] = emit_expressions(
-            pairs, graph, crosswalk, run_id, known_lobs=known_lobs,
-            lob_aliases=lob_aliases)
+            pairs, graph, crosswalk, run_id, lob_aliases=lob_aliases,
+            usage_targets=usage_targets)
         glossary_path = sources / "data_cleaned.csv"
         terms_path = sources / "business_terms.csv"
         glossary = (load_glossary(glossary_path)[0]
