@@ -10,6 +10,7 @@ message — never a stack trace."""
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -35,6 +36,9 @@ class VertexClient:
     sleep: Callable[[float], None] = time.sleep
     usage: dict[str, int] = field(default_factory=lambda: {
         "calls": 0, "prompt_tokens": 0, "output_tokens": 0})
+    thinking_ok: bool = True     # flips off for the run when the
+                                 # endpoint rejects thinking_config
+                                 # (proven graceful-degrade behavior)
 
     def _token(self) -> str:
         if self.token_provider is not None:
@@ -82,6 +86,15 @@ class VertexClient:
                 "responseMimeType": "application/json",
             },
         }
+        # GEMINI_THINKING_BUDGET (proven laptop knob): set → attach;
+        # "0" disables thinking explicitly; unset → model default
+        budget = (os.environ.get("GEMINI_THINKING_BUDGET") or "").strip()
+        if budget and self.thinking_ok:
+            try:
+                body["generationConfig"]["thinkingConfig"] = {
+                    "thinkingBudget": int(budget)}
+            except ValueError:
+                pass
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
         last_error = "no attempt made"
@@ -95,6 +108,14 @@ class VertexClient:
                         "message", str(e))
                 except Exception:
                     message = str(e)
+                if e.code == 400 and "thinking" in message.lower() \
+                        and "thinkingConfig" in body["generationConfig"]:
+                    # endpoint rejects thinking — degrade gracefully
+                    # for the whole run, retry this call without it
+                    del body["generationConfig"]["thinkingConfig"]
+                    self.thinking_ok = False
+                    last_error = f"thinking rejected: {message}"
+                    continue
                 if e.code in _RETRY_STATUSES and backoff is not None:
                     last_error = f"HTTP {e.code}: {message}"
                     self.sleep(backoff)

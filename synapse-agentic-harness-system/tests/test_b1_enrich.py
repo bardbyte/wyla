@@ -212,7 +212,10 @@ def test_vertex_env_contract_is_typed_and_separate(tmp_path,
     empty_env.write_text("", encoding="utf-8")
     monkeypatch.setenv("SAHS_ENV_FILE", str(empty_env))
     for name in ("VERTEX_PROJECT_ID", "LUMI_VERTEX_PROJECT",
-                 "VERTEX_MODEL", "LUMI_VERTEX_MODEL",
+                 "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
+                 "VERTEX_MODEL", "LUMI_VERTEX_MODEL", "GEMINI_MODEL",
+                 "VERTEX_LOCATION", "LUMI_VERTEX_LOCATION",
+                 "VERTEX_API_BASE_URL",
                  "LUMI_VERTEX_SA_KEY", "GOOGLE_APPLICATION_CREDENTIALS"):
         monkeypatch.delenv(name, raising=False)
     # the BQ project must NOT leak into the Vertex contract
@@ -223,16 +226,24 @@ def test_vertex_env_contract_is_typed_and_separate(tmp_path,
     except AuthError as e:
         assert "VERTEX_PROJECT_ID" in str(e)
         assert "never" in str(e).lower()
-    monkeypatch.setenv("VERTEX_PROJECT_ID", "vertex-proj")
-    try:
-        VertexConnection.from_env()
-        raise AssertionError("missing model must be typed")
-    except AuthError as e:
-        assert "VERTEX_MODEL" in str(e)
-    monkeypatch.setenv("VERTEX_MODEL", "gemini-test")
+    # the proven ADK laptop env resolves as-is: GOOGLE_CLOUD_PROJECT
+    # is the VERTEX project there, and the defaults are the proven
+    # global + gemini-3.1-pro-preview pair
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "prj-d-ea-poc")
     key = tmp_path / "k.json"
     key.write_text("{}", encoding="utf-8")
     monkeypatch.setenv("LUMI_VERTEX_SA_KEY", str(key))
     connection = VertexConnection.from_env()
+    assert connection.project == "prj-d-ea-poc"
+    assert connection.location == "global"
+    assert connection.model == "gemini-3.1-pro-preview"
+    assert connection.endpoint == "https://aiplatform.googleapis.com"
+    # silo-first names win; a regional location derives its own host
+    monkeypatch.setenv("VERTEX_PROJECT_ID", "vertex-proj")
+    monkeypatch.setenv("VERTEX_LOCATION", "us-central1")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-test")
+    connection = VertexConnection.from_env()
     assert connection.project == "vertex-proj"
     assert connection.model == "gemini-test"
+    assert connection.endpoint == \
+        "https://us-central1-aiplatform.googleapis.com"

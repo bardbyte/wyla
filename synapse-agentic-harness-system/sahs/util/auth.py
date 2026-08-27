@@ -12,8 +12,28 @@ Resolution order (first hit wins), matching the existing laptop setup:
     Vertex key   LUMI_VERTEX_SA_KEY  → GOOGLE_APPLICATION_CREDENTIALS
     BQ project   BQ_PROJECT_ID → LUMI_BQ_PROJECT → GOOGLE_CLOUD_PROJECT
     BQ endpoint  BIGQUERY_API_BASE_URL → BIGQUERY_URL → enterprise PSC default
-    Vertex URL   VERTEX_API_BASE_URL → public default
     BQ location  BQ_LOCATION → "US"
+
+Vertex resolution honors the PROVEN laptop contract (the ADK apps and
+check_vertex_gemini.py that already ran against prj-d-ea-poc): the
+standard GOOGLE_* names, location "global" (Vertex's globally-routed
+endpoint — the right default for the Gemini previews), GEMINI_MODEL,
+and the GEMINI_* TLS knobs. Silo-first names win when both are set:
+
+    Vertex project   VERTEX_PROJECT_ID → LUMI_VERTEX_PROJECT
+                     → GOOGLE_CLOUD_PROJECT      (never a BQ_* var)
+    Vertex location  VERTEX_LOCATION → LUMI_VERTEX_LOCATION
+                     → GOOGLE_CLOUD_LOCATION → "global"
+    Vertex model     VERTEX_MODEL → LUMI_VERTEX_MODEL → GEMINI_MODEL
+                     → "gemini-3.1-pro-preview" (the proven default)
+    Vertex URL       VERTEX_API_BASE_URL → derived from location
+                     (global → aiplatform.googleapis.com; regional →
+                      {location}-aiplatform.googleapis.com)
+    Vertex TLS       GEMINI_CA_BUNDLE → REQUESTS_CA_BUNDLE →
+                     SSL_CERT_FILE; insecure opt-in via
+                     GEMINI_TLS_INSECURE=1 or BQ_SSL_NO_VERIFY=1;
+                     `truststore` (the OS keychain, where corporate
+                     roots live) engages best-effort in every mode
 
 No global credential mutation happens on import; callers ask for what they
 need. Missing configuration is reported as a typed error (exit code 3 —
@@ -136,26 +156,59 @@ def resolve_bq_endpoint() -> str:
     return (v or DEFAULT_BQ_ENDPOINT).rstrip("/")
 
 
-def resolve_vertex_endpoint() -> str:
+DEFAULT_VERTEX_LOCATION = "global"     # the proven laptop default —
+                                       # Vertex's globally-routed
+                                       # endpoint, right for the
+                                       # Gemini previews
+DEFAULT_VERTEX_MODEL = "gemini-3.1-pro-preview"   # proven reachable
+                                                  # from prj-d-ea-poc
+
+
+def resolve_vertex_endpoint(location: str = "") -> str:
+    """VERTEX_API_BASE_URL wins (PSC); otherwise derived from the
+    location — REST requires the REGIONAL host for a regional
+    location, while "global" uses the plain host."""
     v = _first_env("VERTEX_API_BASE_URL")
-    return (v or DEFAULT_VERTEX_ENDPOINT).rstrip("/")
+    if v:
+        return v.rstrip("/")
+    location = (location or "").strip().lower()
+    if location and location != "global":
+        return f"https://{location}-aiplatform.googleapis.com"
+    return DEFAULT_VERTEX_ENDPOINT
 
 
 def resolve_vertex_project() -> str | None:
-    """DELIBERATELY never falls back to the BQ project: the laptop's
-    Vertex SVC-ID lives in a DIFFERENT project than the BQ dry-run one,
-    and a silent fallback would bill (and fail) against the wrong
-    project. Missing → typed error naming the variable."""
-    return _first_env("VERTEX_PROJECT_ID", "LUMI_VERTEX_PROJECT")
+    """Never a BQ_* variable: the laptop's Vertex SVC-ID lives in a
+    DIFFERENT project (prj-d-ea-poc) than the BQ dry-run one, and a
+    silent BQ fallback would bill (and fail) against the wrong
+    project. GOOGLE_CLOUD_PROJECT is accepted because the proven ADK
+    setup already sets it to the VERTEX project."""
+    return _first_env("VERTEX_PROJECT_ID", "LUMI_VERTEX_PROJECT",
+                      "GOOGLE_CLOUD_PROJECT")
 
 
 def resolve_vertex_location() -> str:
-    return _first_env("VERTEX_LOCATION", "LUMI_VERTEX_LOCATION") \
-        or "us-central1"
+    return _first_env("VERTEX_LOCATION", "LUMI_VERTEX_LOCATION",
+                      "GOOGLE_CLOUD_LOCATION") or DEFAULT_VERTEX_LOCATION
 
 
-def resolve_vertex_model() -> str | None:
-    return _first_env("VERTEX_MODEL", "LUMI_VERTEX_MODEL")
+def resolve_vertex_model() -> str:
+    return _first_env("VERTEX_MODEL", "LUMI_VERTEX_MODEL",
+                      "GEMINI_MODEL") or DEFAULT_VERTEX_MODEL
+
+
+def resolve_vertex_ssl() -> tuple[bool, str | None]:
+    """Vertex layers the proven GEMINI_* knobs over the shared ones:
+    GEMINI_TLS_INSECURE=1 (or BQ_SSL_NO_VERIFY=1) disables
+    verification; GEMINI_CA_BUNDLE → REQUESTS_CA_BUNDLE →
+    SSL_CERT_FILE names the corporate root."""
+    insecure = (os.environ.get("GEMINI_TLS_INSECURE") or "").lower()
+    if insecure in ("1", "true", "yes") \
+            or os.environ.get("BQ_SSL_NO_VERIFY") == "1":
+        return False, None
+    bundle = _first_env("GEMINI_CA_BUNDLE", "REQUESTS_CA_BUNDLE",
+                        "SSL_CERT_FILE")
+    return True, bundle
 
 
 def resolve_bq_location() -> str:
@@ -238,26 +291,25 @@ class VertexConnection:
     key_path: Path | None
     ssl_verify: bool = True
     ca_bundle: str | None = None
+    truststore_active: bool = False
 
     @classmethod
     def from_env(cls) -> "VertexConnection":
         """Same bootstrap shape as BQConnection: .env → validate →
         resolve endpoint → NO_PROXY injection → SSL settings. Fails
-        fast with a typed error (exit 3)."""
+        fast with a typed error (exit 3). ``truststore`` (the OS
+        keychain, where corporate root CAs actually live) engages
+        best-effort in every mode — the field lesson: it is the clean
+        fix for corporate TLS interception, strictly better than
+        disabling verification."""
         load_dotenv()
         project = resolve_vertex_project()
         if not project:
             raise AuthError(
                 "no Vertex project configured — set VERTEX_PROJECT_ID "
-                "(or LUMI_VERTEX_PROJECT), e.g. in .env. This is a "
-                "DIFFERENT project than the BQ one and is never "
-                "borrowed from it")
-        model = resolve_vertex_model()
-        if not model:
-            raise AuthError(
-                "no Vertex model configured — set VERTEX_MODEL (or "
-                "LUMI_VERTEX_MODEL) to the model id your project "
-                "serves, e.g. gemini-2.5-pro / gemini-2.0-flash")
+                "(or LUMI_VERTEX_PROJECT / GOOGLE_CLOUD_PROJECT), "
+                "e.g. in .env. This is a DIFFERENT project than the "
+                "BQ one and is never borrowed from a BQ_* variable")
         key = resolve_vertex_key_path()
         if key is None:
             raise AuthError(
@@ -266,12 +318,21 @@ class VertexConnection:
                 "path, e.g. in .env")
         if not key.exists():
             raise AuthError(f"Vertex SA key not found on disk: {key}")
-        endpoint = resolve_vertex_endpoint()
+        truststore_active = False
+        try:
+            import truststore                    # type: ignore
+            truststore.inject_into_ssl()
+            truststore_active = True
+        except ImportError:
+            pass
+        location = resolve_vertex_location()
+        endpoint = resolve_vertex_endpoint(location)
         configure_network(endpoint)
-        verify, bundle = resolve_ssl()
-        return cls(project=project, location=resolve_vertex_location(),
-                   model=model, endpoint=endpoint, key_path=key,
-                   ssl_verify=verify, ca_bundle=bundle)
+        verify, bundle = resolve_vertex_ssl()
+        return cls(project=project, location=location,
+                   model=resolve_vertex_model(), endpoint=endpoint,
+                   key_path=key, ssl_verify=verify, ca_bundle=bundle,
+                   truststore_active=truststore_active)
 
     def ssl_context(self) -> ssl.SSLContext:
         if not self.ssl_verify:

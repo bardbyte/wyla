@@ -40,13 +40,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"✗ {e}", file=sys.stderr)
         print("  put the Vertex variables in "
               "synapse-agentic-harness-system/.env (alongside the BQ "
-              "ones — these are SEPARATE):", file=sys.stderr)
-        print("    LUMI_VERTEX_SA_KEY=/path/to/vertex-key.json\n"
-              "    VERTEX_PROJECT_ID=<the Vertex project — NOT the BQ "
-              "one>\n"
-              "    VERTEX_LOCATION=us-central1\n"
-              "    VERTEX_MODEL=<the model id your project serves>\n"
-              "    VERTEX_API_BASE_URL=<PSC endpoint if applicable>",
+              "ones — these are SEPARATE; the proven ADK laptop "
+              "values):", file=sys.stderr)
+        print("    LUMI_VERTEX_SA_KEY=~/.gcp/prj-d-ea-poc.json\n"
+              "    VERTEX_PROJECT_ID=prj-d-ea-poc   # or your existing "
+              "GOOGLE_CLOUD_PROJECT\n"
+              "    # location defaults to 'global', model to "
+              "gemini-3.1-pro-preview — the proven pair;\n"
+              "    # override with VERTEX_LOCATION / VERTEX_MODEL "
+              "(or GOOGLE_CLOUD_LOCATION / GEMINI_MODEL)",
               file=sys.stderr)
         return EXIT_ENV_AUTH
 
@@ -57,10 +59,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  endpoint   {connection.endpoint}")
     print(f"  key file   {connection.key_path} (exists)")
     print(f"  NO_PROXY   {os.environ.get('NO_PROXY', '(none)')}")
+    trust_note = ("ACTIVE (OS keychain trust — the clean "
+                  "corporate-TLS fix)" if connection.truststore_active
+                  else "not installed (pip install truststore "
+                  "recommended on the corporate network)")
+    print(f"  truststore {trust_note}")
     if not connection.ssl_verify:
-        print("  ⚠ TLS verification DISABLED (BQ_SSL_NO_VERIFY=1) — "
-              "prefer REQUESTS_CA_BUNDLE with the corporate root cert "
-              "when available")
+        print("  ⚠ TLS verification DISABLED (GEMINI_TLS_INSECURE / "
+              "BQ_SSL_NO_VERIFY) — prefer truststore or "
+              "GEMINI_CA_BUNDLE with the corporate root cert")
     elif connection.ca_bundle:
         print(f"  CA bundle  {connection.ca_bundle}")
     else:

@@ -19,21 +19,47 @@ descriptions — under three non-negotiables:
 
 ## 0. Environment (once) — Vertex is NOT the BQ contract
 
-The Vertex SVC-ID and project are DIFFERENT from the BQ dry-run ones.
-Add to `synapse-agentic-harness-system/.env` (alongside the BQ vars —
-nothing is borrowed between the two):
+The Vertex SVC-ID and project are DIFFERENT from the BQ dry-run ones,
+and the resolution honors the PROVEN laptop contract — the same env
+the ADK apps and `check_vertex_gemini.py` already ran with against
+`prj-d-ea-poc`. If your `.env` still carries the ADK-era variables,
+**nothing new is needed** — they resolve as-is:
 
 ```
-LUMI_VERTEX_SA_KEY=/path/to/vertex-key.json
-VERTEX_PROJECT_ID=<the Vertex project id>
-VERTEX_LOCATION=us-central1
-VERTEX_MODEL=<the model id your project serves, e.g. gemini-2.5-pro>
-# only if your enterprise routes Vertex through a PSC endpoint:
-# VERTEX_API_BASE_URL=https://<psc-host>
+# proven ADK setup (works unchanged):
+GOOGLE_APPLICATION_CREDENTIALS=~/.gcp/prj-d-ea-poc.json
+GOOGLE_CLOUD_PROJECT=prj-d-ea-poc
+GOOGLE_CLOUD_LOCATION=global            # optional — global is default
+GEMINI_MODEL=gemini-3.1-pro-preview     # optional — this is default
+
+# silo-first names (win over the above when both are set):
+# LUMI_VERTEX_SA_KEY=… VERTEX_PROJECT_ID=… VERTEX_LOCATION=…
+# VERTEX_MODEL=…  VERTEX_API_BASE_URL=<PSC endpoint if applicable>
 ```
 
-Proxy/TLS knobs are shared with BQ (`BQ_DISABLE_PROXY=1`,
-`REQUESTS_CA_BUNDLE=…`, last-resort `BQ_SSL_NO_VERIFY=1`).
+Keep the key file OUTSIDE the repo (e.g. `~/.gcp/`) — never commit it.
+
+⚠ **Two keys on one laptop**: BQ and Vertex BOTH fall back to
+`GOOGLE_APPLICATION_CREDENTIALS`, and your two SVC-IDs are different.
+When both live in the same `.env`, use the explicit names so neither
+borrows the other's key:
+
+```
+LUMI_BQ_SA_KEY=~/.gcp/<bq-key>.json
+LUMI_VERTEX_SA_KEY=~/.gcp/<vertex-key>.json
+```
+A regional location (e.g. `us-central1`) derives its own regional host
+automatically; `global` uses the globally-routed endpoint (the right
+default for the Gemini previews).
+
+TLS on the corporate network (the field-proven order): `pip install
+truststore` — the OS keychain, where the corporate root actually
+lives, engages automatically; else `GEMINI_CA_BUNDLE=<corporate root
+pem>` (or `REQUESTS_CA_BUNDLE`); last resort `GEMINI_TLS_INSECURE=1`
+(or `BQ_SSL_NO_VERIFY=1`). Proxy knobs are shared with BQ
+(`BQ_DISABLE_PROXY=1` / `BQ_FORCE_PROXY=1`). Thinking:
+`GEMINI_THINKING_BUDGET=<n>` sets a budget, `0` disables; endpoints
+that reject thinking degrade gracefully for the run.
 
 ```bash
 python scripts/vertex_check.py             # config + token

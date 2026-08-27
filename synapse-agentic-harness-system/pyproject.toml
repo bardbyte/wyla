@@ -20,6 +20,9 @@ mcp = ["mcp[cli]"]
 # L5-ready (out of scope for the L4 plan; the extra exists so the silo owns
 # its own model connectivity when the agent loop lands).
 adk = ["google-adk", "google-genai>=0.5"]
+# B1 enrichment: SA token refresh + the OS-keychain trust source that
+# makes corporate-MITM TLS work cleanly (proven on the laptop)
+enrich = ["google-auth", "truststore"]
 dev = ["pytest>=8"]
 
 [tool.pytest.ini_options]
