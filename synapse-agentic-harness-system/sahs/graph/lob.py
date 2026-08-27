@@ -38,6 +38,26 @@ class LobRow(BaseModel):
     verified_by: str
     verified_on: str
     notes: str = ""
+    # run-2 finding: DMP declares LOBs by DISPLAY NAME ("Global
+    # Merchant & Network Svcs") while codes are short (GMNS) — without
+    # declared equivalence the two slug to PARALLEL lob nodes and the
+    # corroboration splits. Aliases are that human declaration: every
+    # listed spelling resolves onto THIS code's node.
+    aliases: list[str] = []
+
+
+def lob_alias_map(rows: list[LobRow]) -> dict[str, str]:
+    """slugged-alias lob id → canonical lob id, for every alias on
+    every row. Emitters resolve declared/mined LOB values through this
+    before minting or corroborating — equivalence is declared by the
+    steward, never guessed from string similarity."""
+    out: dict[str, str] = {}
+    for row in rows:
+        canonical = lob_id(row.lob_code)
+        for alias in row.aliases:
+            if alias.strip():
+                out[lob_id(alias)] = canonical
+    return out
 
 
 def load_lob_map(path: Path, crosswalk: Crosswalk) -> list[LobRow]:

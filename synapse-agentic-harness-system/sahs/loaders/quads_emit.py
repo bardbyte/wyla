@@ -58,7 +58,8 @@ _STATE_RANK = {"mined": 1, "team_candidate": 2, "pending": 3,
 def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                      graph: GraphDir, crosswalk: Crosswalk,
                      run_id: str,
-                     known_lobs: set[str] | None = None) -> dict:
+                     known_lobs: set[str] | None = None,
+                     lob_aliases: dict[str, str] | None = None) -> dict:
     """Aggregate-then-write: sources sharing a fingerprint fuse into one
     node, one edge per (s,r,o,WITNESS) with support summed WITHIN the
     family only (E12/A1 — cross-family aggregation is compiler output,
@@ -78,6 +79,15 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
     edges: dict[tuple[str, str, str, str], dict] = {}
     states: dict[str, str] = {}
 
+    # steward-declared equivalence: a DMP display name and a steward
+    # code resolving to the same lob node (lob_alias_map) — applied
+    # BEFORE minting or corroborating, so parallel nodes never fork
+    aliases = lob_aliases or {}
+
+    def canonical_lob(raw: str) -> str:
+        lid = lob_id(raw)
+        return aliases.get(lid, lid)
+
     # authority pre-scan so a mined record processed BEFORE the catalog
     # that declares its LOB still corroborates deterministically
     declared_lobs: set[str] = set()
@@ -86,7 +96,7 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                 and int(record.authority) >= int(Authority.PENDING):
             raw = str(record.extra.get("line_of_business") or "").strip()
             if raw:
-                declared_lobs.add(lob_id(raw))
+                declared_lobs.add(canonical_lob(raw))
     corroboratable = (known_lobs or set()) | declared_lobs
 
     def witness_of(record: ExpressionRecord) -> str:
@@ -223,8 +233,11 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
             bu_raw = str(record.extra.get("business_unit") or "").strip()
             if int(record.authority) >= int(Authority.PENDING):
                 if lob_raw:
-                    lid = lob_id(lob_raw)
-                    merge_node(lid, {"code": lob_raw}, record)
+                    lid = canonical_lob(lob_raw)
+                    if lid == lob_id(lob_raw):
+                        # novel lob — mint; an ALIASED value must not
+                        # clobber the steward node's code on fold
+                        merge_node(lid, {"code": lob_raw}, record)
                     merge_edge(tid, "in_lob", lid, record)
                     report["lob_edges"] += 1
                 if dom_raw:
@@ -232,10 +245,11 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                     merge_node(mid, {"name": dom_raw}, record)
                     merge_edge(metric, "in_domain", mid, record)
                     if lob_raw:
-                        merge_edge(mid, "in_lob", lob_id(lob_raw), record)
+                        merge_edge(mid, "in_lob",
+                                   canonical_lob(lob_raw), record)
                     report["domain_edges"] += 1
             elif bu_raw:
-                lid = lob_id(bu_raw)
+                lid = canonical_lob(bu_raw)
                 if lid in corroboratable:
                     merge_edge(tid, "in_lob", lid, record)
                     report["lob_corroborated_mined"] += 1

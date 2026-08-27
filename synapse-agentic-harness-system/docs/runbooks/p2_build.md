@@ -32,7 +32,11 @@ non-crosswalk physical refuses to load):
   pack nicknames): `{"alias": "…", "physical": "dw.<t>", …}`;
 - `lob_map.jsonl` — line-of-business membership, one row per
   (LOB, table): `{"lob_code": "GMNS", "lob_name": "…", "physical":
-  "dw.<t>", "verified_by": "…", "verified_on": "…", "notes": ""}`.
+  "dw.<t>", "verified_by": "…", "verified_on": "…", "notes": "",
+  "aliases": ["Global Merchant & Network Svcs"]}`. `aliases` declares
+  the OTHER spellings the catalogs use for the same LOB (DMP declares
+  by display name, codes are short) — declared equivalence, so the two
+  never fork into parallel lob nodes.
   Steward witness; dmp/gmns declarations corroborate with their own
   witnesses; mined `business_unit` values only corroborate an existing
   lob node (`lob_unmatched` counts the rest — mined noise never mints).

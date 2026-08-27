@@ -436,6 +436,11 @@ def test_lob_layer_steward_declares_catalogs_corroborate(tmp_path):
     assert gms_lob["steward"].prov.source == "lob_map"   # human declares
     assert "dmp" in gms_lob                # certified catalog testifies
     assert "catalog_mined" in gms_lob      # mined corroborates
+    # declared equivalence: the DMP display name ("Global Merchant &
+    # Network Svcs", fixture metric 102) resolves onto the steward's
+    # canonical lob:gmns via the lob_map alias — NO parallel node forks
+    assert "lob:global_merchant___network_svcs" not in nodes
+    assert nodes["lob:gmns"].props["code"] == "GMNS"     # never clobbered
     # metric → domain → lob chain (cross-domain joins route through it)
     assert any(r == "in_domain" and o == "mdom:merchant"
                for (s, r, o, _w) in edges)
