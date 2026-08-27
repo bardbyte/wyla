@@ -21,11 +21,38 @@ def _tokens_of(text: str) -> int:
     return max(1, len(text) // 4)          # the classic 4-chars/token bound
 
 
+def _lob_line(lob_info: list[dict[str, Any]]) -> str:
+    """One line per card: every LOB membership with its witnesses named
+    — `GMNS — Global Merchant & Network Services (steward; corroborated
+    by 12 dmp metrics)`. Multi-membership renders every entry; the card
+    never picks a winner."""
+    rendered = []
+    for entry in lob_info:
+        witnesses = entry.get("witnesses", {})
+        notes = []
+        if "steward" in witnesses:
+            notes.append("steward")
+        if witnesses.get("dmp"):
+            notes.append(f"corroborated by {witnesses['dmp']} "
+                         "dmp metric(s)")
+        if witnesses.get("gmns"):
+            notes.append(f"{witnesses['gmns']} gmns spec(s)")
+        if witnesses.get("catalog_mined"):
+            notes.append(f"mined support {witnesses['catalog_mined']}")
+        label = entry["code"] + (f" — {entry['name']}"
+                                 if entry.get("name") else "")
+        rendered.append(f"{label} ({'; '.join(notes) or 'declared'})")
+    return ("- line of business: " + " · ".join(rendered)
+            + " [prov:in_lob]")
+
+
 def table_card(consensus: TableConsensus, node_props: dict[str, Any],
                metrics_here: list[dict[str, Any]],
                filters_here: list[dict[str, Any]],
                co_queried: list[tuple[str, int]],
-               acl_entry: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+               acl_entry: dict[str, Any],
+               lob_info: list[dict[str, Any]] | None = None
+               ) -> tuple[str, dict[str, Any]]:
     """→ (markdown, budget_report)."""
     physical = consensus.physical
     prov = f"[prov:table:{physical}]"
@@ -43,6 +70,8 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
         f"business unit: {node_props.get('business_unit', '?')} · "
         f"layer: {node_props.get('layer_type', '?')} {prov}",
     ]
+    if lob_info:
+        lines["header"].append(_lob_line(lob_info))
     purpose = (node_props.get("description_atlas")
                or node_props.get("description_bq") or "")
     if purpose:
@@ -155,6 +184,13 @@ def metric_card(metric: dict[str, Any],
             + (f" · recency from {metric['recency_source']}"
                if metric.get("recency_source") else "")
             + " [prov:witness]")
+    pedigree = [f"{key}: {metric[field]}" for key, field in
+                (("domain", "domain"), ("lob", "line_of_business"),
+                 ("author", "author"), ("scope", "scope"))
+                if metric.get(field)]
+    if pedigree:
+        lines.append(f"- {' · '.join(pedigree)} "
+                     f"[prov:{metric['source']}]")
     if metric.get("question"):
         lines.append(f"- answers: “{metric['question']}” [prov:dmp]")
     lines += [

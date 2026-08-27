@@ -46,10 +46,11 @@ def test_reconcile_d1_to_d5_counts_and_handlers(tmp_path):
     _, build_dir, manifest = _compiled(tmp_path)
     census = json.loads((build_dir / "census.json").read_text())
     totals = census["structural"]["totals"]
-    # D2 = 3: gms bq_only_col + the two sbs_new_accounts columns (a
+    # D2 = 4: gms bq_only_col + the two sbs_new_accounts columns (a
     # bq-only table — no 00 resource, no atlas/mdm plane — is honestly
-    # all coverage gap)
-    assert totals == {"D1": 1, "D2": 3, "D3": 1, "D4": 2, "D5": 1}
+    # all coverage gap) + the 03-minted nested field path (typed by BQ,
+    # undocumented by any catalog plane)
+    assert totals == {"D1": 1, "D2": 4, "D3": 1, "D4": 2, "D5": 1}
     tickets = [json.loads(x) for x in
                (build_dir / "tickets.jsonl").read_text().splitlines()]
     kinds = {t["ticket"] for t in tickets}
@@ -146,3 +147,54 @@ def test_diff_shows_semantic_change_after_clerk_promotion(tmp_path):
 def test_first_build_diff_is_honest(tmp_path):
     _, build_dir, _ = _compiled(tmp_path)
     assert "no previous build" in (build_dir / "DIFF_vs_prev.md").read_text()
+
+
+def test_lob_index_joins_sources_and_pedigree_serving(tmp_path):
+    """Compiled LOB view: indexes/lob.jsonl for the tools, one witness-
+    named line per table card, metric rows carrying their dmp pedigree,
+    and joins.jsonl naming its three knowledge families (`source`)."""
+    _, build_dir, manifest = _compiled(tmp_path)
+    lob_rows = [json.loads(x) for x in
+                (build_dir / "indexes" / "lob.jsonl"
+                 ).read_text().splitlines()]
+    by_code = {r["lob"]: r for r in lob_rows}
+    assert by_code["gmns"]["tables"] == ["dw.gms_transaction",
+                                         "dw.wwcas_authorization"]
+    assert by_code["gmns"]["domains"] == ["merchant"]
+    assert by_code["sbs"]["tables"] == ["dw.sbs_new_accounts"]
+    assert manifest["counts"]["lobs"] == 2
+
+    joins = [json.loads(x) for x in
+             (build_dir / "indexes" / "joins.jsonl"
+              ).read_text().splitlines()]
+    assert {"co_query", "jobs_30d", "constraints"} <= \
+        {j["source"] for j in joins}
+    fk_row = next(j for j in joins if j["source"] == "constraints")
+    assert fk_row["on"] == ("dw.gms_transaction.cm13 = "
+                            "dw.wwcas_authorization.card_no")
+
+    gms_card = (build_dir / "cards" / "tables"
+                / "dw__gms_transaction.md").read_text()
+    assert ("- line of business: GMNS — Global Merchant & Network "
+            "Services (steward; corroborated by") in gms_card
+    assert "payment_detail.card.network" in gms_card   # nested, full path
+
+    metrics = [json.loads(x) for x in
+               (build_dir / "indexes" / "metrics.jsonl"
+                ).read_text().splitlines()]
+    approval = next(m for m in metrics if m["label"] == "SBS Approval Rate")
+    assert approval["author"] == "steward_b"
+    assert approval["domain"] == "Acquisition"
+    assert approval["line_of_business"] == "SBS"
+    card = (build_dir / "cards" / "metrics"
+            / f"{approval['fp']}.md").read_text()
+    assert "- domain: Acquisition · lob: SBS · author: steward_b" in card
+
+    # serving surface: Build loads the lob index; search exposes the
+    # pedigree as hints (E6 — readable, never ranked)
+    from sahs.tools.api import Build, search_metrics
+    build = Build.open(tmp_path / "builds")
+    assert build.lob and build.lob[0]["lob"] == "gmns"
+    top = search_metrics(build, "small business approval rate"
+                         )["candidates"][0]
+    assert top["line_of_business"] == "SBS"

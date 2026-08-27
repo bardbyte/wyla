@@ -1,0 +1,9 @@
+{
+ "tableReference": {
+  "projectId": "axp-lumi",
+  "datasetId": "dw_physical",
+  "tableId": "gms_transaction"
+ },
+ "type": "TABLE",
+ "note": "physical-layer twin of the consumed 00 logical resource"
+}

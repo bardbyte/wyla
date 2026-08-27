@@ -380,17 +380,102 @@ def test_utilization_ledger_accounts_for_every_file(tmp_path):
     assert tls["status"] == "deferred" and "doc evidence" in tls["reason"]
     assert all(r.get("reason") for r in rows
                if r["status"] == "deferred")
-    allowed_inventoried = {
-        "real_extractions_production/_batch_summary.csv",
-        "real_extractions_production/_run_report.json",
-        "mdm_46_patched_v2/run_manifest.json",
-    }
+    # full-utilization end-state: ZERO inventoried files in the fixture
+    # tree — every artifact is consumed or carries a pinned reason
     inventoried = {p for p, r in by_path.items()
                    if r["status"] == "inventoried"}
-    unexpected = {p for p in inventoried
-                  if p not in allowed_inventoried
-                  and not p.endswith(("_summary.json", "summary.json",
-                                      "qa_checks.yaml",
-                                      "chart_contract.yaml",
-                                      "data_specs.md", "discovery.json"))}
-    assert not unexpected, unexpected
+    assert not inventoried, inventoried
+    # the new deferral families, each teaching its lesson
+    twin = by_path["real_extractions_production/gms_transaction/"
+                   "13_table_metrics.json"]
+    assert twin["status"] == "deferred" and "format twin" in twin["reason"]
+    phys = by_path["real_extractions_production/gms_transaction/"
+                   "12_physical_constraints.json"]
+    assert phys["status"] == "deferred" \
+        and "physical-layer twin" in phys["reason"]
+    bak = by_path["real_extractions_production/gms_transaction/"
+                  "02_logical_columns.csv.bak"]
+    assert bak["status"] == "deferred" and "backup" in bak["reason"]
+    specs = by_path["sources/skills/NewAccountsSkills/"
+                    "SBS_NewAccountsApprovalRate/data_specs.md"]
+    assert specs["status"] == "deferred" and "prose" in specs["reason"]
+    for wired in ("01_logical_table_meta.csv",
+                  "03_logical_column_field_paths.csv",
+                  "11_logical_constraints.json"):
+        assert by_path[f"real_extractions_production/gms_transaction/"
+                       f"{wired}"]["status"] == "consumed", wired
+
+
+def test_lob_layer_steward_declares_catalogs_corroborate(tmp_path):
+    """The LOB layer is witnessed classification: the steward map and
+    the dmp catalog testify per family (one in_lob quad each), mined
+    business_unit values only corroborate an EXISTING lob node, and an
+    unknown one is counted `lob_unmatched` — never guessed into the
+    graph. Multi-membership is edges, not a winner-take-all field."""
+    graph_dir, out_dir = tmp_path / "g", tmp_path / "run"
+    result = _build(graph_dir, out_dir)
+    assert result.returncode == 0, result.stderr[-800:]
+    graph = GraphDir(graph_dir)
+    nodes = graph.fold_nodes()
+    edges = graph.fold_edges()
+    assert nodes["lob:gmns"].props["name"] == \
+        "Global Merchant & Network Services"
+    assert nodes["mdom:merchant"].props["name"] == "Merchant"
+    gms_lob = {w: q for (s, r, o, w), q in edges.items()
+               if r == "in_lob" and s == "table:dw.gms_transaction"
+               and o == "lob:gmns"}
+    assert gms_lob["steward"].prov.source == "lob_map"   # human declares
+    assert "dmp" in gms_lob                # certified catalog testifies
+    assert "catalog_mined" in gms_lob      # mined corroborates
+    # metric → domain → lob chain (cross-domain joins route through it)
+    assert any(r == "in_domain" and o == "mdom:merchant"
+               for (s, r, o, _w) in edges)
+    assert ("mdom:merchant", "in_lob", "lob:gmns", "dmp") in edges
+    # mined never mints: CRO measures land in the counter, not the graph
+    assert "lob:cro" not in nodes
+    manifest = json.loads((graph_dir / "runs" / "test_r1" /
+                           "manifest.json").read_text())
+    assert manifest["reports"]["lob_map"] == {
+        "lobs": 2, "memberships": 3, "duplicate_rows": 0}
+    ex = manifest["reports"]["expressions"]
+    assert ex["lob_corroborated_mined"] >= 1
+    assert ex["lob_unmatched"] >= 1
+
+
+def test_constraints_meta_and_field_paths_wired(tmp_path):
+    """11 → PK props + fk_references (referenced table resolves through
+    the crosswalk or the edge is a counted skip); 01 and the full 13
+    first rows ride on the table node; 03 nested STRUCT paths become
+    col nodes of their own — top-level twins skipped, dupes deduped."""
+    graph_dir, out_dir = tmp_path / "g", tmp_path / "run"
+    result = _build(graph_dir, out_dir)
+    assert result.returncode == 0, result.stderr[-800:]
+    graph = GraphDir(graph_dir)
+    nodes = graph.fold_nodes()
+    edges = graph.fold_edges()
+    assert nodes["col:dw.gms_transaction.se_no"].props[
+        "is_primary_key"] is True
+    minted = nodes["col:dw.gms_transaction.txn_uid"].props
+    assert minted["is_primary_key"] is True
+    assert minted["observed_via"] == "constraint_declaration"
+    fk = [(s, o) for (s, r, o, _w) in edges if r == "fk_references"]
+    assert fk == [("col:dw.gms_transaction.cm13",
+                   "col:dw.wwcas_authorization.card_no")]
+    nested = nodes["col:dw.gms_transaction.payment_detail.card.network"]
+    assert nested.props["nested_path"] is True
+    assert nested.props["data_type"] == "STRING"
+    assert ("table:dw.gms_transaction", "has_column",
+            "col:dw.gms_transaction.payment_detail.card.network",
+            "bq") in edges
+    props = nodes["table:dw.gms_transaction"].props
+    assert props["table_meta_logical"]["application"] == "lumi"
+    assert props["table_metrics"]["table_size_bytes"] == "987654321"
+    manifest = json.loads((graph_dir / "runs" / "test_r1" /
+                           "manifest.json").read_text())
+    bq = manifest["reports"]["bq"]
+    assert bq["pk_columns"] == 2
+    assert bq["fk_edges"] == 1
+    assert bq["fk_out_of_scope"] == 1          # merchant_dim: not ours
+    assert bq["cols_minted_from_constraints"] == 1
+    assert bq["nested_columns"] == 1
+    assert bq["constraints_unrecognized"] == 0

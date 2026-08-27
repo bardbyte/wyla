@@ -152,6 +152,13 @@ def compile_build(graph_root: Path, builds_root: Path
             "approved_dimensions":
                 record.props.get("approved_dimensions") or [],
             "sign_convention": record.props.get("sign_convention", ""),
+            # full-utilization pedigree (dmp/gmns) + usage texture
+            # (mined) — serving-facing, never ranked on (E6/rc1)
+            "author": record.props.get("author", ""),
+            "domain": record.props.get("domain", ""),
+            "line_of_business":
+                record.props.get("line_of_business", ""),
+            "scope": record.props.get("scope", ""),
         })
         members_by_group[o].append(s)
     # collapse per metric id: a metric fused across catalogs (same fp)
@@ -176,7 +183,8 @@ def compile_build(graph_root: Path, builds_root: Path
         if _STATUS_RANK.get(row["status"], 0) > _STATUS_RANK.get(
                 held["status"], 0):
             held["status"] = row["status"]
-        for key in ("question", "grain", "label", "sign_convention"):
+        for key in ("question", "grain", "label", "sign_convention",
+                    "author", "domain", "line_of_business", "scope"):
             held[key] = held[key] or row[key]
         if row["approved_dimensions"] and not held["approved_dimensions"]:
             held["approved_dimensions"] = row["approved_dimensions"]
@@ -270,6 +278,46 @@ def compile_build(graph_root: Path, builds_root: Path
     index_report = build_indexes(build_dir / "indexes", vocab_rows,
                                  binding_rows, metric_rows)
 
+    # ── LOB layer (compiled view): lob nodes + witnessed in_lob edges
+    # fold into one index the tools can serve and a per-table line the
+    # cards render — "steward-declared, corroborated by N dmp metrics"
+    # is readable provenance, never a ranked feature
+    lob_nodes = {nid: rec for nid, rec in nodes.items()
+                 if nid.startswith("lob:")}
+    lob_tables: dict[str, dict[str, dict[str, int]]] = {}
+    lob_domains: dict[str, set[str]] = {}
+    for (s, r, o, w), quad in sorted(edges.items()):
+        if r != "in_lob" or quad.prov.status != "active":
+            continue
+        family = w or "unknown"
+        if s.startswith("table:"):
+            cell = lob_tables.setdefault(o, {}).setdefault(
+                s.split(":", 1)[1], {})
+            cell[family] = cell.get(family, 0) + (quad.prov.support or 1)
+        elif s.startswith("mdom:"):
+            lob_domains.setdefault(o, set()).add(s.split(":", 1)[1])
+    lob_rows = []
+    for lid in sorted(set(lob_nodes) | set(lob_tables)
+                      | set(lob_domains)):
+        rec = lob_nodes.get(lid)
+        lob_rows.append({
+            "lob": lid.split(":", 1)[1],
+            "code": (rec.props.get("code", "") if rec else ""),
+            "name": (rec.props.get("name", "") if rec else ""),
+            "tables": sorted(lob_tables.get(lid, {})),
+            "domains": sorted(lob_domains.get(lid, set())),
+        })
+    lob_by_table: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for lid, per_table in sorted(lob_tables.items()):
+        rec = lob_nodes.get(lid)
+        for physical, witnesses in sorted(per_table.items()):
+            lob_by_table[physical].append({
+                "code": ((rec.props.get("code") if rec else "")
+                         or lid.split(":", 1)[1]),
+                "name": (rec.props.get("name", "") if rec else ""),
+                "witnesses": dict(sorted(witnesses.items())),
+            })
+
     # ── cards ──
     budget: dict[str, Any] = {"over_budget": 0, "dropped": {}}
     co_by_table: dict[str, list[tuple[str, int]]] = defaultdict(list)
@@ -295,7 +343,8 @@ def compile_build(graph_root: Path, builds_root: Path
             metrics_here, filters_here,
             sorted(co_by_table.get(physical, []),
                    key=lambda x: -x[1]),
-            acl.get(physical, {"restricted": None, "pii_columns": []}))
+            acl.get(physical, {"restricted": None, "pii_columns": []}),
+            lob_info=lob_by_table.get(physical, []))
         (build_dir / "cards" / "tables"
          / f"{physical.replace('.', '__')}.md").write_text(
             text + "\n", encoding="utf-8")
@@ -364,14 +413,37 @@ def compile_build(graph_root: Path, builds_root: Path
     (build_dir / "schema.json").write_text(
         json.dumps(schema, indent=1, sort_keys=True) + "\n",
         encoding="utf-8")
-    join_rows = [
-        {"a": s.split(":", 1)[1], "b": o.split(":", 1)[1],
-         "support": quad.prov.support or 1}
-        for (s, r, o, _w), quad in sorted(edges.items())
-        if r == "co_queried_with"]
+    # three join-knowledge families, each named: co-query digests say
+    # tables appear together, jobs ON-clauses say HOW (measured), and
+    # declared constraints say HOW by fiat — the agent reads `source`
+    join_rows = []
+    for (s, r, o, _w), quad in sorted(edges.items()):
+        if r == "co_queried_with":
+            join_rows.append(
+                {"a": s.split(":", 1)[1], "b": o.split(":", 1)[1],
+                 "support": quad.prov.support or 1,
+                 "source": "co_query"})
+        elif r == "joins_via":
+            row = {"a": s.split(":", 1)[1], "b": o.split(":", 1)[1],
+                   "support": quad.prov.support or 1,
+                   "source": "jobs_30d"}
+            if quad.props.get("on"):
+                row["on"] = quad.props["on"]
+            join_rows.append(row)
+        elif r == "fk_references":
+            a_col = s.split(":", 1)[1]
+            b_col = o.split(":", 1)[1]
+            join_rows.append(
+                {"a": ".".join(a_col.split(".")[:2]),
+                 "b": ".".join(b_col.split(".")[:2]),
+                 "support": 1, "on": f"{a_col} = {b_col}",
+                 "source": "constraints"})
     (build_dir / "indexes" / "joins.jsonl").write_text(
         "".join(json.dumps(j, sort_keys=True) + "\n" for j in join_rows),
         encoding="utf-8")
+    (build_dir / "indexes" / "lob.jsonl").write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n"
+                for row in lob_rows), encoding="utf-8")
     domain_rows = [
         {"key": node_id.split(":", 1)[1],
          "values": record.props.get("values", [])}
@@ -400,7 +472,9 @@ def compile_build(graph_root: Path, builds_root: Path
                    "metrics": len(metric_rows),
                    "bindings": len(binding_rows),
                    "vocab": len(vocab_rows),
-                   "tickets": len(tickets)},
+                   "tickets": len(tickets),
+                   "lobs": len(lob_rows),
+                   "joins": len(join_rows)},
         "index": index_report,
         "budget": budget,
         "resolver_constants": RESOLVER_CONSTANTS,

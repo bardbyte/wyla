@@ -86,7 +86,9 @@ def reconcile(graph: GraphDir) -> dict[str, TableConsensus]:
             if record is None:
                 continue
             props = record.props
-            name = cid.rsplit(".", 1)[-1]
+            # everything after "dataset.table." — a nested field path
+            # (col:dw.t.a.b.c) keeps its full dotted name on the card
+            name = cid.split(":", 1)[1][len(physical) + 1:]
             bq_type = str(props.get("data_type") or "")
             mdm_type = str(props.get("data_type_mdm") or "")
             atlas_type = str(props.get("data_type_atlas") or "")

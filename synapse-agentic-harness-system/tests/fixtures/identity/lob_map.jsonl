@@ -1,0 +1,3 @@
+{"lob_code": "GMNS", "lob_name": "Global Merchant & Network Services", "physical": "dw.gms_transaction", "verified_by": "fixture", "verified_on": "2026-08-27", "notes": ""}
+{"lob_code": "GMNS", "lob_name": "Global Merchant & Network Services", "physical": "dw.wwcas_authorization", "verified_by": "fixture", "verified_on": "2026-08-27", "notes": "auth plane serves GMNS"}
+{"lob_code": "SBS", "lob_name": "Small Business Services", "physical": "dw.sbs_new_accounts", "verified_by": "fixture", "verified_on": "2026-08-27", "notes": ""}

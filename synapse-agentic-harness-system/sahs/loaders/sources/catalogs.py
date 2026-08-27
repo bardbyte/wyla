@@ -55,7 +55,8 @@ def load_metrics_dmp(path: Path) -> tuple[list[ExpressionRecord],
                    "status": row.get("status"),
                    "author": row.get("author"),
                    "domain": row.get("metricDomain"),
-                   "line_of_business": row.get("lineOfBusiness")}))
+                   "line_of_business": row.get("lineOfBusiness"),
+                   "products": [str(p) for p in products]}))
     return records, quarantined
 
 
@@ -86,7 +87,11 @@ def load_extended_gmns(path: Path) -> tuple[list[ExpressionRecord],
                    "metric_grain": row.get("metricGrain"),
                    "metric_scope": row.get("metricScope"),
                    "requestor": row.get("requestor"),
-                   "status": row.get("status", "Submitted")}))
+                   "status": row.get("status", "Submitted"),
+                   # the catalog's own name declares its scope: every
+                   # pending spec in this file is a GMNS metric
+                   "line_of_business":
+                       row.get("lineOfBusiness") or "GMNS"}))
     return records, quarantined
 
 

@@ -1,0 +1,4 @@
+# presentation contract — rendering concern, not semantics
+chart: line
+x: part_dt
+y: approval_rate

@@ -58,6 +58,13 @@ synapse-agentic-harness-system/
 │   │   # (data-product display names, skill-pack nicknames) mapping
 │   │   # onto crosswalk rows: {"alias": ..., "physical": "dw.<t>", …}.
 │   │   # An alias to a non-crosswalk physical refuses to load.
+│   ├── identity/lob_map.jsonl         # YOU author — line-of-business map
+│   │   # {"lob_code": "GMNS", "lob_name": "…", "physical": "dw.<t>",
+│   │   #  "verified_by": …, "verified_on": …, "notes": ""} — one row
+│   │   # per (LOB, table); multi-membership = several rows. Strict:
+│   │   # physical must be a crosswalk row. Steward witness; the dmp
+│   │   # catalog corroborates with its own witness; mined
+│   │   # business_unit values only corroborate, never mint.
 │   ├── nodes/  edges/                 # append-only JSONL quads
 │   └── runs/<run_name>/               # every run's committed record:
 │       events.jsonl · census.json · census_tail.jsonl ·

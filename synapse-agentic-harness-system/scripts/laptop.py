@@ -324,6 +324,20 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
         console.finish(EXIT_VALIDATION_ERROR)
         return EXIT_VALIDATION_ERROR
 
+    # steward LOB map — sidecar beside the crosswalk (same contract as
+    # aliases.jsonl: strict, local, never guessed). Emitted BEFORE the
+    # semantic catalogs so mined business_unit values can corroborate
+    # steward-declared lob nodes.
+    known_lobs: set[str] = set()
+    lob_path = Path(args.crosswalk).parent / "lob_map.jsonl"
+    if lob_path.exists():
+        from sahs.graph.ids import lob_id
+        from sahs.graph.lob import emit_lob_map, load_lob_map
+        console.phase("lob map")
+        lob_rows = load_lob_map(lob_path, crosswalk)
+        reports["lob_map"] = emit_lob_map(lob_rows, graph, run_id)
+        known_lobs = {lob_id(r.lob_code) for r in lob_rows}
+
     if args.sources_dir:
         sources = Path(args.sources_dir)
         registry = _registry(args)
@@ -334,7 +348,7 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
         for q in canon_quar:
             console.item_quarantined(q.category, q.evidence_ref)
         reports["expressions"] = emit_expressions(
-            pairs, graph, crosswalk, run_id)
+            pairs, graph, crosswalk, run_id, known_lobs=known_lobs)
         glossary_path = sources / "data_cleaned.csv"
         terms_path = sources / "business_terms.csv"
         glossary = (load_glossary(glossary_path)[0]

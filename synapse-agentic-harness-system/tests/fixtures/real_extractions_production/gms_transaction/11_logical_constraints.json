@@ -1,0 +1,17 @@
+{
+ "table": "gms_transaction",
+ "constraints": [
+  {"constraint_name": "pk_gms", "constraint_type": "PRIMARY KEY",
+   "column_name": "se_no"},
+  {"constraint_name": "pk_gms", "constraint_type": "PRIMARY KEY",
+   "column_name": "txn_uid"},
+  {"constraint_name": "fk_gms_card", "constraint_type": "FOREIGN KEY",
+   "column_name": "cm13",
+   "referenced_table": "dw.wwcas_authorization",
+   "referenced_column": "card_no"},
+  {"constraint_name": "fk_gms_merch", "constraint_type": "FOREIGN KEY",
+   "column_name": "se_no",
+   "referenced_table": "merchant_dim",
+   "referenced_column": "merchant_id"}
+ ]
+}

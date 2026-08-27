@@ -1,0 +1,8 @@
+{
+ "table": "gms_transaction",
+ "note": "physical-layer twin of 11 — deferred by the ledger",
+ "constraints": [
+  {"constraint_name": "pk_gms", "constraint_type": "PRIMARY KEY",
+   "column_name": "se_no"}
+ ]
+}
