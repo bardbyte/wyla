@@ -54,39 +54,105 @@ def load_metrics_dmp(path: Path) -> tuple[list[ExpressionRecord],
             extra={"question_answered": row.get("questionAnswered"),
                    "status": row.get("status"),
                    "author": row.get("author"),
+                   "author_id": row.get("authorId"),
+                   "requestor": row.get("requestor"),
                    "domain": row.get("metricDomain"),
                    "line_of_business": row.get("lineOfBusiness"),
+                   # the buried treasure: hand-written usage guidance
+                   # ("do not use for…") + disambiguation instructions
+                   "description": row.get("metricDescription"),
+                   "calculation": row.get("calculation"),
+                   "approved_dimensions": row.get("approvedDimensions"),
+                   "metric_grain": row.get("metricGrain"),
+                   "metric_scope": row.get("metricScope"),
                    "products": [str(p) for p in products]}))
     return records, quarantined
 
 
+def _looks_like_metric_specs(value) -> bool:
+    if not (isinstance(value, list) and value
+            and isinstance(value[0], dict)):
+        return False
+    keys = " ".join(k.lower() for k in value[0])
+    return (("metric" in keys or "name" in keys)
+            and ("sql" in keys or "calculation" in keys
+                 or "expression" in keys))
+
+
 def load_extended_gmns(path: Path) -> tuple[list[ExpressionRecord],
                                             list[Quarantined]]:
+    """The real export wraps its list under a key that is NOT
+    "metrics" (run-2 finding: the loader yielded ZERO records and the
+    14 pending specs silently never existed). The loader adapts to the
+    file: known wrapper keys first, then the first list-of-dicts value
+    that LOOKS like metric specs; an unrecognizable shape quarantines
+    loudly instead of returning nothing."""
     payload = _read(path)
-    rows = payload if isinstance(payload, list) else \
-        payload.get("metrics", [])
+    if isinstance(payload, list):
+        rows = payload
+    else:
+        rows = []
+        for key in ("metrics", "metric_catalog", "semantics",
+                    "extended_metrics", "extendedMetrics",
+                    "definitions", "metricDefinitions"):
+            if _looks_like_metric_specs(payload.get(key)):
+                rows = payload[key]
+                break
+        else:
+            rows = next((v for v in payload.values()
+                         if _looks_like_metric_specs(v)), [])
     records, quarantined = [], []
+    if not rows and payload:
+        top = (sorted(payload)[:8] if isinstance(payload, dict)
+               else type(payload).__name__)
+        quarantined.append(Quarantined(
+            source="extended_gmns", category="missing_field",
+            detail=f"no metric list found in the file — top-level "
+                   f"shape: {top}",
+            evidence_ref=Path(path).name))
     for row in rows:
-        name = str(row.get("metricName") or "?")
+        name = str(row.get("metricName") or row.get("metric_name")
+                   or row.get("name") or "?")
         ref = f"{Path(path).name}#metric={name}"
-        sql = str(row.get("sqlExpression") or "").strip()
+        sql = str(row.get("sqlExpression") or row.get("sql_expression")
+                  or row.get("sql") or row.get("expression")
+                  or "").strip()
         if not sql:
             quarantined.append(Quarantined(
                 source="extended_gmns", category="missing_field",
                 detail=f"pending metric {name} without SQL",
                 evidence_ref=ref))
             continue
+        # the real export is DMP's sibling — same schema plus
+        # calculation prose. Products resolve through the SAME alias
+        # chain, friendly names win, and every documented field rides.
+        products = [str(p) for p in
+                    (row.get("associatedDataProductNames") or [])]
+        hint = (products[0] if products else
+                str(row.get("table") or row.get("tableName")
+                    or row.get("associatedTable")
+                    or "gms_transaction"))
         records.append(ExpressionRecord(
             raw_sql=sql, kind="metric_expr", source="extended_gmns",
             authority=Authority.PENDING,
-            metric_ref=f"gmns:{name}", concept_label=name,
-            table_hint=str(row.get("table") or "gms_transaction").lower(),
+            metric_ref=f"gmns:{name}",
+            concept_label=str(row.get("businessFriendlyMetricName")
+                              or name),
+            table_hint=hint.lower(),
+            first_seen=str(row.get("createdAt") or ""),
+            last_seen=str(row.get("updatedAt") or ""),
             evidence_ref=ref,
-            extra={"calculation": row.get("calculation"),
+            extra={"question_answered": row.get("questionAnswered"),
+                   "calculation": row.get("calculation"),
                    "approved_dimensions": row.get("approvedDimensions"),
                    "metric_grain": row.get("metricGrain"),
                    "metric_scope": row.get("metricScope"),
                    "requestor": row.get("requestor"),
+                   "author": row.get("author"),
+                   "author_id": row.get("authorId"),
+                   "domain": row.get("metricDomain"),
+                   "description": row.get("metricDescription"),
+                   "products": products,
                    "status": row.get("status", "Submitted"),
                    # the catalog's own name declares its scope: every
                    # pending spec in this file is a GMNS metric

@@ -1,0 +1,2 @@
+table_name,view_definition
+sbs_new_accounts,"SELECT approval_cd, trans_usd_am, part_dt FROM dw.sbs_new_accounts_raw WHERE part_dt >= '2026-01-01'"

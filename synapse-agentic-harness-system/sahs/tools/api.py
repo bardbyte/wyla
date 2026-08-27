@@ -108,6 +108,7 @@ def search_metrics(build: Build, intent: str, top_k: int = 8) -> dict:
         "source": r["source"],
         "line_of_business": r.get("line_of_business", ""),
         "domain": r.get("domain", ""),
+        "guidance": (r.get("description") or "")[:280],
         "conflict": any(groups.get(g, 0) > 1
                         for g in r.get("mgroups", [r.get("mgroup", "")])),
     } for _, _, _, r in scored[:top_k]],

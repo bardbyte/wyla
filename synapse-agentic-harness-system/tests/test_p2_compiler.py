@@ -162,7 +162,13 @@ def test_lob_index_joins_sources_and_pedigree_serving(tmp_path):
                                          "dw.wwcas_authorization"]
     assert by_code["gmns"]["domains"] == ["merchant"]
     assert by_code["sbs"]["tables"] == ["dw.sbs_new_accounts"]
-    assert manifest["counts"]["lobs"] == 2
+    # the usage plane compiled: the CRO org unit (child of SBS) with
+    # its used tables; the LOB's own usage rides on the gmns row
+    assert by_code["cro"]["kind"] == "org_unit"
+    assert by_code["cro"]["parent"] == "SBS"
+    assert by_code["cro"]["used_tables"] == ["dw.wwcas_authorization"]
+    assert by_code["gmns"]["usage_support"] >= 27
+    assert manifest["counts"]["lobs"] == 3
 
     joins = [json.loads(x) for x in
              (build_dir / "indexes" / "joins.jsonl"
@@ -178,6 +184,10 @@ def test_lob_index_joins_sources_and_pedigree_serving(tmp_path):
     assert ("- line of business: GMNS — Global Merchant & Network "
             "Services (steward; corroborated by") in gms_card
     assert "payment_detail.card.network" in gms_card   # nested, full path
+    assert "- used by: " in gms_card
+    wwcas_card = (build_dir / "cards" / "tables"
+                  / "dw__wwcas_authorization.md").read_text()
+    assert "CRO — Credit Risk Ops (SBS)" in wwcas_card  # usage ≠ ownership
 
     metrics = [json.loads(x) for x in
                (build_dir / "indexes" / "metrics.jsonl"
@@ -190,11 +200,21 @@ def test_lob_index_joins_sources_and_pedigree_serving(tmp_path):
             / f"{approval['fp']}.md").read_text()
     assert "- domain: Acquisition · lob: SBS · author: steward_b" in card
 
+    # the catalog's hand-written guidance rides row → card → search
+    spend = next(m for m in metrics if m["label"] == "GMNS Merchant Spend")
+    assert "Do not use for" in spend["description"]
+    spend_card = (build_dir / "cards" / "metrics"
+                  / f"{spend['fp']}.md").read_text()
+    assert "- guidance: " in spend_card
+    assert "Do not use for authorization counts" in spend_card
+
     # serving surface: Build loads the lob index; search exposes the
-    # pedigree as hints (E6 — readable, never ranked)
+    # pedigree + guidance as hints (E6 — readable, never ranked)
     from sahs.tools.api import Build, search_metrics
     build = Build.open(tmp_path / "builds")
-    assert build.lob and build.lob[0]["lob"] == "gmns"
+    assert build.lob and build.lob[0]["lob"] == "cro"
     top = search_metrics(build, "small business approval rate"
                          )["candidates"][0]
     assert top["line_of_business"] == "SBS"
+    hit = search_metrics(build, "merchant spend volume")["candidates"]
+    assert any("Do not use" in c["guidance"] for c in hit)

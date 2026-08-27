@@ -285,7 +285,8 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
               "fk_edges": 0, "fk_out_of_scope": 0,
               "cols_minted_from_constraints": 0,
               "constraints_unrecognized": 0,
-              "giant_cells_offloaded": 0}
+              "giant_cells_offloaded": 0,
+              "view_sql_from_twin": 0}
     # constraint-declared FKs resolve AFTER the walk — the referenced
     # table's own columns must have minted first, whatever dir order
     minted_cols: set[str] = set()
@@ -371,13 +372,47 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                                prov=prov()))
         report["tables"] += 1
 
+        # 05 — view SQL: some tables ship the definition ONLY as a
+        # csv/json twin (run-2 audit finding: two views had no .sql at
+        # all) — the loader adapts to the file, SQL detected by the
+        # same value signature the templates adapter uses
+        view_sql_text = ""
+        view_ev = ""
         view_sql = d / "05_view_definition.sql"
         if view_sql.exists():
+            view_sql_text = track(view_sql).read_text(encoding="utf-8")
+            view_ev = f"{d.name}/05_view_definition.sql"
+        else:
+            rows5 = _csv_rows(track(d / "05_view_definition.csv"))
+            col5 = _sql_column(rows5)
+            if rows5 and col5:
+                view_sql_text = str(rows5[0].get(col5) or "")
+                view_ev = f"{d.name}/05_view_definition.csv"
+            if not view_sql_text:
+                payload5 = _json(track(d / "05_view_definition.json"))
+                if isinstance(payload5, str):
+                    view_sql_text = payload5
+                elif isinstance(payload5, dict):
+                    view_sql_text = next(
+                        (str(v) for v in payload5.values()
+                         if isinstance(v, str)
+                         and any(k in v.lower() for k in _SQLISH)), "")
+                elif isinstance(payload5, list) and payload5 \
+                        and isinstance(payload5[0], dict):
+                    col5 = _sql_column(payload5)
+                    if col5:
+                        view_sql_text = str(payload5[0].get(col5) or "")
+                if view_sql_text:
+                    view_ev = f"{d.name}/05_view_definition.json"
+                    report["view_sql_from_twin"] += 1
+            else:
+                report["view_sql_from_twin"] += 1
+        if view_sql_text:
             doc = f"doc:view_sql_{physical.replace('.', '_')}"
             graph.append_node(NodeRecord(
                 id=doc, props={"kind": "view_sql",
-                               "sql": track(view_sql).read_text(encoding="utf-8")},
-                prov=prov(evidence=f"{d.name}/05_view_definition.sql")))
+                               "sql": view_sql_text},
+                prov=prov(evidence=view_ev)))
             graph.append_edge(Quad(s=tid, r="described_by", o=doc,
                                    prov=prov()))
 

@@ -79,6 +79,9 @@ DEFERRAL_PREFIXES: tuple[tuple[str, str], ...] = (
      "consumed) — same declarations at physical grain"),
     ("14_profile", "column-profiling plan/coverage metadata — "
      "operational, not semantic"),
+    ("15_low_cardinality_manifest",
+     "value-profile manifest — profiling coverage metadata, "
+     "operational"),
     ("_batch_summary",
      "extraction batch summary — the registry input when used as "
      "--registry; operational otherwise"),

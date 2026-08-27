@@ -56,6 +56,7 @@ from sahs.loaders.sources.vocab import (                          # noqa: E402
     load_std_tech_metadata,
 )
 from sahs.util.console import (                                   # noqa: E402
+    EXIT_ENV_AUTH,
     EXIT_GATE_FAILURE,
     EXIT_OK,
     EXIT_VALIDATION_ERROR,
@@ -328,15 +329,29 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
     # aliases.jsonl: strict, local, never guessed). Emitted BEFORE the
     # semantic catalogs so mined business_unit values can corroborate
     # steward-declared lob nodes.
-    known_lobs: set[str] = set()
+    lob_aliases: dict[str, str] = {}
+    usage_targets: dict[str, str] = {}
     lob_path = Path(args.crosswalk).parent / "lob_map.jsonl"
     if lob_path.exists():
-        from sahs.graph.ids import lob_id
-        from sahs.graph.lob import emit_lob_map, load_lob_map
+        from sahs.graph.lob import (
+            emit_lob_map,
+            emit_org_map,
+            load_lob_map,
+            load_org_map,
+            lob_alias_map,
+            usage_target_map,
+        )
         console.phase("lob map")
         lob_rows = load_lob_map(lob_path, crosswalk)
         reports["lob_map"] = emit_lob_map(lob_rows, graph, run_id)
-        known_lobs = {lob_id(r.lob_code) for r in lob_rows}
+        lob_aliases = lob_alias_map(lob_rows)
+        # org units (sub-LOBs, WHO QUERIES) — optional second sidecar
+        org_rows = []
+        org_path = Path(args.crosswalk).parent / "org_map.jsonl"
+        if org_path.exists():
+            org_rows = load_org_map(org_path, lob_rows)
+            reports["org_map"] = emit_org_map(org_rows, graph, run_id)
+        usage_targets = usage_target_map(lob_rows, org_rows)
 
     if args.sources_dir:
         sources = Path(args.sources_dir)
@@ -348,7 +363,8 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
         for q in canon_quar:
             console.item_quarantined(q.category, q.evidence_ref)
         reports["expressions"] = emit_expressions(
-            pairs, graph, crosswalk, run_id, known_lobs=known_lobs)
+            pairs, graph, crosswalk, run_id, lob_aliases=lob_aliases,
+            usage_targets=usage_targets)
         glossary_path = sources / "data_cleaned.csv"
         terms_path = sources / "business_terms.csv"
         glossary = (load_glossary(glossary_path)[0]
@@ -468,6 +484,68 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true", dest="json_out")
     p.add_argument("--fresh", action="store_true")
     p.set_defaults(fn=cmd_compile)
+
+    def cmd_enrich(args: argparse.Namespace, console: RunConsole) -> int:
+        from sahs.enrich.client import EnrichTransportError
+        from sahs.enrich.loop import run_enrich
+        from sahs.util.auth import AuthError
+        console.phase("enrich (B1)")
+        targets = tuple(t.strip() for t in args.targets.split(",")
+                        if t.strip())
+        try:
+            report = run_enrich(
+                graph_root=Path(args.graph),
+                builds_root=Path(args.builds),
+                out_dir=Path(args.out), run_id=console.run_id,
+                limit=args.limit, targets=targets,
+                plan_only=args.plan, blind_sample=args.blind_sample,
+                fresh=args.fresh,
+                log=lambda m: console.emit("phase_start",
+                                           phase="enrich", detail=m))
+        except AuthError as e:
+            console.gate("vertex_env", False, str(e))
+            return EXIT_ENV_AUTH
+        except EnrichTransportError as e:
+            console.gate("vertex_reachable", False, str(e))
+            return EXIT_GATE_FAILURE
+        console.output(Path(args.out) / "enrich_report.json")
+        if args.plan:
+            console.output(Path(args.out) / "plan.jsonl")
+            console.gate("enrich_plan", True,
+                         f"{report['planned_metrics']} metric + "
+                         f"{report['planned_concepts']} concept items "
+                         "planned (no model calls)")
+            return EXIT_OK
+        blind = report.get("blind") or {}
+        ok = console.gate(
+            "blind_gate_a5", blind.get("tier") != "halt",
+            f"recovery {blind.get('rate', 0):.0%} on "
+            f"{blind.get('n', 0)} certified → tier "
+            f"{blind.get('tier', '?')}")
+        console.gate(
+            "enrich_writes", True,
+            f"metrics {report['metrics_enriched']} · concepts "
+            f"{report['concepts_enriched']} · collisions→review "
+            f"{report['collisions']} · invalid_json "
+            f"{report['invalid_json']}")
+        return EXIT_OK if ok else EXIT_GATE_FAILURE
+
+    p = sub.add_parser("enrich")
+    p.add_argument("--graph", required=True)
+    p.add_argument("--builds", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--limit", type=int, default=200,
+                   help="max items per target this run")
+    p.add_argument("--targets", default="metrics,concepts")
+    p.add_argument("--plan", action="store_true",
+                   help="write the plan only — no model calls")
+    p.add_argument("--blind-sample", type=int, default=0,
+                   help="cap the A5 blind set (0 = all certified)")
+    p.add_argument("--run-id", default="")
+    p.add_argument("--plain", action="store_true")
+    p.add_argument("--json", action="store_true", dest="json_out")
+    p.add_argument("--fresh", action="store_true")
+    p.set_defaults(fn=cmd_enrich)
 
     p = sub.add_parser("build-graph")
     p.add_argument("--graph", required=True, help="graph/ root (L2)")

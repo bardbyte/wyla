@@ -60,11 +60,15 @@ synapse-agentic-harness-system/
 │   │   # An alias to a non-crosswalk physical refuses to load.
 │   ├── identity/lob_map.jsonl         # YOU author — line-of-business map
 │   │   # {"lob_code": "GMNS", "lob_name": "…", "physical": "dw.<t>",
-│   │   #  "verified_by": …, "verified_on": …, "notes": ""} — one row
+│   │   #  "verified_by": …, "verified_on": …, "notes": "",
+│   │   #  "aliases": [<catalog spellings of the same LOB>]} — one row
 │   │   # per (LOB, table); multi-membership = several rows. Strict:
-│   │   # physical must be a crosswalk row. Steward witness; the dmp
-│   │   # catalog corroborates with its own witness; mined
-│   │   # business_unit values only corroborate, never mint.
+│   │   # physical must be a crosswalk row. Steward witness; the
+│   │   # catalogs corroborate with their own witnesses via aliases.
+│   ├── identity/org_map.jsonl         # YOU author — org units
+│   │   # (sub-LOBs): {"org_code","org_name","parent_lob","aliases",…}.
+│   │   # Mined business_unit = WHO QUERIES → used_by edges (usage),
+│   │   # never in_lob (ownership); unmapped values are counted.
 │   ├── nodes/  edges/                 # append-only JSONL quads
 │   └── runs/<run_name>/               # every run's committed record:
 │       events.jsonl · census.json · census_tail.jsonl ·
