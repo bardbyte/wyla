@@ -84,20 +84,35 @@ _PROP_FIELD_CAP = 8192
 def _first_row_props(rows: list[dict]) -> dict:
     """Whole-first-row harvest (01 table meta, full 13 metrics): the
     loader adapts to whatever columns the extractor wrote — every
-    non-empty cell of row one rides along. A cell past 8KB (real 01
-    exports carry multi-hundred-KB option blobs) is truncated with its
-    byte count and content hash — the store stays lean, the evidence
-    stays checkable against the archive."""
-    out: dict = {}
-    for k, v in (rows[0] if rows else {}).items():
-        if not k or v in ("", None):
+    non-empty cell of row one rides along verbatim."""
+    return {k: v for k, v in (rows[0] if rows else {}).items()
+            if k and v not in ("", None)}
+
+
+def _offload_giant_cells(graph: GraphDir, tid: str, physical: str,
+                         artifact: str, props: dict, prov,
+                         evidence: str, report: dict) -> None:
+    """NOTHING verbatim is ever lost. A cell past 8KB (real 01 exports
+    carry multi-hundred-KB option blobs) moves WHOLE into a ``doc:``
+    node — the same pattern that already stores full view SQL — linked
+    ``described_by`` from the table; the inline prop keeps a preview
+    plus the doc id and content hash. The truth graph keeps the full
+    text; only the table node's inline props stay lean."""
+    for key, value in list(props.items()):
+        if not isinstance(value, str) or len(value) <= _PROP_FIELD_CAP:
             continue
-        if isinstance(v, str) and len(v) > _PROP_FIELD_CAP:
-            digest = hashlib.sha256(v.encode()).hexdigest()[:12]
-            v = (v[:2048] + f" …[truncated: {len(v)} bytes, "
-                 f"sha256_12={digest} — full text in the archive]")
-        out[k] = v
-    return out
+        slug = re.sub(r"[^a-z0-9_\-]", "_", key.lower())
+        doc = (f"doc:{artifact}_{physical.replace('.', '_')}_{slug}")
+        graph.append_node(NodeRecord(
+            id=doc,
+            props={"kind": artifact, "field": key, "text": value},
+            prov=prov(evidence=evidence)))
+        graph.append_edge(Quad(s=tid, r="described_by", o=doc,
+                               prov=prov(evidence=evidence)))
+        digest = hashlib.sha256(value.encode()).hexdigest()[:12]
+        props[key] = (value[:2048] + f" …[{len(value)} bytes — full "
+                      f"verbatim text in {doc}, sha256_12={digest}]")
+        report["giant_cells_offloaded"] += 1
 
 
 _PATH_RE = re.compile(r"^[A-Za-z_][\w]*(\.[A-Za-z_][\w]*)+$")
@@ -269,7 +284,8 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
               "field_paths_unmintable": 0, "pk_columns": 0,
               "fk_edges": 0, "fk_out_of_scope": 0,
               "cols_minted_from_constraints": 0,
-              "constraints_unrecognized": 0}
+              "constraints_unrecognized": 0,
+              "giant_cells_offloaded": 0}
     # constraint-declared FKs resolve AFTER the walk — the referenced
     # table's own columns must have minted first, whatever dir order
     minted_cols: set[str] = set()
@@ -314,8 +330,15 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
 
         metrics = _csv_rows(track(d / "13_table_metrics.csv"))
         total_rows = int(metrics[0]["total_rows"]) if metrics else None
+        table_metrics_row = _first_row_props(metrics)
         table_meta = _first_row_props(
             _csv_rows(track(d / "01_logical_table_meta.csv")))
+        _offload_giant_cells(
+            graph, tid, physical, "table_meta_logical", table_meta,
+            prov, f"{d.name}/01_logical_table_meta.csv", report)
+        _offload_giant_cells(
+            graph, tid, physical, "table_metrics", table_metrics_row,
+            prov, f"{d.name}/13_table_metrics.csv", report)
         partitions = _csv_rows(track(d / "10_physical_partitions.csv"))
         users = (_csv_rows(track(d / "17_queries_30d"
                                  / "jobs_top_users.csv"))
@@ -329,7 +352,7 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                 "total_rows": total_rows,
                 # the rest of row one — size/modified/freshness context
                 # the old loader discarded past total_rows
-                "table_metrics": _first_row_props(metrics) or None,
+                "table_metrics": table_metrics_row or None,
                 "table_meta_logical": table_meta or None,
                 "n_partitions": len(partitions) or None,
                 "partition_latest": max(
