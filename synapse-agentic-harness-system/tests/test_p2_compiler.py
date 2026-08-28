@@ -173,7 +173,7 @@ def test_lob_index_joins_sources_and_pedigree_serving(tmp_path):
     joins = [json.loads(x) for x in
              (build_dir / "indexes" / "joins.jsonl"
               ).read_text().splitlines()]
-    assert {"co_query", "jobs_30d", "constraints"} <= \
+    assert {"co_query", "jobs_30d", "constraints", "studio"} <= \
         {j["source"] for j in joins}
     fk_row = next(j for j in joins if j["source"] == "constraints")
     assert fk_row["on"] == ("dw.gms_transaction.cm13 = "
@@ -218,3 +218,33 @@ def test_lob_index_joins_sources_and_pedigree_serving(tmp_path):
     assert top["line_of_business"] == "SBS"
     hit = search_metrics(build, "merchant spend volume")["candidates"]
     assert any("Do not use" in c["guidance"] for c in hit)
+
+
+def test_studio_scoped_joins_serve_with_their_discipline(tmp_path):
+    """The scoped-join witness survives compile intact: joins.jsonl rows
+    carry scope/preconditions/witness_metric, and BOTH table cards warn
+    that the join is CTE-scoped — the agent must never read an observed
+    equality as a raw-safe join."""
+    _, build_dir, _ = _compiled(tmp_path)
+    joins = [json.loads(x) for x in
+             (build_dir / "indexes" / "joins.jsonl"
+              ).read_text().splitlines()]
+    studio = next(j for j in joins if j["source"] == "studio")
+    assert studio["scope"] == "scoped_only"
+    assert studio["on"] == ["cm13 = card_no"]
+    assert studio["join_type"] == "INNER"
+    assert studio["witness_metric"] == "101"
+    assert "aggregate both sides to cm13 grain first" \
+        in studio["preconditions"]
+    for name in ("dw__gms_transaction.md", "dw__wwcas_authorization.md"):
+        card = (build_dir / "cards" / "tables" / name).read_text()
+        assert "CTE-scoped, NOT raw-safe" in card, name
+        assert "[prov:studio]" in card, name
+    gms_card = (build_dir / "cards" / "tables"
+                / "dw__gms_transaction.md").read_text()
+    assert "ON cm13 = card_no · INNER · scoped_only" in gms_card
+    assert "requires: aggregate both sides to cm13 grain first" \
+        in gms_card
+    # the same-id-different-SQL witness is a VISIBLE census conflict
+    census = json.loads((build_dir / "census.json").read_text())
+    assert census["summary"]["metric_conflicts"] >= 1

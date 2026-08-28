@@ -71,7 +71,8 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
                co_queried: list[tuple[str, int]],
                acl_entry: dict[str, Any],
                lob_info: list[dict[str, Any]] | None = None,
-               usage_info: list[dict[str, Any]] | None = None
+               usage_info: list[dict[str, Any]] | None = None,
+               scoped_joins: list[dict[str, Any]] | None = None
                ) -> tuple[str, dict[str, Any]]:
     """→ (markdown, budget_report)."""
     physical = consensus.physical
@@ -128,6 +129,18 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
     lines["joins"] = ["## joined with (observed)"] + [
         f"- {other} · {support} co-queries [prov:bq:history]"
         for other, support in co_queried[:8]]
+    for j in (scoped_joins or [])[:4]:
+        # a scoped_only witness means the equality was observed between
+        # TRANSFORMED CTEs — the relationship exists; the raw tables do
+        # NOT join safely without the stated preparation
+        caveat = ("" if j.get("scope") == "raw_safe"
+                  else " — CTE-scoped, NOT raw-safe"
+                  + (f"; requires: {'; '.join(j['preconditions'][:2])}"
+                     if j.get("preconditions") else ""))
+        lines["joins"].append(
+            f"- {j['other']} ON {' AND '.join(j.get('on') or ['?'])} · "
+            f"{j.get('join_type') or 'JOIN'} · {j.get('scope')}{caveat} "
+            f"[prov:{j.get('witness') or 'studio'}]")
     lines["filters"] = ["## common filters"] + [
         f"- {f['label']}: `{f['sql']}` · support {f['support']} "
         f"[prov:{f['source']}]" for f in filters_here[:8]]

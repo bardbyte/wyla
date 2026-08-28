@@ -1,0 +1,5 @@
+{
+ "schema": "studio.duplicate_quality_report/1",
+ "duplicates": [],
+ "quality": {"records": 2, "flagged": 1}
+}

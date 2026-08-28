@@ -99,6 +99,34 @@ def test_catalog_adapters_counts():
     assert mined[0].support > 1          # user_count scaling
 
 
+def test_studio_query_witness_adapter(tmp_path: Path):
+    """The Studio witness loader: fuses via the dmp: ref namespace,
+    carries the full referenced query, and quarantines broken or
+    id-less lines with a category instead of guessing."""
+    from sahs.loaders.sources.studio_witnesses import load_query_witnesses
+    records, quar = load_query_witnesses(
+        FX / "query_semantic_witnesses.jsonl")
+    assert len(records) == 2 and not quar
+    assert [r.metric_ref for r in records] == ["dmp:101", "dmp:102"]
+    assert all(r.source == "studio_queries" for r in records)
+    assert records[0].table_hint == "gms_transaction"
+    assert records[0].extra["referenced_query"].startswith("WITH txn AS")
+    assert records[1].extra["quality_flags"] == \
+        ["metric_expression_vs_query_mismatch"]
+    p = tmp_path / "broken.jsonl"
+    p.write_text('not json\n'
+                 '{"metric_catalog_id": "", "sql": {"expression": "x"}}\n'
+                 '{"metric_catalog_id": "9", "sql": {}}\n'
+                 '{"metric_catalog_id": "9", '
+                 '"sql": {"referenced_query": "SELECT 1"}}\n',
+                 encoding="utf-8")
+    records, quar = load_query_witnesses(p)
+    # the referenced query stands in when the expression is absent
+    assert len(records) == 1 and records[0].raw_sql == "SELECT 1"
+    assert sorted(q.category for q in quar) == \
+        ["missing_field", "missing_field", "parse_error"]
+
+
 def test_skills_contracts_extracted_knowledge_only_pack_skipped():
     records, quar = load_skill_contracts(FX / "skills")
     ids = {r.metric_ref for r in records}

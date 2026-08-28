@@ -39,6 +39,7 @@ _EXPR_AUTHORITY = {
     "gold_queries": Authority.SKILL_CONTRACT,
     "measures_catalog": Authority.MINED,
     "jobs_30d": Authority.MINED,
+    "studio_queries": Authority.MINED,
     "blue_insights": Authority.SNIPPET,
 }
 
@@ -362,10 +363,24 @@ def compile_build(graph_root: Path, builds_root: Path
     # ── cards ──
     budget: dict[str, Any] = {"over_budget": 0, "dropped": {}}
     co_by_table: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    scoped_by_table: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for (s, r, o, _w), quad in sorted(edges.items()):
         if r == "co_queried_with":
             co_by_table[s.split(":", 1)[1]].append(
                 (o.split(":", 1)[1], quad.prov.support or 1))
+        elif r == "joins_via" and quad.props.get("scope"):
+            # witnessed join knowledge renders on BOTH ends — the join
+            # is symmetric; the scope discipline rides with it
+            a, b = s.split(":", 1)[1], o.split(":", 1)[1]
+            entry = {"on": quad.props.get("on") or [],
+                     "scope": quad.props["scope"],
+                     "join_type": quad.props.get("join_type", ""),
+                     "purpose": quad.props.get("purpose", ""),
+                     "preconditions":
+                         quad.props.get("preconditions") or [],
+                     "witness": quad.prov.witness or ""}
+            scoped_by_table[a].append({**entry, "other": b})
+            scoped_by_table[b].append({**entry, "other": a})
     for tid, table_consensus in sorted(consensus.items()):
         physical = table_consensus.physical
         record = nodes.get(tid)
@@ -386,7 +401,8 @@ def compile_build(graph_root: Path, builds_root: Path
                    key=lambda x: -x[1]),
             acl.get(physical, {"restricted": None, "pii_columns": []}),
             lob_info=lob_by_table.get(physical, []),
-            usage_info=usage_by_table.get(physical, []))
+            usage_info=usage_by_table.get(physical, []),
+            scoped_joins=scoped_by_table.get(physical, []))
         (build_dir / "cards" / "tables"
          / f"{physical.replace('.', '__')}.md").write_text(
             text + "\n", encoding="utf-8")
@@ -469,9 +485,13 @@ def compile_build(graph_root: Path, builds_root: Path
     (build_dir / "schema.json").write_text(
         json.dumps(schema, indent=1, sort_keys=True) + "\n",
         encoding="utf-8")
-    # three join-knowledge families, each named: co-query digests say
-    # tables appear together, jobs ON-clauses say HOW (measured), and
-    # declared constraints say HOW by fiat — the agent reads `source`
+    # four join-knowledge families, each named: co-query digests say
+    # tables appear together, jobs ON-clauses say HOW (measured),
+    # declared constraints say HOW by fiat, and studio witnesses say
+    # HOW inside certified-metric SQL — the agent reads `source`, and
+    # a studio row's `scope: scoped_only` means the equality was
+    # observed between TRANSFORMED CTEs: evidence the relationship
+    # exists, never that the raw tables join safely
     join_rows = []
     for (s, r, o, _w), quad in sorted(edges.items()):
         if r == "co_queried_with":
@@ -482,9 +502,13 @@ def compile_build(graph_root: Path, builds_root: Path
         elif r == "joins_via":
             row = {"a": s.split(":", 1)[1], "b": o.split(":", 1)[1],
                    "support": quad.prov.support or 1,
-                   "source": "jobs_30d"}
+                   "source": quad.prov.witness or "jobs_30d"}
             if quad.props.get("on"):
                 row["on"] = quad.props["on"]
+            for key in ("scope", "join_type", "semantic_keys", "grain",
+                        "purpose", "preconditions", "witness_metric"):
+                if quad.props.get(key):
+                    row[key] = quad.props[key]
             join_rows.append(row)
         elif r == "fk_references":
             a_col = s.split(":", 1)[1]

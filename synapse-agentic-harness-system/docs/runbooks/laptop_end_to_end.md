@@ -32,6 +32,10 @@ path flags. Two kinds of input:
     ├── measures_catalog.json          # mined measures
     ├── metrics_dmp.json               # DMP certified metrics
     ├── extended_gmns_semantics.json   # GMNS pending metrics
+    ├── query_semantic_witnesses.jsonl # Studio pass: observed metric SQL
+    ├── join_witnesses.jsonl           # Studio pass: CTE-scoped joins
+    │   # (the raw studio_results_*.csv they were normalized from may
+    │   # sit beside them — it ledgers as deferred, upstream twin)
     ├── data_cleaned.csv               # acropedia glossary
     ├── business_terms.csv             # Atlas/Collibra terms
     ├── std_tech_metadata/             # 46 per-table Atlas JSONs …

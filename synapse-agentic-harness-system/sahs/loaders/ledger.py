@@ -54,6 +54,10 @@ DEFERRALS: tuple[tuple[str, str], ...] = (
      "profiling run summary — operational metadata"),
     ("_state.json",
      "extractor checkpoint state — operational, not semantic"),
+    ("duplicate_quality_report.json",
+     "Studio-pass duplicate/quality analysis — a derived report; "
+     "Meridian derives conflicts itself in census/validator, and two "
+     "analyses of the same witnesses don't vote twice"),
     (".DS_Store", "OS metadata"),
 )
 # pinned deliberate deferrals (filename-prefix → reason)
@@ -85,6 +89,10 @@ DEFERRAL_PREFIXES: tuple[tuple[str, str], ...] = (
     ("_batch_summary",
      "extraction batch summary — the registry input when used as "
      "--registry; operational otherwise"),
+    ("studio_results_",
+     "raw Studio export — upstream of the consumed witness jsonl "
+     "(query_semantic_witnesses/join_witnesses), which the Studio "
+     "analysis pass normalized from it"),
 )
 # pinned deliberate deferrals (filename-extension → reason)
 DEFERRAL_EXTENSIONS: tuple[tuple[str, str], ...] = (

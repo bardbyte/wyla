@@ -65,7 +65,15 @@ python scripts/laptop.py build-graph \
 
 Order inside the run (pinned): crosswalk gate → BQ archive → MDM
 archive → LOB map (steward first, so mined values have something to
-corroborate) → semantic quads → **jobs 30d witness** (raw history mined
+corroborate) → semantic quads (the Studio witness pair loads here when
+present in sources/: `query_semantic_witnesses.jsonl` fuses observed
+metric SQL onto canonical ids via `dmp:<metric_catalog_id>` — same SQL
+corroborates, different SQL lands as a flagged second class, the full
+referenced query rides whole as a doc node; `join_witnesses.jsonl`
+becomes `joins_via` edges that default to `scope: scoped_only` — an
+equality observed between transformed CTEs proves a relationship
+exists, never that the raw tables join safely; self-join patterns are
+counted, never edges) → **jobs 30d witness** (raw history mined
 in-silo; runs AFTER the catalogs so a jobs sighting of a governed
 metric is testimony, never a fresh seed) → utilization ledger → run
 manifest → **validator gate** (the 14-check catalog; any error exits 2

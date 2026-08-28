@@ -1,0 +1,2 @@
+metricCatalogId,metricName,sqlExpression,referencedSqlQuery
+101,gmns_spend,"SUM(CASE WHEN se_cr_dr_in = 'C' THEN -trans_usd_am ELSE trans_usd_am END)","WITH txn AS (SELECT cm13 FROM dw.gms_transaction) SELECT 1"

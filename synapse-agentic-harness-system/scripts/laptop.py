@@ -50,6 +50,10 @@ from sahs.loaders.sources.catalogs import (                       # noqa: E402
 )
 from sahs.loaders.sources.gold_queries import load_gold_queries   # noqa: E402
 from sahs.loaders.sources.skills import load_skill_contracts      # noqa: E402
+from sahs.loaders.sources.studio_witnesses import (               # noqa: E402
+    emit_join_witnesses,
+    load_query_witnesses,
+)
 from sahs.loaders.sources.vocab import (                          # noqa: E402
     load_business_terms,
     load_glossary,
@@ -104,6 +108,12 @@ def _load_expressions(sources: Path, registry: TableRegistry,
     p = sources / "extended_gmns_semantics.json"
     if p.exists():
         _take("extended_gmns", load_extended_gmns(p))
+    p = sources / "query_semantic_witnesses.jsonl"
+    if p.exists():
+        # Studio witness pass — observed certified-metric SQL; fuses
+        # onto canonical ids via dmp:<metric_catalog_id>, AFTER the
+        # catalogs so a sighting is testimony, never a fresh seed
+        _take("studio_queries", load_query_witnesses(p))
     p = sources / "measures_catalog.json"
     if p.exists():
         _take("measures_catalog", load_measures_catalog(p))
@@ -365,6 +375,12 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
         reports["expressions"] = emit_expressions(
             pairs, graph, crosswalk, run_id, lob_aliases=lob_aliases,
             usage_targets=usage_targets)
+        joins_path = sources / "join_witnesses.jsonl"
+        if joins_path.exists():
+            console.emit("phase_start", phase="studio join witnesses",
+                         detail="scoped joins_via from observed SQL")
+            reports["studio_joins"] = emit_join_witnesses(
+                joins_path, graph, crosswalk, run_id)
         glossary_path = sources / "data_cleaned.csv"
         terms_path = sources / "business_terms.csv"
         glossary = (load_glossary(glossary_path)[0]
@@ -408,6 +424,8 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
         for name in ("blue_business_insights.csv",
                      "extracted_gold_queries.json", "metrics_dmp.json",
                      "extended_gmns_semantics.json",
+                     "query_semantic_witnesses.jsonl",
+                     "join_witnesses.jsonl",
                      "measures_catalog.json", "data_cleaned.csv",
                      "business_terms.csv"):
             ledger.consumed(sources / name)

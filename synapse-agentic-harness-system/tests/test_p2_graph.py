@@ -413,6 +413,19 @@ def test_utilization_ledger_accounts_for_every_file(tmp_path):
         and "profiling coverage" in manifest_row["reason"]
     assert by_path["real_extractions_production/sbs_new_accounts/"
                    "05_view_definition.csv"]["status"] == "consumed"
+    # Studio custody: the witness jsonl pair is CONSUMED; the raw CSV
+    # they were normalized from and the derived quality report defer
+    # with their reasons (Meridian derives conflicts itself)
+    assert by_path["sources/query_semantic_witnesses.jsonl"][
+        "status"] == "consumed"
+    assert by_path["sources/join_witnesses.jsonl"]["status"] == "consumed"
+    raw_csv = by_path["sources/studio_results_20260827_fixture_"
+                      "cte_or_subqueries.csv"]
+    assert raw_csv["status"] == "deferred" \
+        and "upstream of the consumed witness jsonl" in raw_csv["reason"]
+    dq = by_path["sources/duplicate_quality_report.json"]
+    assert dq["status"] == "deferred" \
+        and "derives conflicts itself" in dq["reason"]
 
 
 def test_lob_layer_steward_declares_catalogs_corroborate(tmp_path):
@@ -466,6 +479,73 @@ def test_lob_layer_steward_declares_catalogs_corroborate(tmp_path):
     ex = manifest["reports"]["expressions"]
     assert ex["used_by_edges"] >= 2
     assert ex.get("usage_unmatched", 0) == 0   # every fixture value maps
+
+
+def test_studio_witnesses_fuse_conflict_doc_and_scoped_joins(tmp_path):
+    """Studio pass: observed certified-metric SQL. Same id + same SQL
+    FUSES onto the canonical metric (a new witness family, never a
+    duplicate node); same id + different SQL lands as a second class in
+    the same mgroup (retained + flagged, never overwriting); the full
+    referenced query rides WHOLE as a doc node; join witnesses become
+    joins_via edges that are scoped_only by default — the equality was
+    observed between TRANSFORMED CTEs, so it is evidence a relationship
+    exists, never that the raw tables join safely. Self-join patterns
+    are counted, never edges; unresolvable tables are counted out."""
+    graph_dir, out_dir = tmp_path / "g", tmp_path / "run"
+    result = _build(graph_dir, out_dir)
+    assert result.returncode == 0, result.stderr[-800:]
+    graph = GraphDir(graph_dir)
+    nodes = graph.fold_nodes()
+    edges = graph.fold_edges()
+
+    # fusion: ONE metric node carries both the dmp and studio witnesses
+    spend_members = {(s, w) for (s, r, o, w) in edges
+                     if r == "member_of" and o == "mgroup:dmp:101"}
+    spend_ids = {s for s, _w in spend_members}
+    assert len(spend_ids) == 1                 # no parallel node minted
+    assert {w for _s, w in spend_members} >= {"dmp", "studio"}
+    (spend,) = spend_ids
+
+    # the referenced query — verbatim, whole, as a doc node
+    doc_edges = [(s, o) for (s, r, o, _w) in edges
+                 if r == "evidenced_by" and s == spend
+                 and o.startswith("doc:studio_query_")]
+    assert doc_edges
+    doc = nodes[doc_edges[0][1]]
+    assert doc.props["kind"] == "studio_query"
+    assert doc.props["sql"].startswith("WITH txn AS")
+    assert "se_cr_dr_in = 'C'" in doc.props["sql"]   # bytes intact
+
+    # conflict: different SQL under the same catalog id → SECOND class
+    # in the mgroup, studio witness only on the new class
+    txn_members = {(s, w) for (s, r, o, w) in edges
+                   if r == "member_of" and o == "mgroup:dmp:102"}
+    txn_ids = {s for s, _w in txn_members}
+    assert len(txn_ids) == 2                   # retained, never merged
+    studio_class = next(s for s, w in txn_members if w == "studio")
+    assert "distinct" in nodes[studio_class].props["canonical_sql"].lower()
+    # the machine-readable warning rides on the node
+    assert nodes[studio_class].props["quality_flags"] == \
+        ["metric_expression_vs_query_mismatch"]
+    assert nodes[studio_class].props["query_shape"].get("shape") == "cte"
+
+    # scoped join witness: edge + discipline props
+    jw = edges[("table:dw.gms_transaction", "joins_via",
+                "table:dw.wwcas_authorization", "studio")]
+    assert jw.props["scope"] == "scoped_only"
+    assert jw.props["on"] == ["cm13 = card_no"]
+    assert jw.props["join_type"] == "INNER"
+    assert jw.props["witness_metric"] == "101"
+    assert "aggregate both sides to cm13 grain first" \
+        in jw.props["preconditions"]
+    manifest = json.loads((graph_dir / "runs" / "test_r1" /
+                           "manifest.json").read_text())
+    assert manifest["reports"]["studio_joins"] == {
+        "join_edges": 1, "pattern_only": 1,
+        "join_out_of_scope": 1, "join_quarantined": 0}
+    # the self-join pattern never became an edge
+    assert ("table:dw.gms_transaction", "joins_via",
+            "table:dw.gms_transaction", "studio") not in edges
 
 
 def test_constraints_meta_and_field_paths_wired(tmp_path):

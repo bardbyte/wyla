@@ -93,7 +93,8 @@ def test_seed_merge_discovery_and_count_star_fusion(built):
     spend = next(m for m in build.metrics
                  if m["mgroup"] == "mgroup:dmp:101")
     assert spend["support_by_witness"]["jobs_30d"] == 2   # j001+j002
-    assert spend["witness_agreement"] == 3
+    assert spend["support_by_witness"]["studio"] == 1     # qsw_001 fused
+    assert spend["witness_agreement"] == 4
     assert spend["recency_source"] == "jobs_30d"
     assert spend["last_seen"] == "2026-08-24"
     assert spend["support"] == max(
@@ -103,9 +104,12 @@ def test_seed_merge_discovery_and_count_star_fusion(built):
                  if m["support_by_witness"] == {"jobs_30d": 1}
                  and "avg" in m["canonical_sql"])
     assert novel["status"] == "mined"        # discovery: jobs-only metric
-    # ruleset 2: jobs' COUNT(*) fused with the catalog's COUNT(1)
-    txn = next(m for m in build.metrics if m["mgroup"] == "mgroup:dmp:102")
-    assert txn["canonical_sql"] == "count(1)"
+    # ruleset 2: jobs' COUNT(*) fused with the catalog's COUNT(1) —
+    # the studio conflict row put a SECOND class in this mgroup, so
+    # select the catalog class explicitly
+    txn = next(m for m in build.metrics
+               if m["mgroup"] == "mgroup:dmp:102"
+               and m["canonical_sql"] == "count(1)")
     assert txn["support_by_witness"]["jobs_30d"] == 2     # j004 + j006
 
 
@@ -308,7 +312,7 @@ def test_resolver_trace_carries_witness_features(built):
     _, build, _ = built
     out = resolve(build, "How much volume did our merchants process?")
     features = out["features_by_slot"]["metric"]
-    assert features["witness_agreement"] == 3
+    assert features["witness_agreement"] == 4
     assert features["recency_source"] == "jobs_30d"
     assert out["constants_version"].startswith("rc")   # still rc1 family
 
