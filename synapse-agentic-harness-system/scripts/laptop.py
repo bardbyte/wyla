@@ -533,6 +533,9 @@ def main(argv: list[str] | None = None) -> int:
                 limit=args.limit, targets=targets,
                 plan_only=args.plan, blind_sample=args.blind_sample,
                 fresh=args.fresh,
+                prefer=tuple(t.strip() for t in
+                             (args.prefer or "").split(",")
+                             if t.strip()),
                 log=lambda m: console.emit("phase_start",
                                            phase="enrich", detail=m))
         except AuthError as e:
@@ -574,6 +577,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="write the plan only — no model calls")
     p.add_argument("--blind-sample", type=int, default=0,
                    help="cap the A5 blind set (0 = all certified)")
+    p.add_argument("--prefer", default="",
+                   help="comma terms; matching metrics float to the "
+                        "front of the tranche (demand seeding, e.g. "
+                        "'spend,transaction')")
     p.add_argument("--run-id", default="")
     p.add_argument("--plain", action="store_true")
     p.add_argument("--json", action="store_true", dest="json_out")

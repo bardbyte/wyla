@@ -32,9 +32,32 @@ SOURCE = "llm_enricher"                 # → witness "llm_enriched"
 # 60–80% ⇒ item-review only; <60% ⇒ do not run at scale.
 TIER_BATCH = 0.80
 TIER_ITEM = 0.60
-# v1 recovery grader (deterministic proxy, revisit per A5 trigger):
-# ≥50% of the true label's content tokens appear in the prediction.
+# v1.1 recovery grader (deterministic proxy, revisit per A5 trigger):
+# ≥50% of the true label's content tokens appear in the prediction,
+# AND polarity agrees — the b1.1 smoke passed a Card Present /
+# Card Not Present SWAP on token overlap alone, the one error class
+# that would actually poison the graph. Strictly harder, never softer.
 RECOVERY_TOKEN_SHARE = 0.5
+_NEGATIONS = {"not", "non", "excluding", "without"}
+
+
+def _version_num(version) -> tuple[int, int]:
+    """'b1.2' → (1, 2); anything unparsable → (0, 0) so it always
+    re-enriches under a real version."""
+    try:
+        major, minor = str(version or "").lstrip("b").split(".")
+        return (int(major), int(minor))
+    except (ValueError, AttributeError):
+        return (0, 0)
+
+
+def _enriched_current(props: dict) -> bool:
+    """Version-aware idempotency: presence alone must not freeze a
+    metric on the draft we least liked — a b1.2 prompt improvement
+    re-enriches b1.1 output (append-only keeps the old draft as
+    history; the fold's last-wins serves the newest)."""
+    return (_version_num(props.get("enrich_prompt_version"))
+            >= _version_num(PROMPT_VERSION))
 
 
 def _prov(run_id: str, model: str, extra: str = "") -> Prov:
@@ -99,7 +122,9 @@ def _context(row: dict[str, Any], build: Build,
 
 
 def plan_metric_items(build: Build, folded_nodes: dict,
-                      limit: int) -> list[dict[str, Any]]:
+                      limit: int,
+                      prefer: tuple[str, ...] = ()
+                      ) -> list[dict[str, Any]]:
     """Mined metrics missing BOTH a question and a grain — highest
     support first (deterministic). The never-clobber guard checks the
     GRAPH fold, not just the build, so a re-run before recompile still
@@ -118,19 +143,34 @@ def plan_metric_items(build: Build, folded_nodes: dict,
         if props.get("description"):
             continue        # the catalog documented it by hand —
                             # never ask the model to redo a steward
-        if props.get("question_enriched") or props.get("grain_enriched"):
-            continue                     # enriched in a prior run
+        if (props.get("question_enriched")
+                or props.get("grain_enriched")) \
+                and _enriched_current(props):
+            continue          # enriched by THIS prompt version or newer
         if not row.get("canonical_sql"):
             continue
         item = {"kind": "metric", "id": row["id"], "fp": row["fp"],
                 **_context(row, build, purposes, lob_of),
                 "support": row.get("support", 0),
                 "has_question": bool(props.get("question_answered")),
-                "has_grain": bool(props.get("grain"))}
+                "has_grain": bool(props.get("grain")),
+                "grain_observed": str(props.get("grain_observed")
+                                      or "")}
         items.append(item)
-        if len(items) >= limit:
+        # with a preference list, over-collect so the sort has a pool
+        # to promote from; without one, stop exactly at the limit
+        if len(items) >= (limit * 4 if prefer else limit):
             break
-    return items
+    # demand seeding (opt-in): items matching a preferred term float to
+    # the front — the first tranche covers what users actually ask
+    # about; support still orders within each group
+    if prefer:
+        terms = tuple(t.lower() for t in prefer if t)
+        items.sort(key=lambda i: (
+            0 if any(t in (i["label"] + " " + i["sql"]).lower()
+                     for t in terms) else 1,
+            -i["support"], i["id"]))
+    return items[:limit]
 
 
 def plan_concept_items(build: Build, folded_nodes: dict,
@@ -145,12 +185,12 @@ def plan_concept_items(build: Build, folded_nodes: dict,
             by_label.items(),
             key=lambda kv: (-sum(r.get("support", 0) for r in kv[1]),
                             kv[0])):
-        enriched = any(
-            (folded_nodes.get(concept_id(label, r["table"])) is not None
-             and folded_nodes[concept_id(label, r["table"])]
-             .props.get("description_enriched"))
-            for r in rows)
-        if enriched:
+        def _current(record) -> bool:
+            return (record is not None
+                    and record.props.get("description_enriched")
+                    and _enriched_current(record.props))
+        if any(_current(folded_nodes.get(concept_id(label, r["table"])))
+               for r in rows):
             continue
         items.append({
             "kind": "concept", "label": label,
@@ -187,12 +227,23 @@ def blind_items(build: Build) -> list[dict[str, Any]]:
     return items
 
 
+def recovery_share(true_label: str, predicted: str) -> float:
+    truth = _tokens(true_label)
+    if not truth:
+        return 0.0
+    return round(len(truth & _tokens(predicted)) / len(truth), 3)
+
+
 def grade_recovery(true_label: str, predicted: str) -> bool:
     truth = _tokens(true_label)
     if not truth:
         return False
-    overlap = len(truth & _tokens(predicted))
-    return overlap / len(truth) >= RECOVERY_TOKEN_SHARE
+    # negation veto: 'Card Not Present X' vs 'Card Present X' are
+    # OPPOSITE metrics — polarity disagreement fails the case no
+    # matter how much else overlaps (b1.1 field false-positive)
+    if (truth & _NEGATIONS) != (_tokens(predicted) & _NEGATIONS):
+        return False
+    return recovery_share(true_label, predicted) >= RECOVERY_TOKEN_SHARE
 
 
 def run_blind_gate(build: Build, client: VertexClient, out_dir: Path,
@@ -203,14 +254,28 @@ def run_blind_gate(build: Build, client: VertexClient, out_dir: Path,
         items = items[:sample_n]
     results = []
     recovered = 0
+    leaky = 0
     for item in items:
+        # leakage instrumentation: how much of the WITHHELD name the
+        # assembled context already gives away (purpose/domain/lob
+        # labels — a card purpose that names its flagship metric turns
+        # recovery into a measurement of leakage). Published per item;
+        # a high rate with high leakage is not a pass to trust.
+        context_text = " ".join((item.get("table_purpose", ""),
+                                 item.get("domain", ""),
+                                 item.get("line_of_business", "")))
+        leak = recovery_share(item["true_label"], context_text)
+        leaky += int(leak >= 0.5)
         answer = parse_json_answer(client.generate(
             blind_name_prompt(item), system=SYSTEM)) or {}
         predicted = str(answer.get("name") or "")
         ok = grade_recovery(item["true_label"], predicted)
         recovered += int(ok)
         results.append({"id": item["id"], "true": item["true_label"],
-                        "predicted": predicted, "recovered": ok})
+                        "predicted": predicted, "recovered": ok,
+                        "share": recovery_share(item["true_label"],
+                                                predicted),
+                        "context_leak": leak})
     rate = round(recovered / len(items), 4) if items else 0.0
     tier = ("batch" if rate >= TIER_BATCH else
             "item" if rate >= TIER_ITEM else "halt")
@@ -218,9 +283,10 @@ def run_blind_gate(build: Build, client: VertexClient, out_dir: Path,
         "".join(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n"
                 for r in results), encoding="utf-8")
     log(f"blind gate: {recovered}/{len(items)} recovered "
-        f"({rate:.0%}) → tier {tier}")
+        f"({rate:.0%}) → tier {tier} · leaky contexts {leaky}")
     return {"n": len(items), "recovered": recovered, "rate": rate,
-            "tier": tier}
+            "tier": tier, "leaky_contexts": leaky,
+            "grader": "v1.1 (token-share + negation veto)"}
 
 
 # ── enrichment writes ────────────────────────────────────────
@@ -280,6 +346,24 @@ def enrich_metric_items(items: list[dict], client: VertexClient,
             report["collisions"] += 1
             continue
         taken_questions.add(key)
+        observed = str(item.get("grain_observed") or "").strip()
+        if observed and _normalize_question(grain) \
+                != _normalize_question(observed):
+            # two witnesses disagreeing about grain is exactly the
+            # class of finding this system exists to surface — both
+            # values stay recorded, a steward decides
+            emit_review_item(
+                graph, kind="witness_divergence", subject=item["id"],
+                proposal=(f"enriched grain {grain!r} disagrees with "
+                          f"studio-observed grain {observed!r}"),
+                evidence=[f"vertex:{model}#prompt={PROMPT_VERSION}",
+                          "studio:grain_observed"],
+                run_id=run_id, source=SOURCE, witness="llm_enriched",
+                support_effective=item.get("support", 1),
+                blast_radius=1,
+                agent_recommendation="prefer the observed grain — it "
+                                     "came from real certified SQL")
+            report["grain_divergences"] += 1
         props: dict[str, Any] = {
             "enrich_confidence": float(answer.get("confidence") or 0.0),
             "enrich_prompt_version": PROMPT_VERSION,
@@ -344,7 +428,8 @@ def run_enrich(*, graph_root: Path, builds_root: Path, out_dir: Path,
                run_id: str, limit: int = 200,
                targets: tuple[str, ...] = ("metrics", "concepts"),
                plan_only: bool = False, blind_sample: int = 0,
-               fresh: bool = False, client: VertexClient | None = None,
+               fresh: bool = False, prefer: tuple[str, ...] = (),
+               client: VertexClient | None = None,
                log: Callable[[str], None] = print) -> dict[str, Any]:
     """→ the enrich report (also written to <out>/enrich_report.json).
     ``plan_only`` builds and writes the plan without any model call —
@@ -359,9 +444,11 @@ def run_enrich(*, graph_root: Path, builds_root: Path, out_dir: Path,
         "planned_metrics": 0, "planned_concepts": 0,
         "metrics_enriched": 0, "concepts_enriched": 0,
         "collisions": 0, "invalid_json": 0, "resumed_skips": 0,
+        "grain_divergences": 0,
         "blind": None, "usage": None, "plan_only": plan_only,
     }
-    metric_items = (plan_metric_items(build, folded, limit)
+    metric_items = (plan_metric_items(build, folded, limit,
+                                      prefer=prefer)
                     if "metrics" in targets else [])
     concept_items = (plan_concept_items(build, folded, limit)
                      if "concepts" in targets else [])
