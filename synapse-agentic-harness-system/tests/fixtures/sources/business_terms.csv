@@ -20,3 +20,4 @@ businessTermId,businessTermName,businessTermStatus
 19,Country Code,Rejected
 20,Point of Sale Entry Mode,Approved
 99,Bad Status Term,Mystery
+21,case when se_cr_dr_in = 'D' then se_trans_usd_am,Approved

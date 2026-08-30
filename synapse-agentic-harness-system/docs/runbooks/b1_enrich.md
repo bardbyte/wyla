@@ -53,6 +53,23 @@
 > against this exam's residuals — treat the A5 rate as an upper
 > bound; B2 steward review is the audit. b1.4 is the LAST prompt
 > iteration before scale regardless of tier.
+>
+> The `b1.4` smoke surfaced two CODE defects (prompt untouched — the
+> no-b1.5 rule holds). (1) The Atlas export carries 'terms' whose
+> NAME is a raw SQL fragment; a fragment always phrase-matches its
+> own SQL blob, so unbalanced-quoted SQL rode the shelf into the two
+> CASE-densest prompts — correlated with that run's only empty
+> answers (one a smoke3 pass). `_looks_like_sql` now drops
+> expression-shaped text at the shelf. (2) The MAX_TOKENS self-heal
+> only fired on EMPTY responses; a response cut mid-emission (half a
+> JSON object) was returned as-is and graded as an empty prediction —
+> now any MAX_TOKENS finish heals, which should also cut the write
+> phase's invalid_json. Visible b1.4 wins in the same smoke: the
+> Inbound Local/Foreign method twin recovered; NAAS and Paid-Search
+> predictions moved onto the right register but the answer key is
+> register-inconsistent case by case ('New Accounts Acquired (NAA)'
+> spells out the very acronym the register rule keeps) — the honest
+> ceiling of prompt-rule iteration, on the record.
 
 > **Pinned follow-up (not built): observed filters from referenced
 > SQL.** The graph already stores each certified metric's full

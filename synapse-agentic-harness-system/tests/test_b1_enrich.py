@@ -261,6 +261,21 @@ def test_vocab_hygiene_blocks_sql_noise_and_stems(tmp_path):
     assert "Computer Aided" not in joined       # CASE keyword blocked
     assert "Default Workgroup" not in joined    # 2-letter fragment blocked
     assert "Credit Tracker" not in joined       # ct is a count, not CT
+    # the Atlas export carries 'terms' whose name IS a SQL fragment —
+    # such a phrase always matches its own SQL blob, and the b1.4
+    # smoke rode one into real prompts (correlated with the run's
+    # only empty answers). The shelf drops expression-shaped text.
+    from sahs.enrich.loop import _looks_like_sql
+    assert any(_looks_like_sql(str(r.get("text") or ""))
+               for r in build.vocab)            # poison IS on the shelf
+    frag = {"label": "", "table": "dw.gms_transaction",
+            "sql": "sum(case when se_cr_dr_in = 'D' then "
+                   "se_trans_usd_am else 0 end)",
+            "columns": [], "filters": []}
+    frag_entries = _vocab_for(frag, single, multi)
+    assert not any("case when" in e.lower() for e in frag_entries)
+    assert not _looks_like_sql("Point of Sale Entry Mode")  # terms keep
+    assert not _looks_like_sql("New Accounts Acquired (NAA)")
 
 
 def test_house_style_b14_register_and_code_pins():
@@ -516,15 +531,21 @@ def test_proxy_credentials_never_printed():
 
 
 def test_max_tokens_empty_response_grows_budget_and_retries():
-    """A reasoning model can burn the whole output budget thinking —
-    a 200 with finishReason=MAX_TOKENS and no text. The client grows
-    the cap and retries instead of failing the call."""
+    """A reasoning model can burn the whole output budget thinking.
+    Two field faces of the same cap: a 200 with NO text, and a 200
+    with PARTIAL text — half a JSON object cut mid-emission (the b1.4
+    smoke's empty predictions). Both heal: grow the cap and retry."""
     from sahs.enrich.client import VertexClient
     seen: list[int] = []
 
     def transport(body):
         seen.append(body["generationConfig"]["maxOutputTokens"])
-        if len(seen) == 1:
+        if len(seen) == 1:            # cut mid-emission: partial JSON
+            return {"candidates": [{"finishReason": "MAX_TOKENS",
+                                    "content": {"parts": [
+                                        {"text": '{"ok'}]}}],
+                    "usageMetadata": {"thoughtsTokenCount": 30}}
+        if len(seen) == 2:            # whole budget spent thinking
             return {"candidates": [{"finishReason": "MAX_TOKENS",
                                     "content": {"parts": []}}],
                     "usageMetadata": {"thoughtsTokenCount": 32}}
@@ -538,11 +559,12 @@ def test_max_tokens_empty_response_grows_budget_and_retries():
                           sleep=lambda _s: None, log=notes.append)
     text = client.generate("hi", max_output_tokens=32)
     assert text == '{"ok": true}'
-    assert seen == [32, 128]          # grew ×4, then succeeded
-    assert client.usage["thought_tokens"] == 32
+    assert seen == [32, 128, 512]     # grew ×4 twice, then succeeded
+    assert client.usage["thought_tokens"] == 62
     # the self-heal narrates itself — a struggling call must be
     # distinguishable from a hung one in the live terminal
-    assert any("[vertex]" in n and "MAX_TOKENS" in n for n in notes)
+    assert any("truncated" in n and "MAX_TOKENS" in n for n in notes)
+    assert any("empty" in n and "MAX_TOKENS" in n for n in notes)
 
 
 def test_live_progress_lines(tmp_path):
