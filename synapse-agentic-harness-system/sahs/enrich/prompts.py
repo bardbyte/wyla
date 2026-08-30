@@ -63,6 +63,10 @@ def _table_context(item: dict[str, Any]) -> str:
     if item.get("filters"):
         lines.append("metric filters (part of its identity): "
                      + "; ".join(item["filters"]))
+    if item.get("vocab"):
+        lines.append("company vocabulary (Atlas business terms + the "
+                     "enterprise glossary — authoritative here):")
+        lines += [f"  - {entry}" for entry in item["vocab"]]
     return "\n".join(lines)
 
 
@@ -105,10 +109,15 @@ def concept_description_prompt(item: dict[str, Any]) -> str:
     bindings = "\n".join(
         f"- on {b['table']}: `{b['sql']}` (support {b['support']})"
         for b in item.get("bindings", [])[:6])
+    vocab = ""
+    if item.get("vocab"):
+        vocab = ("\ncompany vocabulary (Atlas business terms + the "
+                 "enterprise glossary — authoritative here):\n"
+                 + "\n".join(f"  - {entry}" for entry in item["vocab"]))
     return f"""A business concept appears in real analyst SQL with these bindings:
 
 concept: {item['label']}
-{bindings}
+{bindings}{vocab}
 
 Return ONE JSON object with exactly these keys:
 {{"description": "<2-3 sentences: what the concept means in business terms and when an analyst would filter by it — grounded ONLY in the bindings above>",

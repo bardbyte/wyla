@@ -129,6 +129,7 @@ def test_plan_targets_only_blank_metrics(tmp_path):
                               limit=500)
     assert items                                # mined metrics need work
     assert "filters" in items[0]                # b1.3 context carries them
+    assert "vocab" in items[0]                  # and the glossary shelf
     planned = {i["id"] for i in items}
     for row in build.metrics:
         if row.get("question") and row.get("grain"):
@@ -213,6 +214,28 @@ def test_grain_divergence_files_review_item(tmp_path):
                and "studio-observed" in n.props.get("proposal", "")]
     assert reviews and reviews[0].prov.witness == "llm_enriched"
     assert validate_graph(graph_dir).ok
+
+
+def test_enricher_context_carries_company_vocabulary(tmp_path):
+    """The enricher reads the company's own reference shelf — acropedia
+    acronym expansions + Atlas business terms — scoped to each item's
+    text (snake_case split so alif_cnt finds ALIF), rendered into the
+    prompt as authoritative vocabulary. The blind exam gets the same
+    configuration with the label scrubbed BEFORE the lookup, so vocab
+    can never carry the withheld name in through the side door."""
+    from sahs.enrich.loop import _vocab_for, _vocab_index, blind_items
+    from sahs.enrich.prompts import metric_semantics_prompt
+    graph_dir, builds = _compiled(tmp_path)
+    build = Build.open(builds)
+    single, multi = _vocab_index(build)
+    assert "alif" in single            # acropedia acronym plane loaded
+    item = {"label": "Submitter ALIF", "sql": "count(alif_cnt)",
+            "table": "dw.gms_transaction", "columns": [], "filters": []}
+    entries = _vocab_for(item, single, multi)
+    assert any("Active Locations in Force" in e for e in entries)
+    item["vocab"] = entries
+    assert "Active Locations in Force" in metric_semantics_prompt(item)
+    assert all("vocab" in b for b in blind_items(build))
 
 
 def test_gold_text_never_reaches_prompts(tmp_path):
