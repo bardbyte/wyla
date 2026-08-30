@@ -103,7 +103,10 @@ def search_metrics(build: Build, intent: str, top_k: int = 8) -> dict:
             groups[g] = groups.get(g, 0) + 1
     return {"candidates": [{
         "id": r["id"], "mgroup": r["mgroup"], "label": r["label"],
-        "status": r["status"], "grain": r.get("grain", ""),
+        "status": r["status"],
+        "status_served": r.get("status_served", r["status"]),
+        "evidence_origin": r.get("evidence_origin", r["source"]),
+        "grain": r.get("grain", ""),
         "table": r["table"], "question": r.get("question", ""),
         "source": r["source"],
         "line_of_business": r.get("line_of_business", ""),
@@ -194,14 +197,19 @@ def get_definition_line(build: Build, metric_id: str,
                 f"({row['source']}) on {row['table']} — the meridian "
                 f"line for this metric.")
     else:
-        line = (f"Using '{row['label']}' [{row['status']}, "
-                f"{row['source']}] on {row['table']}"
+        # served vocabulary: governance status, then evidence origin —
+        # "unreviewed, usage_mining" cannot be read as an endorsement
+        line = (f"Using '{row['label']}' "
+                f"[{row.get('status_served') or row['status']}, "
+                f"{row.get('evidence_origin') or row['source']}] "
+                f"on {row['table']}"
                 + (f" — off-meridian variant of {row['parent_fp']}"
                    if row.get("parent_fp") else
                    " — not yet on the meridian line")
                 + ".")
     return {"definition_line": line, "metric": row["id"],
-            "status": row["status"]}
+            "status": row["status"],
+            "status_served": row.get("status_served", row["status"])}
 
 
 def _tokens(text: str) -> set[str]:

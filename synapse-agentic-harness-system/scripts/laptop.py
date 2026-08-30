@@ -304,6 +304,22 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
     blocking: list[str] = []
     reports: dict[str, dict] = {}
 
+    # the graph carries its own identity: crosswalk + sidecars ride
+    # INSIDE graph/identity/ so compile (a pure function of the graph)
+    # can run the table-reconciliation gate — the 46→45 rule. On the
+    # laptop they already live there (same-file → no copy).
+    import shutil
+    identity_src = Path(args.crosswalk).resolve().parent
+    identity_dst = graph_root / "identity"
+    identity_dst.mkdir(parents=True, exist_ok=True)
+    for name in ("crosswalk.jsonl", "aliases.jsonl", "lob_map.jsonl",
+                 "org_map.jsonl", "exclusions.jsonl"):
+        src = (Path(args.crosswalk).resolve()
+               if name == "crosswalk.jsonl" else identity_src / name)
+        dst = identity_dst / name
+        if src.exists() and src != dst.resolve():
+            shutil.copy2(src, dst)
+
     ledger = UtilizationLedger()
     no_jobs = bool(getattr(args, "no_jobs_30d", False))
     if no_jobs:
