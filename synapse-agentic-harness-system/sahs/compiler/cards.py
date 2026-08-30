@@ -71,7 +71,8 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
                co_queried: list[tuple[str, int]],
                acl_entry: dict[str, Any],
                lob_info: list[dict[str, Any]] | None = None,
-               usage_info: list[dict[str, Any]] | None = None
+               usage_info: list[dict[str, Any]] | None = None,
+               scoped_joins: list[dict[str, Any]] | None = None
                ) -> tuple[str, dict[str, Any]]:
     """→ (markdown, budget_report)."""
     physical = consensus.physical
@@ -128,6 +129,18 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
     lines["joins"] = ["## joined with (observed)"] + [
         f"- {other} · {support} co-queries [prov:bq:history]"
         for other, support in co_queried[:8]]
+    for j in (scoped_joins or [])[:4]:
+        # a scoped_only witness means the equality was observed between
+        # TRANSFORMED CTEs — the relationship exists; the raw tables do
+        # NOT join safely without the stated preparation
+        caveat = ("" if j.get("scope") == "raw_safe"
+                  else " — CTE-scoped, NOT raw-safe"
+                  + (f"; requires: {'; '.join(j['preconditions'][:2])}"
+                     if j.get("preconditions") else ""))
+        lines["joins"].append(
+            f"- {j['other']} ON {' AND '.join(j.get('on') or ['?'])} · "
+            f"{j.get('join_type') or 'JOIN'} · {j.get('scope')}{caveat} "
+            f"[prov:{j.get('witness') or 'studio'}]")
     lines["filters"] = ["## common filters"] + [
         f"- {f['label']}: `{f['sql']}` · support {f['support']} "
         f"[prov:{f['source']}]" for f in filters_here[:8]]
@@ -227,13 +240,34 @@ def metric_card(metric: dict[str, Any],
     grain_prov = ("llm_enriched·unreviewed"
                   if metric.get("grain_source") == "llm_enriched"
                   else metric["source"])
+    grain_line = (f"- grain: {metric.get('grain') or 'unspecified'} "
+                  f"[prov:{grain_prov}]")
+    if not metric.get("grain") and metric.get("grain_observed"):
+        # observed in the studio export — texture, never identity
+        grain_line = (f"- grain: {metric['grain_observed']} (observed) "
+                      "[prov:studio]")
     lines += [
-        f"- grain: {metric.get('grain') or 'unspecified'} "
-        f"[prov:{grain_prov}]",
+        grain_line,
         f"- expression: `{metric['canonical_sql']}` "
         f"[prov:{metric['source']}·fp={metric['fp']}]",
         f"- table: {metric['table']} [prov:{metric['source']}]",
     ]
+    if metric.get("query_shape"):
+        lines.append("- query shape: "
+                     + "/".join(metric["query_shape"])
+                     + " — full SQL retained as evidence [prov:studio]")
+    if metric.get("tables_associated_not_referenced"):
+        lines.append(
+            "- ⚠ associated but NOT referenced by the SQL: "
+            + ", ".join(metric["tables_associated_not_referenced"])
+            + " — declared lineage the query never reads [prov:studio]")
+    if metric.get("data_owners"):
+        lines.append("- data owners: "
+                     + ", ".join(metric["data_owners"])
+                     + " [prov:studio]")
+    if metric.get("join_condition"):
+        lines.append(f"- declared join condition: "
+                     f"`{metric['join_condition']}` [prov:dmp]")
     if metric.get("approved_dimensions"):
         lines.append("- approved dimensions: "
                      + ", ".join(metric["approved_dimensions"])

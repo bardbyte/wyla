@@ -49,6 +49,8 @@ WITNESSES = (
     "user_variant",     # Alice/Bob on-the-fly variants
     "llm_enriched",     # enricher output (Part B)
     "gold_attested",    # the 158 gold pairs — the answer key
+    "studio",           # Studio query/join witnesses (observed
+                        # certified-metric SQL, CTE-scoped)
 )
 
 # Gold contamination guard (pinned): gold_attested is a full graph
@@ -79,6 +81,7 @@ SOURCE_WITNESS = {
     "jobs_30d": "jobs_30d",
     "lob_map": "steward",       # graph/identity/lob_map.jsonl (human)
     "llm_enricher": "llm_enriched",   # B1 loop (E13)
+    "studio_queries": "studio",       # Studio witness jsonl pair
 }
 
 # ReviewItem lattice (E12/A5, pinned) — schemas land BEFORE the first

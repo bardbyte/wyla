@@ -99,6 +99,40 @@ def test_catalog_adapters_counts():
     assert mined[0].support > 1          # user_count scaling
 
 
+def test_studio_csv_adapter_and_pg_arrays(tmp_path: Path):
+    """The raw Studio export: Postgres-style array cells parse, rows
+    fuse via the dmp: ref namespace, the attribution chain prefers
+    base_tables over associated over product names, and broken or
+    id-less rows quarantine with a category instead of guessing."""
+    from sahs.loaders.sources.studio_csv import _pg_array, load_studio_csv
+    assert _pg_array("{a,b}") == ["a", "b"]
+    assert _pg_array('{loyalty_rc_redemption}') == ["loyalty_rc_redemption"]
+    assert _pg_array('{"quoted, name",plain}') == ["quoted, name", "plain"]
+    assert _pg_array("{}") == [] and _pg_array("") == []
+    assert _pg_array('["x", "y"]') == ["x", "y"]
+    records, quar = load_studio_csv(
+        FX / "studio_results_20260827_fixture_cte_or_subqueries.csv")
+    assert len(records) == 3
+    assert [r.metric_ref for r in records] == \
+        ["dmp:101", "dmp:102", "dmp:stud-901"]
+    assert all(r.source == "studio_queries" for r in records)
+    # base_tables empty → associated_tables carries the hint (short)
+    assert records[0].table_hint == "gms_transaction"
+    # base_tables populated → wins, qualified name shortened
+    assert records[1].table_hint == "gms_transaction"
+    assert records[1].extra["grain_observed"] == "card member x day"
+    assert records[1].extra["query_shape"] == ["CTE", "SUBQUERY"]
+    assert records[1].extra["data_owners"] == ["ops@example.com"]
+    # OUR lineage delta: associated − base, only when base is stated
+    assert records[1].extra["tables_associated_not_referenced"] == \
+        ["wwcas_authorization"]
+    assert records[0].extra["tables_associated_not_referenced"] == []
+    assert records[0].extra["referenced_query"].startswith("WITH txn AS")
+    # the CSV's author column is the catalog authorId
+    assert records[1].extra["author_id"] == "studio_analyst"
+    assert len(quar) == 1 and quar[0].category == "missing_field"
+
+
 def test_skills_contracts_extracted_knowledge_only_pack_skipped():
     records, quar = load_skill_contracts(FX / "skills")
     ids = {r.metric_ref for r in records}

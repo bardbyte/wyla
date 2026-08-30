@@ -218,3 +218,50 @@ def test_lob_index_joins_sources_and_pedigree_serving(tmp_path):
     assert top["line_of_business"] == "SBS"
     hit = search_metrics(build, "merchant spend volume")["candidates"]
     assert any("Do not use" in c["guidance"] for c in hit)
+
+
+def test_studio_texture_and_mined_joins_serve(tmp_path):
+    """The studio evidence survives compile intact: joins.jsonl carries
+    the mined scoped edge (4th named family), BOTH table cards warn the
+    join is CTE-scoped, and the metric cards render observed grain, the
+    lineage-mismatch warning, data owners, and dmp's declared join
+    condition. The same-id-different-SQL row is a VISIBLE conflict."""
+    _, build_dir, _ = _compiled(tmp_path)
+    joins = [json.loads(x) for x in
+             (build_dir / "indexes" / "joins.jsonl"
+              ).read_text().splitlines()]
+    assert {"co_query", "jobs_30d", "constraints", "studio"} <= \
+        {j["source"] for j in joins}
+    studio = next(j for j in joins if j["source"] == "studio")
+    assert studio["scope"] == "scoped_only"
+    assert studio["on"] == ["cm13 = card_no", "offr_id = offr_id"]
+    assert studio["join_type"] == "LEFT"
+    assert studio["witness_metrics"] == ["102"]
+    for name in ("dw__gms_transaction.md", "dw__wwcas_authorization.md"):
+        card = (build_dir / "cards" / "tables" / name).read_text()
+        assert "CTE-scoped, NOT raw-safe" in card, name
+        assert "[prov:studio]" in card, name
+
+    metrics = [json.loads(x) for x in
+               (build_dir / "indexes" / "metrics.jsonl"
+                ).read_text().splitlines()]
+    conflict = next(m for m in metrics
+                    if "mgroup:dmp:102" in m["mgroups"]
+                    and "distinct" in m["canonical_sql"].lower())
+    card = (build_dir / "cards" / "metrics"
+            / f"{conflict['fp']}.md").read_text()
+    assert "- grain: card member x day (observed) [prov:studio]" in card
+    assert "associated but NOT referenced by the SQL: " \
+           "wwcas_authorization" in card
+    assert "- data owners: ops@example.com [prov:studio]" in card
+    assert "- query shape: CTE/SUBQUERY" in card
+    certified = next(m for m in metrics
+                     if "mgroup:dmp:102" in m["mgroups"]
+                     and m["canonical_sql"] == "count(1)")
+    card = (build_dir / "cards" / "metrics"
+            / f"{certified['fp']}.md").read_text()
+    assert ("- declared join condition: `gms_transaction.cm13 = "
+            "wwcas_authorization.card_no` [prov:dmp]") in card
+    # the same-id-different-SQL witness is a VISIBLE census conflict
+    census = json.loads((build_dir / "census.json").read_text())
+    assert census["summary"]["metric_conflicts"] >= 1

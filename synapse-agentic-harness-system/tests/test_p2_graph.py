@@ -468,6 +468,93 @@ def test_lob_layer_steward_declares_catalogs_corroborate(tmp_path):
     assert ex.get("usage_unmatched", 0) == 0   # every fixture value maps
 
 
+def test_studio_export_fuses_docs_and_mined_scoped_joins(tmp_path):
+    """The raw Studio CSV consumed whole: same id + same SQL FUSES onto
+    the canonical metric (a new `studio` witness family, never a
+    duplicate node); same id + different SQL lands as a flagged second
+    class; the full referenced SQL — from the studio export AND from
+    dmp's own referencedSqlQuery — rides whole on ONE shared doc node;
+    grain/query-shape/lineage-delta/data-owners ride as texture props
+    (grain NEVER enters identity); joins are mined IN-SILO from the SQL
+    (CTE-aware) into joins_via edges that are scoped_only by design,
+    with self-join patterns counted, never edges."""
+    graph_dir, out_dir = tmp_path / "g", tmp_path / "run"
+    result = _build(graph_dir, out_dir)
+    assert result.returncode == 0, result.stderr[-800:]
+    graph = GraphDir(graph_dir)
+    nodes = graph.fold_nodes()
+    edges = graph.fold_edges()
+
+    # fusion: ONE metric node carries dmp + studio witnesses
+    spend_members = {(s, w) for (s, r, o, w) in edges
+                     if r == "member_of" and o == "mgroup:dmp:101"}
+    spend_ids = {s for s, _w in spend_members}
+    assert len(spend_ids) == 1                 # no parallel node minted
+    assert {w for _s, w in spend_members} >= {"dmp", "studio"}
+    (spend,) = spend_ids
+
+    # ONE doc node, TWO witnessing sources (dmp's referencedSqlQuery
+    # and the studio row carry the same author SQL → same fp → merge)
+    doc_ids = {o for (s, r, o, _w) in edges
+               if r == "evidenced_by" and s == spend
+               and o.startswith("doc:referenced_sql_")}
+    assert len(doc_ids) == 1
+    doc = nodes[next(iter(doc_ids))]
+    assert doc.props["kind"] == "referenced_sql"
+    assert doc.props["sql"].startswith("WITH txn AS")
+    assert "se_cr_dr_in = 'C'" in doc.props["sql"]    # bytes intact
+    doc_witnesses = {w for (s, r, o, w) in edges
+                     if r == "evidenced_by" and s == spend}
+    assert {"dmp", "studio"} <= doc_witnesses
+
+    # conflict: different SQL under the same catalog id → SECOND class
+    txn_members = {(s, w) for (s, r, o, w) in edges
+                   if r == "member_of" and o == "mgroup:dmp:102"}
+    txn_ids = {s for s, _w in txn_members}
+    assert len(txn_ids) >= 2                   # retained, never merged
+    studio_class = next(s for s, w in txn_members if w == "studio")
+    assert "distinct" in \
+        nodes[studio_class].props["canonical_sql"].lower()
+    # texture props ride the node; grain stays OUT of identity
+    sprops = nodes[studio_class].props
+    assert sprops["grain_observed"] == "card member x day"
+    assert sprops["query_shape"] == ["CTE", "SUBQUERY"]
+    assert sprops["data_owners"] == ["ops@example.com"]
+    assert sprops["tables_associated_not_referenced"] == \
+        ["wwcas_authorization"]
+    # dmp's own unread field lands on the certified class
+    dmp_class = next(s for s, w in txn_members if w == "dmp")
+    assert nodes[dmp_class].props["join_condition"] == \
+        "gms_transaction.cm13 = wwcas_authorization.card_no"
+
+    # novel id → MINED candidate on the resolved table
+    novel = {s for (s, r, o, _w) in edges
+             if r == "member_of" and o == "mgroup:dmp:stud-901"}
+    assert len(novel) == 1
+
+    # in-silo mined join: CTE-aware, scoped_only, both keys, support =
+    # witnessing metrics; the self-join pattern is counted, never an edge
+    jw = edges[("table:dw.gms_transaction", "joins_via",
+                "table:dw.wwcas_authorization", "studio")]
+    assert jw.props["scope"] == "scoped_only"
+    assert jw.props["on"] == ["cm13 = card_no", "offr_id = offr_id"]
+    assert jw.props["join_type"] == "LEFT"
+    assert jw.props["witness_metrics"] == ["102"]
+    assert jw.prov.support == 1
+    manifest = json.loads((graph_dir / "runs" / "test_r1" /
+                           "manifest.json").read_text())
+    assert manifest["reports"]["studio_joins"] == {
+        "join_edges": 1, "pattern_only": 1, "join_unresolved": 0,
+        "join_out_of_scope": 0, "sql_parse_failures": 0}
+    assert ("table:dw.gms_transaction", "joins_via",
+            "table:dw.gms_transaction", "studio") not in edges
+    # custody: the raw export is CONSUMED, not deferred or inventoried
+    by_path = {r["path"]: r for r in manifest["utilization"]
+               if r["root"] == "sources"}
+    assert by_path["studio_results_20260827_fixture_"
+                   "cte_or_subqueries.csv"]["status"] == "consumed"
+
+
 def test_constraints_meta_and_field_paths_wired(tmp_path):
     """11 → PK props + fk_references (referenced table resolves through
     the crosswalk or the edge is a counted skip); 01 and the full 13
