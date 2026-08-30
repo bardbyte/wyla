@@ -98,6 +98,25 @@ def test_recovery_grader_and_json_parsing():
                               "Card Not Present Transaction Amount USD")
     assert grade_recovery("Card Not Present Spend",
                           "Card Not Present Transaction Amount")
+    # v1.2 answer-key normalization: a ' / ' compound entry is TWO
+    # names — either whole part counts (b1.2 field case). A tight
+    # slash ('Local/Foreign') is one name, never split.
+    assert grade_recovery(
+        "Submitter Merchant Count / Submitter Active Locations in "
+        "Force (ALIF)", "Distinct Submitter Merchants")
+    assert grade_recovery("Local Spend - Local/Foreign Indicator Method",
+                          "Local Spend - Local/Foreign Indicator Method")
+    assert not grade_recovery(
+        "Transactions per Submitter Merchant / Transactions per "
+        "Submitter ALIF", "Domestic Spend")   # genuinely wrong stays wrong
+    # the filters are part of the prompt context now (b1.3): the
+    # discriminating literal is visible to the model
+    from sahs.enrich.prompts import blind_name_prompt as _bnp
+    from sahs.enrich.prompts import metric_semantics_prompt as _msp
+    item = {"table": "dw.t", "sql": "count(1)", "label": "",
+            "filters": ["page_nm = 'View All Cards'"]}
+    assert "View All Cards" in _msp(item)
+    assert "View All Cards" in _bnp({**item, "true_label": "x"})
     assert parse_json_answer('```json\n{"a": 1}\n```') == {"a": 1}
     assert parse_json_answer("not json") is None
     assert parse_json_answer('["list"]') is None
@@ -109,6 +128,8 @@ def test_plan_targets_only_blank_metrics(tmp_path):
     items = plan_metric_items(build, GraphDir(graph_dir).fold_nodes(),
                               limit=500)
     assert items                                # mined metrics need work
+    assert "filters" in items[0]                # b1.3 context carries them
+    assert "vocab" in items[0]                  # and the glossary shelf
     planned = {i["id"] for i in items}
     for row in build.metrics:
         if row.get("question") and row.get("grain"):
@@ -193,6 +214,28 @@ def test_grain_divergence_files_review_item(tmp_path):
                and "studio-observed" in n.props.get("proposal", "")]
     assert reviews and reviews[0].prov.witness == "llm_enriched"
     assert validate_graph(graph_dir).ok
+
+
+def test_enricher_context_carries_company_vocabulary(tmp_path):
+    """The enricher reads the company's own reference shelf — acropedia
+    acronym expansions + Atlas business terms — scoped to each item's
+    text (snake_case split so alif_cnt finds ALIF), rendered into the
+    prompt as authoritative vocabulary. The blind exam gets the same
+    configuration with the label scrubbed BEFORE the lookup, so vocab
+    can never carry the withheld name in through the side door."""
+    from sahs.enrich.loop import _vocab_for, _vocab_index, blind_items
+    from sahs.enrich.prompts import metric_semantics_prompt
+    graph_dir, builds = _compiled(tmp_path)
+    build = Build.open(builds)
+    single, multi = _vocab_index(build)
+    assert "alif" in single            # acropedia acronym plane loaded
+    item = {"label": "Submitter ALIF", "sql": "count(alif_cnt)",
+            "table": "dw.gms_transaction", "columns": [], "filters": []}
+    entries = _vocab_for(item, single, multi)
+    assert any("Active Locations in Force" in e for e in entries)
+    item["vocab"] = entries
+    assert "Active Locations in Force" in metric_semantics_prompt(item)
+    assert all("vocab" in b for b in blind_items(build))
 
 
 def test_gold_text_never_reaches_prompts(tmp_path):

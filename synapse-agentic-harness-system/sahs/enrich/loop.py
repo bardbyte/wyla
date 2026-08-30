@@ -93,6 +93,56 @@ def _lob_by_table(build: Build) -> dict[str, str]:
     return out
 
 
+def _vocab_index(build: Build) -> tuple[dict[str, str],
+                                        list[tuple[str, str]]]:
+    """The company's own reference shelf — Atlas business terms + the
+    acropedia glossary, already compiled into the vocab plane — split
+    for fast per-item lookup: single-token entries (acronyms, symbols)
+    keyed exactly; multi-word terms matched by phrase."""
+    single: dict[str, str] = {}
+    multi: list[tuple[str, str]] = []
+    for row in build.vocab:
+        text = str(row.get("text") or "").strip()
+        if not text or len(text) < 2:
+            continue
+        definition = str(row.get("definition") or "").strip()
+        entry = text + (f" — {definition[:140]}" if definition else "")
+        if " " in text:
+            multi.append((text.lower(), entry))
+        else:
+            single.setdefault(text.lower(), entry)
+    return single, multi
+
+
+def _vocab_for(item: dict[str, Any], single: dict[str, str],
+               multi: list[tuple[str, str]],
+               cap: int = 6) -> list[str]:
+    """→ the glossary entries this metric's own text touches (label,
+    SQL, columns, table, filters) — snake_case split so `alif_cnt`
+    finds ALIF. Capped; deterministic (catalog order)."""
+    blob = " ".join((item.get("label", ""), item.get("sql", ""),
+                     item.get("table", ""),
+                     " ".join(item.get("columns", []) or []),
+                     " ".join(item.get("filters", []) or []))).lower()
+    tokens = set("".join(c if (c.isalnum() or c == "_") else " "
+                         for c in blob).split())
+    for token in list(tokens):
+        tokens.update(token.split("_"))
+    picked: list[str] = []
+    for token in sorted(tokens):
+        entry = single.get(token)
+        if entry and entry not in picked:
+            picked.append(entry)
+            if len(picked) >= cap:
+                return picked
+    for phrase, entry in multi:
+        if phrase in blob and entry not in picked:
+            picked.append(entry)
+            if len(picked) >= cap:
+                break
+    return picked
+
+
 def _referenced_columns(sql: str, build: Build, table: str) -> list[str]:
     columns = build.schema.get(table, {})
     sql_tokens = {t for t in
@@ -103,9 +153,12 @@ def _referenced_columns(sql: str, build: Build, table: str) -> list[str]:
 
 def _context(row: dict[str, Any], build: Build,
              purposes: dict[str, str],
-             lob_of: dict[str, str]) -> dict[str, Any]:
+             lob_of: dict[str, str],
+             vocab: tuple[dict[str, str],
+                          list[tuple[str, str]]] | None = None
+             ) -> dict[str, Any]:
     table = row.get("table", "")
-    return {
+    item = {
         "table": table,
         "table_purpose": purposes.get(table, ""),
         "line_of_business": (row.get("line_of_business")
@@ -113,9 +166,21 @@ def _context(row: dict[str, Any], build: Build,
         "domain": row.get("domain", ""),
         "columns": _referenced_columns(row.get("canonical_sql", ""),
                                        build, table),
+        # the b1.2 field lesson: the discriminating literals (a page
+        # name, a channel, a method flag) live in the FILTERS, not the
+        # aggregate expression — without them the model cannot name
+        # what the metric is scoped to
+        "filters": [str(f) for f in
+                    (row.get("common_filters") or [])[:4]],
         "sql": row.get("canonical_sql", ""),
         "label": row.get("label") or "",
     }
+    if vocab is not None:
+        # the company's own reference shelf, scoped to THIS metric's
+        # text — acronym expansions + business-term definitions the
+        # model cannot know from generic reasoning
+        item["vocab"] = _vocab_for(item, vocab[0], vocab[1])
+    return item
 
 
 # ── planning ─────────────────────────────────────────────────
@@ -131,6 +196,7 @@ def plan_metric_items(build: Build, folded_nodes: dict,
     skips already-enriched nodes."""
     purposes = _table_purposes(build)
     lob_of = _lob_by_table(build)
+    vocab = _vocab_index(build)
     items = []
     for row in sorted(build.metrics,
                       key=lambda r: (-r.get("support", 0), r["id"])):
@@ -150,7 +216,7 @@ def plan_metric_items(build: Build, folded_nodes: dict,
         if not row.get("canonical_sql"):
             continue
         item = {"kind": "metric", "id": row["id"], "fp": row["fp"],
-                **_context(row, build, purposes, lob_of),
+                **_context(row, build, purposes, lob_of, vocab),
                 "support": row.get("support", 0),
                 "has_question": bool(props.get("question_answered")),
                 "has_grain": bool(props.get("grain")),
@@ -180,6 +246,7 @@ def plan_concept_items(build: Build, folded_nodes: dict,
     by_label: dict[str, list[dict[str, Any]]] = {}
     for row in build.bindings:
         by_label.setdefault(row["label"], []).append(row)
+    vocab = _vocab_index(build)
     items = []
     for label, rows in sorted(
             by_label.items(),
@@ -192,9 +259,12 @@ def plan_concept_items(build: Build, folded_nodes: dict,
         if any(_current(folded_nodes.get(concept_id(label, r["table"])))
                for r in rows):
             continue
+        binding_sql = " ".join(r["canonical_sql"] for r in rows[:6])
         items.append({
             "kind": "concept", "label": label,
             "tables": sorted({r["table"] for r in rows}),
+            "vocab": _vocab_for({"label": label, "sql": binding_sql},
+                                vocab[0], vocab[1]),
             "bindings": [{"table": r["table"],
                           "sql": r["canonical_sql"],
                           "support": r.get("support", 0)}
@@ -214,36 +284,61 @@ def blind_items(build: Build) -> list[dict[str, Any]]:
     enricher must recover blind (names withheld from the prompt)."""
     purposes = _table_purposes(build)
     lob_of = _lob_by_table(build)
+    vocab = _vocab_index(build)
     items = []
     for row in sorted(build.metrics, key=lambda r: r["id"]):
         if row.get("status") not in ("certified", "pending"):
             continue
         if not row.get("label") or not row.get("canonical_sql"):
             continue
-        item = _context(row, build, purposes, lob_of)
+        # the exam takes the SAME configuration the enricher runs
+        # with — vocab included — but the label is scrubbed from the
+        # lookup text below by rebuilding vocab AFTER withholding it
+        item = _context({**row, "label": ""}, build, purposes, lob_of,
+                        vocab)
         item.update({"id": row["id"], "true_label": row["label"]})
         item["label"] = ""               # withheld — that's the test
         items.append(item)
     return items
 
 
+def _key_parts(true_label: str) -> list[str]:
+    """Answer-key normalization (grader v1.2): the catalog writes some
+    entries as TWO names joined by ' / ' ('Submitter Merchant Count /
+    Submitter Active Locations in Force') — matching either whole part
+    is a recovery. Split only on spaced slashes: 'Local/Foreign' is one
+    name, never two."""
+    parts = [p.strip() for p in str(true_label).split(" / ")
+             if p.strip()]
+    return parts or [str(true_label)]
+
+
 def recovery_share(true_label: str, predicted: str) -> float:
-    truth = _tokens(true_label)
-    if not truth:
-        return 0.0
-    return round(len(truth & _tokens(predicted)) / len(truth), 3)
+    best = 0.0
+    for part in _key_parts(true_label):
+        truth = _tokens(part)
+        if truth:
+            best = max(best, len(truth & _tokens(predicted))
+                       / len(truth))
+    return round(best, 3)
 
 
 def grade_recovery(true_label: str, predicted: str) -> bool:
-    truth = _tokens(true_label)
-    if not truth:
-        return False
-    # negation veto: 'Card Not Present X' vs 'Card Present X' are
-    # OPPOSITE metrics — polarity disagreement fails the case no
-    # matter how much else overlaps (b1.1 field false-positive)
-    if (truth & _NEGATIONS) != (_tokens(predicted) & _NEGATIONS):
-        return False
-    return recovery_share(true_label, predicted) >= RECOVERY_TOKEN_SHARE
+    predicted_tokens = _tokens(predicted)
+    for part in _key_parts(true_label):
+        truth = _tokens(part)
+        if not truth:
+            continue
+        # negation veto: 'Card Not Present X' vs 'Card Present X' are
+        # OPPOSITE metrics — polarity disagreement fails the part no
+        # matter how much else overlaps (b1.1 field false-positive;
+        # the veto caught the swap again in the b1.2 run)
+        if (truth & _NEGATIONS) != (predicted_tokens & _NEGATIONS):
+            continue
+        if len(truth & predicted_tokens) / len(truth) \
+                >= RECOVERY_TOKEN_SHARE:
+            return True
+    return False
 
 
 def run_blind_gate(build: Build, client: VertexClient, out_dir: Path,
