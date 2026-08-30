@@ -238,6 +238,47 @@ def test_enricher_context_carries_company_vocabulary(tmp_path):
     assert all("vocab" in b for b in blind_items(build))
 
 
+def test_vocab_hygiene_blocks_sql_noise_and_stems(tmp_path):
+    """b1.4 field lesson: the b1.3 run matched the SQL keyword CASE to
+    'Computer Aided Software Engineering' and two-letter column
+    fragments (dw, cr, dr, ct) to unrelated corporate acronyms — every
+    2-letter hit in that run was wrong. Keywords and sub-3-letter
+    tokens never match; a trailing-s token still finds its acronym
+    (naas_ct → NAA); multi-word Atlas entries rank first."""
+    from sahs.enrich.loop import _vocab_for, _vocab_index
+    graph_dir, builds = _compiled(tmp_path)
+    build = Build.open(builds)
+    single, multi = _vocab_index(build)
+    assert "dw" in single and "case" in single   # poison IS on the shelf
+    item = {"label": "",
+            "sql": "sum(case when dw.tot_sbs_basic_naas_ct > 0 "
+                   "then 1 else 0 end)",
+            "table": "dw.dsdl_acquisition_shop_datamart",
+            "columns": [], "filters": []}
+    entries = _vocab_for(item, single, multi)
+    joined = " | ".join(entries)
+    assert any("New Accounts Acquired" in e for e in entries)  # naas→NAA
+    assert "Computer Aided" not in joined       # CASE keyword blocked
+    assert "Default Workgroup" not in joined    # 2-letter fragment blocked
+    assert "Credit Tracker" not in joined       # ct is a count, not CT
+
+
+def test_house_style_b14_register_and_code_pins():
+    """The b1.4 clauses that converted real misses stay pinned: suffix
+    derivation by expanding the discriminating column's name, the
+    column-name dialect, the catalog register (spell out nouns, keep
+    acronyms, never drop a per-X denominator), and the POS
+    cardholder-present encoding fact ('0' = present)."""
+    from sahs.enrich.prompts import HOUSE_STYLE, PROMPT_VERSION
+    assert PROMPT_VERSION == "b1.4"
+    assert "Submitted Country Code Method" in HOUSE_STYLE
+    assert "Local/Foreign Indicator Method" in HOUSE_STYLE
+    assert "never SE or CM" in HOUSE_STYLE
+    assert "never expanded" in HOUSE_STYLE
+    assert "per-X denominator" in HOUSE_STYLE
+    assert "'0' means the card IS present" in HOUSE_STYLE
+
+
 def test_gold_text_never_reaches_prompts(tmp_path):
     """AIP pin: the gold pairs are the eval answer key — their prompt
     text must never appear in any enrichment or blind prompt. Enforced

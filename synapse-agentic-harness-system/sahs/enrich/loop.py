@@ -114,12 +114,33 @@ def _vocab_index(build: Build) -> tuple[dict[str, str],
     return single, multi
 
 
+# SQL keywords and function names must never hit the acronym shelf —
+# the b1.3 field run fed CASE→"Computer Aided Software Engineering"
+# and AS→"Actual Start date" into real prompts as authoritative
+# vocabulary, and two-letter column fragments (cr, dr, am, cd, dw)
+# pulled unrelated corporate acronyms in front of the model (cr/dr
+# are credit/debit indicators, not Customer Reference / Disaster
+# recovery). Every 2-letter match in that run was wrong; the shortest
+# true positive (ALIF) has four letters.
+_SQL_NOISE = frozenset((
+    "case", "when", "then", "else", "end", "and", "not", "sum",
+    "count", "countif", "avg", "min", "max", "distinct", "trim",
+    "nullif", "coalesce", "cast", "safe_cast", "like", "between",
+    "select", "from", "where", "join", "left", "right", "inner",
+    "outer", "group", "having", "order", "over", "partition",
+    "null", "true", "false", "date", "timestamp", "extract",
+    "interval", "day", "month", "year", "week"))
+
+
 def _vocab_for(item: dict[str, Any], single: dict[str, str],
                multi: list[tuple[str, str]],
                cap: int = 6) -> list[str]:
     """→ the glossary entries this metric's own text touches (label,
     SQL, columns, table, filters) — snake_case split so `alif_cnt`
-    finds ALIF. Capped; deterministic (catalog order)."""
+    finds ALIF, trailing-s stripped so `naas_ct` still finds NAA.
+    Multi-word Atlas entries first (they match exactly and were the
+    only genuinely useful hits in the b1.3 field run), then acronyms
+    of 3+ letters, longest first. Capped; deterministic."""
     blob = " ".join((item.get("label", ""), item.get("sql", ""),
                      item.get("table", ""),
                      " ".join(item.get("columns", []) or []),
@@ -129,14 +150,19 @@ def _vocab_for(item: dict[str, Any], single: dict[str, str],
     for token in list(tokens):
         tokens.update(token.split("_"))
     picked: list[str] = []
-    for token in sorted(tokens):
-        entry = single.get(token)
-        if entry and entry not in picked:
+    for phrase, entry in multi:
+        if phrase in blob and entry not in picked:
             picked.append(entry)
             if len(picked) >= cap:
                 return picked
-    for phrase, entry in multi:
-        if phrase in blob and entry not in picked:
+    for token in sorted(tokens, key=lambda t: (-len(t), t)):
+        if len(token) < 3 or token in _SQL_NOISE:
+            continue
+        entry = single.get(token)
+        if entry is None and len(token) > 3 and token.endswith("s") \
+                and not token.endswith("ss"):
+            entry = single.get(token[:-1])      # naas → NAA
+        if entry and entry not in picked:
             picked.append(entry)
             if len(picked) >= cap:
                 break
@@ -381,7 +407,8 @@ def run_blind_gate(build: Build, client: VertexClient, out_dir: Path,
         f"({rate:.0%}) → tier {tier} · leaky contexts {leaky}")
     return {"n": len(items), "recovered": recovered, "rate": rate,
             "tier": tier, "leaky_contexts": leaky,
-            "grader": "v1.1 (token-share + negation veto)"}
+            "grader": "v1.2 (token-share + negation veto + "
+                      "answer-key normalization)"}
 
 
 # ── enrichment writes ────────────────────────────────────────

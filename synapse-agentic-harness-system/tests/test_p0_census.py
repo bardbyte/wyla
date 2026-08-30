@@ -142,7 +142,7 @@ def test_skills_contracts_extracted_knowledge_only_pack_skipped():
 
 def test_vocab_adapters_and_degenerates():
     glossary, gq = load_glossary(FX / "data_cleaned.csv")
-    assert len(glossary) == 24 and len(gq) == 1      # orphan row
+    assert len(glossary) == 28 and len(gq) == 1      # orphan row
     dups = [g for g in glossary if g.symbol == "AA"]
     assert len(dups) == 3                             # BU-scoped meanings
     assert any(g.region == "EMEA" for g in dups)      # Global_Region header
