@@ -65,11 +65,21 @@ python scripts/laptop.py build-graph \
 
 Order inside the run (pinned): crosswalk gate → BQ archive → MDM
 archive → LOB map (steward first, so mined values have something to
-corroborate) → semantic quads → **jobs 30d witness** (raw history mined
-in-silo; runs AFTER the catalogs so a jobs sighting of a governed
-metric is testimony, never a fresh seed) → utilization ledger → run
-manifest → **validator gate** (the 14-check catalog; any error exits 2
-and nothing downstream runs). Interrupted? Re-run; checkpoints resume.
+corroborate) → semantic quads (any `studio_results_*.csv` in sources/
+loads here, AFTER the catalogs: rows fuse onto canonical metrics via
+`dmp:<metric_catalog_id>` — same SQL corroborates as a `studio` witness
+family, different SQL lands as a flagged second class; the full
+referenced SQL — dmp's own `referencedSqlQuery` included — rides whole
+as doc evidence; observed grain/query-shape/lineage-delta/data-owners
+ride as texture, never identity) → **studio join mining** (in-silo,
+CTE-aware sqlglot walk over the kept SQL: ON equalities between
+resolvable tables become `joins_via` edges that are `scope:
+scoped_only` by design — evidence a relationship EXISTS, never that
+raw tables join safely; self-join patterns counted, never edges) →
+**jobs 30d witness** (raw history mined in-silo; runs AFTER the
+catalogs so a jobs sighting of a governed metric is testimony, never a
+fresh seed) → utilization ledger → run manifest → **validator gate**
+(the 14-check catalog; any error exits 2 and nothing downstream runs). Interrupted? Re-run; checkpoints resume.
 DENIED/503 archive responses become explicit `unknown_*` quads —
 absence is never silence.
 

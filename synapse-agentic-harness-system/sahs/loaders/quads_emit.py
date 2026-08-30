@@ -217,7 +217,33 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                     record.extra.get("joined_tables") or [],
                 "business_unit": record.extra.get("business_unit") or "",
                 "data_category": record.extra.get("data_category") or "",
+                # Studio-export texture (observed SQL shape + lineage
+                # mismatch + stewardship contacts). grain_observed is
+                # DELIBERATELY outside the identity fingerprint: the
+                # certified catalog carries no grain, so an observed
+                # grain entering identity would fork every fusion.
+                "query_shape": record.extra.get("query_shape") or [],
+                "grain_observed":
+                    record.extra.get("grain_observed") or "",
+                "data_owners": record.extra.get("data_owners") or [],
+                "join_condition":
+                    record.extra.get("join_condition") or "",
+                "tables_associated_not_referenced":
+                    record.extra.get("tables_associated_not_referenced")
+                    or [],
             }, record)
+            # full referenced SQL rides WHOLE as a doc node (the
+            # view-SQL pattern) — "the full SQL is deliberately
+            # retained because future extraction can derive more".
+            # Source-neutral: dmp's referencedSqlQuery and the studio
+            # export land on the SAME doc when they fuse (same fp).
+            referenced_query = str(
+                record.extra.get("referenced_query") or "").strip()
+            if referenced_query:
+                doc = f"doc:referenced_sql_{metric_fp}"
+                merge_node(doc, {"kind": "referenced_sql",
+                                 "sql": referenced_query}, record)
+                merge_edge(metric, "evidenced_by", doc, record)
             # ── LOB layer (witnessed classification, never guessed) ──
             lob_raw = str(record.extra.get("line_of_business")
                           or "").strip()

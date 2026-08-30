@@ -6,6 +6,7 @@
    "businessFriendlyMetricName": "GMNS Merchant Spend",
    "questionAnswered": "How much volume did our merchants process?",
    "sqlExpression": "SUM(CASE WHEN se_cr_dr_in = 'C' THEN -trans_usd_am ELSE trans_usd_am END)",
+   "referencedSqlQuery": "WITH txn AS (SELECT cm13, trans_usd_am, se_cr_dr_in FROM dw.gms_transaction WHERE rn = 1) SELECT SUM(CASE WHEN se_cr_dr_in = 'C' THEN -trans_usd_am ELSE trans_usd_am END) AS gmns_spend FROM txn",
    "associatedDataProductNames": [
     "gms_transaction"
    ],
@@ -23,6 +24,7 @@
    "businessFriendlyMetricName": "Transaction Count",
    "questionAnswered": "How many transactions did merchants process?",
    "sqlExpression": "COUNT(1)",
+   "joinCondition": "gms_transaction.cm13 = wwcas_authorization.card_no",
    "associatedDataProductNames": [
     "gms_transaction"
    ],

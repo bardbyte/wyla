@@ -50,6 +50,10 @@ from sahs.loaders.sources.catalogs import (                       # noqa: E402
 )
 from sahs.loaders.sources.gold_queries import load_gold_queries   # noqa: E402
 from sahs.loaders.sources.skills import load_skill_contracts      # noqa: E402
+from sahs.loaders.sources.studio_csv import (                     # noqa: E402
+    load_studio_csv,
+    mine_join_witnesses,
+)
 from sahs.loaders.sources.vocab import (                          # noqa: E402
     load_business_terms,
     load_glossary,
@@ -104,6 +108,10 @@ def _load_expressions(sources: Path, registry: TableRegistry,
     p = sources / "extended_gmns_semantics.json"
     if p.exists():
         _take("extended_gmns", load_extended_gmns(p))
+    for p in sorted(sources.glob("studio_results_*.csv")):
+        # the raw Studio catalog export — AFTER the catalogs (a studio
+        # sighting of a governed metric is testimony, never a seed)
+        _take("studio_queries", load_studio_csv(p))
     p = sources / "measures_catalog.json"
     if p.exists():
         _take("measures_catalog", load_measures_catalog(p))
@@ -365,6 +373,13 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
         reports["expressions"] = emit_expressions(
             pairs, graph, crosswalk, run_id, lob_aliases=lob_aliases,
             usage_targets=usage_targets)
+        studio_records = [r for r in records
+                          if r.source == "studio_queries"]
+        if studio_records:
+            console.emit("phase_start", phase="studio join mining",
+                         detail="in-silo, CTE-aware, scoped_only")
+            reports["studio_joins"] = mine_join_witnesses(
+                studio_records, graph, crosswalk, run_id)
         glossary_path = sources / "data_cleaned.csv"
         terms_path = sources / "business_terms.csv"
         glossary = (load_glossary(glossary_path)[0]
@@ -411,6 +426,8 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
                      "measures_catalog.json", "data_cleaned.csv",
                      "business_terms.csv"):
             ledger.consumed(sources / name)
+        for p in sorted(sources.glob("studio_results_*.csv")):
+            ledger.consumed(p)
         for pack_file in sorted(sources.glob("skills/**/skill.yaml")) + \
                 sorted(sources.glob("skills/**/metric_contracts.yaml")):
             ledger.consumed(pack_file)

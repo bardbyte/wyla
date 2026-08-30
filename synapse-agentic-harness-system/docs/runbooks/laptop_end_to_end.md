@@ -32,6 +32,9 @@ path flags. Two kinds of input:
     ├── measures_catalog.json          # mined measures
     ├── metrics_dmp.json               # DMP certified metrics
     ├── extended_gmns_semantics.json   # GMNS pending metrics
+    ├── studio_results_*.csv           # raw Studio catalog export(s) —
+    │   # consumed whole: metric rows fuse onto canonical ids, the full
+    │   # SQL rides as doc evidence, joins are mined in-silo (scoped)
     ├── data_cleaned.csv               # acropedia glossary
     ├── business_terms.csv             # Atlas/Collibra terms
     ├── std_tech_metadata/             # 46 per-table Atlas JSONs …

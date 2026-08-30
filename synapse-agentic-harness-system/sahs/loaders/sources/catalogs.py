@@ -65,6 +65,13 @@ def load_metrics_dmp(path: Path) -> tuple[list[ExpressionRecord],
                    "approved_dimensions": row.get("approvedDimensions"),
                    "metric_grain": row.get("metricGrain"),
                    "metric_scope": row.get("metricScope"),
+                   # the full author SQL rides WHOLE as a doc node —
+                   # this field sat unread in the catalog until the
+                   # studio recon surfaced it (full utilization)
+                   "referenced_query":
+                       str(row.get("referencedSqlQuery") or "").strip(),
+                   "join_condition":
+                       str(row.get("joinCondition") or "").strip(),
                    "products": [str(p) for p in products]}))
     return records, quarantined
 
