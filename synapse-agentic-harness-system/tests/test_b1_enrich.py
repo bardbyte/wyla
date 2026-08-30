@@ -89,6 +89,15 @@ def _blind_perfect(build: Build):
 def test_recovery_grader_and_json_parsing():
     assert grade_recovery("GMNS Merchant Spend", "merchant spend (GMNS)")
     assert not grade_recovery("GMNS Merchant Spend", "customer count")
+    # v1.1 negation veto — the b1.1 field false-positive: a Card
+    # Present / Card Not Present SWAP passed on token overlap alone.
+    # Polarity disagreement now fails regardless of overlap.
+    assert not grade_recovery("Card Not Present Spend",
+                              "Card Present Net USD Amount")
+    assert not grade_recovery("Card Present Spend",
+                              "Card Not Present Transaction Amount USD")
+    assert grade_recovery("Card Not Present Spend",
+                          "Card Not Present Transaction Amount")
     assert parse_json_answer('```json\n{"a": 1}\n```') == {"a": 1}
     assert parse_json_answer("not json") is None
     assert parse_json_answer('["list"]') is None
@@ -106,6 +115,112 @@ def test_plan_targets_only_blank_metrics(tmp_path):
             assert row["id"] not in planned     # catalog never re-asked
     supports = [i["support"] for i in items]
     assert supports == sorted(supports, reverse=True)
+
+
+def test_prompt_version_reenriches_stale_drafts(tmp_path):
+    """S-review pin: presence alone must not freeze a metric on the
+    draft we least liked. A b1.0-era draft is re-planned under the
+    current prompt; a current-version draft is skipped. b1.10 > b1.2
+    numerically, not lexically."""
+    from sahs.enrich.loop import _version_num
+    from sahs.enrich.prompts import PROMPT_VERSION
+    from sahs.graph.quads import NodeRecord, Prov
+    assert _version_num("b1.10") > _version_num("b1.2")
+    assert _version_num("garbage") == (0, 0)
+    graph_dir, builds = _compiled(tmp_path)
+    build = Build.open(builds)
+    graph = GraphDir(graph_dir)
+    target = plan_metric_items(build, graph.fold_nodes(), 5)[0]["id"]
+
+    def _draft(version: str) -> None:
+        graph.append_node(NodeRecord(id=target, props={
+            "question_enriched": "old draft?",
+            "grain_enriched": "per day",
+            "enrich_prompt_version": version},
+            prov=Prov(source="llm_enricher", run="r0",
+                      witness="llm_enriched")))
+
+    _draft("b1.0")
+    stale = {i["id"] for i in plan_metric_items(
+        build, graph.fold_nodes(), 500)}
+    assert target in stale                     # stale draft → re-enrich
+    _draft(PROMPT_VERSION)
+    current = {i["id"] for i in plan_metric_items(
+        build, graph.fold_nodes(), 500)}
+    assert target not in current               # current draft → skip
+
+
+def test_prefer_terms_seed_the_tranche(tmp_path):
+    """Demand seeding: a matching item floats to the front of the plan
+    regardless of support; default order is untouched without it."""
+    graph_dir, builds = _compiled(tmp_path)
+    build = Build.open(builds)
+    folded = GraphDir(graph_dir).fold_nodes()
+    base = plan_metric_items(build, folded, 10)
+    assert len(base) >= 3
+    tail = base[-1]
+    token = next((w.lower() for w in tail["label"].split()
+                  if len(w) > 3), None) \
+        or tail["sql"].split()[0].lower()
+    seeded = plan_metric_items(build, folded, 10, prefer=(token,))
+    first = (seeded[0]["label"] + " " + seeded[0]["sql"]).lower()
+    assert token in first
+
+
+def test_grain_divergence_files_review_item(tmp_path):
+    """A grain drafted against a studio-observed grain is a two-witness
+    disagreement → ReviewItem(witness_divergence); the draft still
+    writes (both values recorded, a steward decides)."""
+    graph_dir, builds = _compiled(tmp_path)
+    build = Build.open(builds)
+    graph = GraphDir(graph_dir)
+    folded = graph.fold_nodes()
+    from sahs.enrich.loop import enrich_metric_items, plan_metric_items
+    items = [i for i in plan_metric_items(build, folded, 5000)
+             if i["grain_observed"]]
+    assert items                    # the studio conflict-class metric
+    fake = FakeVertex(_blind_perfect(build))
+    report = {"metrics_enriched": 0, "collisions": 0, "invalid_json": 0,
+              "resumed_skips": 0, "grain_divergences": 0}
+    (tmp_path / "b1").mkdir()
+    enrich_metric_items(items[:1], fake, graph, build, "enrich_r1",
+                        tmp_path / "b1", report, log=lambda _m: None)
+    assert report["grain_divergences"] == 1
+    assert report["metrics_enriched"] == 1     # still written
+    reviews = [n for nid, n in graph.fold_nodes().items()
+               if nid.startswith("review:")
+               and n.props.get("kind") == "witness_divergence"
+               and "studio-observed" in n.props.get("proposal", "")]
+    assert reviews and reviews[0].prov.witness == "llm_enriched"
+    assert validate_graph(graph_dir).ok
+
+
+def test_gold_text_never_reaches_prompts(tmp_path):
+    """AIP pin: the gold pairs are the eval answer key — their prompt
+    text must never appear in any enrichment or blind prompt. Enforced
+    by CI, not memory."""
+    from sahs.enrich.loop import blind_items, plan_concept_items
+    from sahs.enrich.prompts import (
+        blind_name_prompt,
+        concept_description_prompt,
+        metric_semantics_prompt,
+    )
+    from sahs.loaders.sources.gold_queries import load_gold_queries
+    graph_dir, builds = _compiled(tmp_path)
+    build = Build.open(builds)
+    folded = GraphDir(graph_dir).fold_nodes()
+    gold, _quar, _backlog = load_gold_queries(
+        FX / "sources" / "extracted_gold_queries.json")
+    gold_texts = [g.prompt for g in gold if len(g.prompt or "") > 20]
+    prompts = [metric_semantics_prompt(i)
+               for i in plan_metric_items(build, folded, 100)]
+    prompts += [blind_name_prompt(i) for i in blind_items(build)]
+    prompts += [concept_description_prompt(i)
+                for i in plan_concept_items(build, folded, 100)]
+    assert gold_texts and prompts
+    joined = "\n".join(prompts)
+    for text in gold_texts:
+        assert text not in joined
 
 
 def test_enrich_writes_witnessed_and_never_clobbers(tmp_path):
@@ -204,6 +319,14 @@ def test_a5_halt_writes_nothing(tmp_path):
     assert report["metrics_enriched"] == 0
     assert report["concepts_enriched"] == 0
     assert len(list(GraphDir(graph_dir).fold_nodes())) == before
+    # v1.1 instrumentation: per-item margins + context leakage are
+    # published so a 34-key gate reads as calibration, not verdict
+    rows = [json.loads(x) for x in
+            (tmp_path / "b1" / "blind_results.jsonl"
+             ).read_text().splitlines()]
+    assert rows and all("share" in r and "context_leak" in r
+                        for r in rows)
+    assert "leaky_contexts" in report["blind"]
 
 
 def test_vertex_env_contract_is_typed_and_separate(tmp_path,

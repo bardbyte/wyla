@@ -1,5 +1,25 @@
 # B1 — the enrichment loop (E13)
 
+> **Prompt/grader history.** `b1.1` halted at 56% on the real laptop
+> (19/34): 8 misses were house-dialect paraphrases (the model answered
+> in literal SQL English — "Net Transaction Amount" for "Spend"),
+> ~6 dropped a discriminating qualifier, and the token grader PASSED a
+> Card Present / Card Not Present swap in both directions. `b1.2` adds
+> the HOUSE_STYLE block to both prompts; grader `v1.1` adds a negation
+> veto (strictly harder), per-item `share` margins, and per-item
+> `context_leak` so a pass can be trusted (a leaky context measures
+> leakage, not recovery). Note honestly: iterating the prompt against
+> exam feedback adds mild optimistic bias to A5 — the exam names are
+> never embedded, and the true audit is B2 steward review.
+> Re-enrichment is version-aware: a metric enriched under an older
+> prompt version is re-planned; append-only keeps every draft.
+
+> **B1.2 wave (pinned, not yet built):** aliases + anti-aliases
+> (merchant-vs-cardmember-vs-issuer country first), the geography
+> concept family, and an edit-distance NAME-collision check against
+> certified labels — the question-duplication tripwire complements
+> but does not replace it.
+
 The graph knows WHAT (canonical SQL, tables, support). The certified
 catalogs say WHY for only ~41 metrics. B1 asks the Vertex model to
 draft the why — mined-metric questions and grains, thin-concept

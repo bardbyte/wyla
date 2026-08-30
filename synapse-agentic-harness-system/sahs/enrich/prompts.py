@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-PROMPT_VERSION = "b1.1"
+PROMPT_VERSION = "b1.2"
 
 SYSTEM = (
     "You are a careful analytics engineer documenting an enterprise "
@@ -18,6 +18,30 @@ SYSTEM = (
     "the SQL in front of you actually computes. When you are not "
     "confident, you say so via the confidence field instead of "
     "guessing confidently.")
+
+# House dialect, distilled from the catalog's own conventions (b1.2 —
+# the b1.1 blind exam showed the model answering in literal SQL English
+# where the catalog speaks the house language). The exam's specific
+# names are never embedded here; note honestly that iterating a prompt
+# against exam feedback adds mild optimistic bias to A5 — the true
+# audit is steward review of real outputs (B2).
+HOUSE_STYLE = """Naming and phrasing conventions in this catalog:
+- Money movement is called Spend, not "net transaction amount": prefer
+  short business names ("Spend", "Purchase Spend", "Cash Spend",
+  "Inbound Spend") over SQL-literal phrases.
+- When the SQL discriminates on a method/indicator column, the name
+  carries it as a suffix: "<Thing> - <Indicator> Method".
+- Keep discriminating qualifiers from SQL literals in the name: a
+  filtered page, channel, program, or population belongs in the title
+  ("... on <Page>", "... for Prospects").
+- Funnel stages are distinct and must not be conflated: eligible,
+  enrolled, redeeming are different populations — name the stage the
+  SQL actually filters to.
+- Card holders are Card Members (CM); merchants may appear as
+  Submitter Merchants or Service Establishments (SE).
+- Negations are opposite metrics: "Card Not Present" and
+  "Card Present" must never be swapped — check filter polarity
+  carefully before naming."""
 
 
 def _table_context(item: dict[str, Any]) -> str:
@@ -37,6 +61,8 @@ def metric_semantics_prompt(item: dict[str, Any]) -> str:
     """question + grain for a mined metric that has neither."""
     return f"""A mined metric was observed in real analyst usage. Document it.
 
+{HOUSE_STYLE}
+
 {_table_context(item)}
 metric label (usage alias, may be weak): {item.get('label') or '(none)'}
 canonical SQL expression:
@@ -53,6 +79,8 @@ def blind_name_prompt(item: dict[str, Any]) -> str:
     """A5 blind test: recover the certified name from expression +
     context alone (the name is withheld)."""
     return f"""An enterprise metric catalog entry lost its name. Reconstruct it.
+
+{HOUSE_STYLE}
 
 {_table_context(item)}
 canonical SQL expression:

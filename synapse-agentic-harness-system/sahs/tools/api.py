@@ -108,6 +108,7 @@ def search_metrics(build: Build, intent: str, top_k: int = 8) -> dict:
         "evidence_origin": r.get("evidence_origin", r["source"]),
         "grain": r.get("grain", ""),
         "table": r["table"], "question": r.get("question", ""),
+        "question_source": r.get("question_source", ""),
         "source": r["source"],
         "line_of_business": r.get("line_of_business", ""),
         "domain": r.get("domain", ""),
