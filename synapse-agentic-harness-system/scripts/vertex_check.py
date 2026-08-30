@@ -58,12 +58,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  model      {connection.model}")
     print(f"  endpoint   {connection.endpoint}")
     print(f"  key file   {connection.key_path} (exists)")
-    proxy = (os.environ.get("HTTPS_PROXY")
-             or os.environ.get("https_proxy") or "")
+    from sahs.util.auth import redact_url
+    proxy = redact_url(os.environ.get("HTTPS_PROXY")
+                       or os.environ.get("https_proxy") or "")
     print("  proxy      "
           + (f"via {proxy} — the proven contract (token + model "
-             "calls ride the corporate proxy)" if proxy
-             else "none configured — direct"))
+             "calls ride the corporate proxy; credentials redacted)"
+             if proxy else "none configured — direct"))
     print(f"  NO_PROXY   {os.environ.get('NO_PROXY', '(none)')}")
     trust_note = ("ACTIVE (OS keychain trust — the clean "
                   "corporate-TLS fix)" if connection.truststore_active
@@ -101,9 +102,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     print(f"generating (1 call, {connection.model})…")
     try:
+        # 512, not a token-pinching 32: gemini 3.x is a reasoning
+        # model and thinks BEFORE it answers — a tiny cap yields an
+        # empty MAX_TOKENS response (the client also self-heals by
+        # growing the cap on that symptom)
         text = client.generate(
             'Return exactly this JSON: {"ok": true}',
-            max_output_tokens=32)
+            max_output_tokens=512)
     except EnrichTransportError as e:
         print(f"✗ generate refused: {e}", file=sys.stderr)
         print("  (a 404 here usually means the model id or location "

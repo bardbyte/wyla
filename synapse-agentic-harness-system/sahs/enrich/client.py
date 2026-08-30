@@ -136,15 +136,35 @@ class VertexClient:
                 meta.get("promptTokenCount") or 0)
             self.usage["output_tokens"] += int(
                 meta.get("candidatesTokenCount") or 0)
+            self.usage["thought_tokens"] = (
+                self.usage.get("thought_tokens", 0)
+                + int(meta.get("thoughtsTokenCount") or 0))
             candidates = payload.get("candidates") or []
             parts = ((candidates[0].get("content") or {}).get("parts")
                      if candidates else None) or []
             text = "".join(str(p.get("text") or "") for p in parts)
             if text.strip():
                 return text
+            finish = (candidates[0].get("finishReason")
+                      if candidates else "?")
+            if finish == "MAX_TOKENS" and backoff is not None:
+                # reasoning models (gemini 3.x) burn output budget on
+                # internal thought BEFORE any text — the field symptom
+                # is a 200 with empty parts. Grow the cap and retry
+                # (bounded by the attempt budget; no sleep — this is
+                # not a rate issue).
+                grown = min(int(body["generationConfig"]
+                                ["maxOutputTokens"]) * 4, 8192)
+                body["generationConfig"]["maxOutputTokens"] = grown
+                last_error = ("no text at finishReason=MAX_TOKENS — "
+                              f"retrying with maxOutputTokens={grown}")
+                continue
             raise EnrichTransportError(
-                "vertex returned no text (finishReason="
-                f"{candidates[0].get('finishReason') if candidates else '?'})")
+                f"vertex returned no text (finishReason={finish})"
+                + (" — the model spent the whole budget thinking; "
+                   "raise max_output_tokens or set "
+                   "GEMINI_THINKING_BUDGET"
+                   if finish == "MAX_TOKENS" else ""))
         raise EnrichTransportError(
             f"vertex unreachable after {len(_BACKOFFS) + 1} attempts — "
             f"last: {last_error}")
