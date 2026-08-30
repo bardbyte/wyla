@@ -147,8 +147,8 @@ def configure_vertex_network(endpoint: str) -> dict[str, str]:
         summary["proxy"] += " (VERTEX_NO_PROXY_GOOGLE=1)"
         return summary
     proxy = _first_env("HTTPS_PROXY", "https_proxy")
-    summary["proxy"] = (f"via corporate proxy {proxy} (the proven "
-                        "contract)" if proxy
+    summary["proxy"] = (f"via corporate proxy {redact_url(proxy)} "
+                        "(the proven contract)" if proxy
                         else "no proxy configured — direct")
     return summary
 
@@ -163,6 +163,18 @@ def resolve_ssl() -> tuple[bool, str | None]:
         return False, None
     bundle = _first_env("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE")
     return True, bundle
+
+
+def redact_url(url: str) -> str:
+    """Strip embedded credentials from a URL for display —
+    ``user:pass@host`` is common in corporate HTTPS_PROXY values and
+    must NEVER reach logs, console output, or screenshots."""
+    url = (url or "").strip()
+    if "@" not in url:
+        return url
+    scheme, sep, rest = url.partition("://")
+    host = rest.rsplit("@", 1)[-1] if sep else url.rsplit("@", 1)[-1]
+    return f"{scheme}://{host}" if sep else host
 
 
 def _first_env(*names: str) -> str | None:

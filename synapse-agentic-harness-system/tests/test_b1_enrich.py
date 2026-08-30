@@ -294,3 +294,41 @@ def test_vertex_rides_the_proxy_bq_bypasses_it(tmp_path, monkeypatch):
     monkeypatch.setenv("VERTEX_DISABLE_PROXY", "1")
     configure_vertex_network("https://aiplatform.googleapis.com")
     assert "HTTPS_PROXY" not in os.environ
+
+
+def test_proxy_credentials_never_printed():
+    """Corporate HTTPS_PROXY values embed user:pass — the display path
+    redacts them (the field lesson: a screenshot of vertex_check leaked
+    a proxy password)."""
+    from sahs.util.auth import redact_url
+    assert redact_url("http://user:s3cr%23t@proxy.corp.com:8080") == \
+        "http://proxy.corp.com:8080"
+    assert redact_url("http://proxy.corp.com:8080") == \
+        "http://proxy.corp.com:8080"
+    assert redact_url("") == ""
+
+
+def test_max_tokens_empty_response_grows_budget_and_retries():
+    """A reasoning model can burn the whole output budget thinking —
+    a 200 with finishReason=MAX_TOKENS and no text. The client grows
+    the cap and retries instead of failing the call."""
+    from sahs.enrich.client import VertexClient
+    seen: list[int] = []
+
+    def transport(body):
+        seen.append(body["generationConfig"]["maxOutputTokens"])
+        if len(seen) == 1:
+            return {"candidates": [{"finishReason": "MAX_TOKENS",
+                                    "content": {"parts": []}}],
+                    "usageMetadata": {"thoughtsTokenCount": 32}}
+        return {"candidates": [{"finishReason": "STOP", "content": {
+            "parts": [{"text": '{"ok": true}'}]}}],
+            "usageMetadata": {"candidatesTokenCount": 5}}
+
+    client = VertexClient(connection=SimpleNamespace(), transport=transport,
+                          token_provider=lambda: "t",
+                          sleep=lambda _s: None)
+    text = client.generate("hi", max_output_tokens=32)
+    assert text == '{"ok": true}'
+    assert seen == [32, 128]          # grew ×4, then succeeded
+    assert client.usage["thought_tokens"] == 32
