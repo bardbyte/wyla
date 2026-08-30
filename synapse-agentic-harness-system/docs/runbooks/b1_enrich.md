@@ -13,6 +13,19 @@
 > never embedded, and the true audit is B2 steward review.
 > Re-enrichment is version-aware: a metric enriched under an older
 > prompt version is re-planned; append-only keeps every draft.
+>
+> `b1.2` reached 20/34 (59% — halt by one case) with the dialect
+> bucket converted to exact matches and the veto correctly failing a
+> repeated CP/CNP swap at share 1.0. The remaining misses: the
+> `- Method` suffix family (base names now right, suffix dropped),
+> the invisible-filter family (the page/channel literal lives in
+> `common_filters`, which the context never carried — OUR bug), and
+> ' / ' compound answer-key names halving the share. `b1.3` feeds
+> `common_filters` into both prompts (compile rows now carry them),
+> strengthens the suffix rule, and softens the CM clause (it caused
+> one overcorrection); grader `v1.2` credits either whole part of a
+> spaced-slash compound name (answer-key normalization, not synonym
+> credit — tight slashes like 'Local/Foreign' never split).
 
 > **B1.2 wave (pinned, not yet built):** aliases + anti-aliases
 > (merchant-vs-cardmember-vs-issuer country first), the geography

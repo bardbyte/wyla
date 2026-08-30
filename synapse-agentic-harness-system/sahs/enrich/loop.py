@@ -113,6 +113,12 @@ def _context(row: dict[str, Any], build: Build,
         "domain": row.get("domain", ""),
         "columns": _referenced_columns(row.get("canonical_sql", ""),
                                        build, table),
+        # the b1.2 field lesson: the discriminating literals (a page
+        # name, a channel, a method flag) live in the FILTERS, not the
+        # aggregate expression — without them the model cannot name
+        # what the metric is scoped to
+        "filters": [str(f) for f in
+                    (row.get("common_filters") or [])[:4]],
         "sql": row.get("canonical_sql", ""),
         "label": row.get("label") or "",
     }
@@ -227,23 +233,43 @@ def blind_items(build: Build) -> list[dict[str, Any]]:
     return items
 
 
+def _key_parts(true_label: str) -> list[str]:
+    """Answer-key normalization (grader v1.2): the catalog writes some
+    entries as TWO names joined by ' / ' ('Submitter Merchant Count /
+    Submitter Active Locations in Force') — matching either whole part
+    is a recovery. Split only on spaced slashes: 'Local/Foreign' is one
+    name, never two."""
+    parts = [p.strip() for p in str(true_label).split(" / ")
+             if p.strip()]
+    return parts or [str(true_label)]
+
+
 def recovery_share(true_label: str, predicted: str) -> float:
-    truth = _tokens(true_label)
-    if not truth:
-        return 0.0
-    return round(len(truth & _tokens(predicted)) / len(truth), 3)
+    best = 0.0
+    for part in _key_parts(true_label):
+        truth = _tokens(part)
+        if truth:
+            best = max(best, len(truth & _tokens(predicted))
+                       / len(truth))
+    return round(best, 3)
 
 
 def grade_recovery(true_label: str, predicted: str) -> bool:
-    truth = _tokens(true_label)
-    if not truth:
-        return False
-    # negation veto: 'Card Not Present X' vs 'Card Present X' are
-    # OPPOSITE metrics — polarity disagreement fails the case no
-    # matter how much else overlaps (b1.1 field false-positive)
-    if (truth & _NEGATIONS) != (_tokens(predicted) & _NEGATIONS):
-        return False
-    return recovery_share(true_label, predicted) >= RECOVERY_TOKEN_SHARE
+    predicted_tokens = _tokens(predicted)
+    for part in _key_parts(true_label):
+        truth = _tokens(part)
+        if not truth:
+            continue
+        # negation veto: 'Card Not Present X' vs 'Card Present X' are
+        # OPPOSITE metrics — polarity disagreement fails the part no
+        # matter how much else overlaps (b1.1 field false-positive;
+        # the veto caught the swap again in the b1.2 run)
+        if (truth & _NEGATIONS) != (predicted_tokens & _NEGATIONS):
+            continue
+        if len(truth & predicted_tokens) / len(truth) \
+                >= RECOVERY_TOKEN_SHARE:
+            return True
+    return False
 
 
 def run_blind_gate(build: Build, client: VertexClient, out_dir: Path,

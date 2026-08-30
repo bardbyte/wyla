@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-PROMPT_VERSION = "b1.2"
+PROMPT_VERSION = "b1.3"
 
 SYSTEM = (
     "You are a careful analytics engineer documenting an enterprise "
@@ -29,16 +29,22 @@ HOUSE_STYLE = """Naming and phrasing conventions in this catalog:
 - Money movement is called Spend, not "net transaction amount": prefer
   short business names ("Spend", "Purchase Spend", "Cash Spend",
   "Inbound Spend") over SQL-literal phrases.
-- When the SQL discriminates on a method/indicator column, the name
-  carries it as a suffix: "<Thing> - <Indicator> Method".
-- Keep discriminating qualifiers from SQL literals in the name: a
-  filtered page, channel, program, or population belongs in the title
-  ("... on <Page>", "... for Prospects").
+- When the SQL discriminates on a method/indicator/code column, ALWAYS
+  append the method as a suffix, deriving its name from that column's
+  meaning: "<Thing> - <Indicator/Code Meaning> Method". A metric that
+  measures the same thing by a different column gets a different
+  suffix — the suffix is what tells them apart.
+- The metric's FILTERS are part of its identity: a filtered page,
+  channel, program, or population from the filters MUST appear in the
+  name, quoted for pages ("... on 'Page Name' Page", "... for
+  Prospects", "Paid Search ...").
 - Funnel stages are distinct and must not be conflated: eligible,
   enrolled, redeeming are different populations — name the stage the
-  SQL actually filters to.
-- Card holders are Card Members (CM); merchants may appear as
-  Submitter Merchants or Service Establishments (SE).
+  SQL actually filters to. Sessions and visits are different things.
+- Prefer the catalog's short population nouns (Redeemers,
+  Enrollments, Prospects); the formal terms — Card Member (CM),
+  Service Establishment / Submitter Merchant (SE) — only when no
+  short noun fits.
 - Negations are opposite metrics: "Card Not Present" and
   "Card Present" must never be swapped — check filter polarity
   carefully before naming."""
@@ -54,6 +60,9 @@ def _table_context(item: dict[str, Any]) -> str:
         lines.append(f"metric domain: {item['domain']}")
     if item.get("columns"):
         lines.append("columns referenced: " + ", ".join(item["columns"]))
+    if item.get("filters"):
+        lines.append("metric filters (part of its identity): "
+                     + "; ".join(item["filters"]))
     return "\n".join(lines)
 
 

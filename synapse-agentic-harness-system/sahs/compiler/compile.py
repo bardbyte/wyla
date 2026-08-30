@@ -256,6 +256,10 @@ def compile_build(graph_root: Path, builds_root: Path
             "line_of_business":
                 record.props.get("line_of_business", ""),
             "scope": record.props.get("scope", ""),
+            # the metric's filters are part of its IDENTITY (the page,
+            # channel, or method it is scoped to) — serving + enricher
+            # context both need them
+            "common_filters": record.props.get("common_filters") or [],
             # studio-export texture (observed, serving-facing)
             "grain_observed": record.props.get("grain_observed", ""),
             "query_shape": record.props.get("query_shape") or [],
@@ -295,7 +299,8 @@ def compile_build(graph_root: Path, builds_root: Path
                     "join_condition"):
             held[key] = held[key] or row[key]
         for key in ("approved_dimensions", "query_shape", "data_owners",
-                    "tables_associated_not_referenced"):
+                    "tables_associated_not_referenced",
+                    "common_filters"):
             if row[key] and not held[key]:
                 held[key] = row[key]
     for row in collapsed.values():

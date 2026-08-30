@@ -98,6 +98,25 @@ def test_recovery_grader_and_json_parsing():
                               "Card Not Present Transaction Amount USD")
     assert grade_recovery("Card Not Present Spend",
                           "Card Not Present Transaction Amount")
+    # v1.2 answer-key normalization: a ' / ' compound entry is TWO
+    # names — either whole part counts (b1.2 field case). A tight
+    # slash ('Local/Foreign') is one name, never split.
+    assert grade_recovery(
+        "Submitter Merchant Count / Submitter Active Locations in "
+        "Force (ALIF)", "Distinct Submitter Merchants")
+    assert grade_recovery("Local Spend - Local/Foreign Indicator Method",
+                          "Local Spend - Local/Foreign Indicator Method")
+    assert not grade_recovery(
+        "Transactions per Submitter Merchant / Transactions per "
+        "Submitter ALIF", "Domestic Spend")   # genuinely wrong stays wrong
+    # the filters are part of the prompt context now (b1.3): the
+    # discriminating literal is visible to the model
+    from sahs.enrich.prompts import blind_name_prompt as _bnp
+    from sahs.enrich.prompts import metric_semantics_prompt as _msp
+    item = {"table": "dw.t", "sql": "count(1)", "label": "",
+            "filters": ["page_nm = 'View All Cards'"]}
+    assert "View All Cards" in _msp(item)
+    assert "View All Cards" in _bnp({**item, "true_label": "x"})
     assert parse_json_answer('```json\n{"a": 1}\n```') == {"a": 1}
     assert parse_json_answer("not json") is None
     assert parse_json_answer('["list"]') is None
@@ -109,6 +128,7 @@ def test_plan_targets_only_blank_metrics(tmp_path):
     items = plan_metric_items(build, GraphDir(graph_dir).fold_nodes(),
                               limit=500)
     assert items                                # mined metrics need work
+    assert "filters" in items[0]                # b1.3 context carries them
     planned = {i["id"] for i in items}
     for row in build.metrics:
         if row.get("question") and row.get("grain"):
