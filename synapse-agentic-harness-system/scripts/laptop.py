@@ -536,8 +536,7 @@ def main(argv: list[str] | None = None) -> int:
                 prefer=tuple(t.strip() for t in
                              (args.prefer or "").split(",")
                              if t.strip()),
-                log=lambda m: console.emit("phase_start",
-                                           phase="enrich", detail=m))
+                log=console.note)
         except AuthError as e:
             console.gate("vertex_env", False, str(e))
             return EXIT_ENV_AUTH

@@ -10,6 +10,10 @@ POT,Point of Transaction,GMNS,All,Acronym
 A/R,Accounts Receivable,Finance,All,Acronym
 SE10,Service Establishment 10 Digit Number,GMNS,All,Acronym
 CNP,Card Not Present,GMNS,All,Acronym
+NAA,New Accounts Acquired,USCS,US,Acronym
+DW,Default Workgroup,Technology,All,Acronym
+CASE,Computer Aided Software Engineering,Technology,All,Acronym
+CT,Credit Tracker,Finance,US,Acronym
 FICO,Fair Isaac Corporation Score,Risk,US,Acronym
 Roll Rate,Movement of balances between delinquency buckets month over month,Risk,All,Glossary Term
 Write-Off,Balance removed from receivables as uncollectible,Risk,All,Glossary Term

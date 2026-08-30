@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-PROMPT_VERSION = "b1.3"
+PROMPT_VERSION = "b1.4"
 
 SYSTEM = (
     "You are a careful analytics engineer documenting an enterprise "
@@ -21,19 +21,31 @@ SYSTEM = (
 
 # House dialect, distilled from the catalog's own conventions (b1.2 —
 # the b1.1 blind exam showed the model answering in literal SQL English
-# where the catalog speaks the house language). The exam's specific
-# names are never embedded here; note honestly that iterating a prompt
-# against exam feedback adds mild optimistic bias to A5 — the true
-# audit is steward review of real outputs (B2).
+# where the catalog speaks the house language; b1.4 — the b1.3 exam
+# showed suffixes are derived by EXPANDING the discriminating column's
+# name, and that the model drifted off the catalog's register:
+# abbreviating nouns the catalog spells out, expanding acronyms the
+# catalog keeps). The exam's specific names are never embedded here;
+# note honestly that iterating a prompt against exam feedback adds
+# mild optimistic bias to A5 — the true audit is steward review of
+# real outputs (B2).
 HOUSE_STYLE = """Naming and phrasing conventions in this catalog:
 - Money movement is called Spend, not "net transaction amount": prefer
   short business names ("Spend", "Purchase Spend", "Cash Spend",
   "Inbound Spend") over SQL-literal phrases.
 - When the SQL discriminates on a method/indicator/code column, ALWAYS
-  append the method as a suffix, deriving its name from that column's
-  meaning: "<Thing> - <Indicator/Code Meaning> Method". A metric that
-  measures the same thing by a different column gets a different
+  append the method as a suffix, deriving its name by EXPANDING the
+  discriminating column's own name, abbreviation by abbreviation:
+  se_local_frgn_in → "... - Local/Foreign Indicator Method";
+  se_subm_ctry_cd → "... - Submitted Country Code Method". A metric
+  that measures the same thing by a different column gets a different
   suffix — the suffix is what tells them apart.
+- Column-name dialect (how this warehouse abbreviates): subm =
+  Submitted/Submitter, ctry = Country, cd = Code, frgn = Foreign,
+  in/ind = Indicator, iss = Issuing, cr = Credit, dr = Debit,
+  am = Amount, ct = Count, trans = Transaction, cm = Card Member,
+  se = Service Establishment (Submitter Merchant), alif = Active
+  Locations in Force.
 - The metric's FILTERS are part of its identity: a filtered page,
   channel, program, or population from the filters MUST appear in the
   name, quoted for pages ("... on 'Page Name' Page", "... for
@@ -41,13 +53,20 @@ HOUSE_STYLE = """Naming and phrasing conventions in this catalog:
 - Funnel stages are distinct and must not be conflated: eligible,
   enrolled, redeeming are different populations — name the stage the
   SQL actually filters to. Sessions and visits are different things.
-- Prefer the catalog's short population nouns (Redeemers,
-  Enrollments, Prospects); the formal terms — Card Member (CM),
-  Service Establishment / Submitter Merchant (SE) — only when no
-  short noun fits.
+- Write names in the catalog's register: population nouns spelled out
+  in full ("Submitter Merchant", "Card Member" — never SE or CM
+  inside a metric name) and enterprise acronyms kept exactly as the
+  catalog writes them (NAA, SBS, ALIF — never expanded in a name).
+  Prefer the catalog's short population nouns (Redeemers,
+  Enrollments, Prospects) where they fit. An average or ratio NEVER
+  drops its per-X denominator: "Spend per Transaction", never a bare
+  "Average Spend".
 - Negations are opposite metrics: "Card Not Present" and
   "Card Present" must never be swapped — check filter polarity
-  carefully before naming."""
+  carefully before naming. Indicator encodings can invert intuition:
+  in POS cardholder-present coding, '0' means the card IS present
+  (face to face) and the nonzero codes mean NOT present — read the
+  tested value's standard meaning, never assume 0 = absent."""
 
 
 def _table_context(item: dict[str, Any]) -> str:

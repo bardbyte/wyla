@@ -10,6 +10,7 @@ written — you iterate the prompt, never the graph.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -114,12 +115,33 @@ def _vocab_index(build: Build) -> tuple[dict[str, str],
     return single, multi
 
 
+# SQL keywords and function names must never hit the acronym shelf —
+# the b1.3 field run fed CASE→"Computer Aided Software Engineering"
+# and AS→"Actual Start date" into real prompts as authoritative
+# vocabulary, and two-letter column fragments (cr, dr, am, cd, dw)
+# pulled unrelated corporate acronyms in front of the model (cr/dr
+# are credit/debit indicators, not Customer Reference / Disaster
+# recovery). Every 2-letter match in that run was wrong; the shortest
+# true positive (ALIF) has four letters.
+_SQL_NOISE = frozenset((
+    "case", "when", "then", "else", "end", "and", "not", "sum",
+    "count", "countif", "avg", "min", "max", "distinct", "trim",
+    "nullif", "coalesce", "cast", "safe_cast", "like", "between",
+    "select", "from", "where", "join", "left", "right", "inner",
+    "outer", "group", "having", "order", "over", "partition",
+    "null", "true", "false", "date", "timestamp", "extract",
+    "interval", "day", "month", "year", "week"))
+
+
 def _vocab_for(item: dict[str, Any], single: dict[str, str],
                multi: list[tuple[str, str]],
                cap: int = 6) -> list[str]:
     """→ the glossary entries this metric's own text touches (label,
     SQL, columns, table, filters) — snake_case split so `alif_cnt`
-    finds ALIF. Capped; deterministic (catalog order)."""
+    finds ALIF, trailing-s stripped so `naas_ct` still finds NAA.
+    Multi-word Atlas entries first (they match exactly and were the
+    only genuinely useful hits in the b1.3 field run), then acronyms
+    of 3+ letters, longest first. Capped; deterministic."""
     blob = " ".join((item.get("label", ""), item.get("sql", ""),
                      item.get("table", ""),
                      " ".join(item.get("columns", []) or []),
@@ -129,14 +151,19 @@ def _vocab_for(item: dict[str, Any], single: dict[str, str],
     for token in list(tokens):
         tokens.update(token.split("_"))
     picked: list[str] = []
-    for token in sorted(tokens):
-        entry = single.get(token)
-        if entry and entry not in picked:
+    for phrase, entry in multi:
+        if phrase in blob and entry not in picked:
             picked.append(entry)
             if len(picked) >= cap:
                 return picked
-    for phrase, entry in multi:
-        if phrase in blob and entry not in picked:
+    for token in sorted(tokens, key=lambda t: (-len(t), t)):
+        if len(token) < 3 or token in _SQL_NOISE:
+            continue
+        entry = single.get(token)
+        if entry is None and len(token) > 3 and token.endswith("s") \
+                and not token.endswith("ss"):
+            entry = single.get(token[:-1])      # naas → NAA
+        if entry and entry not in picked:
             picked.append(entry)
             if len(picked) >= cap:
                 break
@@ -347,10 +374,12 @@ def run_blind_gate(build: Build, client: VertexClient, out_dir: Path,
     items = blind_items(build)
     if sample_n:
         items = items[:sample_n]
+    log(f"blind gate: asking {len(items)} certified metrics "
+        "(names withheld)…")
     results = []
     recovered = 0
     leaky = 0
-    for item in items:
+    for n, item in enumerate(items, 1):
         # leakage instrumentation: how much of the WITHHELD name the
         # assembled context already gives away (purpose/domain/lob
         # labels — a card purpose that names its flagship metric turns
@@ -361,15 +390,22 @@ def run_blind_gate(build: Build, client: VertexClient, out_dir: Path,
                                  item.get("line_of_business", "")))
         leak = recovery_share(item["true_label"], context_text)
         leaky += int(leak >= 0.5)
+        started = time.monotonic()
         answer = parse_json_answer(client.generate(
             blind_name_prompt(item), system=SYSTEM)) or {}
         predicted = str(answer.get("name") or "")
         ok = grade_recovery(item["true_label"], predicted)
         recovered += int(ok)
+        share = recovery_share(item["true_label"], predicted)
+        # live progress: the prediction is shown, the withheld truth is
+        # NOT — the terminal stream stays as blind as the model
+        log(f"  blind {n}/{len(items)} · {'✓' if ok else '✗'} share "
+            f"{share:.2f} · {time.monotonic() - started:.1f}s · "
+            f"{item['id']}"
+            + ("" if ok else f" → {predicted[:60] or '(no answer)'!r}"))
         results.append({"id": item["id"], "true": item["true_label"],
                         "predicted": predicted, "recovered": ok,
-                        "share": recovery_share(item["true_label"],
-                                                predicted),
+                        "share": share,
                         "context_leak": leak})
     rate = round(recovered / len(items), 4) if items else 0.0
     tier = ("batch" if rate >= TIER_BATCH else
@@ -381,7 +417,8 @@ def run_blind_gate(build: Build, client: VertexClient, out_dir: Path,
         f"({rate:.0%}) → tier {tier} · leaky contexts {leaky}")
     return {"n": len(items), "recovered": recovered, "rate": rate,
             "tier": tier, "leaky_contexts": leaky,
-            "grader": "v1.1 (token-share + negation veto)"}
+            "grader": "v1.2 (token-share + negation veto + "
+                      "answer-key normalization)"}
 
 
 # ── enrichment writes ────────────────────────────────────────
@@ -405,6 +442,10 @@ def enrich_metric_items(items: list[dict], client: VertexClient,
                         out_dir: Path, report: dict,
                         log: Callable[[str], None] = print) -> None:
     done, checkpoint = _checkpoint(out_dir)
+    already = sum(1 for i in items if i["id"] in done)
+    if already:
+        log(f"  resuming: {already}/{len(items)} metric items already "
+            "checkpointed — skipping them")
     taken_questions = {
         _normalize_question(r["question"])
         for r in build.metrics
@@ -415,11 +456,15 @@ def enrich_metric_items(items: list[dict], client: VertexClient,
         if item["id"] in done:
             report["resumed_skips"] += 1
             continue
+        started = time.monotonic()
         answer = parse_json_answer(client.generate(
             metric_semantics_prompt(item), system=SYSTEM))
+        elapsed = f"{time.monotonic() - started:.1f}s"
         if (not answer or not str(answer.get("question") or "").strip()
                 or not str(answer.get("grain") or "").strip()):
             report["invalid_json"] += 1
+            log(f"  metric {n}/{len(items)} · ✗ invalid_json · "
+                f"{elapsed} · {item['id']}")
             continue
         question = str(answer["question"]).strip()
         grain = str(answer["grain"]).strip()
@@ -439,11 +484,15 @@ def enrich_metric_items(items: list[dict], client: VertexClient,
                 agent_recommendation="consider variant_of the certified "
                                      "metric instead of a new question")
             report["collisions"] += 1
+            log(f"  metric {n}/{len(items)} · ↷ collision → ReviewItem "
+                f"· {elapsed} · {item['id']}")
             continue
         taken_questions.add(key)
+        diverged = False
         observed = str(item.get("grain_observed") or "").strip()
         if observed and _normalize_question(grain) \
                 != _normalize_question(observed):
+            diverged = True
             # two witnesses disagreeing about grain is exactly the
             # class of finding this system exists to surface — both
             # values stay recorded, a steward decides
@@ -475,8 +524,13 @@ def enrich_metric_items(items: list[dict], client: VertexClient,
         with checkpoint.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"id": item["id"]}) + "\n")
         report["metrics_enriched"] += 1
-        if n % 25 == 0:
-            log(f"  enriched {n}/{len(items)} metric items")
+        wrote = "+".join(k.split("_")[0]
+                         for k in ("question_enriched", "grain_enriched")
+                         if k in props) or "version only"
+        log(f"  metric {n}/{len(items)} · ✓ wrote {wrote} "
+            f"(conf {props['enrich_confidence']:.2f}) · {elapsed} · "
+            f"{item['id']}"
+            + (" · ⚠ grain diverges from studio" if diverged else ""))
 
 
 def enrich_concept_items(items: list[dict], client: VertexClient,
@@ -484,17 +538,26 @@ def enrich_concept_items(items: list[dict], client: VertexClient,
                          report: dict,
                          log: Callable[[str], None] = print) -> None:
     done, checkpoint = _checkpoint(out_dir)
+    already = sum(1 for i in items
+                  if f"concept::{i['label']}" in done)
+    if already:
+        log(f"  resuming: {already}/{len(items)} concept items already "
+            "checkpointed — skipping them")
     model = client.connection.model
     for n, item in enumerate(items, 1):
         key = f"concept::{item['label']}"
         if key in done:
             report["resumed_skips"] += 1
             continue
+        started = time.monotonic()
         answer = parse_json_answer(client.generate(
             concept_description_prompt(item), system=SYSTEM))
+        elapsed = f"{time.monotonic() - started:.1f}s"
         if not answer or not str(
                 answer.get("description") or "").strip():
             report["invalid_json"] += 1
+            log(f"  concept {n}/{len(items)} · ✗ invalid_json · "
+                f"{elapsed} · {item['label']!r}")
             continue
         props: dict[str, Any] = {
             "description_enriched":
@@ -512,8 +575,9 @@ def enrich_concept_items(items: list[dict], client: VertexClient,
         with checkpoint.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"id": key}) + "\n")
         report["concepts_enriched"] += 1
-        if n % 25 == 0:
-            log(f"  enriched {n}/{len(items)} concept items")
+        log(f"  concept {n}/{len(items)} · ✓ {item['label']!r} → "
+            f"{len(item['tables'])} table(s) "
+            f"(conf {props['enrich_confidence']:.2f}) · {elapsed}")
 
 
 # ── orchestration ────────────────────────────────────────────
@@ -563,7 +627,10 @@ def run_enrich(*, graph_root: Path, builds_root: Path, out_dir: Path,
                 stale.unlink()
         if client is None:
             from sahs.util.auth import VertexConnection
-            client = VertexClient(VertexConnection.from_env())
+            # the log hook makes retries, backoffs and MAX_TOKENS
+            # self-heals visible live — without it a struggling call
+            # is indistinguishable from a hung one
+            client = VertexClient(VertexConnection.from_env(), log=log)
         report["blind"] = run_blind_gate(build, client, out_dir,
                                          blind_sample, log)
         if report["blind"]["tier"] == "halt":
@@ -574,6 +641,11 @@ def run_enrich(*, graph_root: Path, builds_root: Path, out_dir: Path,
                                 run_id, out_dir, report, log)
             enrich_concept_items(concept_items, client, graph, run_id,
                                  out_dir, report, log)
+        u = client.usage
+        log(f"usage: {u.get('calls', 0)} calls · "
+            f"prompt {u.get('prompt_tokens', 0)} · "
+            f"output {u.get('output_tokens', 0)} · "
+            f"thought {u.get('thought_tokens', 0)} tokens")
         report["usage"] = dict(client.usage)
 
     (out_dir / "enrich_report.json").write_text(

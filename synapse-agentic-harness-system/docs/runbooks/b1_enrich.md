@@ -26,6 +26,43 @@
 > one overcorrection); grader `v1.2` credits either whole part of a
 > spaced-slash compound name (answer-key normalization, not synonym
 > credit — tight slashes like 'Local/Foreign' never split).
+>
+> `b1.3` OPENED THE GATE: 21/34 (62%, tier item) — first real writes
+> (23 metrics + 21 concepts, 0 collisions). Churn was high (5 fixed /
+> 4 regressed) and a context probe on the misses found three things.
+> (1) Only 1/34 blind items carried any filters — `common_filters`
+> exists only on the mined plane; the certified metrics' scoping
+> WHERE lives in their referenced full SQL, not the canonical
+> expression, so five cases (both 'View All Cards', Paid Search,
+> campaign redeemers, eligible merchants) were unwinnable from the
+> shown context — the model's "wrong" answers were faithful to the
+> evidence (one catalog SQL even aliases a Sessions metric
+> `monthly_visits` — a B2 steward finding, not a model error).
+> (2) The vocab shelf fed poison: SQL keywords (CASE, AS) and
+> 2-letter column fragments (cr/dr = credit/debit, not Customer
+> Reference / Disaster recovery) matched unrelated acronyms — and
+> caused one regression directly (TOT/SBS expansions). (3) The CP/CNP
+> twins differ on POS cardholder-present codes where '0' means
+> PRESENT — the model assumed 0 = absent. `b1.4` therefore: vocab
+> hygiene in `_vocab_for` (keyword blocklist, 3-letter minimum,
+> trailing-s stem lookup, Atlas-phrase-first ordering), suffix
+> derivation by EXPANDING the discriminating column's name plus a
+> column-name dialect table, a register clause (spell out population
+> nouns, keep catalog acronyms, never drop a per-X denominator), and
+> the POS encoding fact. Honesty note, doubly so now: b1.4 is tuned
+> against this exam's residuals — treat the A5 rate as an upper
+> bound; B2 steward review is the audit. b1.4 is the LAST prompt
+> iteration before scale regardless of tier.
+
+> **Pinned follow-up (not built): observed filters from referenced
+> SQL.** The graph already stores each certified metric's full
+> referenced query (`doc:referenced_sql_*`, PR #89). Mining its
+> top-level WHERE conjuncts with string literals into an
+> `observed_filters` row field would make the five
+> unwinnable-from-expression exam cases (and every future mined
+> metric on those tables) name their page/channel/campaign scope.
+> Loader/compile patch, sqlglot in-silo — do it as its own change,
+> measured by its own exam delta.
 
 > **B1.2 wave (pinned, not yet built):** aliases + anti-aliases
 > (merchant-vs-cardmember-vs-issuer country first), the geography
@@ -134,6 +171,15 @@ python scripts/laptop.py enrich \
 #        enrich_writes (written / collisions→review / invalid_json)
 # read graph/runs/b1_smoke/blind_results.jsonl — per-item recovery
 ```
+
+The run narrates itself live — one line per model call
+(`blind 12/34 · ✓ share 0.83 · 8.4s · metric:…`,
+`metric 7/25 · ✓ wrote question+grain (conf 0.85) · 11.2s · …`),
+`[vertex]` lines for retries/backoffs/MAX_TOKENS self-heals, a
+`resuming: N/M already checkpointed` line on resume, and a closing
+`usage:` token line. Blind lines show the model's prediction on a
+miss but NEVER the withheld true name — the terminal stays as blind
+as the exam. Every line is also recorded in `<out>/events.jsonl`.
 
 Interrupted or rate-limited? Re-run the same command — the checkpoint
 resumes; `--fresh` restarts the batch deliberately. Then raise
