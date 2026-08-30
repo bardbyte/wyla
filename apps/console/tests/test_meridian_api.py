@@ -117,6 +117,27 @@ def test_graph_map_builds_and_feedback(client, compiled):
                for r in lines)
 
 
+def test_artifact_staging_is_a_source_drop(client, tmp_path):
+    """Staging a Knowledge File writes into sources/artifacts/ with
+    the actor header — a source drop, never a graph write — and
+    refuses silent overwrites."""
+    os.environ["MERIDIAN_SOURCES_DIR"] = str(tmp_path / "sources")
+    payload = {"business_unit": "USCS",
+               "name": "lending vocabulary",
+               "content": "ALIL means Active Lending In Force."}
+    first = client.post("/api/meridian/artifacts", json=payload)
+    assert first.status_code == 201 and first.json()["staged"]
+    staged_file = (tmp_path / "sources" / "artifacts"
+                   / "uscs_lending-vocabulary.md")
+    text = staged_file.read_text()
+    assert "actor admin" in text and "Active Lending" in text
+    second = client.post("/api/meridian/artifacts", json=payload)
+    assert second.json()["staged"] is False        # no silent overwrite
+    listing = client.get("/api/meridian/artifacts").json()
+    assert "uscs_lending-vocabulary.md" in listing["staged"]
+    del os.environ["MERIDIAN_SOURCES_DIR"]
+
+
 def test_no_build_renders_honest_unavailable(tmp_path):
     os.environ["MERIDIAN_BUILDS_DIR"] = str(tmp_path / "empty")
     os.environ["MERIDIAN_GRAPH_DIR"] = str(tmp_path / "graph")

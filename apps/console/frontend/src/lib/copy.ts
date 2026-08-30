@@ -27,6 +27,8 @@ export const BRAND = {
 export const TABS = [
   { id: "home", label: "Home", preview: false },
   { id: "semantics", label: "Semantics", preview: false },
+  { id: "cosmos", label: "Cosmos", preview: false },
+  { id: "artifacts", label: "Artifacts", preview: false },
   { id: "ask", label: "Ask", preview: false },
   { id: "products", label: "Data products", preview: false },
   { id: "graph", label: "Context graph", preview: false },

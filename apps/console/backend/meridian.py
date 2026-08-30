@@ -48,6 +48,11 @@ def _graph_root() -> Path:
     return Path(os.environ.get("MERIDIAN_GRAPH_DIR", _SILO / "graph"))
 
 
+def _sources_dir() -> Path:
+    return Path(os.environ.get("MERIDIAN_SOURCES_DIR",
+                               _SILO / "sources"))
+
+
 class MeridianData:
     """Lazy, mtime-cached view over builds/CURRENT + graph sidecars."""
 
@@ -322,7 +327,7 @@ class MeridianData:
             if build is not None else {}
         known = [s for s in shelf.get("sources", [])
                  if s.get("family") == "knowledge"]
-        staged_dir = _SILO / "sources" / "artifacts"
+        staged_dir = _sources_dir() / "artifacts"
         staged = sorted(p.name for p in staged_dir.glob("*")
                         if p.is_file()) if staged_dir.exists() else []
         return {"available": build is not None,
@@ -338,6 +343,17 @@ class FeedbackEvent(BaseModel):
     vote: str = Field(pattern="^(up|down)$")
     note: str = ""
     session_kind: str = "steward"       # steward | analyst (two hats)
+    actor: str = "admin"
+
+
+class ArtifactStageRequest(BaseModel):
+    """Stage a new Knowledge File for a business unit. This is a
+    SOURCE drop, not a graph write: the file lands in
+    sources/artifacts/ where the ingestion ledger will meet it —
+    the clerk stays the only graph writer."""
+    business_unit: str = Field(pattern=r"^[A-Za-z0-9_-]{1,40}$")
+    name: str = Field(min_length=1, max_length=80)
+    content: str = Field(min_length=1, max_length=200_000)
     actor: str = "admin"
 
 
@@ -394,6 +410,29 @@ def enrich_runs() -> dict:
 @router.get("/artifacts")
 def artifacts() -> dict:
     return _DATA.artifacts()
+
+
+@router.post("/artifacts", status_code=201)
+def stage_artifact(req: ArtifactStageRequest) -> dict:
+    slug = "".join(c if c.isalnum() or c in "-_" else "-"
+                   for c in req.name.strip().lower()).strip("-")[:60]
+    if not slug:
+        return {"staged": False, "reason": "name yields an empty slug"}
+    staged_dir = _sources_dir() / "artifacts"
+    staged_dir.mkdir(parents=True, exist_ok=True)
+    path = staged_dir / f"{req.business_unit.lower()}_{slug}.md"
+    if path.exists():
+        return {"staged": False,
+                "reason": f"{path.name} already staged — pick another "
+                          "name or edit the file directly"}
+    header = (f"<!-- staged via Synapse by Lumi · actor {req.actor} · "
+              f"business unit {req.business_unit} -->\n")
+    path.write_text(header + req.content, encoding="utf-8")
+    return {"staged": True, "file": path.name,
+            "note": "staged for ingestion — the Knowledge Files "
+                    "loader picks this up when it lands (pinned "
+                    "follow-up); until then it is visible here as "
+                    "staged, never silently pretended into the graph"}
 
 
 @router.post("/feedback", status_code=201)
