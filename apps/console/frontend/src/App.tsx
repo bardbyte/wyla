@@ -4,7 +4,9 @@ import { NavProvider, useNav } from "./lib/nav";
 import { useTheme } from "./lib/theme";
 import { AskTab } from "./tabs/Ask";
 import { GraphTab } from "./tabs/Graph";
+import { HomeTab } from "./tabs/Home";
 import { KnowledgeTab } from "./tabs/Knowledge";
+import { OperateTab } from "./tabs/Operate";
 import { ProductsTab } from "./tabs/Products";
 
 export default function App() {
@@ -59,9 +61,11 @@ function Shell() {
           style={{ display: nav.tab === "ask" ? "flex" : "none" }}>
           <AskTab />
         </div>
+        {nav.tab === "home" && <HomeTab />}
         {nav.tab === "products" && <ProductsTab />}
         {nav.tab === "graph" && <GraphTab />}
         {nav.tab === "knowledge" && <KnowledgeTab />}
+        {nav.tab === "operate" && <OperateTab />}
       </main>
 
       {nav.evidenceRef && (

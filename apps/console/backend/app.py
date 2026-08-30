@@ -348,6 +348,11 @@ def create_app(runner: Runner | None = None,
         except KeyError:
             return JSONResponse({"code": "not_found"}, status_code=404)
 
+    # ── Meridian read plane (Synapse by Lumi admin, E17) ─────
+
+    from apps.console.backend.meridian import router as meridian_router
+    app.include_router(meridian_router)
+
     # ── the SPA (after API routes, so /api wins) ─────────────
 
     if _FRONTEND_DIST.exists():
