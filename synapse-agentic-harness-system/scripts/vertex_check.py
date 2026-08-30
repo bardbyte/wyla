@@ -58,6 +58,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  model      {connection.model}")
     print(f"  endpoint   {connection.endpoint}")
     print(f"  key file   {connection.key_path} (exists)")
+    proxy = (os.environ.get("HTTPS_PROXY")
+             or os.environ.get("https_proxy") or "")
+    print("  proxy      "
+          + (f"via {proxy} — the proven contract (token + model "
+             "calls ride the corporate proxy)" if proxy
+             else "none configured — direct"))
     print(f"  NO_PROXY   {os.environ.get('NO_PROXY', '(none)')}")
     trust_note = ("ACTIVE (OS keychain trust — the clean "
                   "corporate-TLS fix)" if connection.truststore_active
@@ -81,8 +87,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"✓ token acquired ({len(token)} chars)")
     except Exception as e:
         print(f"✗ token refresh failed: {e}", file=sys.stderr)
-        print("  (proxy or TLS, usually — try BQ_DISABLE_PROXY=1, or "
-              "BQ_SSL_NO_VERIFY=1 as the last resort)", file=sys.stderr)
+        print("  (proxy or TLS, usually. The default rides the "
+              "corporate proxy — the proven contract. On a "
+              "direct-egress network try VERTEX_DISABLE_PROXY=1; on a "
+              "private-DNS/restricted-VIP network try "
+              "VERTEX_NO_PROXY_GOOGLE=1; TLS last resort "
+              "GEMINI_TLS_INSECURE=1)", file=sys.stderr)
         return EXIT_ENV_AUTH
 
     if not args.generate:

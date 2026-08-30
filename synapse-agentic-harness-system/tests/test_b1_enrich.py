@@ -5,6 +5,7 @@ the client is faked at the .generate seam."""
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -247,3 +248,49 @@ def test_vertex_env_contract_is_typed_and_separate(tmp_path,
     assert connection.model == "gemini-test"
     assert connection.endpoint == \
         "https://us-central1-aiplatform.googleapis.com"
+
+
+def test_vertex_rides_the_proxy_bq_bypasses_it(tmp_path, monkeypatch):
+    """The two planes have OPPOSITE proven network contracts. BQ's PSC
+    endpoint needs the NO_PROXY injection; Vertex rides the corporate
+    proxy exactly like check_vertex_gemini.py did — injecting
+    googleapis into NO_PROXY sent the Vertex OAuth call direct and the
+    corporate network blackholed it (timeout at the auth step)."""
+    from sahs.util.auth import (
+        VertexConnection,
+        configure_network,
+        configure_vertex_network,
+    )
+    empty_env = tmp_path / "empty.env"
+    empty_env.write_text("", encoding="utf-8")
+    monkeypatch.setenv("SAHS_ENV_FILE", str(empty_env))
+    for name in ("NO_PROXY", "no_proxy", "VERTEX_DISABLE_PROXY",
+                 "VERTEX_NO_PROXY_GOOGLE", "BQ_DISABLE_PROXY",
+                 "BQ_FORCE_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.corp:8080")
+    key = tmp_path / "k.json"
+    key.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("LUMI_VERTEX_SA_KEY", str(key))
+    monkeypatch.setenv("VERTEX_PROJECT_ID", "prj-d-ea-poc")
+
+    # Vertex default: proxy untouched, NOTHING injected into NO_PROXY
+    connection = VertexConnection.from_env()
+    assert "googleapis" not in os.environ.get("NO_PROXY", "")
+    assert os.environ["HTTPS_PROXY"] == "http://proxy.corp:8080"
+    summary = configure_vertex_network(connection.endpoint)
+    assert "via corporate proxy" in summary["proxy"]
+
+    # the BQ contract still injects (PSC needs direct)
+    configure_network("https://bigquery-prod.p.googleapis.com")
+    assert "oauth2.googleapis.com" in os.environ["NO_PROXY"]
+
+    # knobs: opt back into injection, or drop the proxy entirely
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("VERTEX_NO_PROXY_GOOGLE", "1")
+    configure_vertex_network("https://aiplatform.googleapis.com")
+    assert "aiplatform.googleapis.com" in os.environ["NO_PROXY"]
+    monkeypatch.delenv("VERTEX_NO_PROXY_GOOGLE")
+    monkeypatch.setenv("VERTEX_DISABLE_PROXY", "1")
+    configure_vertex_network("https://aiplatform.googleapis.com")
+    assert "HTTPS_PROXY" not in os.environ
