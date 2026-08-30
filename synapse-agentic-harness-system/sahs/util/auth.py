@@ -116,6 +116,43 @@ def configure_network(endpoint: str) -> dict[str, str]:
     return summary
 
 
+def configure_vertex_network(endpoint: str) -> dict[str, str]:
+    """The PROVEN Vertex contract (check_vertex_gemini.py / the ADK
+    apps that ran against prj-d-ea-poc): touch NOTHING. requests and
+    urllib honor HTTPS_PROXY from the environment, so the OAuth token
+    call and the model call ride the corporate proxy, with truststore
+    fixing the MITM chain.
+
+    This is deliberately the OPPOSITE of the BQ plane: the BQ PSC
+    endpoint resolves privately and needs the NO_PROXY injection —
+    but borrowing that injection here sent the Vertex OAuth call
+    DIRECT to oauth2.googleapis.com, which the corporate network
+    blackholes (the field symptom: a 120s timeout at the auth step).
+
+    Knobs for other topologies:
+    - ``VERTEX_DISABLE_PROXY=1`` drops the proxy for this process
+      (direct-egress networks);
+    - ``VERTEX_NO_PROXY_GOOGLE=1`` re-enables the BQ-style host
+      injection (private-DNS setups where googleapis resolves to
+      restricted VIPs)."""
+    summary: dict[str, str] = {}
+    if os.environ.get("VERTEX_DISABLE_PROXY") == "1":
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy",
+                     "https_proxy"):
+            os.environ.pop(name, None)
+        summary["proxy"] = "disabled (VERTEX_DISABLE_PROXY=1)"
+        return summary
+    if os.environ.get("VERTEX_NO_PROXY_GOOGLE") == "1":
+        summary = configure_network(endpoint)
+        summary["proxy"] += " (VERTEX_NO_PROXY_GOOGLE=1)"
+        return summary
+    proxy = _first_env("HTTPS_PROXY", "https_proxy")
+    summary["proxy"] = (f"via corporate proxy {proxy} (the proven "
+                        "contract)" if proxy
+                        else "no proxy configured — direct")
+    return summary
+
+
 def resolve_ssl() -> tuple[bool, str | None]:
     """→ (verify, ca_bundle). ``BQ_SSL_NO_VERIFY=1`` disables TLS
     verification entirely (explicit opt-in for corporate TLS
@@ -295,9 +332,10 @@ class VertexConnection:
 
     @classmethod
     def from_env(cls) -> "VertexConnection":
-        """Same bootstrap shape as BQConnection: .env → validate →
-        resolve endpoint → NO_PROXY injection → SSL settings. Fails
-        fast with a typed error (exit 3). ``truststore`` (the OS
+        """Same bootstrap shape as BQConnection — .env → validate →
+        resolve endpoint → network → SSL — but the network step is the
+        PROVEN proxy-riding contract, never the BQ NO_PROXY injection.
+        Fails fast with a typed error (exit 3). ``truststore`` (the OS
         keychain, where corporate root CAs actually live) engages
         best-effort in every mode — the field lesson: it is the clean
         fix for corporate TLS interception, strictly better than
@@ -327,7 +365,9 @@ class VertexConnection:
             pass
         location = resolve_vertex_location()
         endpoint = resolve_vertex_endpoint(location)
-        configure_network(endpoint)
+        # NOT configure_network: the Vertex plane rides the proxy by
+        # default (the proven contract) — see configure_vertex_network
+        configure_vertex_network(endpoint)
         verify, bundle = resolve_vertex_ssl()
         return cls(project=project, location=location,
                    model=resolve_vertex_model(), endpoint=endpoint,

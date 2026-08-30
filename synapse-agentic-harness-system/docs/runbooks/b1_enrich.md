@@ -56,10 +56,20 @@ TLS on the corporate network (the field-proven order): `pip install
 truststore` — the OS keychain, where the corporate root actually
 lives, engages automatically; else `GEMINI_CA_BUNDLE=<corporate root
 pem>` (or `REQUESTS_CA_BUNDLE`); last resort `GEMINI_TLS_INSECURE=1`
-(or `BQ_SSL_NO_VERIFY=1`). Proxy knobs are shared with BQ
-(`BQ_DISABLE_PROXY=1` / `BQ_FORCE_PROXY=1`). Thinking:
-`GEMINI_THINKING_BUDGET=<n>` sets a budget, `0` disables; endpoints
-that reject thinking degrade gracefully for the run.
+(or `BQ_SSL_NO_VERIFY=1`).
+
+**Proxy — the two planes are OPPOSITE and the knobs are separate.**
+BQ's PSC endpoint needs the NO_PROXY injection (goes direct); Vertex
+rides the corporate proxy untouched — exactly how
+`check_vertex_gemini.py` and the ADK apps proved it. Nothing to set
+on the standard corporate laptop. Other topologies:
+`VERTEX_DISABLE_PROXY=1` (direct-egress network, drop the proxy) ·
+`VERTEX_NO_PROXY_GOOGLE=1` (private-DNS/restricted-VIP network,
+re-enable the BQ-style injection). The field symptom that pinned
+this: googleapis in NO_PROXY sends the Vertex OAuth call direct and
+the network blackholes it — a 120s timeout at the auth step.
+Thinking: `GEMINI_THINKING_BUDGET=<n>` sets a budget, `0` disables;
+endpoints that reject thinking degrade gracefully for the run.
 
 ```bash
 python scripts/vertex_check.py             # config + token
