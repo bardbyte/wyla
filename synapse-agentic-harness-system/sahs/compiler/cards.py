@@ -145,7 +145,8 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
         f"- {f['label']}: `{f['sql']}` · support {f['support']} "
         f"[prov:{f['source']}]" for f in filters_here[:8]]
     lines["metrics"] = ["## metrics available"] + [
-        f"- {m['label'] or m['id']} · {m['status']} [prov:{m['source']}]"
+        f"- {m['label'] or m['id']} · "
+        f"{m.get('status_served') or m['status']} [prov:{m['source']}]"
         for m in metrics_here[:10]]
 
     access = []
@@ -204,10 +205,15 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
 
 def metric_card(metric: dict[str, Any],
                 variants: list[dict[str, Any]]) -> str:
+    served = metric.get("status_served") or metric["status"]
+    origin = metric.get("evidence_origin") or metric["source"]
     lines = [
         f"# metric {metric['label'] or metric['id']}",
-        f"- id: {metric['id']} · status: **{metric['status']}** "
-        f"[prov:{metric['source']}]",
+        # governance status and evidence origin are DIFFERENT axes —
+        # "unreviewed (evidence: usage_mining)" tells the agent what it
+        # may claim; "mined" alone let it read origin as endorsement
+        f"- id: {metric['id']} · status: **{served}** "
+        f"(evidence: {origin}) [prov:{metric['source']}]",
     ]
     if metric.get("support_by_witness"):
         witnesses = " · ".join(

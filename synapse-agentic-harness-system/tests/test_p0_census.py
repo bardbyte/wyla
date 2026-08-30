@@ -112,9 +112,9 @@ def test_studio_csv_adapter_and_pg_arrays(tmp_path: Path):
     assert _pg_array('["x", "y"]') == ["x", "y"]
     records, quar = load_studio_csv(
         FX / "studio_results_20260827_fixture_cte_or_subqueries.csv")
-    assert len(records) == 3
+    assert len(records) == 4
     assert [r.metric_ref for r in records] == \
-        ["dmp:101", "dmp:102", "dmp:stud-901"]
+        ["dmp:101", "dmp:102", "dmp:stud-901", "dmp:101-dup"]
     assert all(r.source == "studio_queries" for r in records)
     # base_tables empty → associated_tables carries the hint (short)
     assert records[0].table_hint == "gms_transaction"

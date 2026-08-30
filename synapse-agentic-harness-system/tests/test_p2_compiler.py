@@ -220,6 +220,83 @@ def test_lob_index_joins_sources_and_pedigree_serving(tmp_path):
     assert any("Do not use" in c["guidance"] for c in hit)
 
 
+def test_table_reconciliation_explained_or_blocked(tmp_path):
+    """The 46→45 rule: every crosswalk row either compiles or is
+    EXPLAINED. The fixture's lineage endpoint (a crosswalk row with no
+    columns anywhere) is intentionally excluded via
+    identity/exclusions.jsonl and the manifest says so; strip the
+    exclusion and the SAME graph refuses to promote — an unexplained
+    gap may not survive a build."""
+    graph_dir, build_dir, manifest = _compiled(tmp_path)
+    recon = manifest["table_reconciliation"]
+    assert recon["crosswalk_rows"] == 4
+    assert recon["built"] == 3
+    (gap,) = recon["missing"]
+    assert gap["physical"] == "data.raw_gms_feed"
+    # the node EXISTS (minted as an fk lineage endpoint) — what's
+    # missing is columns, and the derived reason says exactly that
+    assert "ZERO columns on record" in gap["reason"]
+    assert "lineage endpoint" in gap["intentionally_excluded"]
+    # now the same graph WITHOUT the explanation → gate blocks
+    (graph_dir / "identity" / "exclusions.jsonl").write_text(
+        "", encoding="utf-8")
+    _, _, failures = compile_build(graph_dir, tmp_path / "builds2")
+    assert any("missing from build, unexplained: data.raw_gms_feed"
+               in f for f in failures)
+    assert not (tmp_path / "builds2" / "CURRENT").exists()
+    # strict sidecar: an exclusion naming a non-crosswalk table refuses
+    (graph_dir / "identity" / "exclusions.jsonl").write_text(
+        json.dumps({"physical": "dw.not_a_table", "reason": "x"}) + "\n",
+        encoding="utf-8")
+    _, _, failures = compile_build(graph_dir, tmp_path / "builds3")
+    assert any("non-crosswalk table" in f for f in failures)
+
+
+def test_census_duplicate_ids_and_conflict_scope_meta(tmp_path):
+    """metric_conflicts counts same-IDENTITY drift only — the census
+    says so in meta, so a zero is never read as 'no metric
+    disagreements exist'. The inverse finding gets its own counter:
+    the fixture's 101-dup row (same SQL, second catalog id) is a
+    duplicate catalog entry, not a conflict."""
+    _, build_dir, _ = _compiled(tmp_path)
+    census = json.loads((build_dir / "census.json").read_text())
+    assert census["summary"]["metric_duplicate_ids"] >= 1
+    assert "same-IDENTITY drift only" in census["meta"]["metric_conflicts"]
+    assert "multiple catalog ids" in \
+        census["meta"]["metric_duplicate_ids"]
+
+
+def test_served_status_splits_governance_from_evidence(tmp_path):
+    """The agent-facing vocabulary separates the two axes: a mined
+    metric serves as **unreviewed** with its evidence origin named —
+    'mined' alone let origin read as endorsement. Store states and the
+    E7 clerk lattice are untouched."""
+    _, build_dir, _ = _compiled(tmp_path)
+    metrics = [json.loads(x) for x in
+               (build_dir / "indexes" / "metrics.jsonl"
+                ).read_text().splitlines()]
+    mined = next(m for m in metrics if m["status"] == "mined"
+                 and m["source"] == "measures_catalog")
+    assert mined["status_served"] == "unreviewed"
+    assert mined["evidence_origin"] == "usage_mining"
+    card = (build_dir / "cards" / "metrics"
+            / f"{mined['fp']}.md").read_text()
+    assert "status: **unreviewed** (evidence: usage_mining)" in card
+    certified = next(m for m in metrics if m["status"] == "certified")
+    assert certified["status_served"] == "certified"
+    assert certified["evidence_origin"] == "certified_catalog"
+    gms_card = (build_dir / "cards" / "tables"
+                / "dw__gms_transaction.md").read_text()
+    assert "· unreviewed [prov:measures_catalog]" in gms_card
+    assert "· mined [prov:" not in gms_card
+    from sahs.tools.api import Build, get_definition_line, search_metrics
+    build = Build.open(tmp_path / "builds")
+    top = search_metrics(build, "merchant spend volume")["candidates"][0]
+    assert top["status_served"] and top["evidence_origin"]
+    out = get_definition_line(build, mined["id"])
+    assert "[unreviewed, usage_mining]" in out["definition_line"]
+
+
 def test_studio_texture_and_mined_joins_serve(tmp_path):
     """The studio evidence survives compile intact: joins.jsonl carries
     the mined scoped edge (4th named family), BOTH table cards warn the

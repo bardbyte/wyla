@@ -37,6 +37,12 @@ non-crosswalk physical refuses to load):
   the OTHER spellings the catalogs use for the same LOB (DMP declares
   by display name, codes are short) — declared equivalence, so the two
   never fork into parallel lob nodes.
+- `exclusions.jsonl` — the 46→45 rule: a crosswalk table that does
+  not compile (no columns on record anywhere) must carry a steward
+  reason here — `{"physical": "dw.<t>", "reason": "…", "verified_by":
+  …, "verified_on": …}` — or the compile gate BLOCKS promotion. The
+  build manifest's `table_reconciliation` block accounts for every
+  row either way; an unexplained gap may not survive a build.
 - `org_map.jsonl` — org units (sub-LOBs): `{"org_code": "CFR",
   "org_name": "Credit & Fraud Risk", "parent_lob": "Finance",
   "aliases": [], …}`. Ownership and usage are DIFFERENT facts: the

@@ -43,6 +43,30 @@ _EXPR_AUTHORITY = {
     "blue_insights": Authority.SNIPPET,
 }
 
+# Serving split: governance STATUS and evidence ORIGIN are different
+# axes, and the store's "mined" state conflates them for the reader.
+# The agent-facing surfaces (cards, disclosure, candidates) speak the
+# served vocabulary — "unreviewed (evidence: usage_mining)" — while the
+# store state and the E7 clerk lattice stay untouched.
+_STATUS_SERVED = {
+    "mined": "unreviewed",
+    "pending": "pending_certification",
+    "team_candidate": "team_candidate",
+    "certified": "certified",
+    "rejected": "rejected",
+    "deprecated": "deprecated",
+}
+_EVIDENCE_ORIGIN = {
+    "metrics_dmp": "certified_catalog",
+    "extended_gmns": "pending_catalog",
+    "measures_catalog": "usage_mining",
+    "jobs_30d": "query_history",
+    "studio_queries": "studio_sql",
+    "blue_insights": "snippet_mining",
+    "skill_contract": "skill_contract",
+    "gold_queries": "gold_pair",
+}
+
 
 def _merge_witness_maps(held: dict[str, Any],
                         incoming: dict[str, Any]) -> None:
@@ -107,6 +131,65 @@ def compile_build(graph_root: Path, builds_root: Path
 
     consensus = reconcile(graph)
     acl = build_acl(graph, consensus)
+
+    # ── table reconciliation (the 46→45 rule) ──
+    # Every crosswalk row either COMPILES or is EXPLAINED. A table can
+    # drop out silently (reconcile iterates has_column edges — a node
+    # with zero columns never reaches consensus), and an unexplained
+    # gap must not survive a build: it either appears in
+    # identity/exclusions.jsonl with a steward reason, or the gate
+    # blocks promotion. Identity sidecars live INSIDE the graph dir
+    # (build-graph copies them in), so compile stays a function of the
+    # graph.
+    recon_failures: list[str] = []
+    table_recon: dict[str, Any] = {}
+    crosswalk_path = Path(graph_root) / "identity" / "crosswalk.jsonl"
+    if crosswalk_path.exists():
+        declared = list(dict.fromkeys(
+            str(json.loads(line)["physical"]).lower()
+            for line in crosswalk_path.read_text(
+                encoding="utf-8").split("\n") if line.strip()))
+        excluded: dict[str, str] = {}
+        exclusions_path = (Path(graph_root) / "identity"
+                           / "exclusions.jsonl")
+        if exclusions_path.exists():
+            for line in exclusions_path.read_text(
+                    encoding="utf-8").split("\n"):
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                phys = str(row.get("physical", "")).lower()
+                if phys not in declared:
+                    recon_failures.append(
+                        "exclusion names a non-crosswalk table: "
+                        f"{phys}")
+                    continue
+                excluded[phys] = str(row.get("reason") or "")
+        built = {c.physical for c in consensus.values()}
+        missing: list[dict[str, str]] = []
+        for phys in declared:
+            if phys in built:
+                continue
+            reason = (
+                "table node exists but ZERO columns on record — no "
+                "has_column edge from any plane (archive 02, atlas "
+                "std_tech)"
+                if f"table:{phys}" in nodes else
+                "no table node in the graph — never attested by any "
+                "archive or catalog quad")
+            entry = {"physical": phys, "reason": reason}
+            if phys in excluded:
+                entry["intentionally_excluded"] = excluded[phys]
+            else:
+                recon_failures.append(
+                    f"crosswalk table missing from build, unexplained: "
+                    f"{phys} ({reason})")
+            missing.append(entry)
+        table_recon = {
+            "crosswalk_rows": len(declared),
+            "built": sum(1 for p in declared if p in built),
+            "missing": missing,
+        }
 
     # ── metric rows ──
     status_by_metric: dict[str, str] = {}
@@ -217,6 +300,10 @@ def compile_build(graph_root: Path, builds_root: Path
                 held[key] = row[key]
     for row in collapsed.values():
         _finish_witness_features(row)
+        row["status_served"] = _STATUS_SERVED.get(row["status"],
+                                                  row["status"])
+        row["evidence_origin"] = _EVIDENCE_ORIGIN.get(row["source"],
+                                                      row["source"])
     metric_rows = sorted(collapsed.values(),
                          key=lambda r: (-r["authority"], -r["support"],
                                         r["id"]))
@@ -397,6 +484,7 @@ def compile_build(graph_root: Path, builds_root: Path
         record = nodes.get(tid)
         metrics_here = [
             {"id": m["id"], "label": m["label"], "status": m["status"],
+             "status_served": m.get("status_served", m["status"]),
              "source": m["source"]}
             for m in metric_rows if m["table"] == physical]
         filters_here = sorted(
@@ -468,6 +556,15 @@ def compile_build(graph_root: Path, builds_root: Path
     group_conflicts = sum(
         1 for members in members_by_group.values()
         if len(set(members)) > 1)
+    # the INVERSE finding: one expression class registered under
+    # MULTIPLE catalog ids — duplicate catalog entries
+    groups_of_metric: dict[str, set[str]] = defaultdict(set)
+    for group, members in members_by_group.items():
+        for member in set(members):
+            groups_of_metric[member].add(group)
+    duplicate_ids = sum(
+        1 for groups in groups_of_metric.values()
+        if sum(1 for g in groups if g.startswith("mgroup:dmp:")) > 1)
     census = {
         "schema": "meridian.census/1",
         "summary": {
@@ -475,6 +572,22 @@ def compile_build(graph_root: Path, builds_root: Path
             "concept_conflicts": concept_conflicts,
             "metric_groups": len(members_by_group),
             "metric_conflicts": group_conflicts,
+            "metric_duplicate_ids": duplicate_ids,
+        },
+        # scope honesty — so nobody reads a zero as a claim it can't be:
+        "meta": {
+            "metric_conflicts":
+                "same-IDENTITY drift only: two expression classes "
+                "under one catalog id (or one exact label@table). "
+                "Mined labels are near-unique by construction, so "
+                "same-intent-different-formula across DIFFERENT names "
+                "is invisible to this counter — that class of "
+                "disagreement surfaces through concept_conflicts, "
+                "alias work, and enrichment review, not here.",
+            "metric_duplicate_ids":
+                "one expression class registered under multiple "
+                "catalog ids — duplicate catalog entries (steward "
+                "review material).",
         },
         "structural": structural_census(consensus),
     }
@@ -571,6 +684,7 @@ def compile_build(graph_root: Path, builds_root: Path
         "resolver_constants": RESOLVER_CONSTANTS,
         "census_summary": census["summary"],
         "structural_totals": census["structural"]["totals"],
+        "table_reconciliation": table_recon,
     }
     (build_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=1, sort_keys=True) + "\n",
@@ -588,7 +702,7 @@ def compile_build(graph_root: Path, builds_root: Path
         build_diff(build_dir, previous) + "\n", encoding="utf-8")
 
     # ── gates → atomic CURRENT (E4) ──
-    failures: list[str] = []
+    failures: list[str] = list(recon_failures)
     for table_consensus in consensus.values():
         card = (build_dir / "cards" / "tables"
                 / f"{table_consensus.physical.replace('.', '__')}.md")
