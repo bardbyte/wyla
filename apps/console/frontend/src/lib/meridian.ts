@@ -98,6 +98,66 @@ export interface MeridianBuilds {
   diff: string;
 }
 
+export interface TableRow {
+  physical: string;
+  short: string;
+  columns: number;
+  lob: string;
+  metrics_here: number;
+  joins: number;
+  tickets: number;
+  cost_prior: { p50?: number; p95?: number } | null;
+}
+
+/** The full metric row is fluid by design (props ride through) —
+ * the keys the UI renders are typed, the rest stay open. */
+export interface MetricFull extends Record<string, unknown> {
+  id: string;
+  fp?: string;
+  label?: string;
+  canonical_sql?: string;
+  status?: string;
+  status_served?: string;
+  evidence_origin?: string;
+  question?: string;
+  question_source?: string;
+  grain?: string;
+  grain_observed?: string;
+  common_filters?: string[];
+  support?: number;
+  support_by_witness?: Record<string, number>;
+  witness_agreement?: number;
+  used_by?: Record<string, number>;
+  table?: string;
+  line_of_business?: string;
+}
+
+export interface MetricDetail {
+  available: true;
+  found: boolean;
+  id?: string;
+  metric?: MetricFull;
+  tier?: MeridianTier;
+  family?: MetricFull[];
+  reviews?: Record<string, unknown>[];
+}
+
+export interface TableDetail {
+  available: true;
+  found: boolean;
+  physical: string;
+  columns?: Record<string, string>;
+  card?: string;
+  joins?: {
+    a: string; b: string; source: string; support?: number;
+    on?: string[] | string; scope?: string;
+  }[];
+  metrics_here?: {
+    id: string; label: string; status_served: string; support: number;
+  }[];
+  cost_prior?: { p50?: number; p95?: number } | null;
+}
+
 async function get<T>(url: string): Promise<T | Unavailable> {
   const r = await fetch(url);
   if (!r.ok) return { available: false, reason: `${url} → ${r.status}` };
@@ -116,6 +176,15 @@ export const meridian = {
       available: true; total: number; shown: number; rows: MetricRow[];
     }>(`/api/meridian/explorer/metrics?${search.toString()}`);
   },
+  tables: () =>
+    get<{ available: true; rows: TableRow[] }>(
+      "/api/meridian/explorer/tables"),
+  metricDetail: (id: string) =>
+    get<MetricDetail>(
+      `/api/meridian/metric/${encodeURIComponent(id)}`),
+  tableDetail: (physical: string) =>
+    get<TableDetail>(
+      `/api/meridian/table/${encodeURIComponent(physical)}`),
   builds: () => get<MeridianBuilds>("/api/meridian/builds"),
   enrichRuns: () =>
     get<{ available: true; runs: EnrichRun[] }>(

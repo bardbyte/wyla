@@ -8,6 +8,7 @@ import { HomeTab } from "./tabs/Home";
 import { KnowledgeTab } from "./tabs/Knowledge";
 import { OperateTab } from "./tabs/Operate";
 import { ProductsTab } from "./tabs/Products";
+import { SemanticsTab } from "./tabs/Semantics";
 
 export default function App() {
   return (
@@ -62,6 +63,7 @@ function Shell() {
           <AskTab />
         </div>
         {nav.tab === "home" && <HomeTab />}
+        {nav.tab === "semantics" && <SemanticsTab />}
         {nav.tab === "products" && <ProductsTab />}
         {nav.tab === "graph" && <GraphTab />}
         {nav.tab === "knowledge" && <KnowledgeTab />}

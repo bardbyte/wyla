@@ -55,10 +55,8 @@ export function HomeTab() {
         <div className="m-hero-doors">
           <button className="m-door m-door-primary"
             onClick={() => nav.go("ask")}>Ask Lumi</button>
-          <button className="m-door" disabled
-            title="Semantics Explorer lands with the next stage (E17-C)">
-            Explore semantics · next stage
-          </button>
+          <button className="m-door"
+            onClick={() => nav.go("semantics")}>Explore semantics</button>
           <button className="m-door"
             onClick={() => nav.go("operate")}>
             Operate{home?.available ? ` · ${home.open_reviews} open` : ""}
