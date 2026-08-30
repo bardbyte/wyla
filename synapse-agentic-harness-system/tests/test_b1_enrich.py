@@ -532,10 +532,45 @@ def test_max_tokens_empty_response_grows_budget_and_retries():
             "parts": [{"text": '{"ok": true}'}]}}],
             "usageMetadata": {"candidatesTokenCount": 5}}
 
+    notes: list[str] = []
     client = VertexClient(connection=SimpleNamespace(), transport=transport,
                           token_provider=lambda: "t",
-                          sleep=lambda _s: None)
+                          sleep=lambda _s: None, log=notes.append)
     text = client.generate("hi", max_output_tokens=32)
     assert text == '{"ok": true}'
     assert seen == [32, 128]          # grew ×4, then succeeded
     assert client.usage["thought_tokens"] == 32
+    # the self-heal narrates itself — a struggling call must be
+    # distinguishable from a hung one in the live terminal
+    assert any("[vertex]" in n and "MAX_TOKENS" in n for n in notes)
+
+
+def test_live_progress_lines(tmp_path):
+    """The 'is it hung?' fix: every model call prints a per-item line
+    (index, outcome, seconds, id) through the log callable, and the
+    run closes with a usage line. The blind lines show the PREDICTION
+    on a miss but never the withheld truth — the terminal stream stays
+    as blind as the model."""
+    graph_dir, builds = _compiled(tmp_path)
+    build = Build.open(builds)
+    lines: list[str] = []
+    report = run_enrich(graph_root=graph_dir, builds_root=builds,
+                        out_dir=tmp_path / "b1", run_id="live_r1",
+                        limit=3,
+                        client=FakeVertex(_blind_perfect(build)),
+                        log=lines.append)
+    joined = "\n".join(lines)
+    assert "blind 1/" in joined and "✓ share" in joined
+    assert f"metric 1/{report['planned_metrics']} · ✓ wrote " in joined
+    assert "✓ wrote question+grain (conf" in joined
+    if report["planned_concepts"]:
+        assert "concept 1/" in joined and "table(s)" in joined
+    assert "usage: " in joined and "calls" in joined
+    truths = [m["label"] for m in build.metrics
+              if m.get("status") in ("certified", "pending")
+              and m.get("label")]
+    blind_lines = [ln for ln in lines if ln.startswith("  blind")]
+    assert blind_lines and truths
+    for ln in blind_lines:      # pass or fail, the withheld truth
+        for truth in truths:    # never reaches the live stream
+            assert truth not in ln

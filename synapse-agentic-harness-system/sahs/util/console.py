@@ -176,6 +176,14 @@ class RunConsole:
     def output(self, path: Path | str) -> None:
         self._outputs.append(str(path))
 
+    def note(self, text: str) -> None:
+        """A live progress line: printed to the terminal AND recorded
+        in the event stream. Long model loops route their per-item
+        lines here — emit() alone only reaches events.jsonl, which is
+        how the first enrich runs managed to look hung while working."""
+        self.emit("note", detail=text)
+        self._println(text)
+
     # ── checkpointing (E10) ──────────────────────────────────
 
     @staticmethod

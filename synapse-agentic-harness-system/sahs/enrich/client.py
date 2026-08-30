@@ -39,6 +39,14 @@ class VertexClient:
     thinking_ok: bool = True     # flips off for the run when the
                                  # endpoint rejects thinking_config
                                  # (proven graceful-degrade behavior)
+    log: Callable[[str], None] | None = None   # live progress hook —
+                                 # retries and self-heals are invisible
+                                 # without it (a call can legitimately
+                                 # sit through 5 attempts × 120s)
+
+    def _note(self, message: str) -> None:
+        if self.log is not None:
+            self.log(f"    [vertex] {message}")
 
     def _token(self) -> str:
         if self.token_provider is not None:
@@ -114,9 +122,14 @@ class VertexClient:
                     # for the whole run, retry this call without it
                     del body["generationConfig"]["thinkingConfig"]
                     self.thinking_ok = False
+                    self._note("endpoint rejects thinking_config — "
+                               "disabled for the rest of the run")
                     last_error = f"thinking rejected: {message}"
                     continue
                 if e.code in _RETRY_STATUSES and backoff is not None:
+                    self._note(f"HTTP {e.code} — retrying in {backoff}s "
+                               f"(attempt {attempt + 2}/"
+                               f"{len(_BACKOFFS) + 1})")
                     last_error = f"HTTP {e.code}: {message}"
                     self.sleep(backoff)
                     continue
@@ -126,6 +139,10 @@ class VertexClient:
                 raise
             except Exception as e:
                 if backoff is not None:
+                    self._note(f"transport error — retrying in "
+                               f"{backoff}s (attempt {attempt + 2}/"
+                               f"{len(_BACKOFFS) + 1}): "
+                               f"{str(e)[:80]}")
                     last_error = f"transport: {e}"
                     self.sleep(backoff)
                     continue
@@ -156,6 +173,10 @@ class VertexClient:
                 grown = min(int(body["generationConfig"]
                                 ["maxOutputTokens"]) * 4, 8192)
                 body["generationConfig"]["maxOutputTokens"] = grown
+                self._note("empty answer at finishReason=MAX_TOKENS "
+                           "(model spent the budget thinking) — "
+                           f"growing maxOutputTokens to {grown}, "
+                           "retrying")
                 last_error = ("no text at finishReason=MAX_TOKENS — "
                               f"retrying with maxOutputTokens={grown}")
                 continue

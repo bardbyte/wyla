@@ -172,6 +172,15 @@ python scripts/laptop.py enrich \
 # read graph/runs/b1_smoke/blind_results.jsonl — per-item recovery
 ```
 
+The run narrates itself live — one line per model call
+(`blind 12/34 · ✓ share 0.83 · 8.4s · metric:…`,
+`metric 7/25 · ✓ wrote question+grain (conf 0.85) · 11.2s · …`),
+`[vertex]` lines for retries/backoffs/MAX_TOKENS self-heals, a
+`resuming: N/M already checkpointed` line on resume, and a closing
+`usage:` token line. Blind lines show the model's prediction on a
+miss but NEVER the withheld true name — the terminal stays as blind
+as the exam. Every line is also recorded in `<out>/events.jsonl`.
+
 Interrupted or rate-limited? Re-run the same command — the checkpoint
 resumes; `--fresh` restarts the batch deliberately. Then raise
 `--limit` (the full backlog is ~3,000 metric items; run it in slices).
