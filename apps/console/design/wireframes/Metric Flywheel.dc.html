@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;600;700;800&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap" rel="stylesheet"><style>body{margin:0;background:#f4f6f9;font-family:'Libre Franklin',sans-serif;color:#1a2332}a{color:#006fcf}a:hover{color:#005fb8}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:0ms!important}}
+</style></helmet>
+<div style="max-width:1160px;margin:0 auto;padding:20px 28px 48px;display:flex;flex-direction:column;gap:16px">
+<div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#71809b">
+<span style="font-weight:800;color:#1a2332;letter-spacing:.02em">SYNAPSE</span><span>·</span><span style="color:#1a2332;font-weight:600">Metric variations</span>
+<span style="margin-left:auto;display:flex;gap:14px"><a href="Table Profile.dc.html" style="text-decoration:none;font-weight:600">Table profile</a><a href="Agent Theater.dc.html" style="text-decoration:none;font-weight:600">Agent theater</a><a href="Graph Cosmos.dc.html" style="text-decoration:none;font-weight:600">Cosmos</a></span>
+</div>
+
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:14px;padding:20px 24px;display:flex;flex-direction:column;gap:14px;box-shadow:0 1px 2px rgba(26,35,50,.06)">
+<div style="font-size:12px;color:#71809b;font-weight:600;letter-spacing:.05em">ANSWER</div>
+<div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+<span style="font-size:30px;font-weight:800;letter-spacing:-.01em">£312M</span>
+<span style="font-size:14px;color:#4a5568">Total Billed Business, UK merchants only, Q3 FY26</span>
+</div>
+<div style="border:1px solid #d8dee8;border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#f7f9fc">
+<span style="font-size:11px;font-weight:700;letter-spacing:.05em;color:#71809b">DERIVED FROM</span>
+<span style="display:inline-flex;align-items:center;gap:6px;border:1px solid #0e7a55;color:#0e7a55;background:#e2f3ec;border-radius:999px;padding:2px 11px;font-size:12.5px;font-weight:700">TBB · governed ●</span>
+<span style="color:#b9c2d0">+</span>
+<span style="display:inline-flex;border:1px solid #9a6407;color:#9a6407;background:#f9efdc;border-radius:999px;padding:2px 11px;font-size:12.5px;font-weight:600">UK only</span>
+<span style="color:#b9c2d0">+</span>
+<span style="display:inline-flex;border:1px solid #9a6407;color:#9a6407;background:#f9efdc;border-radius:999px;padding:2px 11px;font-size:12.5px;font-weight:600">Q3 FY26</span>
+<span style="margin-left:auto;font-size:12px;color:#71809b">denominator &amp; source unchanged ✓</span>
+</div>
+<sc-if value="{{ undecided }}" hint-placeholder-val="{{ true }}">
+<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+<span style="font-size:13px;color:#4a5568">This variation of TBB isn't named yet —</span>
+<button onClick="{{ choosePromote }}" style="border:1px solid #006fcf;color:#006fcf;background:#fff;border-radius:8px;padding:6px 14px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer" style-hover="background:#e5f1fb">Propose as governed</button>
+<button onClick="{{ chooseChild }}" style="border:1px solid #d8dee8;color:#1a2332;background:#fff;border-radius:8px;padding:6px 14px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer" style-hover="background:#eef1f6">Save as child of TBB</button>
+<button onClick="{{ chooseOnce }}" style="border:none;color:#71809b;background:none;padding:6px 8px;font-family:inherit;font-size:12.5px;cursor:pointer;text-decoration:underline">Just this once</button>
+</div>
+</sc-if>
+<sc-if value="{{ decided }}" hint-placeholder-val="{{ false }}">
+<div style="font-size:13px;color:#0e7a55;font-weight:600;animation:fadeUp .3s ease both">{{ decisionNote }} <button onClick="{{ undo }}" style="border:none;background:none;font:inherit;font-size:12px;color:#006fcf;cursor:pointer;text-decoration:underline;font-weight:400">undo</button></div>
+</sc-if>
+<div style="font-size:12px;color:#71809b">No pressure either way — unnamed variations just accumulate usage quietly. The system only speaks up at the threshold.</div>
+</div>
+
+<div style="display:grid;grid-template-columns:1.5fr 1fr;gap:16px;align-items:start">
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:4px;box-shadow:0 1px 2px rgba(26,35,50,.06)">
+<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+<h2 style="margin:0;font-size:15px;font-weight:700">TBB — metric family</h2>
+<span style="font-size:12px;color:#71809b">Data Products › Measures</span>
+</div>
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 86px 44px 110px;gap:8px;align-items:center;padding:9px 8px;border:1px solid #0e7a55;background:#f2faf6;border-radius:10px">
+<div style="display:flex;flex-direction:column;gap:1px;min-width:0"><span style="font-weight:700;font-size:13.5px">TBB</span><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#4a5568">SUM(amount_usd) WHERE settled</span></div>
+<span style="font-size:11px;color:#0e7a55;font-weight:700">governed ●</span>
+<span style="font-size:11.5px;color:#71809b;font-family:'IBM Plex Mono',monospace">1.1k</span>
+<span style="font-size:11px;color:#71809b">S. Rivera · owner</span>
+</div>
+<sc-for list="{{ children }}" as="ch" hint-placeholder-count="3">
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 86px 44px 110px;gap:8px;align-items:center;padding:8px 8px 8px 26px;border-top:1px solid #eef1f6;position:relative">
+<span style="position:absolute;left:10px;color:#b9c2d0">└</span>
+<div style="display:flex;flex-direction:column;gap:3px;min-width:0;align-items:flex-start"><span style="font-weight:600;font-size:13px">{{ ch.name }}</span><span style="display:inline-flex;border:1px solid #9a6407;color:#9a6407;background:#f9efdc;border-radius:999px;padding:0 8px;font-size:10px;white-space:nowrap">{{ ch.delta }}</span></div>
+<span style="font-size:11px;color:{{ ch.tierColor }};font-weight:600">{{ ch.tier }}</span>
+<span style="font-size:11.5px;color:#71809b;font-family:'IBM Plex Mono',monospace">{{ ch.usage }}</span>
+<span style="font-size:11px;color:#71809b">{{ ch.who }}</span>
+</div>
+</sc-for>
+<div style="margin-top:10px;border:1.5px solid #be3a48;background:#fbe9eb;border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;gap:5px">
+<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:12.5px;font-weight:700;color:#be3a48">⊘ Not a child — definition conflict</span><button style="border:1px solid #be3a48;color:#be3a48;background:#fff;border-radius:7px;padding:3px 11px;font-family:inherit;font-size:11.5px;font-weight:600;cursor:pointer">resolve as steward</button></div>
+<div style="font-size:12.5px;color:#4a5568">"TBB (gross)" changes the denominator — sums authorized, not settled. A changed denominator or source is never a variation; it's a competing definition.</div>
+</div>
+</div>
+
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:12px;box-shadow:0 1px 2px rgba(26,35,50,.06)">
+<div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#71809b">STEWARD QUEUE · PROMOTION PROPOSED</div>
+<div style="font-size:14.5px;font-weight:700">Name "TBB — UK" as a governed child of TBB?</div>
+<div style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:#4a5568">
+<span>· used <b>47 times by 12 analysts</b> in 60 days — crossed the promotion threshold</span>
+<span>· delta: <span style="display:inline-flex;border:1px solid #9a6407;color:#9a6407;background:#f9efdc;border-radius:999px;padding:0 8px;font-size:11px">UK only</span> — filter added, denominator and source unchanged ✓</span>
+<span>· results consistent across all 47 runs</span>
+</div>
+<div style="display:flex;gap:8px">
+<button style="background:#006fcf;color:#fff;border:none;border-radius:8px;padding:8px 18px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer" style-hover="background:#005fb8">Approve</button>
+<button style="border:1px solid #d8dee8;background:#fff;border-radius:8px;padding:8px 14px;font-family:inherit;font-size:13px;color:#1a2332;cursor:pointer">Rename…</button>
+<button style="border:1px solid #d8dee8;background:#fff;border-radius:8px;padding:8px 14px;font-family:inherit;font-size:13px;color:#1a2332;cursor:pointer">Not sure — skip</button>
+</div>
+<div style="font-size:11.5px;color:#71809b">recorded as you · reversible · same one-decision-at-a-time queue as everywhere else</div>
+<div style="border-top:1px solid #eef1f6;padding-top:10px;font-size:12px;color:#71809b">The flywheel: analysts ask → variations accrue usage → the system proposes → one steward tap governs it → the next analyst's answer cites it as ● governed.</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:820}}">
+class Component extends DCLogic {
+  state = { decision: null };
+  renderVals() {
+    const notes = {
+      promote: 'Proposed to the steward queue — you\'ll see it as "TBB — UK (proposed)" until reviewed.',
+      child: 'Saved as a child of TBB. It carries its delta chips and starts accruing usage.',
+      once: 'Used once, not saved. If this shape keeps coming up, Synapse will offer again at the threshold.',
+    };
+    const d = this.state.decision;
+    return {
+      undecided: !d, decided: !!d, decisionNote: d ? notes[d] : '',
+      choosePromote: () => this.setState({ decision: 'promote' }),
+      chooseChild: () => this.setState({ decision: 'child' }),
+      chooseOnce: () => this.setState({ decision: 'once' }),
+      undo: () => this.setState({ decision: null }),
+      children: [
+        { name: 'TBB — UK', delta: '+ UK only', tier: 'proposed ◐', tierColor: '#9a6407', usage: '47', who: 'system-proposed' },
+        { name: 'TBB — Q3 snapshot', delta: '+ Q3 FY26', tier: 'child ◆', tierColor: '#0e7a55', usage: '31', who: 'M. Osei promoted' },
+        { name: 'TBB — SMB segment', delta: '+ segment=SMB', tier: 'child ◆', tierColor: '#0e7a55', usage: '18', who: 'S. Rivera promoted' },
+        { name: 'TBB — ex-refunds', delta: '+ excl. refunds', tier: 'quiet ○', tierColor: '#71809b', usage: '6', who: 'unnamed · accruing' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

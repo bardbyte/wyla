@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap" rel="stylesheet"><style>body{margin:0;background:#f5f8fc;font-family:'Plus Jakarta Sans',sans-serif;color:#00175a}a{color:#006fcf}a:hover{color:#00175a}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:0ms!important}}
+</style></helmet>
+<div style="max-width:980px;margin:0 auto;padding:20px 28px 48px;display:flex;flex-direction:column;gap:16px">
+<div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#5b6b8f">
+<span style="font-weight:800;color:#00175a;letter-spacing:.02em;font-size:14px">LUMI</span>
+<span style="border-left:1px solid #d7e2f2;padding-left:10px">F5 · discovery &amp; lifecycle</span>
+<span style="margin-left:auto;display:flex;gap:14px"><a href="F4 Steward Cockpit.dc.html" style="text-decoration:none;font-weight:600">← F4</a><a href="F6 Cosmos.dc.html" style="text-decoration:none;font-weight:600">F6 →</a></span>
+</div>
+
+<div style="background:#fff;border:1.5px solid #006fcf;border-radius:12px;padding:12px 16px;display:flex;gap:10px;align-items:center;box-shadow:0 1px 3px rgba(0,23,90,.07)">
+<span style="color:#5b6b8f">🔍</span><span style="font-size:15px;font-weight:600">churn</span><span style="width:2px;height:18px;background:#006fcf"></span>
+<span style="margin-left:auto;font-size:11.5px;color:#5b6b8f">searching semantics — metrics, tables, columns, glossary</span>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:10px">
+<sc-for list="{{ results }}" as="r" hint-placeholder-count="4">
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:14px 18px;display:grid;grid-template-columns:minmax(0,1fr) 150px 150px;gap:14px;align-items:center;box-shadow:0 1px 3px rgba(0,23,90,.07)" style-hover="border-color:#006fcf">
+<div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+<div style="display:flex;gap:8px;align-items:center"><span style="font-weight:700;font-size:14px">{{ r.name }}</span><span style="font-size:10.5px;color:#5b6b8f;border:1px solid #d7e2f2;border-radius:5px;padding:0 6px">{{ r.kind }}</span></div>
+<span style="font-size:12px;color:#5b6b8f">{{ r.desc }}</span>
+</div>
+<span style="justify-self:start;display:inline-flex;border:{{ r.tierBorder }};color:{{ r.tierColor }};background:{{ r.tierBg }};border-radius:999px;padding:1px 10px;font-size:11.5px;font-weight:600;white-space:nowrap">{{ r.tier }}</span>
+<div style="display:flex;flex-direction:column;gap:2px;font-size:11px;color:#5b6b8f"><span style="font-weight:700;color:{{ r.lcColor }}">{{ r.lifecycle }}</span><span>{{ r.next }}</span></div>
+</div>
+</sc-for>
+</div>
+
+<div style="background:#fff;border:1px dashed #c6dcf5;border-radius:14px;padding:16px 20px;display:flex;flex-direction:column;gap:10px">
+<span style="font-size:13.5px;color:#33415f">Nothing here means "merchant churn rate" exactly.</span>
+<sc-if value="{{ notRequested }}" hint-placeholder-val="{{ true }}">
+<button onClick="{{ request }}" style="align-self:flex-start;background:#006fcf;color:#fff;border:none;border-radius:9px;padding:8px 18px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer" style-hover="background:#00175a">Request "merchant_churn_rate"</button>
+</sc-if>
+<sc-if value="{{ requested }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;gap:10px;animation:fadeUp .3s ease both">
+<span style="font-size:13.5px;font-weight:700;color:#0e7a55">✓ Requested — recorded as you · reversible</span>
+<div style="display:flex;align-items:center;gap:0;max-width:560px">
+<div style="display:flex;flex-direction:column;align-items:center;gap:3px"><span style="width:24px;height:24px;border-radius:50%;background:#006fcf;color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:700">1</span><span style="font-size:10.5px;font-weight:700;color:#006fcf">Draft</span></div>
+<span style="flex:1;border-top:2px dashed #c6dcf5;margin-bottom:16px"></span>
+<div style="display:flex;flex-direction:column;align-items:center;gap:3px"><span style="width:24px;height:24px;border-radius:50%;border:1.5px dashed #c6dcf5;font-size:11px;display:flex;align-items:center;justify-content:center;color:#7c8bab">2</span><span style="font-size:10.5px;color:#7c8bab">Review</span></div>
+<span style="flex:1;border-top:2px dashed #c6dcf5;margin-bottom:16px"></span>
+<div style="display:flex;flex-direction:column;align-items:center;gap:3px"><span style="width:24px;height:24px;border-radius:50%;border:1.5px dashed #c6dcf5;font-size:11px;display:flex;align-items:center;justify-content:center;color:#7c8bab">3</span><span style="font-size:10.5px;color:#7c8bab">Approved</span></div>
+<span style="flex:1;border-top:2px dashed #c6dcf5;margin-bottom:16px"></span>
+<div style="display:flex;flex-direction:column;align-items:center;gap:3px"><span style="width:24px;height:24px;border-radius:50%;border:1.5px dashed #c6dcf5;font-size:11px;display:flex;align-items:center;justify-content:center;color:#7c8bab">4</span><span style="font-size:10.5px;color:#7c8bab">Published</span></div>
+</div>
+<div style="font-size:12px;color:#33415f;background:#f5f8fc;border-radius:8px;padding:7px 10px">Next action: <b>M. Osei</b> (Merchant Services steward) drafts the definition · you'll be cited as requester · SLA 3 days</div>
+</div>
+</sc-if>
+</div>
+<div style="font-size:12px;color:#5b6b8f">Entitled users see everything they may see — no access tickets. Lifecycle state and owner-of-next-action render on every result.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1040,&quot;height&quot;:760}}">
+class Component extends DCLogic {
+  state = { requested: false };
+  renderVals() {
+    return {
+      requested: this.state.requested, notRequested: !this.state.requested,
+      request: () => this.setState({ requested: true }),
+      results: [
+        { name: 'merchant_retention_rate', kind: 'metric', desc: 'share of merchants with repeat activity, monthly · owner S. Rivera', tier: '● human', tierBorder: '1px solid #0e7a55', tierColor: '#0e7a55', tierBg: '#eaf6f0', lifecycle: 'Published', lcColor: '#0e7a55', next: 'stable · v3' },
+        { name: 'churned_merchants', kind: 'metric', desc: 'count of merchants inactive 90+ days · proposed from 31 mined queries', tier: '◐ inferred', tierBorder: '1px solid #b07908', tierColor: '#b07908', tierBg: '#fdf4e0', lifecycle: 'Review', lcColor: '#006fcf', next: 'next: M. Osei · 3d SLA' },
+        { name: 'status_cd', kind: 'column', desc: 'merchant lifecycle state · merch_dim · "A active, C churned…"', tier: '◆ grounded', tierBorder: '1px solid #0e7a55', tierColor: '#0e7a55', tierBg: '#fff', lifecycle: 'Published', lcColor: '#0e7a55', next: 'MDM witnessed' },
+        { name: 'churn (glossary)', kind: 'term', desc: 'merchant attrition — related: retention, lifecycle, winback', tier: '◆ grounded', tierBorder: '1px solid #0e7a55', tierColor: '#0e7a55', tierBg: '#fff', lifecycle: 'Published', lcColor: '#0e7a55', next: '5 witnesses' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&amp;family=Libre+Franklin:wght@400;600;800&amp;family=Public+Sans:wght@400;600;800&amp;family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&amp;family=IBM+Plex+Sans:wght@400;600;700&amp;family=IBM+Plex+Mono:wght@400;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap" rel="stylesheet"><style>
+body{margin:0;background:#f0eee9;font-family:system-ui,sans-serif}
+a{color:#2a78d6}a:hover{color:#1b5fb0}
+.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(0,0,0,.08);scroll-margin-top:16px}
+.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}
+.dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:#1a1a1a;color:#fff;border-radius:4px;text-decoration:none}
+.dv-tname{font:600 13px/1.2 system-ui,sans-serif;color:#1a1a1a}
+.dv-opts{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}
+.dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:rgba(0,0,0,.08);color:#1a1a1a;border-radius:5px;text-decoration:none}
+.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 system-ui,sans-serif;color:rgba(0,0,0,.55)}
+.dv-card{max-width:100%;background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden}
+.dv-opt:target .dv-oid{background:#2a78d6;color:#fff}
+.dv-next{margin:22px 0 0;font:12px/1.5 system-ui,sans-serif;color:rgba(0,0,0,.5)}
+.dv-grp{font:700 13px system-ui,sans-serif;color:#1a1a1a;margin:30px 0 14px;padding-bottom:4px;border-bottom:2px dashed rgba(0,0,0,.18);max-width:720px}
+.dv-grp:first-of-type{margin-top:0}
+/* wireframe vocabulary */
+.wf{font-family:'Patrick Hand','Comic Sans MS',cursive;color:#26282c;padding:14px;display:flex;flex-direction:column;gap:9px;font-size:13px;line-height:1.35}
+.wf .b{border:1.5px solid #3a3d42;border-radius:4px;padding:8px 10px;background:#fff}
+.wf .d{border:1.5px dashed #a3a6ab;border-radius:4px;padding:8px 10px;color:#8a8d92;background:#fafafa}
+.wf .r{display:flex;gap:8px;align-items:center}
+.wf .rw{display:flex;gap:8px;align-items:flex-start}
+.wf .c{display:flex;flex-direction:column;gap:7px}
+.wf .h{font-size:16px;font-weight:700}
+.wf .h2{font-size:13.5px;font-weight:700}
+.wf .s{font-size:11.5px;color:#6f7278}
+.wf .mono{font-family:ui-monospace,Menlo,monospace;font-size:10.5px}
+.wf .chip{display:inline-flex;align-items:center;gap:5px;border:1.3px solid #3a3d42;border-radius:999px;padding:0 9px;font-size:11px;background:#fff;white-space:nowrap;height:20px}
+.wf .btn{display:inline-flex;align-items:center;gap:5px;border:1.5px solid #3a3d42;border-radius:6px;padding:2px 12px;font-size:12.5px;background:#f2f2f0;white-space:nowrap}
+.wf .btn.pri{background:#26282c;color:#fff}
+.wf .ann{color:#2a78d6;font-size:11.5px;line-height:1.3}
+.wf .ann::before{content:"✎ "}
+.wf .bar{height:9px;border:1.2px solid #8a8d92;border-radius:5px;background:#fff;overflow:hidden}
+.wf .bar i{display:block;height:100%;background:repeating-linear-gradient(45deg,#c9ccd2 0 4px,#fff 4px 8px)}
+.wf .tha{border-color:#0e7a55;color:#0e7a55;background:#e2f3ec}
+.wf .tgr{border-color:#0e7a55;color:#0e7a55}
+.wf .tin{border-color:#9a6407;color:#9a6407;background:#f9efdc}
+.wf .tgu{border-color:#8a8d92;color:#6f7278;border-style:dashed}
+.wf .tde{border-color:#be3a48;color:#be3a48}
+.wf .prop{border-style:dashed;border-color:#9a6407;color:#9a6407;background:#fdf8ee}
+.wf .sky{background:#14161c;color:#b9bdc6;border-radius:5px;position:relative;overflow:hidden}
+.wf .sky .lbl{position:absolute;font:10px ui-monospace,Menlo,monospace;color:#d7dae0}
+.wf .sky .lbl small{display:block;color:#7c8089;font-size:9px}
+.wf .blob{position:absolute;border-radius:50%;filter:blur(1px)}
+.wf .nd{position:absolute;border-radius:50%}
+.wf .hr{border:none;border-top:1.5px dashed #c9ccd2;margin:2px 0}
+</style></helmet>
+<section class="dv-turn" id="t2">
+<div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Brand direction — palette &amp; typography candidates (blue anchored on your repo token #006FCF; Amex proprietary fonts/logo can't be reproduced — these are close open stand-ins)</span></div>
+
+<div class="dv-grp">Palette</div>
+<div class="dv-opts">
+<div class="dv-opt" id="2a"><div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Bright blue on cool paper — light chrome everywhere</div>
+<div class="dv-card" style="width:460px;padding:16px;background:#f4f6f9;font-family:'Libre Franklin',sans-serif;display:flex;flex-direction:column;gap:12px">
+<div style="display:flex;gap:6px">
+<div style="flex:1;height:44px;background:#006fcf;border-radius:6px;color:#fff;font-size:9px;display:flex;align-items:flex-end;padding:4px">#006FCF accent</div>
+<div style="flex:1;height:44px;background:#1a2332;border-radius:6px;color:#fff;font-size:9px;display:flex;align-items:flex-end;padding:4px">ink</div>
+<div style="flex:1;height:44px;background:#f4f6f9;border:1px solid #d8dee8;border-radius:6px;font-size:9px;display:flex;align-items:flex-end;padding:4px;color:#4a5568">canvas</div>
+<div style="flex:1;height:44px;background:#ffffff;border:1px solid #d8dee8;border-radius:6px;font-size:9px;display:flex;align-items:flex-end;padding:4px;color:#4a5568">surface</div>
+</div>
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:800;color:#1a2332">gcs_transactions</span><span style="font-size:11px;color:#0e7a55;border:1px solid #0e7a55;border-radius:999px;padding:1px 8px;background:#e2f3ec">◆ grounded</span></div>
+<div style="font-size:12px;color:#4a5568">Blue is interactive only: if it isn't clickable, it isn't blue.</div>
+<div style="display:flex;gap:8px"><span style="background:#006fcf;color:#fff;border-radius:6px;padding:4px 14px;font-size:12px;font-weight:600">Approve</span><span style="border:1px solid #d8dee8;border-radius:6px;padding:4px 14px;font-size:12px;color:#1a2332">Skip</span><span style="color:#006fcf;font-size:12px;padding:4px 0;text-decoration:underline">evidence</span></div>
+</div>
+<div style="font-size:11px;color:#2a78d6;font-family:'Patrick Hand',cursive">✎ calmest option — your current token doctrine, kept. Tier colors are the only other semantics.</div>
+</div></div>
+
+<div class="dv-opt" id="2b"><div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Deep-navy cosmos — dark instrument world, bright-blue accent</div>
+<div class="dv-card" style="width:460px;padding:16px;background:#00175a;font-family:'Libre Franklin',sans-serif;display:flex;flex-direction:column;gap:12px">
+<div style="display:flex;gap:6px">
+<div style="flex:1;height:44px;background:#00175a;border:1px solid #2b3f7e;border-radius:6px;color:#9fb0d8;font-size:9px;display:flex;align-items:flex-end;padding:4px">#00175A deep</div>
+<div style="flex:1;height:44px;background:#0a2472;border-radius:6px;color:#9fb0d8;font-size:9px;display:flex;align-items:flex-end;padding:4px">surface</div>
+<div style="flex:1;height:44px;background:#57a9f2;border-radius:6px;color:#00175a;font-size:9px;display:flex;align-items:flex-end;padding:4px">accent</div>
+<div style="flex:1;height:44px;background:#e8edf5;border-radius:6px;color:#00175a;font-size:9px;display:flex;align-items:flex-end;padding:4px">ink</div>
+</div>
+<div style="background:#0a2472;border:1px solid #2b3f7e;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:800;color:#e8edf5">MERCHANT SERVICES</span><span style="font-size:11px;color:#2bae84;border:1px solid #2bae84;border-radius:999px;padding:1px 8px">● 62% grounded</span></div>
+<div style="font-size:12px;color:#9fb0d8">Built for the graph cosmos &amp; agent theater — glow reads beautifully here.</div>
+<div style="display:flex;gap:8px"><span style="background:#57a9f2;color:#00175a;border-radius:6px;padding:4px 14px;font-size:12px;font-weight:700">Fly to</span><span style="border:1px solid #2b3f7e;border-radius:6px;padding:4px 14px;font-size:12px;color:#e8edf5">Filters</span></div>
+</div>
+<div style="font-size:11px;color:#8fc1f2;font-family:'Patrick Hand',cursive">✎ most cinematic; risks feeling like a demo if used for steward paperwork too.</div>
+</div></div>
+
+<div class="dv-opt" id="2c"><div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Dual-world — light chrome for work, navy canvas for graph/agent</div>
+<div class="dv-card" style="width:460px;padding:16px;background:#f4f6f9;font-family:'Libre Franklin',sans-serif;display:flex;flex-direction:column;gap:12px">
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:10px;padding:10px;display:flex;justify-content:space-between;align-items:center">
+<span style="font-weight:800;color:#1a2332">Steward queue · 13 of 40</span><span style="background:#006fcf;color:#fff;border-radius:6px;padding:3px 12px;font-size:12px;font-weight:600">Approve</span></div>
+<div style="background:#00175a;border-radius:10px;padding:10px;height:86px;position:relative;overflow:hidden">
+<div style="position:absolute;left:14%;top:18%;width:120px;height:70px;border-radius:50%;background:radial-gradient(closest-side,#57a9f244,transparent)"></div>
+<div style="position:absolute;left:58%;top:30%;width:110px;height:60px;border-radius:50%;background:radial-gradient(closest-side,#e8c98a33,transparent)"></div>
+<span style="position:absolute;left:20%;top:14%;font:10px 'IBM Plex Mono',monospace;color:#cdd9f0">credit risk</span>
+<span style="position:absolute;right:10px;bottom:8px;font:10px 'IBM Plex Mono',monospace;color:#7c8fbe">the cosmos stays navy in both themes</span></div>
+<div style="font-size:11px;color:#2a78d6;font-family:'Patrick Hand',cursive">✎ recommended: curation feels like daylight office work (<a class="dv-oid" href="#1d">1d</a>–<a class="dv-oid" href="#1f">1f</a>); exploration &amp; agent theater (<a class="dv-oid" href="#1j">1j</a>–<a class="dv-oid" href="#1o">1o</a>) get the deep-navy stage. One token set, two grounds.</div>
+</div></div>
+</div>
+
+<div class="dv-grp">Typography (stand-ins for the Amex faces)</div>
+<div class="dv-opts">
+<div class="dv-opt" id="2d"><div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Libre Franklin + IBM Plex Mono — closest to the brand's gothic voice</div>
+<div class="dv-card" style="width:400px;padding:18px;display:flex;flex-direction:column;gap:8px;font-family:'Libre Franklin',sans-serif">
+<div style="font-size:26px;font-weight:800;color:#1a2332;letter-spacing:-.01em">Total Billed Business</div>
+<div style="font-size:13px;color:#4a5568">Every fact carries its witnesses and a computed trust tier.</div>
+<div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:#71809b">HUMAN_ASSERTED · 31 FACTS</div>
+<div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#1a2332;background:#eef1f6;border-radius:6px;padding:6px 8px">SUM(amount_usd) WHERE settled</div>
+<div style="font-size:11px;color:#2a78d6;font-family:'Patrick Hand',cursive">✎ sturdy, institutional, reads like Franklin Gothic — the safest brand-adjacent voice.</div>
+</div></div>
+
+<div class="dv-opt" id="2e"><div class="dv-olabel"><a class="dv-oid" href="#2e">2e</a>Public Sans + Source Serif display — governed, with an editorial answer voice</div>
+<div class="dv-card" style="width:400px;padding:18px;display:flex;flex-direction:column;gap:8px;font-family:'Public Sans',sans-serif">
+<div style="font-family:'Source Serif 4',serif;font-size:26px;font-weight:700;color:#1a2332">$4.1B, grounded.</div>
+<div style="font-size:13px;color:#4a5568">Serif only for the agent's answers &amp; narration — the human moments.</div>
+<div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:#71809b">CITATIONS ×4 · GOVERNANCE ✓</div>
+<div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#1a2332;background:#eef1f6;border-radius:6px;padding:6px 8px">filter ← guardrail · join ← 214 queries</div>
+<div style="font-size:11px;color:#2a78d6;font-family:'Patrick Hand',cursive">✎ gives narration (<a class="dv-oid" href="#1l">1l</a>) a distinct warm register vs the machinery.</div>
+</div></div>
+
+<div class="dv-opt" id="2f"><div class="dv-olabel"><a class="dv-oid" href="#2f">2f</a>IBM Plex Sans + Space Grotesk display — instrument-panel modern</div>
+<div class="dv-card" style="width:400px;padding:18px;display:flex;flex-direction:column;gap:8px;font-family:'IBM Plex Sans',sans-serif">
+<div style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;color:#1a2332;letter-spacing:-.01em">Watching it think</div>
+<div style="font-size:13px;color:#4a5568">One superfamily with a matched mono — seams disappear between UI and code.</div>
+<div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:#71809b">STAGE 3 · 2 GUARDRAILS BINDING</div>
+<div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#1a2332;background:#eef1f6;border-radius:6px;padding:6px 8px">route(merchant_services)=.92</div>
+<div style="font-size:11px;color:#2a78d6;font-family:'Patrick Hand',cursive">✎ most "telemetry" of the three — pairs naturally with the cosmos refs you sent.</div>
+</div></div>
+</div>
+<p class="dv-next">Pick one palette + one type stack in the form, or: "show <a class="dv-oid" href="#2c">2c</a> with <a class="dv-oid" href="#2f">2f</a> applied to <a class="dv-oid" href="#1d">1d</a>" · "warmer navy" · "more type options"</p>
+</section>
+<section class="dv-turn" id="t1">
+<div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Synapse — first pass across all five screens · shell-agnostic panels</span></div>
+<div class="wf" style="max-width:760px;padding:0 0 6px">
+<div class="b r" style="flex-wrap:wrap;gap:12px;background:#fbfaf7"><span class="h2">Tier grammar (used in every frame — shape + color, never color alone):</span>
+<span class="chip tha">● human_asserted</span><span class="chip tgr">◆ grounded</span><span class="chip tin">◐ inferred</span><span class="chip tgu">○ guessed</span><span class="chip tde">⊘ deprecated</span>
+<span class="chip prop">◌ proposal (LLM, capped until accepted)</span></div>
+</div>
+
+<div class="dv-grp">3.1 · Table profile</div>
+<div class="dv-opts">
+<div class="dv-opt" id="1a"><div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Dossier — two columns, witness rail always visible</div>
+<div class="dv-card wf" style="width:620px">
+<div class="r" style="justify-content:space-between"><div class="c" style="gap:2px"><span class="h">gcs_transactions</span><span class="s">"Global Card Settlements" · owner: J. Ma <span class="mono">(who says so → MDM, human)</span></span></div><span class="chip tgr">◆ grounded</span></div>
+<div class="r"><span class="chip">Credit Risk</span><span class="chip">also in: Merchant Services</span><span class="chip tgu">not in: Deposits — no witness</span></div>
+<div class="rw">
+<div class="c" style="flex:1.5">
+<div class="b c"><div class="r" style="justify-content:space-between"><span class="h2">Columns · 52</span><span class="s">38 have meaning</span></div>
+<div class="bar"><i style="width:73%"></i></div>
+<div class="r s"><span class="mono">amount_usd</span> settled amount <span class="chip tha" style="height:16px">●</span></div>
+<div class="r s"><span class="mono">cm11_encrypted</span> <span class="chip tde" style="height:16px">⊘ PII</span> guardrail bound</div>
+<div class="r s"><span class="mono">merch_id</span> merchant key <span class="chip tin" style="height:16px">◐</span></div>
+<div class="d s">col rows × 49 … each: meaning · type · sensitivity · tier glyph</div></div>
+<div class="b c"><span class="h2">Measures on this table · 6</span><div class="d s">TBB, approval_rate, … (cards link to 3.3)</div></div>
+</div>
+<div class="c" style="flex:1">
+<div class="b c"><span class="h2">Witness ledger</span><div class="s">MDM ×8 · BQ ×6 · glossary ×5 · mined ×2 · human ×10</div><div class="s">expandable per fact ↓</div></div>
+<div class="b c"><span class="h2">Usage</span><div class="s">4.2k runs / 90d · 61 analysts</div><div class="d s">peak sparkline</div></div>
+<div class="b c"><span class="h2">Joins</span><div class="s">↔ merch_dim · 214 queries</div><div class="s">↔ auth_events · 88</div></div>
+<div class="b c" style="border-style:dashed"><span class="h2">Gaps (honest)</span><div class="s">no description witnessed yet → <u>be the first witness</u></div></div>
+</div></div>
+<div class="ann">provenance one gesture away: every fact row carries its tier glyph; tap → ledger. Gaps are rendered content with a next step — no dead ends, no uncertainty left unnamed.</div>
+</div></div>
+
+<div class="dv-opt" id="1b"><div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Glance band → depth accordions (VP 5-second read)</div>
+<div class="dv-card wf" style="width:560px">
+<div class="b r" style="gap:14px;background:#fbfaf7">
+<div class="c" style="align-items:center;gap:2px"><div style="width:54px;height:54px;border:3px solid #0e7a55;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700">73%</div><span class="s">ready</span></div>
+<div class="c" style="flex:1;gap:3px"><span class="h">gcs_transactions</span><span class="s">One row per settled card transaction, global.</span><div class="r"><span class="chip tgr">◆ grounded</span><span class="chip">2 domains</span><span class="chip">4.2k runs</span></div></div>
+<span class="btn pri">Ask about this</span></div>
+<div class="b r" style="justify-content:space-between"><span class="h2">▸ Columns</span><span class="s">52 · 38 with meaning · 1 PII</span></div>
+<div class="b r" style="justify-content:space-between"><span class="h2">▸ Usage &amp; joins</span><span class="s">61 analysts · top join: merch_dim</span></div>
+<div class="b r" style="justify-content:space-between"><span class="h2">▸ Measures</span><span class="s">6 · 4 grounded ◆</span></div>
+<div class="b c" style="border-color:#0e7a55"><div class="r" style="justify-content:space-between"><span class="h2">▾ Witnesses</span><span class="s">31 facts · 5 sources</span></div>
+<div class="s">description — MDM + human ● · membership — mined ◐ …</div></div>
+<div class="ann">summary band answers "can I trust this?" before any scroll; accordions carry counts so closed ≠ unknown. Depth exists but is never demanded — takes reading away from the VP.</div>
+</div></div>
+
+<div class="dv-opt" id="1c"><div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Fact ledger — provenance-first, steward can act in place</div>
+<div class="dv-card wf" style="width:560px">
+<div class="r" style="justify-content:space-between"><span class="h">gcs_transactions</span><div class="r"><span class="chip tgr">◆ grounded</span><span class="chip tin">3 facts one review from ◆</span></div></div>
+<div class="s">every fact is a row: statement · witnesses · tier · one action</div>
+<div class="b r" style="justify-content:space-between"><span>is described as "global card settlements"</span><div class="r"><span class="chip" style="height:16px">MDM</span><span class="chip" style="height:16px">human</span><span class="chip tha" style="height:16px">●</span></div></div>
+<div class="b r" style="justify-content:space-between"><span>belongs to Merchant Services</span><div class="r"><span class="chip" style="height:16px">mined ×2</span><span class="chip tin" style="height:16px">◐</span><span class="btn" style="border-color:#0e7a55;color:#0e7a55">✓ bless</span></div></div>
+<div class="b r" style="justify-content:space-between"><span><span class="mono">amount_usd</span> means settled USD amount</span><div class="r"><span class="chip prop" style="height:16px">LLM ◌</span><span class="btn">✓</span><span class="btn">✕</span></div></div>
+<div class="d s">…grouped by kind: identity · membership · column meaning · joins</div>
+<div class="ann">reading and curating are the same surface — no separate "admin mode". Approve where the evidence already is; each ✓ is attributed + reversible, so no anxiety about acting.</div>
+</div></div>
+</div>
+
+<div class="dv-grp">3.2 · Steward approval</div>
+<div class="dv-opts">
+<div class="dv-opt" id="1d"><div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a>Focus queue — one decision at a time</div>
+<div class="dv-card wf" style="width:560px">
+<div class="r" style="justify-content:space-between"><span class="s">Reviewing gcs_transactions · fact 13 of 40</span><div class="bar" style="width:160px"><i style="width:32%"></i></div></div>
+<div class="b c" style="padding:14px">
+<span class="h">belongs to domain "Merchant Services"</span>
+<div class="r"><span class="chip">mined usage ×2</span><span class="chip">DMP map</span><span class="chip tin">◐ inferred</span></div>
+<div class="hr"></div>
+<div class="s">evidence first: used in 12 Merchant queries · joins merch_dim · no conflicting witness</div>
+<div class="d s">↳ tap any line for the full ledger</div>
+<div class="r" style="margin-top:6px;gap:10px"><span class="btn pri" style="padding:4px 22px">Approve</span><span class="btn">Correct…</span><span class="btn">Not sure — skip</span></div>
+<div class="s">approving records: you · today · reversible any time</div></div>
+<div class="d s r" style="justify-content:space-between"><span>up next: 2 column meanings, 1 join</span><span>keyboard: ← ↑ →</span></div>
+<div class="ann">evidence is shown before the ask; skip is a first-class equal button — never a guilt state. Queue is entered by invitation ("3 facts would reach ◆ with your review"), not a red badge.</div>
+</div></div>
+
+<div class="dv-opt" id="1e"><div class="dv-olabel"><a class="dv-oid" href="#1e">1e</a>Ledger — bulk with exceptions</div>
+<div class="dv-card wf" style="width:560px">
+<div class="r" style="justify-content:space-between"><span class="h">28 domain memberships of GCS</span><span class="btn pri">Approve all 26 ✓</span></div>
+<div class="s">agreement is one gesture; doubt is pulled out for you:</div>
+<div class="b r" style="justify-content:space-between"><span>☑ gcs_transactions → Credit Risk</span><span class="chip" style="height:16px">4 witnesses</span></div>
+<div class="b r" style="justify-content:space-between"><span>☑ gcs_settle_daily → Credit Risk</span><span class="chip" style="height:16px">3 witnesses</span></div>
+<div class="d s">☑ ×22 more, all multi-witness, collapsed</div>
+<div class="b r" style="justify-content:space-between;border-color:#9a6407;background:#fdf8ee"><span>☐ gcs_refunds → Deposits</span><div class="r"><span class="chip tin" style="height:16px">◐ single witness</span><span class="btn">look ▸</span></div></div>
+<div class="b r" style="justify-content:space-between;border-color:#9a6407;background:#fdf8ee"><span>☐ gcs_fx_rates → Treasury</span><div class="r"><span class="chip tde" style="height:16px">conflict</span><span class="btn">look ▸</span></div></div>
+<div class="ann">system pre-separates confident rows from the 2 doubtful ones — the steward never scans 28 checkboxes. Precision is only spent where there is genuine doubt.</div>
+</div></div>
+
+<div class="dv-opt" id="1f"><div class="dv-olabel"><a class="dv-oid" href="#1f">1f</a>Curation session — momentum &amp; visible consequence</div>
+<div class="dv-card wf" style="width:600px">
+<div class="rw">
+<div class="c" style="flex:1.6">
+<div class="r" style="justify-content:space-between"><span class="h2">Session · 12 of 40 reviewed</span><span class="s">~6 min in</span></div>
+<div class="bar"><i style="width:30%"></i></div>
+<div class="b c"><span>column <span class="mono">merch_id</span> means "merchant key"</span><div class="r"><span class="chip">BQ profile</span><span class="chip prop">LLM ◌</span></div>
+<div class="r"><span class="btn pri">Approve</span><span class="btn">Correct…</span><span class="btn">Skip</span></div></div>
+</div>
+<div class="b c" style="flex:1;background:#fbfaf7"><span class="h2">Impact so far</span>
+<div class="s">gcs_transactions</div>
+<div class="r s"><span class="chip tin" style="height:16px">◐</span>→<span class="chip tha" style="height:16px">●</span><span>tier climbed!</span></div>
+<div class="s">+9 facts human_asserted</div>
+<div class="s">2 tables now fully described</div>
+<div class="d s">tier chip upgrade animates subtly (ripple, 400ms, reduced-motion safe)</div></div>
+</div>
+<div class="d s">session end: "GCS domain is now ● human_asserted — signed by you." · Undo list attached</div>
+<div class="ann">the steward is a hero: consequence panel shows the graph visibly improving as they work. Celebration is quiet (a chip upgrade, a summary line) — no gamification cringe, no streak pressure.</div>
+</div></div>
+</div>
+
+<div class="dv-grp">3.3 · Measures — browse + LLM-assisted definition</div>
+<div class="dv-opts">
+<div class="dv-opt" id="1g"><div class="dv-olabel"><a class="dv-oid" href="#1g">1g</a>Canon gallery — search &amp; filter over all measures</div>
+<div class="dv-card wf" style="width:620px">
+<div class="r"><div class="b" style="flex:1;color:#8a8d92">🔍 search the metric canon…</div><span class="chip">table ▾</span><span class="chip">domain ▾</span><span class="chip">tier ▾</span><span class="chip">most used ▾</span></div>
+<div class="rw">
+<div class="b c" style="flex:1"><div class="r" style="justify-content:space-between"><span class="h2">TBB</span><span class="chip tha" style="height:16px">●</span></div><span class="mono">SUM(amount_usd) WHERE settled</span><div class="s">"How much did we bill?" · 1.1k runs</div><div class="r"><span class="chip" style="height:16px">gold SQL</span><span class="chip" style="height:16px">human</span></div></div>
+<div class="b c" style="flex:1"><div class="r" style="justify-content:space-between"><span class="h2">approval_rate</span><span class="chip tgr" style="height:16px">◆</span></div><span class="mono">approved / decisioned</span><div class="s">"What share clears?" · 640 runs</div><div class="r"><span class="chip" style="height:16px">DMP</span><span class="chip" style="height:16px">mined</span></div></div>
+<div class="b c" style="flex:1;border-style:dashed"><div class="r" style="justify-content:space-between"><span class="h2">net_bps</span><span class="chip tin" style="height:16px">◐</span></div><span class="mono">mined from 9 queries</span><div class="s">no owner yet → <u>claim it</u></div></div>
+</div>
+<div class="d s">…card grid continues · every card: formula · source cols · the question it answers · usage · witnesses</div>
+<div class="ann">one tab, whole canon. The measure card is the atom — identical anatomy reused in <a class="dv-oid" href="#1a">1a</a>'s measures panel and in agent citations, so trust reads the same everywhere.</div>
+</div></div>
+
+<div class="dv-opt" id="1h"><div class="dv-olabel"><a class="dv-oid" href="#1h">1h</a>Table-anchored browser + inline suggestion strip</div>
+<div class="dv-card wf" style="width:620px">
+<div class="rw">
+<div class="c" style="flex:.8"><div class="b c"><span class="h2">Tables</span><div class="s">gcs_transactions · 6</div><div class="s" style="font-weight:700">merch_dim · 2 ◂</div><div class="d s">…</div></div></div>
+<div class="c" style="flex:2">
+<div class="r" style="justify-content:space-between"><span class="h2">Measures on merch_dim</span><span class="btn pri">+ New measure</span></div>
+<div class="b r" style="justify-content:space-between"><span>active_merchants</span><span class="chip tgr" style="height:16px">◆</span></div>
+<div class="b c" style="border-style:dashed;background:#fdf8ee"><span class="s" style="color:#9a6407">while you type "churned merchants" — grounded suggestions, not a copilot takeover:</span>
+<div class="r"><span class="chip prop">◌ last_txn_date — "date of latest settle"</span><span class="chip prop">◌ status_cd ≠ 'A'</span></div>
+<div class="s">reasoning: glossary "churn" + 2 existing measures use these columns → tap to accept</div></div>
+</div></div>
+<div class="ann">suggestions appear inline under the editor as capped-trust chips ◌; accepting one records it as human-defined ● with you as witness. Ignorable without dismissal — zero modal anxiety.</div>
+</div></div>
+
+<div class="dv-opt" id="1i"><div class="dv-olabel"><a class="dv-oid" href="#1i">1i</a>Definition workspace — form + grounded reasoning panel</div>
+<div class="dv-card wf" style="width:620px">
+<div class="h">New measure on gcs_transactions</div>
+<div class="rw">
+<div class="c" style="flex:1.4">
+<div class="b s">name: <b>merchant_churn_rate</b></div>
+<div class="b s">grain: merchant · month</div>
+<div class="b c"><span class="s">formula</span><span class="mono">COUNT(churned) / COUNT(active) …</span></div>
+<div class="b r s" style="border-color:#be3a48;color:#be3a48"><span>⊘ guardrail binding: never sum cm11_encrypted</span></div>
+<div class="r"><span class="btn pri">Save as human-defined ●</span><span class="btn">Discard</span></div>
+</div>
+<div class="b c" style="flex:1;background:#fdf8ee;border-style:dashed;border-color:#9a6407">
+<span class="h2" style="color:#9a6407">◌ These columns would fit</span>
+<div class="s"><span class="mono">status_cd</span> — meaning: "merchant lifecycle state" (MDM ●) <span class="btn" style="height:18px">accept</span></div>
+<div class="s"><span class="mono">last_txn_date</span> — used by 2 sibling measures <span class="btn" style="height:18px">accept</span></div>
+<div class="s"><span class="mono">amount_usd</span> — weak fit, shown last <span class="btn" style="height:18px">accept</span></div>
+<div class="s">each suggestion cites the fact it stands on ↑</div>
+</div></div>
+<div class="ann">reasoning is grounded in what the table is — every suggestion carries its witness, so accepting never feels like trusting a black box. Guardrails are visible law, not a save-time surprise.</div>
+</div></div>
+</div>
+
+<div class="dv-grp">4 · Agent run — animated explainability</div>
+<div class="dv-opts">
+<div class="dv-opt" id="1j"><div class="dv-olabel"><a class="dv-oid" href="#1j">1j</a>Vertical timeline — stages stack, evidence expands in place</div>
+<div class="dv-card wf" style="width:560px">
+<div class="b s" style="background:#fbfaf7">"What was TBB for Merchant Services last quarter?"</div>
+<div class="rw"><div class="c" style="width:22px;align-items:center"><span class="chip tha" style="height:16px">1</span><div style="width:2px;flex:1;background:#c9ccd2"></div></div>
+<div class="b c" style="flex:1"><span class="h2">Understand the question ✓</span><div class="r"><span class="chip">TBB → Total Billed Business</span><span class="chip" style="height:16px">glossary ×5</span></div></div></div>
+<div class="rw"><div class="c" style="width:22px;align-items:center"><span class="chip tha" style="height:16px">2</span><div style="width:2px;flex:1;background:#c9ccd2"></div></div>
+<div class="b c" style="flex:1"><span class="h2">Route to a domain ✓</span><div class="r s"><b>Merchant Services .92</b> · Credit Risk .41 · shared table noted</div></div></div>
+<div class="rw"><div class="c" style="width:22px;align-items:center"><span class="chip tin" style="height:16px">3</span><div style="width:2px;flex:1;background:#e4e6ea"></div></div>
+<div class="b c" style="flex:1;border-color:#9a6407"><span class="h2">Load skills — running…</span><div class="r"><span class="chip">playbook: MS revenue</span><span class="chip tde" style="height:16px">2 guardrails now binding</span></div><div class="d s">▸ tap to see exactly which rules</div></div></div>
+<div class="d s">4 · Descend into structure — columns + join paths light up</div>
+<div class="d s">5 · Draft grounded SQL — each clause traceable to a fact</div>
+<div class="r" style="justify-content:space-between"><span class="s">⏮ ⏯ scrub any finished run</span><span class="chip">replayable trace</span></div>
+<div class="ann">reads top-to-bottom like a receipt; the wait feels like watching an expert, not a spinner. Plain-language narration line per stage; everything expandable, nothing demanded.</div>
+</div></div>
+
+<div class="dv-opt" id="1k"><div class="dv-olabel"><a class="dv-oid" href="#1k">1k</a>Stage rail + theater canvas (incl. the refusal state)</div>
+<div class="dv-card wf" style="width:640px">
+<div class="r" style="gap:4px"><span class="chip tha">1 understand ✓</span><span class="chip tha">2 route ✓</span><span class="chip tin">3 skills ●</span><span class="chip tgu">4 structure</span><span class="chip tgu">5 SQL</span></div>
+<div class="sky" style="height:150px">
+<div class="blob" style="left:12%;top:22%;width:110px;height:80px;background:radial-gradient(closest-side,#4a5a7a66,transparent)"></div>
+<div class="blob" style="left:55%;top:30%;width:140px;height:90px;background:radial-gradient(closest-side,#7a4a5a88,transparent)"></div>
+<span class="lbl" style="left:16%;top:18%">credit risk</span>
+<span class="lbl" style="left:60%;top:24%">merchant services<small>winner · .92</small></span>
+<span class="lbl" style="left:44%;top:62%">gcs_transactions<small>shared — both wells pull it</small></span>
+<div class="nd" style="left:48%;top:56%;width:10px;height:10px;background:#d7dae0;box-shadow:0 0 10px #d7dae0"></div>
+</div>
+<div class="b r" style="justify-content:space-between"><span class="s">"Two guardrails from the MS playbook now bind this run."</span><span class="btn">evidence ▸</span></div>
+<div class="r" style="justify-content:space-between"><div class="bar" style="flex:1"><i style="width:55%"></i></div><span class="s">⏮ ⏯ step scrubber</span></div>
+<div class="b c" style="border-color:#9a6407;background:#fdf8ee"><span class="h2">Refusal, designed as honesty:</span><div class="s">"I can't ground this — Treasury has no attested TBB definition. Missing: 1 metric contract. → invite a steward"</div></div>
+<div class="ann">the canvas IS the graph the agent walks — same cosmos as <a class="dv-oid" href="#1m">1m</a>, so explanation and exploration share one mental model. Refusal is calm amber with a next step, never a red failure.</div>
+</div></div>
+
+<div class="dv-opt" id="1l"><div class="dv-olabel"><a class="dv-oid" href="#1l">1l</a>Narrated transcript — the run reads as prose</div>
+<div class="dv-card wf" style="width:520px">
+<div class="s">stage chips ride inline in a readable story:</div>
+<div class="b c"><span><span class="chip" style="height:16px">1</span> I read your question. <b>TBB</b> is <b>Total Billed Business</b> — the glossary says so (5 witnesses).</span></div>
+<div class="b c"><span><span class="chip" style="height:16px">2</span> This belongs to <b>Merchant Services</b> (score .92); it touches one table shared with Credit Risk.</span></div>
+<div class="b c"><span><span class="chip" style="height:16px">5</span> I drafted SQL. The date filter comes from a <u>guardrail</u>; the join from <u>214 observed queries</u>.</span></div>
+<div class="b c" style="border-color:#0e7a55"><span class="h2">Answer · $4.1B ◆</span><div class="r"><span class="chip" style="height:16px">citations ×4</span><span class="chip" style="height:16px">governance ✓</span><span class="chip" style="height:16px">status: executed</span></div></div>
+<div class="ann">for the VP read: no machinery visible until a citation is tapped. Underlines are doors into the same evidence panels as everywhere else.</div>
+</div></div>
+</div>
+
+<div class="dv-grp">5 · Knowledge graph — 3D exploration (per your refs: cosmos + instrument strip)</div>
+<div class="dv-opts">
+<div class="dv-opt" id="1m"><div class="dv-olabel"><a class="dv-oid" href="#1m">1m</a>Cosmos + instrument strip — domains as gravity wells</div>
+<div class="dv-card wf" style="width:640px">
+<div class="sky" style="height:230px">
+<div class="blob" style="left:8%;top:12%;width:180px;height:130px;background:radial-gradient(closest-side,#5a6a9a55,transparent)"></div>
+<div class="blob" style="left:52%;top:8%;width:200px;height:140px;background:radial-gradient(closest-side,#9a5a6a55,transparent)"></div>
+<div class="blob" style="left:30%;top:55%;width:170px;height:110px;background:radial-gradient(closest-side,#5a8a7a44,transparent)"></div>
+<span class="lbl" style="left:12%;top:8%">CREDIT RISK<small>41 tables · 62% grounded</small></span>
+<span class="lbl" style="left:58%;top:5%">MERCHANT SERVICES<small>33 tables</small></span>
+<span class="lbl" style="left:34%;top:52%">DEPOSITS<small>27 tables</small></span>
+<div class="nd" style="left:44%;top:30%;width:14px;height:14px;background:#e8c98a;box-shadow:0 0 14px #e8c98a"></div>
+<span class="lbl" style="left:46.5%;top:26%">gcs_transactions<small>in BOTH wells — held between, never duplicated</small></span>
+<div class="nd" style="left:20%;top:30%;width:7px;height:7px;background:#8fd0b0"></div>
+<div class="nd" style="left:66%;top:35%;width:9px;height:9px;background:#8fd0b0;box-shadow:0 0 8px #8fd0b0"></div>
+<span class="lbl" style="right:8px;bottom:8px">size=usage · glow=tier · shape=type</span>
+</div>
+<div class="r" style="gap:6px"><span class="chip">edges: joins ▾</span><span class="chip">computed-from</span><span class="chip">membership</span><span class="chip" style="margin-left:auto">⏸ ambient motion: minimal</span></div>
+<div class="rw" style="gap:6px">
+<div class="b c" style="flex:1"><span class="s mono">TIER MIX</span><div class="bar"><i style="width:62%"></i></div></div>
+<div class="b c" style="flex:1"><span class="s mono">RECENT CHANGES</span><span class="s">merch_dim ◐→◆ 2m ago</span></div>
+<div class="b c" style="flex:1"><span class="s mono">AGENT ACTIVITY</span><span class="s">2 tables touched, glowing</span></div>
+<div class="b c" style="flex:1"><span class="s mono">FILTERS</span><span class="s">tier ▾ · domain ▾</span></div>
+</div>
+<div class="ann">your ref, tamed: dark cosmos + a calm instrument strip below (live but glanceable, not a wall of logs). An approval in <a class="dv-oid" href="#1d">1d</a> ripples a tier-glow through its cluster here — motion only on change.</div>
+</div></div>
+
+<div class="dv-opt" id="1n"><div class="dv-olabel"><a class="dv-oid" href="#1n">1n</a>Dive + docked profile — tap node, get 3.1 in a panel</div>
+<div class="dv-card wf" style="width:640px">
+<div class="r s" style="justify-content:space-between"><span>All domains ▸ <b>Merchant Services</b> (double-tap dived in)</span><span class="chip">esc backs out</span></div>
+<div class="rw">
+<div class="sky" style="flex:1.5;height:200px">
+<div class="blob" style="left:15%;top:15%;width:220px;height:150px;background:radial-gradient(closest-side,#9a5a6a66,transparent)"></div>
+<div class="nd" style="left:40%;top:42%;width:16px;height:16px;background:#e8c98a;box-shadow:0 0 16px #e8c98a;outline:2px solid #fff;outline-offset:3px"></div>
+<span class="lbl" style="left:44%;top:36%">gcs_transactions · focused</span>
+<div class="nd" style="left:24%;top:30%;width:8px;height:8px;background:#8fd0b0"></div>
+<div class="nd" style="left:60%;top:60%;width:7px;height:7px;background:#9aa4b8"></div>
+<span class="lbl" style="left:8px;bottom:8px">join edges light along real history</span>
+</div>
+<div class="b c" style="flex:1"><div class="r" style="justify-content:space-between"><span class="h2">gcs_transactions</span><span class="chip tgr" style="height:16px">◆</span></div>
+<div class="s">the same profile component as <a class="dv-oid" href="#1a">1a</a> — columns · witnesses · usage · gaps</div>
+<div class="d s">summary band<br>▸ columns 52<br>▸ witnesses 31<br>▸ measures 6</div>
+<div class="r"><span class="btn">Ask about this</span><span class="btn">Evidence</span></div></div>
+</div>
+<div class="ann">one profile component everywhere = zero relearning. Camera focus + side panel keep the graph as context, never a maze — you always know where you are and how to get out.</div>
+</div></div>
+
+<div class="dv-opt" id="1o"><div class="dv-olabel"><a class="dv-oid" href="#1o">1o</a>Search-first navigator + graceful 2D fallback</div>
+<div class="dv-card wf" style="width:560px">
+<div class="b r" style="background:#fbfaf7"><span style="color:#8a8d92;white-space:nowrap">🔍 fly to… "tbb"</span><span class="chip" style="margin-left:auto">metric: TBB ●</span><span class="chip">table: gcs… ◆</span></div>
+<div class="sky" style="height:170px">
+<div class="blob" style="left:10%;top:20%;width:150px;height:100px;background:radial-gradient(closest-side,#5a6a9a55,transparent)"></div>
+<div class="blob" style="left:58%;top:35%;width:160px;height:110px;background:radial-gradient(closest-side,#9a5a6a55,transparent)"></div>
+<svg width="100%" height="100%" style="position:absolute;inset:0"><path d="M60,40 Q 300,10 420,110" stroke="#d7dae0" stroke-dasharray="5 6" fill="none" stroke-width="1.5"></path></svg>
+<div class="nd" style="left:72%;top:60%;width:12px;height:12px;background:#e8c98a;box-shadow:0 0 12px #e8c98a"></div>
+<span class="lbl" style="left:10%;top:14%">camera flies the dashed path to the hit</span>
+</div>
+<div class="r" style="justify-content:space-between"><div class="r"><span class="chip">◱ 2D map</span><span class="chip">reduced motion: instant cuts</span></div><span class="s">same data, flat force layout — nobody is locked out of the graph</span></div>
+<div class="ann">search is the primary navigation (typing beats orbiting); 3D is a view, not a requirement. Fallback is a designed peer, not a degraded apology.</div>
+</div></div>
+</div>
+
+<p class="dv-next">Try next: "go deeper on <a class="dv-oid" href="#1d">1d</a> + <a class="dv-oid" href="#1f">1f</a> merged" · "riff <a class="dv-oid" href="#1m">1m</a> with the instrument strip from my refs, denser" · "combine <a class="dv-oid" href="#1b">1b</a>'s glance band with <a class="dv-oid" href="#1c">1c</a>'s fact ledger" · "wireframe the shell that holds these"</p>
+</section>
+</x-dc>
+</body>
+</html>

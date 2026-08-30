@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap" rel="stylesheet"><style>body{margin:0;background:#f5f8fc;font-family:'Plus Jakarta Sans',sans-serif;color:#00175a}a{color:#006fcf}a:hover{color:#00175a}</style></helmet>
+<div style="max-width:1060px;margin:0 auto;padding:20px 28px 48px;display:flex;flex-direction:column;gap:14px">
+<div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#5b6b8f">
+<a href="Lumi Home.dc.html" style="font-weight:800;color:#00175a;letter-spacing:.02em;font-size:14px;text-decoration:none">LUMI</a>
+<span style="border-left:1px solid #d7e2f2;padding-left:10px">Operate · Builds &amp; Diffs</span>
+<span style="margin-left:auto;display:flex;gap:8px">
+<button style="background:#006fcf;color:#fff;border:none;border-radius:8px;padding:5px 16px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer">promote</button>
+<button style="border:1px solid #d7e2f2;background:#fff;border-radius:8px;padding:5px 14px;font-family:inherit;font-size:12px;font-weight:600;color:#00175a;cursor:pointer">rollback</button>
+</span>
+</div>
+
+<div style="background:#fff;border:1.5px solid #0e7a55;border-radius:16px;padding:18px 22px;display:flex;flex-direction:column;gap:12px;box-shadow:0 1px 3px rgba(0,23,90,.07)">
+<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+<span style="display:inline-flex;border:1px solid #0e7a55;color:#0e7a55;background:#eaf6f0;border-radius:999px;padding:1px 11px;font-size:11px;font-weight:800">CURRENT</span>
+<span style="font-size:16px;font-weight:800;font-family:'IBM Plex Mono',monospace">b_228309551bae</span>
+<span style="font-size:12px;color:#5b6b8f">Aug 30 · gates ✓</span>
+<span style="margin-left:auto;font-size:12px;color:#33415f">tables <b>45</b> <span style="color:#5b6b8f">(+1 excluded: no partition key — reconciliation always explains 46 vs 45)</span></span>
+</div>
+<div style="display:flex;flex-direction:column;gap:6px">
+<span style="font-size:11px;font-weight:700;letter-spacing:.05em;color:#5b6b8f">DIFF vs b_000c… — semantic changes first</span>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:13px;color:#33415f">
+<span>metrics <span style="font-family:'IBM Plex Mono',monospace;font-size:12px">3,073 → 3,074</span> <span style="color:#0e7a55;font-weight:600">+1 studio ●</span></span>
+<span>joins <span style="font-family:'IBM Plex Mono',monospace;font-size:12px">0 → 2</span> <span style="color:#0e7a55;font-weight:600">◆ witnessed</span></span>
+<span>agreement=2 facts <span style="font-family:'IBM Plex Mono',monospace;font-size:12px">0 → 14</span></span>
+<span>census conflicts <span style="font-family:'IBM Plex Mono',monospace;font-size:12px">101</span> · <a href="F4 Steward Cockpit.dc.html">to queue ›</a></span>
+<span>structural: D1 <b>768</b> phantom · D3 <b>37</b> · D5 <b>901</b></span>
+<span>warnings <span style="font-family:'IBM Plex Mono',monospace;font-size:12px">61,215 → 0</span> <span style="color:#5b6b8f">(all typed now)</span></span>
+<span>cards changed <b>39</b></span>
+<span>dropped sections <b>0</b> <span style="color:#0e7a55">✓</span></span>
+</div>
+</div>
+<span style="font-size:11.5px;color:#5b6b8f">promote / rollback is a one-line PR — the pointer moves, nothing is rewritten</span>
+</div>
+
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:14px 22px;display:flex;align-items:center;gap:14px;font-size:12.5px;color:#33415f;box-shadow:0 1px 3px rgba(0,23,90,.07)">
+<span style="font-family:'IBM Plex Mono',monospace;font-weight:700">b_000c…</span>
+<span style="color:#5b6b8f">Aug 26 · first real build · gates ✓</span>
+<a href="#" style="margin-left:auto;font-weight:600">view manifest</a>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1120,&quot;height&quot;:540}}"></script>
+</body>
+</html>

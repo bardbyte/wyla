@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap" rel="stylesheet"><style>body{margin:0;background:#f5f8fc;font-family:'Plus Jakarta Sans',sans-serif;color:#00175a}a{color:#006fcf}a:hover{color:#00175a}</style></helmet>
+<div style="max-width:1060px;margin:0 auto;padding:20px 28px 48px;display:flex;flex-direction:column;gap:14px">
+<div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#5b6b8f">
+<a href="Lumi Home.dc.html" style="font-weight:800;color:#00175a;letter-spacing:.02em;font-size:14px;text-decoration:none">LUMI</a>
+<span style="border-left:1px solid #d7e2f2;padding-left:10px">Govern · Enrichment Runs</span>
+<span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+<button style="border:1px solid #d7e2f2;background:#fff;border-radius:8px;padding:5px 14px;font-family:inherit;font-size:12px;font-weight:600;color:#00175a;cursor:pointer">plan</button>
+<button style="border:1px solid #d7e2f2;background:#fff;border-radius:8px;padding:5px 14px;font-family:inherit;font-size:12px;font-weight:600;color:#00175a;cursor:pointer">smoke</button>
+<button style="background:#006fcf;color:#fff;border:none;border-radius:8px;padding:5px 16px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer">run</button>
+</span>
+</div>
+
+<div style="background:#fff;border:1.5px solid #006fcf;border-radius:16px;padding:18px 22px;display:flex;flex-direction:column;gap:10px;box-shadow:0 1px 3px rgba(0,23,90,.07)">
+<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+<span style="font-size:16px;font-weight:800;font-family:'IBM Plex Mono',monospace">b1_r3</span>
+<span style="font-size:12px;color:#5b6b8f">prompt b1.2 · Aug 30 · latest</span>
+<span style="margin-left:auto;display:inline-flex;border:1px solid #0e7a55;color:#0e7a55;background:#eaf6f0;border-radius:999px;padding:1px 11px;font-size:11.5px;font-weight:700">tier: BATCH — blind gate passed</span>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;font-size:13px;color:#33415f">
+<span>leakage check: <b>0/34</b> contexts contain label tokens <span style="color:#0e7a55">✓</span></span>
+<span>blind gate: <b>28/34</b> recovered (82%) → <b>BATCH</b> <span style="color:#5b6b8f;font-size:11.5px">(≥80 batch · ≥60 item)</span></span>
+<span>enriched <b>500/500</b> · tranche complete</span>
+<span>collisions <b>7</b> → <a href="F4 Steward Cockpit.dc.html">steward queue</a> · invalid_json <b>2</b> · retried ✓</span>
+<span>withheld (low confidence) <b>11</b> — never served silently</span>
+<span>thought tokens 1.2M · cost <b>$18.40</b></span>
+</div>
+<div style="display:flex;flex-direction:column;gap:4px">
+<span style="font-size:11px;font-weight:700;letter-spacing:.05em;color:#5b6b8f">PER-ITEM MARGINS</span>
+<div style="display:flex;align-items:flex-end;gap:2px;height:38px">
+<div style="width:5%;height:8%;background:#b3282d;border-radius:2px 2px 0 0"></div><div style="width:5%;height:14%;background:#b07908;border-radius:2px 2px 0 0"></div><div style="width:6%;height:22%;background:#b07908;border-radius:2px 2px 0 0"></div><div style="width:7%;height:34%;background:#a9b8d4;border-radius:2px 2px 0 0"></div><div style="width:9%;height:48%;background:#a9b8d4;border-radius:2px 2px 0 0"></div><div style="width:12%;height:62%;background:#7fb5e8;border-radius:2px 2px 0 0"></div><div style="width:16%;height:78%;background:#006fcf;border-radius:2px 2px 0 0"></div><div style="width:20%;height:92%;background:#006fcf;border-radius:2px 2px 0 0"></div><div style="width:14%;height:100%;background:#00175a;border-radius:2px 2px 0 0"></div>
+</div>
+<span style="font-size:10.5px;color:#5b6b8f">margin distribution — left tail (11 items) withheld below 0.15 margin</span>
+</div>
+<div style="display:flex;gap:8px;align-items:center">
+<button style="border:1px solid #d7e2f2;background:#fff;border-radius:8px;padding:6px 14px;font-family:inherit;font-size:12px;color:#00175a;cursor:pointer">view per-item margins</button>
+<button style="border:1px solid #006fcf;color:#006fcf;background:#fff;border-radius:8px;padding:6px 14px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer">recompile to serve → preview DIFF</button>
+<span style="margin-left:auto;font-size:11px;color:#5b6b8f">nothing serves without a recompile · DIFF renders before promote</span>
+</div>
+</div>
+
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:14px 22px;display:flex;align-items:center;gap:14px;font-size:12.5px;color:#33415f;box-shadow:0 1px 3px rgba(0,23,90,.07);flex-wrap:wrap">
+<span style="font-family:'IBM Plex Mono',monospace;font-weight:700">b1_r2</span>
+<span style="color:#5b6b8f">prompt b1.1 · Aug 28</span>
+<span>blind gate 76% → <b>tier: ITEM</b> — read case-by-case ✓</span>
+<span style="margin-left:auto;color:#5b6b8f">prompt diff b1.1 → b1.2: added anti-leak instruction · <a href="#" style="font-weight:600">view</a></span>
+</div>
+<div style="font-size:12px;color:#5b6b8f">Calibration decides trust tier per run, not per vibe: the blind gate is measured on held-out labels before anything is served.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1120,&quot;height&quot;:620}}"></script>
+</body>
+</html>
