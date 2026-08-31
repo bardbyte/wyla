@@ -55,6 +55,7 @@ a:hover { color: var(--ink); }
 .navlist a:nth-child(3) { animation-delay: 0.1s; }
 .navlist a:nth-child(4) { animation-delay: 0.14s; }
 .navlist a:nth-child(5) { animation-delay: 0.18s; }
+.navlist a:nth-child(6) { animation-delay: 0.22s; }
 @keyframes nav-in {
   from { opacity: 0; transform: translateX(-6px); }
   to { opacity: 1; transform: none; }
@@ -382,6 +383,32 @@ textarea.input { font-family: var(--font-mono); font-size: var(--fs-12);
 .artifact-panel-body { overflow-y: auto; flex: 1; min-height: 0;
                        padding-right: var(--s-2); }
 .connectors .btn { font-size: var(--fs-12); padding: 6px 12px; }
+
+/* the finder tree: disclosure folders, files as rows */
+.tree { display: flex; flex-direction: column; gap: 1px; }
+.tree-folder > summary {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  list-style: none; padding: 5px 10px; border-radius: var(--r-md);
+  font-weight: 600; font-size: var(--fs-13); color: var(--ink);
+  user-select: none;
+}
+.tree-folder > summary::-webkit-details-marker { display: none; }
+.tree-folder > summary:hover { background: var(--bg); }
+.tree-folder > summary .tri {
+  width: 12px; color: var(--ink-3);
+  transition: transform 0.15s ease; display: inline-block;
+}
+.tree-folder[open] > summary .tri { transform: rotate(90deg); }
+.tree-folder > summary .folder-ico { color: var(--accent); }
+.tree-count { font-weight: 400; font-size: var(--fs-11); }
+.tree-children {
+  margin-left: 14px; padding-left: 8px;
+  border-left: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tree-folder > summary .tri { transition: none; }
+}
 
 /* markdown rendering */
 .md { display: flex; flex-direction: column; gap: var(--s-2);

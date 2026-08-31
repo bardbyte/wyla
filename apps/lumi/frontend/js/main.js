@@ -1,13 +1,14 @@
 /** Synapse by Lumi: shell: hash router over the left sidebar,
  * theme toggle.
- * Routes: #/home #/semantics #/cosmos #/artifacts #/operate
- *         #/metric/<id> #/table/<physical>
+ * Routes: #/home #/semantics #/tables #/cosmos #/artifacts
+ *         #/operate #/metric/<id> #/table/<physical>
  * Deep links work: a metric profile is a URL you can send someone. */
 
 import { renderHome } from "./pages/home.js";
 import { renderSemantics } from "./pages/semantics.js";
 import { renderMetric } from "./pages/metric.js";
 import { renderTable } from "./pages/table.js";
+import { renderTables } from "./pages/tables.js";
 import { renderCosmos } from "./pages/cosmos.js";
 import { renderArtifacts } from "./pages/artifacts.js";
 import { renderOperate } from "./pages/operate.js";
@@ -25,7 +26,8 @@ async function route() {
   if (teardown) { try { teardown(); } catch { /* page gone */ } }
   teardown = null;
   const { page, arg } = parseRoute();
-  const tab = page === "metric" || page === "table" ? "semantics" : page;
+  const tab = page === "metric" ? "semantics"
+    : page === "table" ? "tables" : page;
   document.querySelectorAll(".navlist a[data-tab]").forEach((a) =>
     a.classList.toggle("active", a.dataset.tab === tab));
   outlet.classList.toggle("wide", page === "cosmos");
@@ -33,6 +35,7 @@ async function route() {
   const pages = {
     home: renderHome,
     semantics: renderSemantics,
+    tables: renderTables,
     metric: () => renderMetric(outlet, arg),
     table: () => renderTable(outlet, arg),
     cosmos: renderCosmos,
