@@ -28,10 +28,14 @@ reason — nothing is mocked, ever.** Builds compiled before E17-A lack
 sources dir, resolved in order: `MERIDIAN_SOURCES_DIR` → the silo's
 own `sources/` if present → the absolute `--sources-dir` recorded by
 your latest `laptop.py build-graph` run (manifests record their input
-roots). Older graphs predate that record: either set
-`MERIDIAN_SOURCES_DIR=$DATA/sources` before `uvicorn`, or re-run
-`build-graph` once. When the shelf is empty the page says exactly
-which path it checked.
+roots). The easiest way to set it: paste
+`MERIDIAN_SOURCES_DIR=/path/to/$DATA/sources` into the silo's `.env`
+(see `.env.example`) — the app loads it at startup with the
+pipeline's own loader, and shell-exported variables always win over
+the file. When the shelf is empty the page says exactly which path
+it checked. `python scripts/graph_state.py` (in the silo) prints
+where the shelf resolves on this machine, along with the promoted
+build, statuses, and every enrichment run's blind-gate line.
 
 The same `.env` as the pipeline rides along: `/api/lumi/planes`
 reports the BQ (PSC) and Vertex (proxy) planes as booleans —

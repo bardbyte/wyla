@@ -31,7 +31,28 @@ from apps.lumi.backend.meridian import router as meridian_router
 _FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 
 
+def _load_env_file() -> None:
+    """Pick up the silo's ``.env`` (the pipeline's own loader: first
+    file found among $SAHS_ENV_FILE → <silo>/.env → ./.env; NEVER
+    overrides variables already exported in the shell). So pasting
+    ``MERIDIAN_SOURCES_DIR=/path/to/data/sources`` into the .env is
+    enough for the Knowledge Files shelf to find its files."""
+    import sys
+    silo = os.environ.get(
+        "MERIDIAN_SILO_DIR",
+        str(Path(__file__).resolve().parents[3]
+            / "synapse-agentic-harness-system"))
+    if silo not in sys.path:
+        sys.path.insert(0, silo)
+    try:
+        from sahs.util.auth import load_dotenv
+        load_dotenv()
+    except ImportError:                 # silo not present: env only
+        pass
+
+
 def create_app() -> FastAPI:
+    _load_env_file()
     app = FastAPI(title="Synapse by Lumi", version="0.1.0")
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
