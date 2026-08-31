@@ -94,6 +94,24 @@ def _lob_by_table(build: Build) -> dict[str, str]:
     return out
 
 
+def _looks_like_sql(text: str) -> bool:
+    """The Atlas export carries 'terms' whose NAME is a raw SQL
+    fragment ('case when se_cr_dr_in = ...'). A fragment always
+    phrase-matches its own SQL blob, so the b1.4 smoke fed
+    unbalanced-quoted SQL into prompts as authoritative vocabulary —
+    correlated with that run's only empty answers. A term shaped like
+    code defines nothing; drop it at the shelf."""
+    lowered = text.lower()
+    if any(op in lowered for op in ("=", "<", ">")):
+        return True
+    words = set(lowered.replace("(", " ").split())
+    if {"case", "when"} <= words:
+        return True
+    # a multi-word 'phrase' containing snake_case identifiers is an
+    # expression fragment, not a business term
+    return " " in lowered and "_" in lowered
+
+
 def _vocab_index(build: Build) -> tuple[dict[str, str],
                                         list[tuple[str, str]]]:
     """The company's own reference shelf — Atlas business terms + the
@@ -104,7 +122,7 @@ def _vocab_index(build: Build) -> tuple[dict[str, str],
     multi: list[tuple[str, str]] = []
     for row in build.vocab:
         text = str(row.get("text") or "").strip()
-        if not text or len(text) < 2:
+        if not text or len(text) < 2 or _looks_like_sql(text):
             continue
         definition = str(row.get("definition") or "").strip()
         entry = text + (f" — {definition[:140]}" if definition else "")

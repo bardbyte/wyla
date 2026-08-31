@@ -49,11 +49,14 @@ htmlcov/
 output/
 *.log
 
-# Claude Code local context — never push these
-.claude/
-**/.claude/
+# Claude Code local context — never push these…
+.claude/*
+**/.claude/*
 CLAUDE.md
 **/CLAUDE.md
+# …EXCEPT shared project skills, which ship with the repo
+!.claude/skills/
+!**/.claude/skills/
 
 # Internal design / decision docs — keep local, don't push.
 # Everything under archive/ is legacy and stays local.

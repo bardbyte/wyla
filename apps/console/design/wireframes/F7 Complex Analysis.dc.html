@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap" rel="stylesheet"><style>body{margin:0;background:#f5f8fc;font-family:'Plus Jakarta Sans',sans-serif;color:#00175a}a{color:#006fcf}a:hover{color:#00175a}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes barIn{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes blink{50%{opacity:.2}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:0ms!important}}
+</style></helmet>
+<div style="max-width:960px;margin:0 auto;padding:20px 28px 48px;display:flex;flex-direction:column;gap:14px">
+<div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#5b6b8f">
+<span style="font-weight:800;color:#00175a;letter-spacing:.02em;font-size:14px">LUMI</span>
+<span style="border-left:1px solid #d7e2f2;padding-left:10px">F7 · complex analysis — the exploratory lane</span>
+<div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+<div style="width:70px;height:4px;background:#eef3fa;border-radius:2px"><div style="width:{{ budgetPct }};height:100%;background:{{ budgetColor }};border-radius:2px;transition:width .6s ease"></div></div>
+<span style="font-size:10.5px;font-family:'IBM Plex Mono',monospace;color:#a9b8d4">turn {{ turn }}</span>
+<a href="F8 Session Continuity.dc.html" style="text-decoration:none;font-weight:600;margin-left:8px">F8 →</a>
+</div>
+</div>
+
+<div style="align-self:flex-end;background:#00175a;color:#fff;border-radius:14px 14px 4px 14px;padding:10px 16px;font-size:14px;max-width:75%">Decompose the Q2 spend drop into rate vs mix, by segment</div>
+
+<sc-if value="{{ showTheater }}" hint-placeholder-val="{{ true }}">
+<div style="display:flex;gap:6px;align-items:center;font-size:11.5px;flex-wrap:wrap;animation:fadeUp .3s ease both">
+<sc-for list="{{ phases }}" as="ph" hint-placeholder-count="5">
+<span style="border:{{ ph.border }};color:{{ ph.color }};background:{{ ph.bg }};border-radius:999px;padding:2px 11px;font-weight:600;white-space:nowrap">{{ ph.label }}</span>
+</sc-for>
+<span style="font-size:11px;color:#5b6b8f;margin-left:4px">{{ theaterNote }}</span>
+</div>
+</sc-if>
+
+<sc-if value="{{ showNotebook }}" hint-placeholder-val="{{ false }}">
+<div style="background:#fff;border:{{ nbBorder }};border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 1px 3px rgba(0,23,90,.07);animation:fadeUp .35s ease both;transition:border-color .5s ease">
+<sc-if value="{{ exploratory }}" hint-placeholder-val="{{ true }}">
+<div style="background:#fdf4e0;border-bottom:1px solid #f0ddb0;padding:8px 20px;font-size:11.5px;color:#b07908;font-weight:700;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><span>EXPLORATORY</span><span style="font-weight:400">built from governed parts · not yet a governed answer</span></div>
+</sc-if>
+<sc-if value="{{ promoted }}" hint-placeholder-val="{{ false }}">
+<div style="background:#eaf6f0;border-bottom:1px solid #bfe3d2;padding:8px 20px;font-size:11.5px;color:#0e7a55;font-weight:700;display:flex;justify-content:space-between;gap:10px"><span>GOVERNED ANSWER</span><span style="font-weight:400">contract gate passed · 4/4 checks</span></div>
+</sc-if>
+<div style="padding:18px 22px;display:flex;flex-direction:column;gap:13px;position:relative">
+<sc-if value="{{ exploratory }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;right:18px;top:14px;font-size:34px;font-weight:800;color:#b0790814;letter-spacing:.04em;pointer-events:none;user-select:none">EXPLORATORY</span></sc-if>
+<span style="font-size:15px;font-weight:700">Goal: split Q2's −C$41M vs Q1 into price (rate) and portfolio (mix) effects, per segment</span>
+
+<div style="display:flex;flex-direction:column;gap:6px">
+<button onClick="{{ toggleScript }}" style="align-self:flex-start;border:none;background:none;padding:0;font-family:inherit;font-size:11.5px;color:#006fcf;font-weight:600;cursor:pointer">{{ scriptToggleLabel }}</button>
+<sc-if value="{{ scriptOpen }}" hint-placeholder-val="{{ false }}">
+<div style="background:#f5f8fc;border:1px solid #d7e2f2;border-radius:10px;padding:10px 12px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#33415f;display:flex;flex-direction:column;gap:3px">
+<span>q1, q2 = sdk.metric("TBB").by("segment").quarters("2026Q1","2026Q2")  <span style="color:#5b6b8f"># certified expression, no raw SQL</span></span>
+<span>rate = (q2.avg_ticket - q1.avg_ticket) * q1.volume</span>
+<span>mix&nbsp; = (q2.volume - q1.volume) * q1.avg_ticket</span>
+<span>decomp = rate.join(mix, on="segment")  <span style="color:#5b6b8f"># grain checked by SDK: segment stays segment</span></span>
+</div>
+</sc-if>
+</div>
+
+<sc-if value="{{ st1 }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;gap:6px;animation:fadeUp .35s ease both">
+<span style="font-size:11px;font-weight:700;letter-spacing:.05em;color:#5b6b8f">STEP 1 · QUARTERLY BASE <span style="font-weight:400">— 2 rows × 4 segments</span></span>
+<div style="border:1px solid #d7e2f2;border-radius:10px;overflow:hidden;font-size:12px">
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;background:#f5f8fc;padding:6px 12px;font-weight:700;color:#5b6b8f;font-size:11px"><span>quarter</span><span>SMB</span><span>Mid</span><span>Large</span><span>Global</span></div>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;padding:6px 12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;border-top:1px solid #eef3fa"><span style="font-family:'Plus Jakarta Sans',sans-serif">Q1</span><span>168M</span><span>204M</span><span>141M</span><span>140M</span></div>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;padding:6px 12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;border-top:1px solid #eef3fa"><span style="font-family:'Plus Jakarta Sans',sans-serif">Q2</span><span>151M</span><span>196M</span><span>139M</span><span>126M</span></div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ st2 }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;gap:6px;animation:fadeUp .35s ease both">
+<span style="font-size:11px;font-weight:700;letter-spacing:.05em;color:#5b6b8f">STEP 2 · RATE VS MIX DELTAS <span style="font-weight:400">— the decomposition</span></span>
+<div style="display:flex;flex-direction:column;gap:5px">
+<sc-for list="{{ bars }}" as="b" hint-placeholder-count="4">
+<div style="display:grid;grid-template-columns:56px 1fr 1fr 84px;gap:10px;align-items:center;font-size:12px">
+<span style="color:#33415f">{{ b.seg }}</span>
+<div style="display:flex;justify-content:flex-end"><div style="width:{{ b.ratePct }};height:12px;background:#006fcf;border-radius:6px 0 0 6px;transform-origin:right;animation:barIn .7s ease both"></div></div>
+<div style="display:flex"><div style="width:{{ b.mixPct }};height:12px;background:#7fb5e8;border-radius:0 6px 6px 0;transform-origin:left;animation:barIn .7s .15s ease both"></div></div>
+<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#5b6b8f">{{ b.total }}</span>
+</div>
+</sc-for>
+<div style="display:flex;gap:14px;font-size:10.5px;color:#5b6b8f"><span><span style="display:inline-block;width:9px;height:9px;background:#006fcf;border-radius:2px"></span> rate (price)</span><span><span style="display:inline-block;width:9px;height:9px;background:#7fb5e8;border-radius:2px"></span> mix (portfolio)</span></div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ st3 }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;gap:6px;animation:fadeUp .35s ease both">
+<span style="font-size:11px;font-weight:700;letter-spacing:.05em;color:#5b6b8f">STEP 3 · FINDING</span>
+<div style="font-size:14px;color:#33415f;line-height:1.55;max-width:640px"><b style="color:#00175a">−C$41M is mostly mix, not rate.</b> SMB volume fell (−C$14M mix) and Global shifted to smaller tickets (−C$11M mix); pricing held everywhere except SMB (−C$5M rate). Every number derives from TBB v4 ● and observed volumes — no unwitnessed inputs.</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ showGate }}" hint-placeholder-val="{{ false }}">
+<div style="border-top:1px solid #eef3fa;padding-top:12px;display:flex;flex-direction:column;gap:8px;animation:fadeUp .3s ease both">
+<sc-if value="{{ gateIdle }}" hint-placeholder-val="{{ true }}">
+<div style="display:flex;gap:10px;align-items:center">
+<button onClick="{{ promote }}" style="background:#006fcf;color:#fff;border:none;border-radius:9px;padding:8px 20px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer" style-hover="background:#00175a">Promote to governed answer</button>
+<span style="font-size:11.5px;color:#5b6b8f">runs the contract gate — default is FAIL, passing is earned</span>
+</div>
+</sc-if>
+<sc-if value="{{ gateRunning }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;gap:6px;font-size:12.5px">
+<span style="font-weight:700;font-size:12px;color:#5b6b8f">CONTRACT GATE · verifying</span>
+<sc-for list="{{ checks }}" as="c" hint-placeholder-count="4">
+<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;animation:fadeUp .3s ease both">
+<span style="color:{{ c.color }};font-weight:{{ c.weight }}">{{ c.label }}</span>
+<span style="font-size:11px;color:#5b6b8f;font-family:'IBM Plex Mono',monospace">{{ c.evidence }}</span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ promoted }}" hint-placeholder-val="{{ false }}">
+<div style="border-top:2px solid #006fcf;padding-top:10px;display:flex;flex-direction:column;gap:9px;animation:fadeUp .4s ease both">
+<div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap">
+<span style="font-size:32px;font-weight:800;letter-spacing:-.02em">−C$41M</span>
+<span style="font-size:13.5px;color:#33415f">Q2 spend drop · 78% mix / 22% rate · led by SMB volume</span>
+</div>
+<div style="display:flex;gap:10px;align-items:center;font-size:11px;color:#5b6b8f;flex-wrap:wrap">
+<span style="color:#006fcf;font-weight:700">— meridian</span><span>def: TBB v4 ●</span><span>decomp: rate/mix (standard)</span>
+<span style="border:1px solid #0e7a55;color:#0e7a55;background:#eaf6f0;border-radius:999px;padding:0 9px;font-weight:700">verified ✓ · 4/4 checks</span>
+<span style="font-family:'IBM Plex Mono',monospace">build 8c4a90</span>
+</div>
+<div style="display:flex;gap:8px">
+<button style="border:1px solid #006fcf;color:#006fcf;background:#fff;border-radius:8px;padding:6px 15px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer">Save as governed metric → steward flywheel</button>
+<button onClick="{{ reset }}" style="border:1px solid #d7e2f2;color:#00175a;background:#fff;border-radius:8px;padding:6px 14px;font-family:inherit;font-size:12.5px;cursor:pointer">⟲ replay flow</button>
+</div>
+</div>
+</sc-if>
+</div>
+</div>
+</sc-if>
+<div style="font-size:12px;color:#5b6b8f">The lane's whole job: powerful feels different from certified without feeling second-class. The watermark and banner never blur; only the gate removes them.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1020,&quot;height&quot;:880}}">
+class Component extends DCLogic {
+  state = { step: 0, scriptOpen: false, gate: 'idle', gateStep: 0 };
+  // steps: 0 theater resolving/planning, 1 executing+step1, 2 step2, 3 step3+gate idle, gate: running → promoted
+  componentDidMount() { this.arm(); }
+  componentWillUnmount() { clearTimeout(this.tm); }
+  arm() {
+    clearTimeout(this.tm);
+    const s = this.state;
+    if (s.step < 3) this.tm = setTimeout(() => this.setState({ step: s.step + 1 }, () => this.arm()), s.step === 0 ? 1800 : 2200);
+    else if (s.gate === 'running' && s.gateStep < 4) this.tm = setTimeout(() => {
+      const g = this.state.gateStep + 1;
+      this.setState(g >= 4 ? { gate: 'passed', gateStep: 4 } : { gateStep: g }, () => this.arm());
+    }, 900);
+  }
+  renderVals() {
+    const { step, gate, gateStep } = this.state;
+    const names = ['resolving', 'planning', 'executing', 'verifying'];
+    const active = gate === 'running' ? 3 : step === 0 ? 1 : step === 1 ? 2 : -1;
+    const doneN = gate === 'passed' ? 4 : gate === 'running' ? 3 : step >= 2 ? 3 : step >= 1 ? 2 : 1;
+    const CHECKS = [
+      { label: '✓ executes', evidence: '1.1 GB scanned · 2.4s' },
+      { label: '✓ uses certified spend expression', evidence: 'TBB v4 ●' },
+      { label: '✓ grain holds', evidence: 'segment stays segment · no fan-out' },
+      { label: '✓ explanation grounded', evidence: 'every claim ← computed delta' },
+    ];
+    return {
+      turn: gate === 'passed' ? 9 : 7 + Math.min(step, 2),
+      budgetPct: gate === 'passed' ? '46%' : (34 + step * 3) + '%', budgetColor: '#a9b8d4',
+      showTheater: true,
+      theaterNote: gate === 'running' ? 'verification ticks — each criterion earns its ✓' : step === 0 ? 'resolution was instant (40ms) — composition is what thinks' : step === 1 ? 'the SDK executes governed expressions only' : gate === 'passed' ? 'run complete · replayable' : 'awaiting your promote decision',
+      phases: names.map((n, i) => ({
+        label: i < doneN && !(i === active) ? n + ' ✓' : n,
+        border: i === active ? '1.5px solid #006fcf' : i < doneN ? '1px solid #0e7a55' : '1px dashed #c6dcf5',
+        color: i === active ? '#006fcf' : i < doneN ? '#0e7a55' : '#7c8bab',
+        bg: i === active ? '#eaf2fb' : '#fff',
+      })),
+      showNotebook: step >= 1,
+      exploratory: gate !== 'passed', promoted: gate === 'passed',
+      nbBorder: gate === 'passed' ? '1px solid #bfe3d2' : '1.5px dashed #b07908',
+      scriptOpen: this.state.scriptOpen,
+      scriptToggleLabel: this.state.scriptOpen ? '▾ hide script (governed SDK)' : '▸ show script (governed SDK)',
+      toggleScript: () => this.setState((s) => ({ scriptOpen: !s.scriptOpen })),
+      st1: step >= 1, st2: step >= 2, st3: step >= 3,
+      bars: [
+        { seg: 'SMB', ratePct: '26%', mixPct: '72%', total: '−19M' },
+        { seg: 'Mid', ratePct: '15%', mixPct: '26%', total: '−8M' },
+        { seg: 'Large', ratePct: '5%', mixPct: '5%', total: '−2M' },
+        { seg: 'Global', ratePct: '10%', mixPct: '57%', total: '−14M' },
+      ],
+      showGate: step >= 3 && gate !== 'passed',
+      gateIdle: gate === 'idle', gateRunning: gate === 'running',
+      checks: CHECKS.slice(0, gateStep + (gate === 'passed' ? 0 : 1)).map((c, i) => ({
+        ...c,
+        label: i < gateStep ? c.label : '◌ ' + c.label.slice(2) + '…',
+        color: i < gateStep ? '#33415f' : '#b07908', weight: i < gateStep ? 400 : 700,
+      })),
+      promote: () => this.setState({ gate: 'running', gateStep: 0 }, () => this.arm()),
+      reset: () => this.setState({ step: 0, gate: 'idle', gateStep: 0, scriptOpen: false }, () => this.arm()),
+    };
+  }
+}
+</script>
+</body>
+</html>

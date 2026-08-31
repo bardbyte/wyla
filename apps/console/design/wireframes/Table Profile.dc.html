@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;600;700;800&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap" rel="stylesheet"><style>body{margin:0;background:#f4f6f9;font-family:'Libre Franklin',sans-serif;color:#1a2332}a{color:#006fcf}a:hover{color:#005fb8}</style></helmet>
+<div style="max-width:1220px;margin:0 auto;padding:20px 28px 48px;display:flex;flex-direction:column;gap:16px">
+<div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#71809b">
+<span style="font-weight:800;color:#1a2332;letter-spacing:.02em">SYNAPSE</span><span>·</span>
+<span>Data Products</span><span>›</span><span style="color:#1a2332;font-weight:600">gcs_transactions</span>
+<span style="margin-left:auto;display:flex;gap:14px"><a href="Agent Theater.dc.html" style="text-decoration:none;font-weight:600">Agent theater →</a><a href="Graph Cosmos.dc.html" style="text-decoration:none;font-weight:600">Cosmos →</a></span>
+</div>
+
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:14px;padding:20px 24px;display:flex;gap:24px;align-items:center;box-shadow:0 1px 2px rgba(26,35,50,.06)">
+<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:none">
+<svg width="72" height="72" viewBox="0 0 72 72"><circle cx="36" cy="36" r="31" fill="none" stroke="#eef1f6" stroke-width="7"></circle><circle cx="36" cy="36" r="31" fill="none" stroke="#0e7a55" stroke-width="7" stroke-linecap="round" stroke-dasharray="142 195" transform="rotate(-90 36 36)"></circle><text x="36" y="41" text-anchor="middle" font-size="17" font-weight="800" font-family="Libre Franklin" fill="#1a2332">73%</text></svg>
+<span style="font-size:11px;color:#71809b;font-weight:600;letter-spacing:.06em">READY</span>
+</div>
+<div style="display:flex;flex-direction:column;gap:7px;flex:1;min-width:0">
+<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+<h1 style="margin:0;font-size:26px;font-weight:800;letter-spacing:-.01em">gcs_transactions</h1>
+<span style="font-size:14px;color:#4a5568">Global Card Settlements</span>
+</div>
+<div style="font-size:13.5px;color:#4a5568">One row per settled card transaction, global. <button onClick="{{ openDesc }}" style="border:none;background:none;padding:0;font:inherit;font-size:12px;color:#006fcf;cursor:pointer;text-decoration:underline">who says so</button></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+<span style="display:inline-flex;align-items:center;gap:5px;border:1px solid #0e7a55;color:#0e7a55;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600">◆ grounded</span>
+<span style="display:inline-flex;align-items:center;border:1px solid #d8dee8;border-radius:999px;padding:2px 10px;font-size:12px;color:#1a2332">Credit Risk</span>
+<button onClick="{{ openMembership }}" style="display:inline-flex;align-items:center;border:1px solid #d8dee8;border-radius:999px;padding:2px 10px;font-size:12px;color:#1a2332;background:#fff;font-family:inherit;cursor:pointer" style-hover="background:#eef1f6">also in: Merchant Services ◐</button>
+<span style="font-size:12px;color:#71809b">owner J. Ma · MDM + human</span>
+</div>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px;flex:none">
+<button style="background:#006fcf;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-family:inherit;font-size:13.5px;font-weight:600;cursor:pointer" style-hover="background:#005fb8">Ask about this table</button>
+<sc-if value="{{ steward }}" hint-placeholder-val="{{ true }}"><div style="font-size:11.5px;color:#9a6407;background:#f9efdc;border:1px solid #e8d5ae;border-radius:8px;padding:5px 10px;text-align:center">3 facts would reach ◆ with your review</div></sc-if>
+</div>
+</div>
+
+<div style="display:grid;grid-template-columns:1.6fr 1fr;gap:16px;align-items:start">
+<div style="display:flex;flex-direction:column;gap:16px">
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;box-shadow:0 1px 2px rgba(26,35,50,.06)">
+<div style="display:flex;align-items:baseline;justify-content:space-between"><h2 style="margin:0;font-size:15px;font-weight:700">Columns · 52</h2><span style="font-size:12px;color:#71809b">38 with witnessed meaning</span></div>
+<div style="height:7px;border-radius:4px;background:#eef1f6;overflow:hidden"><div style="width:73%;height:100%;background:#0e7a55;border-radius:4px"></div></div>
+<div style="display:flex;flex-direction:column">
+<sc-for list="{{ columns }}" as="col" hint-placeholder-count="6">
+<div style="display:grid;grid-template-columns:170px 1fr 90px 110px;gap:10px;align-items:center;padding:8px 6px;border-top:1px solid #eef1f6;font-size:13px" style-hover="background:#f7f9fc">
+<span style="font-family:'IBM Plex Mono',monospace;font-size:12px">{{ col.name }}</span>
+<span style="color:{{ col.meaningColor }}">{{ col.meaning }}</span>
+<span style="font-size:11px;color:#71809b;font-family:'IBM Plex Mono',monospace">{{ col.type }}</span>
+<button onClick="{{ col.open }}" style="justify-self:end;display:inline-flex;align-items:center;gap:4px;border:1px solid {{ col.tierColor }};color:{{ col.tierColor }};background:{{ col.tierBg }};border-radius:999px;padding:1px 9px;font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;border-style:{{ col.borderStyle }}">{{ col.tierLabel }}</button>
+</div>
+</sc-for>
+</div>
+<sc-if value="{{ colsCollapsed }}" hint-placeholder-val="{{ true }}"><button onClick="{{ expandCols }}" style="border:1px dashed #b9c2d0;background:#fafbfd;border-radius:8px;padding:7px;font-family:inherit;font-size:12.5px;color:#4a5568;cursor:pointer" style-hover="background:#eef1f6">Show 44 more columns</button></sc-if>
+</div>
+
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;box-shadow:0 1px 2px rgba(26,35,50,.06)">
+<h2 style="margin:0;font-size:15px;font-weight:700">Measures on this table · 6</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+<div style="border:1px solid #d8dee8;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:5px"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:700;font-size:13.5px">TBB</span><span style="font-size:11px;color:#0e7a55;font-weight:700">●</span></div><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#4a5568">SUM(amount_usd) WHERE settled</span><span style="font-size:11.5px;color:#71809b">"How much did we bill?" · 1.1k runs</span></div>
+<div style="border:1px solid #d8dee8;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:5px"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:700;font-size:13.5px">approval_rate</span><span style="font-size:11px;color:#0e7a55">◆</span></div><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#4a5568">approved / decisioned</span><span style="font-size:11.5px;color:#71809b">"What share clears?" · 640 runs</span></div>
+<div style="border:1px dashed #b9c2d0;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:5px;background:#fafbfd"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:700;font-size:13.5px;color:#4a5568">net_bps</span><span style="font-size:11px;color:#9a6407">◐</span></div><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#71809b">mined from 9 queries</span><span style="font-size:11.5px;color:#006fcf;text-decoration:underline;cursor:pointer">no owner yet — claim it</span></div>
+</div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:16px">
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:9px;box-shadow:0 1px 2px rgba(26,35,50,.06)">
+<h2 style="margin:0;font-size:14px;font-weight:700">Witness ledger</h2>
+<sc-for list="{{ witnesses }}" as="w" hint-placeholder-count="5">
+<div style="display:grid;grid-template-columns:110px 1fr 28px;gap:8px;align-items:center;font-size:12.5px">
+<span style="color:#4a5568">{{ w.name }}</span>
+<div style="height:6px;background:#eef1f6;border-radius:3px;overflow:hidden"><div style="width:{{ w.pct }};height:100%;background:#b9c2d0;border-radius:3px"></div></div>
+<span style="color:#71809b;font-family:'IBM Plex Mono',monospace;font-size:11px">×{{ w.n }}</span>
+</div>
+</sc-for>
+<span style="font-size:11.5px;color:#71809b">every fact expands to its witnesses — click any tier chip</span>
+</div>
+
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(26,35,50,.06)">
+<h2 style="margin:0;font-size:14px;font-weight:700">Usage</h2>
+<div style="display:flex;gap:16px;font-size:13px"><span><b style="font-size:17px">4.2k</b> <span style="color:#71809b;font-size:11.5px">runs / 90d</span></span><span><b style="font-size:17px">61</b> <span style="color:#71809b;font-size:11.5px">analysts</span></span></div>
+<sc-if value="{{ analyst }}" hint-placeholder-val="{{ true }}"><svg width="100%" height="34" viewBox="0 0 220 34" preserveAspectRatio="none"><polyline points="0,26 20,22 40,24 60,14 80,18 100,8 120,14 140,10 160,16 180,6 200,12 220,9" fill="none" stroke="#3b6fe0" stroke-width="2"></polyline></svg>
+<span style="font-size:11.5px;color:#71809b">peak: Mondays 9–11am · mined from query history</span></sc-if>
+</div>
+
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(26,35,50,.06)">
+<h2 style="margin:0;font-size:14px;font-weight:700">Join topology</h2>
+<div style="display:flex;justify-content:space-between;font-size:13px"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px">↔ merch_dim</span><span style="color:#71809b;font-size:12px">214 queries ◆</span></div>
+<div style="display:flex;justify-content:space-between;font-size:13px"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px">↔ auth_events</span><span style="color:#71809b;font-size:12px">88 queries ◆</span></div>
+<div style="display:flex;justify-content:space-between;font-size:13px"><span style="font-family:'IBM Plex Mono',monospace;font-size:12px">↔ fx_rates</span><span style="color:#71809b;font-size:12px">31 queries ◐</span></div>
+</div>
+
+<sc-if value="{{ showGaps }}" hint-placeholder-val="{{ true }}">
+<div style="background:#fafbfd;border:1px dashed #b9c2d0;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:8px">
+<h2 style="margin:0;font-size:14px;font-weight:700;color:#4a5568">What we don't know yet</h2>
+<span style="font-size:12.5px;color:#4a5568">14 columns have no witnessed meaning</span>
+<span style="font-size:12.5px;color:#4a5568">Deposits membership: no witness either way</span>
+<button style="align-self:flex-start;border:1px solid #006fcf;color:#006fcf;background:#fff;border-radius:8px;padding:5px 12px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer" style-hover="background:#e5f1fb">Review 3 facts → table reaches ◆</button>
+</div>
+</sc-if>
+</div>
+</div>
+</div>
+
+<sc-if value="{{ drawerOpen }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ closeDrawer }}" style="position:fixed;inset:0;background:rgba(26,35,50,.25)"></div>
+<div style="position:fixed;top:0;right:0;bottom:0;width:360px;background:#fff;border-left:1px solid #d8dee8;box-shadow:-8px 0 30px rgba(26,35,50,.12);padding:22px;display:flex;flex-direction:column;gap:12px;font-size:13px">
+<div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-size:15px;font-weight:700">Who says so</h2><button onClick="{{ closeDrawer }}" style="border:none;background:none;font-size:18px;cursor:pointer;color:#71809b">✕</button></div>
+<div style="font-size:13.5px;color:#1a2332;background:#f7f9fc;border-radius:8px;padding:10px">{{ drawerFact }}</div>
+<sc-for list="{{ drawerWitnesses }}" as="dw" hint-placeholder-count="2">
+<div style="border:1px solid #d8dee8;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px">
+<div style="display:flex;justify-content:space-between"><span style="font-weight:700">{{ dw.src }}</span><span style="font-size:11px;color:{{ dw.color }};font-weight:700">{{ dw.tier }}</span></div>
+<span style="color:#4a5568;font-size:12.5px">{{ dw.note }}</span>
+<span style="color:#71809b;font-size:11.5px">since {{ dw.since }}</span>
+</div>
+</sc-for>
+<div style="margin-top:auto;display:flex;flex-direction:column;gap:8px">
+<sc-if value="{{ steward }}" hint-placeholder-val="{{ true }}"><button onClick="{{ blessDrawer }}" style="background:#0e7a55;color:#fff;border:none;border-radius:8px;padding:9px;font-family:inherit;font-size:13.5px;font-weight:600;cursor:pointer">✓ Bless this fact — becomes ● human_asserted</button>
+<span style="font-size:11.5px;color:#71809b;text-align:center">recorded as you · today · reversible any time</span></sc-if>
+</div>
+</div>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1260,&quot;height&quot;:920},&quot;viewMode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;analyst depth&quot;,&quot;VP glance&quot;],&quot;default&quot;:&quot;analyst depth&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Audience&quot;},&quot;stewardMode&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Curation&quot;},&quot;provenanceInline&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Provenance&quot;}}">
+class Component extends DCLogic {
+  state = { drawer: null, colsExpanded: false };
+  static TIERS = {
+    ha: { label: '● human', color: '#0e7a55', bg: '#e2f3ec', border: 'solid' },
+    gr: { label: '◆ grounded', color: '#0e7a55', bg: '#ffffff', border: 'solid' },
+    in: { label: '◐ inferred', color: '#9a6407', bg: '#f9efdc', border: 'solid' },
+    gu: { label: '○ unknown', color: '#71809b', bg: '#fafbfd', border: 'dashed' },
+    de: { label: '⊘ PII', color: '#be3a48', bg: '#fbe9eb', border: 'solid' },
+  };
+  static COLS = [
+    { name: 'amount_usd', meaning: 'Settled amount in USD', type: 'NUMERIC', tier: 'ha', w: 'MDM · human' },
+    { name: 'cm11_encrypted', meaning: 'Card member id — guardrail bound', type: 'BYTES', tier: 'de', w: 'MDM · guardrail' },
+    { name: 'merch_id', meaning: 'Merchant key → merch_dim', type: 'STRING', tier: 'in', w: 'LLM · mined ×2' },
+    { name: 'settle_dt', meaning: 'Settlement date (UTC)', type: 'DATE', tier: 'ha', w: 'MDM · human' },
+    { name: 'auth_cd', meaning: 'Authorization code', type: 'STRING', tier: 'gr', w: 'MDM · gold SQL' },
+    { name: 'fx_rate', meaning: 'no meaning witnessed yet', type: 'NUMERIC', tier: 'gu', gap: true, w: 'no witness' },
+    { name: 'mcc', meaning: 'Merchant category code', type: 'STRING', tier: 'gr', w: 'glossary · MDM' },
+    { name: 'net_bps_raw', meaning: 'Basis points before fees', type: 'NUMERIC', tier: 'in', w: 'LLM' },
+  ];
+  static FACTS = {
+    desc: { fact: '"One row per settled card transaction, global."', ws: [
+      { src: 'MDM', tier: '◆ grounded', color: '#0e7a55', note: 'Declared description on the golden record.', since: 'Jan 2024' },
+      { src: 'S. Rivera (steward)', tier: '● human', color: '#0e7a55', note: 'Attested during Q1 domain review.', since: 'May 12, 2026' },
+    ]},
+    membership: { fact: 'gcs_transactions belongs to Merchant Services', ws: [
+      { src: 'mined usage', tier: '◐ inferred', color: '#9a6407', note: 'Appears in 12 Merchant Services queries.', since: 'Mar 2026' },
+      { src: 'DMP domain map', tier: '◐ inferred', color: '#9a6407', note: 'Listed under MS revenue playbook.', since: 'Feb 2026' },
+    ]},
+  };
+  openFor(key, fact, ws) { return () => this.setState({ drawer: { fact, ws } }); }
+  renderVals() {
+    const glance = (this.props.viewMode ?? 'analyst depth') === 'VP glance';
+    const steward = this.props.stewardMode ?? true;
+    const inl = this.props.provenanceInline ?? false;
+    const T = Component.TIERS, all = Component.COLS;
+    const n = glance ? 3 : (this.state.colsExpanded ? all.length : 6);
+    const columns = all.slice(0, n).map((c) => {
+      const t = T[c.tier];
+      return {
+        name: c.name, type: c.type,
+        meaning: inl ? c.meaning + '  ·  ' + c.w : c.meaning,
+        meaningColor: c.gap ? '#9a6407' : '#4a5568',
+        tierLabel: t.label, tierColor: t.color, tierBg: t.bg, borderStyle: t.border,
+        open: this.openFor(c.name, c.name + ' means: ' + c.meaning, [
+          { src: c.w, tier: t.label, color: t.color, note: c.gap ? 'Nothing has testified to this column yet — your attestation would be its first witness.' : 'Witnessed meaning for this column.', since: '2026' },
+        ]),
+      };
+    });
+    const d = this.state.drawer;
+    return {
+      analyst: !glance, steward, columns,
+      colsCollapsed: !glance && !this.state.colsExpanded,
+      expandCols: () => this.setState({ colsExpanded: true }),
+      witnesses: [
+        { name: 'human', n: 10, pct: '100%' }, { name: 'MDM', n: 8, pct: '80%' },
+        { name: 'BigQuery', n: 6, pct: '60%' }, { name: 'glossary', n: 5, pct: '50%' },
+        { name: 'mined usage', n: 2, pct: '20%' },
+      ],
+      showGaps: steward,
+      drawerOpen: !!d, drawerFact: d ? d.fact : '', drawerWitnesses: d ? d.ws : [],
+      openDesc: this.openFor('desc', Component.FACTS.desc.fact, Component.FACTS.desc.ws),
+      openMembership: this.openFor('m', Component.FACTS.membership.fact, Component.FACTS.membership.ws),
+      closeDrawer: () => this.setState({ drawer: null }),
+      blessDrawer: () => this.setState({ drawer: null }),
+    };
+  }
+}
+</script>
+</body>
+</html>

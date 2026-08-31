@@ -25,10 +25,15 @@ export const BRAND = {
 };
 
 export const TABS = [
+  { id: "home", label: "Home", preview: false },
+  { id: "semantics", label: "Semantics", preview: false },
+  { id: "cosmos", label: "Cosmos", preview: false },
+  { id: "artifacts", label: "Artifacts", preview: false },
   { id: "ask", label: "Ask", preview: false },
   { id: "products", label: "Data products", preview: false },
   { id: "graph", label: "Context graph", preview: false },
   { id: "knowledge", label: "Bring your knowledge", preview: false },
+  { id: "operate", label: "Operate", preview: false },
 ] as const;
 
 export type TabId = (typeof TABS)[number]["id"];

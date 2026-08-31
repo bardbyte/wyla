@@ -147,7 +147,7 @@ def test_vocab_adapters_and_degenerates():
     assert len(dups) == 3                             # BU-scoped meanings
     assert any(g.region == "EMEA" for g in dups)      # Global_Region header
     terms, tq = load_business_terms(FX / "business_terms.csv")
-    assert len(terms) == 20 and len(tq) == 1          # bad-status row
+    assert len(terms) == 21 and len(tq) == 1          # bad-status row
     assert {t.status for t in terms} == {
         "Approved", "Candidate", "Under Review", "Rejected"}
     entries, sq = load_std_tech_metadata(FX / "std_tech_metadata")

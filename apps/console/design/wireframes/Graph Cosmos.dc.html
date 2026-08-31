@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;600;700;800&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap" rel="stylesheet"><style>body{margin:0;background:#f4f6f9;font-family:'Libre Franklin',sans-serif;color:#1a2332}a{color:#006fcf}a:hover{color:#005fb8}</style></helmet>
+<div style="max-width:1240px;margin:0 auto;padding:20px 28px 40px;display:flex;flex-direction:column;gap:14px">
+<div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#71809b">
+<span style="font-weight:800;color:#1a2332;letter-spacing:.02em">SYNAPSE</span><span>·</span><span style="color:#1a2332;font-weight:600">Knowledge graph</span>
+<span style="margin-left:auto;display:flex;gap:14px"><a href="Table Profile.dc.html" style="text-decoration:none;font-weight:600">← Table profile</a><a href="Agent Theater.dc.html" style="text-decoration:none;font-weight:600">Agent theater</a></span>
+</div>
+
+<div style="display:flex;gap:10px;align-items:center;background:#fff;border:1px solid #d8dee8;border-radius:12px;padding:10px 14px;box-shadow:0 1px 2px rgba(26,35,50,.06)">
+<span style="color:#71809b">🔍</span><span style="color:#71809b;font-size:13.5px">fly to a table, metric, or domain…</span>
+<div style="margin-left:auto;display:flex;gap:6px;align-items:center;font-size:12px">
+<sc-for list="{{ edgeChips }}" as="ec" hint-placeholder-count="4">
+<button onClick="{{ ec.pick }}" style="border:1.5px solid {{ ec.border }};background:{{ ec.bg }};color:{{ ec.color }};border-radius:999px;padding:3px 12px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer">{{ ec.label }}</button>
+</sc-for>
+</div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 320px;gap:14px;align-items:stretch">
+<x-import component-from-global-scope="synapse-cosmos" from="./cosmos.js" theme="{{ theme }}" drift="{{ drift }}" edges="{{ edges }}" style="height:560px;border:1px solid #d8dee8;box-shadow:0 1px 2px rgba(26,35,50,.06)" hint-size="100%,560px"></x-import>
+
+<div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+<sc-if value="{{ hasPick }}" hint-placeholder-val="{{ false }}">
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:9px;box-shadow:0 1px 2px rgba(26,35,50,.06)">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+<span style="font-weight:800;font-size:15px;font-family:'IBM Plex Mono',monospace;overflow:hidden;text-overflow:ellipsis">{{ pickName }}</span>
+<span style="display:inline-flex;border:1px solid {{ pickTierColor }};color:{{ pickTierColor }};border-radius:999px;padding:1px 9px;font-size:11px;font-weight:600;white-space:nowrap">{{ pickTier }}</span>
+</div>
+<div style="font-size:12.5px;color:#4a5568">{{ pickKind }} · {{ pickUsage }} runs / 90d</div>
+<div style="font-size:12.5px;color:#4a5568">domains: {{ pickDomains }}</div>
+<sc-if value="{{ pickShared }}" hint-placeholder-val="{{ false }}">
+<div style="font-size:12px;color:#9a6407;background:#f9efdc;border:1px solid #e8d5ae;border-radius:8px;padding:6px 10px">Sits between two gravity wells — membership in both is first-class, never duplicated.</div>
+</sc-if>
+<div style="display:flex;gap:8px;margin-top:2px">
+<a href="Table Profile.dc.html" style="text-decoration:none;background:#006fcf;color:#fff;border-radius:8px;padding:6px 12px;font-size:12.5px;font-weight:600">Open profile</a>
+<button style="border:1px solid #d8dee8;background:#fff;border-radius:8px;padding:6px 12px;font-family:inherit;font-size:12.5px;cursor:pointer;color:#1a2332">Ask about this</button>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ noPick }}" hint-placeholder-val="{{ true }}">
+<div style="background:#fafbfd;border:1px dashed #b9c2d0;border-radius:14px;padding:16px 18px;font-size:13px;color:#4a5568;display:flex;flex-direction:column;gap:6px">
+<b>Tap any node</b> to dock its profile here — the same profile component as everywhere else.
+<span style="font-size:12px;color:#71809b">drag to orbit · scroll to zoom · the gold node is shared by two domains</span>
+</div>
+</sc-if>
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(26,35,50,.06)">
+<span style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#71809b">ENCODING</span>
+<div style="font-size:12.5px;color:#4a5568">size = usage · glow = trust tier · gold = multi-domain</div>
+<div style="display:flex;gap:6px;flex-wrap:wrap;font-size:11px">
+<span style="border:1px solid #0e7a55;color:#0e7a55;border-radius:999px;padding:1px 8px">● human</span>
+<span style="border:1px solid #0e7a55;color:#0e7a55;border-radius:999px;padding:1px 8px">◆ grounded</span>
+<span style="border:1px solid #9a6407;color:#9a6407;border-radius:999px;padding:1px 8px">◐ inferred</span>
+<span style="border:1px dashed #71809b;color:#71809b;border-radius:999px;padding:1px 8px">○ guessed</span>
+</div>
+</div>
+<div style="background:#fff;border:1px solid #d8dee8;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:7px;box-shadow:0 1px 2px rgba(26,35,50,.06)">
+<span style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#71809b">RECENT CHANGES</span>
+<div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">merch_dim</span><span style="color:#0e7a55">◐ → ◆ · 2m ago</span></div>
+<div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">gcs_transactions</span><span style="color:#0e7a55">+1 human witness</span></div>
+<span style="font-size:11.5px;color:#71809b">an approval ripples its tier-glow through the cluster</span>
+</div>
+</div>
+</div>
+<div style="font-size:12px;color:#71809b">Ambient motion is minimal by default; animation happens on interaction and change. Reduced-motion turns drift off entirely — a 2D fallback ships with the same data.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:760},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;paper&quot;,&quot;deep navy&quot;],&quot;default&quot;:&quot;paper&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Stage&quot;},&quot;ambientDrift&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Stage&quot;},&quot;edgeFilter&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;joins&quot;,&quot;membership&quot;,&quot;computed-from&quot;,&quot;all&quot;],&quot;default&quot;:&quot;joins&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Stage&quot;}}">
+class Component extends DCLogic {
+  state = { pick: null, edges: null };
+  componentDidMount() {
+    this.onPick = (e) => this.setState({ pick: e.detail.node });
+    window.addEventListener('cosmos-pick', this.onPick);
+  }
+  componentWillUnmount() { window.removeEventListener('cosmos-pick', this.onPick); }
+  renderVals() {
+    const TIER = { ha: ['● human_asserted', '#0e7a55'], gr: ['◆ grounded', '#0e7a55'], in: ['◐ inferred', '#9a6407'], gu: ['○ guessed', '#71809b'], de: ['⊘ deprecated', '#be3a48'] };
+    const p = this.state.pick;
+    const edges = this.state.edges ?? (this.props.edgeFilter ?? 'joins');
+    const mk = (label, val) => ({
+      label, pick: () => this.setState({ edges: val }),
+      border: edges === val ? '#006fcf' : '#d8dee8',
+      bg: edges === val ? '#e5f1fb' : '#fff',
+      color: edges === val ? '#006fcf' : '#4a5568',
+    });
+    const t = p ? TIER[p.tier] : ['', '#71809b'];
+    return {
+      theme: (this.props.theme ?? 'paper') === 'deep navy' ? 'navy' : 'paper',
+      drift: (this.props.ambientDrift ?? true) ? 'on' : 'off',
+      edges,
+      edgeChips: [mk('joins', 'joins'), mk('membership', 'membership'), mk('computed-from', 'computed-from'), mk('all edges', 'all')],
+      hasPick: !!p, noPick: !p,
+      pickName: p ? p.name : '', pickTier: t[0], pickTierColor: t[1],
+      pickKind: p ? p.kind : '', pickUsage: p ? p.usage : '',
+      pickDomains: p ? p.domains.join(' + ') : '',
+      pickShared: !!(p && p.domains.length > 1),
+    };
+  }
+}
+</script>
+</body>
+</html>

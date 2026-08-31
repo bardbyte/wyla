@@ -160,26 +160,29 @@ class VertexClient:
             parts = ((candidates[0].get("content") or {}).get("parts")
                      if candidates else None) or []
             text = "".join(str(p.get("text") or "") for p in parts)
-            if text.strip():
-                return text
             finish = (candidates[0].get("finishReason")
                       if candidates else "?")
             if finish == "MAX_TOKENS" and backoff is not None:
                 # reasoning models (gemini 3.x) burn output budget on
-                # internal thought BEFORE any text — the field symptom
-                # is a 200 with empty parts. Grow the cap and retry
-                # (bounded by the attempt budget; no sleep — this is
-                # not a rate issue).
+                # internal thought BEFORE any text. Two field faces of
+                # the same cap: a 200 with empty parts, OR a 200 with
+                # PARTIAL text — half a JSON object cut mid-emission
+                # (the b1.4 smoke's empty predictions). Either way the
+                # answer is unusable: grow the cap and retry (bounded
+                # by the attempt budget; no sleep — not a rate issue).
                 grown = min(int(body["generationConfig"]
                                 ["maxOutputTokens"]) * 4, 8192)
                 body["generationConfig"]["maxOutputTokens"] = grown
-                self._note("empty answer at finishReason=MAX_TOKENS "
+                self._note(("truncated" if text.strip() else "empty")
+                           + " answer at finishReason=MAX_TOKENS "
                            "(model spent the budget thinking) — "
                            f"growing maxOutputTokens to {grown}, "
                            "retrying")
-                last_error = ("no text at finishReason=MAX_TOKENS — "
-                              f"retrying with maxOutputTokens={grown}")
+                last_error = ("MAX_TOKENS truncation — retrying with "
+                              f"maxOutputTokens={grown}")
                 continue
+            if text.strip():
+                return text
             raise EnrichTransportError(
                 f"vertex returned no text (finishReason={finish})"
                 + (" — the model spent the whole budget thinking; "

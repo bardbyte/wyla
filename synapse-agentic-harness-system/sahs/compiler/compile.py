@@ -21,6 +21,8 @@ from sahs.canon.authority import SOURCE_AUTHORITY, Authority
 from sahs.graph.quads import RANKING_WITNESSES
 from sahs.compiler.cards import concept_card, metric_card, table_card
 from sahs.compiler.diff import build_diff
+from sahs.compiler.display import build_sources_index
+from sahs.compiler.graph_map import build_graph_map
 from sahs.compiler.indexes import build_indexes
 from sahs.compiler.reconcile import (
     build_acl,
@@ -673,6 +675,20 @@ def compile_build(graph_root: Path, builds_root: Path
         json.dumps(cost_priors, indent=1, sort_keys=True) + "\n",
         encoding="utf-8")
 
+    # ── E17 serving surfaces: the Sources shelf + the cosmos map ──
+    # display-plane projections of what the graph already holds; the
+    # console renders these files, it never re-derives them
+    sources_index = build_sources_index(nodes, edges, metric_rows,
+                                        lob_rows, graph_root)
+    (build_dir / "indexes" / "sources.json").write_text(
+        json.dumps(sources_index, indent=1, sort_keys=True) + "\n",
+        encoding="utf-8")
+    graph_map = build_graph_map(consensus, nodes, metric_rows,
+                                join_rows, lob_rows)
+    (build_dir / "indexes" / "graph_map.json").write_text(
+        json.dumps(graph_map, indent=1, sort_keys=True) + "\n",
+        encoding="utf-8")
+
     # ── manifest (no wall-clock — determinism) ──
     manifest = {
         "schema": SCHEMA, "build_id": build_id,
@@ -683,7 +699,10 @@ def compile_build(graph_root: Path, builds_root: Path
                    "vocab": len(vocab_rows),
                    "tickets": len(tickets),
                    "lobs": len(lob_rows),
-                   "joins": len(join_rows)},
+                   "joins": len(join_rows),
+                   "sources": len(sources_index["sources"]),
+                   "map_nodes": len(graph_map["nodes"]),
+                   "map_edges": len(graph_map["edges"])},
         "index": index_report,
         "budget": budget,
         "resolver_constants": RESOLVER_CONSTANTS,

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap" rel="stylesheet"><style>body{margin:0;background:#f5f8fc;font-family:'Plus Jakarta Sans',sans-serif;color:#00175a}a{color:#006fcf}a:hover{color:#00175a}</style></helmet>
+<div style="padding:36px 40px 60px;display:flex;flex-direction:column;gap:26px;max-width:1560px">
+<div style="display:flex;flex-direction:column;gap:6px">
+<div style="display:flex;align-items:baseline;gap:14px"><span style="font-size:26px;font-weight:800;letter-spacing:-.02em">Lumi — governed component library</span><span style="font-size:13px;color:#5b6b8f">A2UI · the agent fills slots, never freestyles · one component everywhere</span></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:11.5px;align-items:center">
+<span style="background:#00175a;color:#fff;border-radius:6px;padding:2px 10px;font-weight:600">deep #00175A</span>
+<span style="background:#006fcf;color:#fff;border-radius:6px;padding:2px 10px;font-weight:600">bright #006FCF — the meridian</span>
+<span style="background:#eaf2fb;border:1px solid #c6dcf5;border-radius:6px;padding:2px 10px">ice #EAF2FB</span>
+<span style="border:1px solid #0e7a55;color:#0e7a55;border-radius:999px;padding:1px 9px">● human</span>
+<span style="border:1px solid #0e7a55;color:#0e7a55;border-radius:999px;padding:1px 9px">◆ grounded</span>
+<span style="border:1px solid #b07908;color:#b07908;border-radius:999px;padding:1px 9px;background:#fdf4e0">◐ inferred</span>
+<span style="border:1px dashed #7c8bab;color:#5b6b8f;border-radius:999px;padding:1px 9px">○ guessed</span>
+<span style="border:1px solid #b3282d;color:#b3282d;border-radius:999px;padding:1px 9px">crimson = definition conflict only</span>
+</div>
+</div>
+
+<div style="display:flex;flex-wrap:wrap;gap:26px;align-items:flex-start">
+
+<div style="display:flex;flex-direction:column;gap:8px;width:460px">
+<span style="font-size:12px;font-weight:700;color:#5b6b8f">1 · ANSWER CARD <span style="font-weight:400">— meridian line is schema-required</span></span>
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:20px 22px;display:flex;flex-direction:column;gap:12px;box-shadow:0 1px 3px rgba(0,23,90,.07)">
+<div style="font-size:12px;color:#5b6b8f">Total Billed Business · UK merchants · Q3 FY26</div>
+<div style="font-size:40px;font-weight:800;letter-spacing:-.02em;line-height:1">£312M</div>
+<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px">
+<span style="border:1px solid #0e7a55;color:#0e7a55;background:#eaf6f0;border-radius:999px;padding:1px 10px;font-weight:700">TBB · governed ●</span>
+<span style="color:#a9b8d4">+</span><span style="border:1px solid #b07908;color:#b07908;background:#fdf4e0;border-radius:999px;padding:1px 10px">UK only</span>
+<span style="color:#a9b8d4">+</span><span style="border:1px solid #b07908;color:#b07908;background:#fdf4e0;border-radius:999px;padding:1px 10px">Q3 FY26</span>
+</div>
+<div style="border-top:2px solid #006fcf;padding-top:8px;display:flex;gap:12px;align-items:center;font-size:11.5px;color:#5b6b8f;flex-wrap:wrap">
+<span style="color:#006fcf;font-weight:700">— meridian</span>
+<span>def: TBB v4 ●</span><span>variant: offset (2 deltas)</span><span>bindings: 3/3 ✓</span>
+<span style="font-family:'IBM Plex Mono',monospace">build 8c41f2</span>
+<button onClick="{{ toggleCalc }}" style="margin-left:auto;border:none;background:none;color:#006fcf;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;text-decoration:underline">How was this calculated?</button>
+</div>
+<sc-if value="{{ calcOpen }}" hint-placeholder-val="{{ false }}">
+<div style="background:#f5f8fc;border:1px solid #d7e2f2;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;font-size:12px">
+<span><b>definition</b> SUM(amount_usd) WHERE settled — governed by S. Rivera</span>
+<span><b>grain</b> one row per settled transaction</span>
+<span><b>filters</b> merchant_country = 'GB' · settle_dt in Q3 FY26</span>
+<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#fff;border-radius:6px;padding:6px 8px;color:#00175a">SELECT SUM(amount_usd) FROM gcs_transactions WHERE …</span>
+</div>
+</sc-if>
+</div>
+<span style="font-size:11.5px;color:#5b6b8f">Variants: certified (sits <i>on</i> the line, no offset chips) · executive (number + trend + meridian only) · error: never renders without meridian — the slot is REQ.</span>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px;width:430px">
+<span style="font-size:12px;font-weight:700;color:#5b6b8f">2 · PLAN PANEL <span style="font-weight:400">— versioned; mutation highlights one slot</span></span>
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 3px rgba(0,23,90,.07);font-size:12.5px">
+<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:700;font-size:13px">Semantic plan</span><span style="display:flex;gap:4px;align-items:center;font-size:11px;color:#5b6b8f"><button style="border:1px solid #d7e2f2;background:#fff;border-radius:6px;padding:1px 8px;cursor:pointer;font-family:inherit">‹</button> v3 <button style="border:1px solid #d7e2f2;background:#fff;border-radius:6px;padding:1px 8px;cursor:pointer;font-family:inherit">›</button></span></div>
+<div style="display:grid;grid-template-columns:86px 1fr;gap:6px 10px;align-items:center">
+<span style="color:#5b6b8f">metrics</span><span style="font-weight:600">TBB ●</span>
+<span style="color:#5b6b8f">source</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">gcs_transactions ◆</span>
+<span style="color:#5b6b8f;font-weight:700">grain <span style="color:#b3282d">*</span></span><span style="font-weight:600">one row per settled transaction</span>
+<span style="color:#5b6b8f">filters</span><span><span style="border:1.5px solid #006fcf;background:#eaf2fb;border-radius:999px;padding:1px 9px;font-weight:700;color:#006fcf">geo: Canada ← changed</span> <span style="border:1px solid #d7e2f2;border-radius:999px;padding:1px 9px">Q3 FY26</span></span>
+<span style="color:#5b6b8f">compare</span><span style="color:#a9b8d4">—</span>
+</div>
+<div style="border-top:1px solid #eef3fa;padding-top:8px;font-size:11.5px;color:#5b6b8f">"Same for Canada" flipped one chip — everything else visibly held. Undo = version stepper. This is exactly what will run.</div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px;width:430px">
+<span style="font-size:12px;font-weight:700;color:#5b6b8f">3 · DISAMBIGUATION CHIPS <span style="font-weight:400">— one question, options carry evidence</span></span>
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:10px;box-shadow:0 1px 3px rgba(0,23,90,.07)">
+<span style="font-size:13.5px;font-weight:600">By "US" — which country do you mean?</span>
+<div style="display:flex;flex-direction:column;gap:6px">
+<button style="display:flex;justify-content:space-between;align-items:center;border:1.5px solid #006fcf;background:#eaf2fb;border-radius:10px;padding:8px 12px;font-family:inherit;font-size:12.5px;cursor:pointer;text-align:left"><span style="font-weight:700">Merchant country</span><span style="font-size:11px;color:#0e7a55">certified · on the line ●</span></button>
+<button style="display:flex;justify-content:space-between;align-items:center;border:1px solid #d7e2f2;background:#fff;border-radius:10px;padding:8px 12px;font-family:inherit;font-size:12.5px;cursor:pointer;text-align:left"><span style="font-weight:600">Cardmember country</span><span style="font-size:11px;color:#b07908">mined ×412 · pending review ◐</span></button>
+<button style="display:flex;justify-content:space-between;align-items:center;border:1px solid #d7e2f2;background:#fff;border-radius:10px;padding:8px 12px;font-family:inherit;font-size:12.5px;cursor:pointer;text-align:left"><span style="font-weight:600">Issuer country</span><span style="font-size:11px;color:#5b6b8f">rare · 9 uses ○</span></button>
+</div>
+<span style="font-size:11.5px;color:#5b6b8f">Remembered at scope — this question is never asked twice.</span>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px;width:460px">
+<span style="font-size:12px;font-weight:700;color:#5b6b8f">4 · JOIN &amp; GRAIN PREVIEW <span style="font-weight:400">— fan-out in row counts, judgeable by anyone</span></span>
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:10px;box-shadow:0 1px 3px rgba(0,23,90,.07);font-size:12.5px">
+<div style="border:1px solid #0e7a55;background:#eaf6f0;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px">
+<span style="font-weight:700;color:#0e7a55">1.2M orders stay 1.2M after the join ✓</span>
+<span style="color:#33415f">one customer per order · witnessed in 214 queries ◆</span>
+<div style="display:flex;gap:8px;margin-top:2px"><button style="background:#006fcf;color:#fff;border:none;border-radius:7px;padding:5px 14px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer">Proceed</button><button style="border:1px solid #d7e2f2;background:#fff;border-radius:7px;padding:5px 12px;font-family:inherit;font-size:12px;cursor:pointer;color:#00175a">Inspect join</button></div>
+</div>
+<div style="border:1.5px solid #b3282d;background:#fdf0f0;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px">
+<span style="font-weight:700;color:#b3282d">1.2M orders become 3.8M — this join likely inflates totals</span>
+<span style="color:#33415f">order → line-items fans out ×3.2</span>
+<div style="display:flex;gap:8px;margin-top:2px"><button style="border:1px solid #006fcf;color:#006fcf;background:#fff;border-radius:7px;padding:5px 12px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer">Use alternate path</button><button style="border:1px solid #d7e2f2;background:#fff;border-radius:7px;padding:5px 12px;font-family:inherit;font-size:12px;cursor:pointer;color:#00175a">Ask a steward</button></div>
+</div>
+<span style="font-size:11.5px;color:#5b6b8f">Executives never see this card — witnessed joins or a tap-out.</span>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px;width:430px">
+<span style="font-size:12px;font-weight:700;color:#5b6b8f">5 · TAP-OUT CARD <span style="font-weight:400">— a refusal with a door</span></span>
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:10px;box-shadow:0 1px 3px rgba(0,23,90,.07);font-size:12.5px">
+<span style="font-size:14px;font-weight:700">"Merchant stickiness" isn't registered.</span>
+<span style="color:#33415f">No governed definition exists — I won't invent a look-alike.</span>
+<div style="display:flex;flex-direction:column;gap:5px">
+<span style="font-size:11px;font-weight:700;color:#5b6b8f;letter-spacing:.05em">NEAREST GOVERNED CONCEPTS</span>
+<span>· merchant_retention_rate ● <span style="color:#5b6b8f">— repeat activity, monthly</span></span>
+<span>· active_merchants ◆ <span style="color:#5b6b8f">— count, monthly grain</span></span>
+</div>
+<button style="align-self:flex-start;background:#006fcf;color:#fff;border:none;border-radius:8px;padding:7px 16px;font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer">Request this metric</button>
+<div style="display:flex;align-items:center;gap:0;font-size:10.5px;color:#5b6b8f">
+<span style="background:#eaf2fb;border:1px solid #c6dcf5;border-radius:999px;padding:1px 9px;font-weight:600;color:#006fcf">Draft</span><span style="width:14px;border-top:1px dashed #c6dcf5"></span>
+<span style="border:1px dashed #c6dcf5;border-radius:999px;padding:1px 9px">Review · M. Osei</span><span style="width:14px;border-top:1px dashed #c6dcf5"></span>
+<span style="border:1px dashed #c6dcf5;border-radius:999px;padding:1px 9px">Approved</span><span style="width:14px;border-top:1px dashed #c6dcf5"></span>
+<span style="border:1px dashed #c6dcf5;border-radius:999px;padding:1px 9px">Published</span>
+</div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px;width:430px">
+<span style="font-size:12px;font-weight:700;color:#5b6b8f">9 · LIFECYCLE TRACKER <span style="font-weight:400">— owner of next action, always</span></span>
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;box-shadow:0 1px 3px rgba(0,23,90,.07)">
+<div style="display:flex;align-items:center;gap:0">
+<div style="display:flex;flex-direction:column;align-items:center;gap:3px"><span style="width:22px;height:22px;border-radius:50%;background:#0e7a55;color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center">✓</span><span style="font-size:10.5px;color:#5b6b8f">Draft</span></div>
+<span style="flex:1;border-top:2px solid #0e7a55;margin-bottom:16px"></span>
+<div style="display:flex;flex-direction:column;align-items:center;gap:3px"><span style="width:22px;height:22px;border-radius:50%;background:#006fcf;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:700">2</span><span style="font-size:10.5px;font-weight:700;color:#006fcf">Review</span></div>
+<span style="flex:1;border-top:2px dashed #c6dcf5;margin-bottom:16px"></span>
+<div style="display:flex;flex-direction:column;align-items:center;gap:3px"><span style="width:22px;height:22px;border-radius:50%;border:1.5px dashed #c6dcf5;font-size:10px;display:flex;align-items:center;justify-content:center;color:#7c8bab">3</span><span style="font-size:10.5px;color:#7c8bab">Approved</span></div>
+<span style="flex:1;border-top:2px dashed #c6dcf5;margin-bottom:16px"></span>
+<div style="display:flex;flex-direction:column;align-items:center;gap:3px"><span style="width:22px;height:22px;border-radius:50%;border:1.5px dashed #c6dcf5;font-size:10px;display:flex;align-items:center;justify-content:center;color:#7c8bab">4</span><span style="font-size:10.5px;color:#7c8bab">Published</span></div>
+</div>
+<div style="font-size:12px;color:#33415f;background:#f5f8fc;border-radius:8px;padding:7px 10px">Next action: <b>M. Osei</b> reviews the proposed definition · SLA 3 days</div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px;width:400px">
+<span style="font-size:12px;font-weight:700;color:#5b6b8f">10 · PROVENANCE POPOVER <span style="font-weight:400">— any chip expands to "who says so"</span></span>
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:9px;box-shadow:0 6px 22px rgba(0,23,90,.14);font-size:12.5px">
+<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:700">merch_id → merchant key</span><span style="border:1px solid #b07908;color:#b07908;background:#fdf4e0;border-radius:999px;padding:0 9px;font-size:11px">◐ inferred</span></div>
+<div style="display:flex;flex-direction:column;gap:6px">
+<div style="display:grid;grid-template-columns:110px 1fr 40px;gap:8px;align-items:center"><span style="color:#33415f">mined queries</span><div style="height:6px;background:#eef3fa;border-radius:3px"><div style="width:82%;height:100%;background:#006fcf;border-radius:3px"></div></div><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#5b6b8f">×412</span></div>
+<div style="display:grid;grid-template-columns:110px 1fr 40px;gap:8px;align-items:center"><span style="color:#33415f">BQ profile</span><div style="height:6px;background:#eef3fa;border-radius:3px"><div style="width:30%;height:100%;background:#7fb5e8;border-radius:3px"></div></div><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#5b6b8f">×1</span></div>
+</div>
+<div style="font-size:11.5px;color:#5b6b8f">valid since Mar 2026 · <a href="#" style="font-weight:600">open evidence</a></div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px;width:520px">
+<span style="font-size:12px;font-weight:700;color:#5b6b8f">11 · AGENT THEATER STRIP <span style="font-weight:400">— AG-UI stream as calm progress</span></span>
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:14px 18px;display:flex;flex-direction:column;gap:10px;box-shadow:0 1px 3px rgba(0,23,90,.07)">
+<div style="display:flex;gap:6px;align-items:center;font-size:12px">
+<span style="border:1px solid #0e7a55;color:#0e7a55;border-radius:999px;padding:2px 11px;font-weight:600">resolving ✓ 40ms</span>
+<span style="color:#c6dcf5">—</span>
+<span style="border:1.5px solid #006fcf;color:#006fcf;background:#eaf2fb;border-radius:999px;padding:2px 11px;font-weight:700">planning ●</span>
+<span style="color:#c6dcf5">—</span>
+<span style="border:1px dashed #c6dcf5;color:#7c8bab;border-radius:999px;padding:2px 11px">validating</span>
+<span style="color:#c6dcf5">—</span>
+<span style="border:1px dashed #c6dcf5;color:#7c8bab;border-radius:999px;padding:2px 11px">executing</span>
+</div>
+<div style="font-size:12px;color:#5b6b8f">Resolution is deterministic — instant. Only composition thinks; the strip shows that contrast. Expand for tool-level rows.</div>
+</div>
+<span style="font-size:11.5px;color:#5b6b8f">Components 6 (Table Profile), 7 (Family Tree) and 8 (Steward Decision Card) live as full screens: <a href="Table Profile.dc.html">6</a> · <a href="F3 Variation Flywheel.dc.html">7 + 8</a>. Theater is now AG-UI-driven — see <a href="F7 Complex Analysis.dc.html">F7</a>.</span>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px;width:470px">
+<span style="font-size:12px;font-weight:700;color:#5b6b8f">12 · VERIFIER VERDICT CARD <span style="font-weight:400">— default-FAIL contract, rendered calm</span></span>
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:9px;box-shadow:0 1px 3px rgba(0,23,90,.07);font-size:12.5px">
+<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:700;font-size:13px">Verification · 3 of 4 passed</span><span style="font-size:11px;color:#5b6b8f">default is FAIL — passing is earned</span></div>
+<div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><span style="color:#33415f">✓ executes</span><span style="font-size:11px;color:#5b6b8f;font-family:'IBM Plex Mono',monospace">1.1 GB scanned · 2.4s</span></div>
+<div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><span style="color:#33415f">✓ uses certified spend expression</span><span style="font-size:11px;color:#0e7a55">TBB v4 ●</span></div>
+<div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><span style="color:#33415f">✓ grain holds</span><span style="font-size:11px;color:#5b6b8f;font-family:'IBM Plex Mono',monospace">1.2M rows stay 1.2M</span></div>
+<div style="border:1px solid #f0ddb0;background:#fdf4e0;border-radius:9px;padding:8px 11px;display:flex;flex-direction:column;gap:3px">
+<span style="color:#b07908;font-weight:700">◌ explanation grounded — retrying (1 of 2)</span>
+<span style="font-size:11.5px;color:#33415f">finding: cited "seasonal dip" has no witness in the result set — regenerating explanation from computed deltas only</span>
+</div>
+<span style="font-size:11.5px;color:#5b6b8f">Verification is routine, not drama — no red until retries are exhausted.</span>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px;width:500px">
+<span style="font-size:12px;font-weight:700;color:#5b6b8f">13 · ANALYSIS NOTEBOOK <span style="font-weight:400">— exploratory lane with a visible passport</span></span>
+<div style="background:#fff;border:1px dashed #b07908;border-radius:14px;padding:0;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(0,23,90,.07);overflow:hidden;position:relative">
+<div style="background:#fdf4e0;border-bottom:1px solid #f0ddb0;padding:7px 16px;font-size:11.5px;color:#b07908;font-weight:700;display:flex;justify-content:space-between"><span>EXPLORATORY</span><span style="font-weight:400">built from governed parts · not yet a governed answer</span></div>
+<div style="padding:14px 16px;display:flex;flex-direction:column;gap:9px;font-size:12.5px">
+<span style="font-weight:700;font-size:13.5px">Goal: decompose the Q2 spend drop into rate vs mix</span>
+<div style="background:#f5f8fc;border:1px solid #d7e2f2;border-radius:8px;padding:8px 10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#33415f">df = sdk.metric("TBB").by("segment").quarters("Q1","Q2")  <span style="color:#5b6b8f"># governed SDK only</span></div>
+<div style="display:flex;gap:10px;font-size:11.5px;color:#5b6b8f"><span>step 2/4 · segment deltas table streamed</span><span>·</span><span>chart pending</span></div>
+<button style="align-self:flex-start;border:1px solid #006fcf;color:#006fcf;background:#fff;border-radius:8px;padding:6px 14px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer">Promote to governed answer → runs the contract gate</button>
+</div>
+</div>
+<span style="font-size:11.5px;color:#5b6b8f">Powerful ≠ certified. On gate pass, this re-renders as a standard Answer Card with meridian.</span>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px;width:400px">
+<span style="font-size:12px;font-weight:700;color:#5b6b8f">14 · BUDGET METER <span style="font-weight:400">— quiet, truthful, never a countdown</span></span>
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 1px 3px rgba(0,23,90,.07);font-size:12px">
+<div style="display:flex;align-items:center;gap:10px"><span style="color:#5b6b8f">normal:</span><div style="flex:1;height:4px;background:#eef3fa;border-radius:2px"><div style="width:34%;height:100%;background:#a9b8d4;border-radius:2px"></div></div><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#a9b8d4">turn 6</span></div>
+<div style="display:flex;align-items:center;gap:10px"><span style="color:#5b6b8f">near cap:</span><div style="flex:1;height:4px;background:#eef3fa;border-radius:2px"><div style="width:86%;height:100%;background:#b07908;border-radius:2px"></div></div><span style="font-size:11px;color:#b07908;font-weight:600;white-space:nowrap">wrapping up within budget</span></div>
+<span style="font-size:11.5px;color:#5b6b8f">Caps are enforced in code; the meter only tells the truth.</span>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px;width:430px">
+<span style="font-size:12px;font-weight:700;color:#5b6b8f">15 · PLAN VERSION STEPPER <span style="font-weight:400">— undo as scrubbing, not archaeology</span></span>
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 1px 3px rgba(0,23,90,.07);font-size:12.5px">
+<div style="display:flex;align-items:center;gap:6px">
+<span style="width:10px;height:10px;border-radius:50%;background:#c6dcf5;cursor:pointer"></span><span style="width:10px;height:10px;border-radius:50%;background:#c6dcf5;cursor:pointer"></span><span style="width:14px;height:14px;border-radius:50%;border:2.5px solid #006fcf;background:#eaf2fb;cursor:pointer"></span><span style="width:10px;height:10px;border-radius:50%;background:#c6dcf5;cursor:pointer"></span><span style="width:10px;height:10px;border-radius:50%;background:#00175a;cursor:pointer"></span>
+<span style="font-size:11px;color:#5b6b8f;margin-left:6px">previewing v3 of 5</span>
+</div>
+<div style="border:1.5px dashed #006fcf;background:#eaf2fb66;border-radius:9px;padding:8px 11px;font-size:12px;color:#33415f">ghost: filters · <b>geo: US</b> · Q3 FY26 <span style="color:#5b6b8f">(current: Canada)</span></div>
+<button style="align-self:flex-start;background:#006fcf;color:#fff;border:none;border-radius:7px;padding:5px 14px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer">Restore v3</button>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px;width:430px">
+<span style="font-size:12px;font-weight:700;color:#5b6b8f">16 · SESSION HANDOFF CARD <span style="font-weight:400">— rendered from state, not chat</span></span>
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:9px;box-shadow:0 1px 3px rgba(0,23,90,.07);font-size:12.5px">
+<span style="font-size:11px;font-weight:700;letter-spacing:.05em;color:#5b6b8f">WHERE WE LEFT OFF · YESTERDAY 17:42</span>
+<div style="display:grid;grid-template-columns:78px 1fr;gap:4px 10px;color:#33415f">
+<span style="color:#5b6b8f">plan</span><span>TBB · Canada · Q3 · by market <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#5b6b8f">v4</span></span>
+<span style="color:#5b6b8f">last answer</span><span style="font-weight:700">C$612M · verified ✓</span>
+<span style="color:#5b6b8f">open</span><span style="color:#b07908">clarification pending: include refunds?</span>
+</div>
+<div style="display:flex;gap:8px"><button style="background:#006fcf;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer">Continue</button><button style="border:1px solid #d7e2f2;background:#fff;border-radius:8px;padding:6px 14px;font-family:inherit;font-size:12.5px;color:#00175a;cursor:pointer">Start fresh</button></div>
+</div>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1600,&quot;height&quot;:1400}}">
+class Component extends DCLogic {
+  state = { calcOpen: true };
+  renderVals() {
+    return { calcOpen: this.state.calcOpen, toggleCalc: () => this.setState((s) => ({ calcOpen: !s.calcOpen })) };
+  }
+}
+</script>
+</body>
+</html>

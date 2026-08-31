@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap" rel="stylesheet"><style>body{margin:0;background:#f5f8fc;font-family:'Plus Jakarta Sans',sans-serif;color:#00175a}a{color:#006fcf}a:hover{color:#00175a}</style></helmet>
+<div style="max-width:1080px;margin:0 auto;padding:20px 28px 48px;display:flex;flex-direction:column;gap:14px">
+<div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#5b6b8f">
+<a href="Lumi Home.dc.html" style="font-weight:800;color:#00175a;letter-spacing:.02em;font-size:14px;text-decoration:none">LUMI</a>
+<span style="border-left:1px solid #d7e2f2;padding-left:10px"><a href="Semantics Explorer.dc.html" style="text-decoration:none">Semantics</a> › Concept Profile</span>
+<span style="margin-left:auto;display:flex;gap:10px"><span style="border:1px solid #d7e2f2;border-radius:999px;padding:2px 11px;font-family:'IBM Plex Mono',monospace;font-size:11px;background:#fff">b_2283…</span><span style="border:1px solid #d7e2f2;border-radius:999px;padding:2px 11px;font-size:11px;background:#fff">actor: admin ●</span></span>
+</div>
+
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:16px;padding:20px 24px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 3px rgba(0,23,90,.07)">
+<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+<span style="font-size:24px;font-weight:800">consumer</span>
+<span style="font-size:12px;color:#5b6b8f;border:1px solid #d7e2f2;border-radius:5px;padding:0 6px">concept</span>
+</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:12px;align-items:center">
+<span style="color:#5b6b8f">aliases:</span>
+<span style="border:1px solid #0e7a55;color:#0e7a55;background:#eaf6f0;border-radius:999px;padding:1px 10px;font-weight:600">retail ●</span>
+<span style="border:1px solid #0e7a55;color:#0e7a55;background:#eaf6f0;border-radius:999px;padding:1px 10px;font-weight:600">B2C ●</span>
+<span style="color:#5b6b8f;margin-left:8px">anti-aliases:</span>
+<span style="border:1px solid #b07908;color:#b07908;background:#fdf4e0;border-radius:999px;padding:1px 10px">SMB ◐ suggested</span>
+</div>
+</div>
+
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;overflow:hidden;box-shadow:0 1px 3px rgba(0,23,90,.07)">
+<div style="padding:12px 18px;font-size:11px;font-weight:700;letter-spacing:.05em;color:#5b6b8f;background:#f5f8fc">BINDINGS BY TABLE</div>
+<div style="display:grid;grid-template-columns:150px minmax(0,1fr) 60px 70px 120px;gap:10px;padding:9px 18px;border-top:1px solid #eef3fa;font-size:12.5px;align-items:center">
+<a href="Lumi Table Profile.dc.html" style="font-family:'IBM Plex Mono',monospace;font-size:12px;text-decoration:none">customers</a>
+<span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#33415f">segment_cd = '1'</span>
+<span style="color:#0e7a55;font-weight:700">●</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#5b6b8f">×917</span>
+<span style="font-size:11.5px;color:#0e7a55;font-weight:600">certified</span>
+</div>
+<div style="display:grid;grid-template-columns:150px minmax(0,1fr) 60px 70px 120px;gap:10px;padding:9px 18px;border-top:1px solid #eef3fa;font-size:12.5px;align-items:center">
+<span style="font-family:'IBM Plex Mono',monospace;font-size:12px">gms_txn</span>
+<span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#33415f">cust_type IN ('C')</span>
+<span style="color:#0e7a55">◆</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#5b6b8f">×412</span>
+<span style="font-size:11.5px;color:#33415f">witnessed</span>
+</div>
+<div style="display:grid;grid-template-columns:150px minmax(0,1fr) 60px 70px 120px;gap:10px;padding:9px 18px;border-top:1px solid #eef3fa;font-size:12.5px;align-items:center;background:#fdf4e033">
+<span style="font-family:'IBM Plex Mono',monospace;font-size:12px">cfr_accounts</span>
+<span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#33415f">seg_flag = 'R'</span>
+<span style="color:#b07908">◐</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#5b6b8f">×33</span>
+<span style="font-size:11.5px;color:#b07908;font-weight:600">pending ⚠</span>
+</div>
+<div style="padding:8px 18px;border-top:1px solid #eef3fa;font-size:11.5px;color:#5b6b8f">
+<button style="border:1px solid #006fcf;color:#006fcf;background:#fff;border-radius:7px;padding:4px 12px;font-family:inherit;font-size:11.5px;font-weight:600;cursor:pointer">Promote binding…</button>
+</div>
+</div>
+
+<div style="border:1.5px solid #b3282d;background:#fdf0f0;border-radius:14px;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+<div style="display:flex;flex-direction:column;gap:3px">
+<span style="font-size:13px;font-weight:700;color:#b3282d">⚠ Conflict cell: 'consumer' on cfr_accounts differs from the certified binding</span>
+<span style="font-size:12px;color:#33415f">same label, different predicate — census #204 · surfaced, never silently merged</span>
+</div>
+<a href="F4 Steward Cockpit.dc.html" style="font-size:12px;font-weight:700;border:1px solid #b3282d;color:#b3282d;border-radius:8px;padding:5px 14px;text-decoration:none;white-space:nowrap">send to steward</a>
+</div>
+
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;padding:14px 18px;display:flex;flex-direction:column;gap:6px;box-shadow:0 1px 3px rgba(0,23,90,.07);font-size:12.5px">
+<span style="font-size:11px;font-weight:700;letter-spacing:.05em;color:#5b6b8f">REMEMBERED CHOICES — scoped disambiguation memory</span>
+<span>GMNS team → <span style="font-family:'IBM Plex Mono',monospace;font-size:12px">segment_cd = '1'</span> <span style="color:#5b6b8f">(scope: team · asked once, never again)</span></span>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1140,&quot;height&quot;:660}}"></script>
+</body>
+</html>

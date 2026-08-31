@@ -1,4 +1,8 @@
-/* Radix design tokens — the entire visual system in one file.
+/* Synapse by Lumi design tokens — the entire visual system in one
+ * file. Light plane carries the Lumi rebrand recorded in the design
+ * canvas (deep #00175A ink · bright #006FCF accent · ice washes ·
+ * Plus Jakarta Sans); the dark plane keeps its own doctrine below.
+ * The old --ink-3 #71809b failed WCAG AA at 3.41:1 — fixed here.
  *
  * Color doctrine (in priority order):
  *   1. Surfaces are quiet: cool, blue-leaning neutrals. No brand color
@@ -19,9 +23,10 @@
  */
 
 :root {
-  /* type */
-  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  /* type — Lumi faces first, full system fallback when the font CDN
+     is unreachable (corporate networks) */
+  --font-ui: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
   --fs-11: 0.6875rem;
   --fs-12: 0.75rem;
   --fs-13: 0.8125rem;
@@ -46,17 +51,17 @@
   --t-fast: 120ms ease;
   --t-med: 220ms ease;
 
-  /* ── light ── */
-  --bg: #f4f6f9;            /* app canvas */
+  /* ── light (Lumi) ── */
+  --bg: #f5f8fc;            /* app canvas */
   --surface: #ffffff;       /* cards, panels */
-  --surface-2: #eef1f6;     /* insets, rails, code */
-  --surface-3: #e4e9f0;     /* hover, pressed */
-  --line: #d8dee8;          /* hairlines */
-  --line-strong: #b9c2d0;
+  --surface-2: #eef3fa;     /* insets, rails, code */
+  --surface-3: #e2eaf6;     /* hover, pressed */
+  --line: #d7e2f2;          /* hairlines */
+  --line-strong: #a9b8d4;
 
-  --ink: #1a2332;           /* primary text */
-  --ink-2: #4a5568;         /* secondary */
-  --ink-3: #71809b;         /* tertiary, labels */
+  --ink: #00175a;           /* primary text — Lumi deep */
+  --ink-2: #33415f;         /* secondary */
+  --ink-3: #5b6b8f;         /* tertiary, labels (AA-fixed) */
 
   --accent: #006fcf;        /* interactive only */
   --accent-hover: #005fb8;
@@ -64,17 +69,19 @@
   --on-accent: #ffffff;
 
   --tier-high: #0e7a55;     /* corroborated / signed */
-  --tier-high-soft: #e2f3ec;
-  --tier-mid: #9a6407;      /* inferred */
-  --tier-mid-soft: #f9efdc;
-  --tier-low: #5b6778;      /* unverified */
-  --tier-low-soft: #eaedf2;
-  --tier-block: #be3a48;    /* declined / guardrail */
-  --tier-block-soft: #fbe9eb;
+  --tier-high-soft: #eaf6f0;
+  --tier-mid: #b07908;      /* inferred (Lumi amber) */
+  --tier-mid-soft: #fdf4e0;
+  --tier-low: #7c8bab;      /* unverified */
+  --tier-low-soft: #eef3fa;
+  --tier-block: #b3282d;    /* conflict, only, ever */
+  --tier-block-soft: #fdf0f0;
 
   --data: #3b6fe0;          /* charts only */
-  --shadow: 0 1px 2px rgba(26, 35, 50, 0.06), 0 4px 16px rgba(26, 35, 50, 0.07);
-  --shadow-lift: 0 4px 12px rgba(26, 35, 50, 0.1), 0 12px 40px rgba(26, 35, 50, 0.12);
+  --hero: #00175a;          /* the one sanctioned brand surface */
+  --on-hero: #c6dcf5;
+  --shadow: 0 1px 3px rgba(0, 23, 90, 0.07);
+  --shadow-lift: 0 4px 12px rgba(0, 23, 90, 0.1), 0 12px 40px rgba(0, 23, 90, 0.12);
 }
 
 [data-theme="dark"] {
@@ -133,6 +140,8 @@
     --tier-block: #e4697a;
     --tier-block-soft: #301721;
     --data: #5e8df0;
+    --hero: #101c38;
+    --on-hero: #c6dcf5;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.35);
     --shadow-lift: 0 4px 12px rgba(0, 0, 0, 0.45), 0 12px 40px rgba(0, 0, 0, 0.5);
   }

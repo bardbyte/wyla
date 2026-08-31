@@ -39,7 +39,7 @@ interface Nav {
 const NavContext = createContext<Nav | null>(null);
 
 export function NavProvider({ children }: { children: ReactNode }) {
-  const [tab, setTab] = useState<TabId>("ask");
+  const [tab, setTab] = useState<TabId>("home");
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const [graphAnchor, setGraphAnchor] = useState<string | null>(null);
   const [evidenceRef, setEvidenceRef] = useState<string | null>(null);

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap" rel="stylesheet"><style>body{margin:0;background:#f5f8fc;font-family:'Plus Jakarta Sans',sans-serif;color:#00175a}a{color:#006fcf}a:hover{color:#00175a}</style></helmet>
+<div style="max-width:1080px;margin:0 auto;padding:20px 28px 48px;display:flex;flex-direction:column;gap:14px">
+<div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#5b6b8f">
+<a href="Lumi Home.dc.html" style="font-weight:800;color:#00175a;letter-spacing:.02em;font-size:14px;text-decoration:none">LUMI</a>
+<span style="border-left:1px solid #d7e2f2;padding-left:10px">Operate · Evals Dashboard</span>
+<span style="margin-left:auto;display:flex;gap:10px"><span style="border:1px solid #d7e2f2;border-radius:999px;padding:2px 11px;font-family:'IBM Plex Mono',monospace;font-size:11px;background:#fff">b_2283…</span><span style="border:1px solid #d7e2f2;border-radius:999px;padding:2px 11px;font-size:11px;background:#fff">gemini-3.1-pro · rc2</span></span>
+</div>
+
+<div style="display:grid;grid-template-columns:1.3fr 1fr;gap:14px;align-items:stretch">
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:16px;padding:20px 24px;display:flex;flex-direction:column;gap:12px;box-shadow:0 1px 3px rgba(0,23,90,.07)">
+<div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">
+<div style="display:flex;flex-direction:column"><span style="font-size:11px;font-weight:700;color:#5b6b8f;letter-spacing:.05em">TQSR · PASS³</span><span style="font-size:44px;font-weight:800;letter-spacing:-.02em;font-family:'IBM Plex Mono',monospace">0.71</span></div>
+<div style="display:flex;flex-direction:column"><span style="font-size:11px;font-weight:700;color:#5b6b8f;letter-spacing:.05em">PASS@1</span><span style="font-size:26px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:#33415f">0.93</span></div>
+<span style="margin-left:auto;font-size:11.5px;color:#5b6b8f">excluded 12 — printed, never hidden</span>
+</div>
+<div style="display:flex;height:16px;border-radius:8px;overflow:hidden;font-size:0">
+<div style="width:61%;background:#006fcf"></div><div style="width:24%;background:#7fb5e8"></div><div style="width:8%;background:#c6dcf5"></div><div style="width:7%;background:#eef3fa"></div>
+</div>
+<div style="display:flex;gap:14px;font-size:11px;color:#5b6b8f;flex-wrap:wrap">
+<span><span style="display:inline-block;width:9px;height:9px;background:#006fcf;border-radius:2px"></span> answer .61</span>
+<span><span style="display:inline-block;width:9px;height:9px;background:#7fb5e8;border-radius:2px"></span> clarify .24</span>
+<span><span style="display:inline-block;width:9px;height:9px;background:#c6dcf5;border-radius:2px"></span> tap-out .08</span>
+<span style="margin-left:auto">a correct refusal counts as success — honesty is in the loss function</span>
+</div>
+</div>
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:16px;padding:20px 24px;display:flex;flex-direction:column;gap:10px;box-shadow:0 1px 3px rgba(0,23,90,.07);font-size:13px;color:#33415f">
+<span style="font-size:11px;font-weight:700;color:#5b6b8f;letter-spacing:.05em">CLARIFICATION QUALITY</span>
+<span>precision <b style="font-family:'IBM Plex Mono',monospace">0.88</b> — when it asks, the question is real</span>
+<span>recall <b style="font-family:'IBM Plex Mono',monospace">0.79</b> — when it should ask, it usually does</span>
+<span style="border-top:1px solid #eef3fa;padding-top:8px">cost/task <b>$0.21</b> · p50 latency <b>6.4s</b></span>
+<button style="align-self:flex-start;border:1px solid #006fcf;color:#006fcf;background:#fff;border-radius:8px;padding:5px 14px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer">sample 5 transcripts</button>
+</div>
+</div>
+
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:14px;overflow:hidden;box-shadow:0 1px 3px rgba(0,23,90,.07)">
+<div style="display:grid;grid-template-columns:1.4fr 70px 90px minmax(0,1.4fr);gap:10px;padding:10px 18px;background:#f5f8fc;font-size:11px;font-weight:700;color:#5b6b8f;letter-spacing:.04em"><span>SUITE</span><span>N</span><span>PASS³</span><span>TRIAGE</span></div>
+<div style="display:grid;grid-template-columns:1.4fr 70px 90px minmax(0,1.4fr);gap:10px;padding:10px 18px;border-top:1px solid #eef3fa;font-size:12.5px;align-items:center"><span style="font-weight:600">curated</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">41</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:700">0.78</span><span style="color:#5b6b8f">2 resolver_bug</span></div>
+<div style="display:grid;grid-template-columns:1.4fr 70px 90px minmax(0,1.4fr);gap:10px;padding:10px 18px;border-top:1px solid #eef3fa;font-size:12.5px;align-items:center"><span style="font-weight:600">sheet-derived</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">63</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:700">0.64</span><span style="color:#b07908">9 gold_defect — the gold is wrong, not the agent</span></div>
+<div style="display:grid;grid-template-columns:1.4fr 70px 90px minmax(0,1.4fr);gap:10px;padding:10px 18px;border-top:1px solid #eef3fa;font-size:12.5px;align-items:center"><span style="font-weight:600">adversarial</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">20</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:700;color:#0e7a55">0.85</span><span style="color:#5b6b8f">—</span></div>
+<div style="display:grid;grid-template-columns:1.4fr 70px 90px minmax(0,1.4fr);gap:10px;padding:10px 18px;border-top:1px solid #eef3fa;font-size:12.5px;align-items:center"><span style="font-weight:600">exploratory</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">12</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:700;color:#b07908">0.58</span><span style="color:#5b6b8f">3 coverage_gap</span></div>
+</div>
+<div style="font-size:12px;color:#5b6b8f">The loss function, visible: every failure is triaged to a cause, and gold defects are charged to the gold.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1140,&quot;height&quot;:640}}"></script>
+</body>
+</html>

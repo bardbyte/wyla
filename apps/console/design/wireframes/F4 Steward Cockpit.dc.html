@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap" rel="stylesheet"><style>body{margin:0;background:#f5f8fc;font-family:'Plus Jakarta Sans',sans-serif;color:#00175a}a{color:#006fcf}a:hover{color:#00175a}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes ripple{0%{background:#eaf6f0}100%{background:#fff}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:0ms!important}}
+</style></helmet>
+<div style="max-width:1280px;margin:0 auto;padding:20px 28px 48px;display:flex;flex-direction:column;gap:16px">
+<div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#5b6b8f">
+<span style="font-weight:800;color:#00175a;letter-spacing:.02em;font-size:14px">LUMI</span>
+<span style="border-left:1px solid #d7e2f2;padding-left:10px">F4 · steward cockpit</span>
+<span style="margin-left:auto;display:flex;gap:14px"><a href="F2 Executive View.dc.html" style="text-decoration:none;font-weight:600">← F2</a><a href="F5 Discovery.dc.html" style="text-decoration:none;font-weight:600">F5 →</a></span>
+</div>
+
+<div style="display:grid;grid-template-columns:300px 1fr 320px;gap:16px;align-items:start">
+
+<div style="display:flex;flex-direction:column;gap:10px">
+<div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-weight:700;font-size:14px">Queue · ranked by reach</span><span style="font-size:11.5px;color:#5b6b8f">{{ remaining }} left</span></div>
+<sc-for list="{{ queue }}" as="q" hint-placeholder-count="4">
+<button onClick="{{ q.pick }}" style="display:flex;flex-direction:column;gap:4px;border:{{ q.frame }};background:{{ q.bg }};border-radius:12px;padding:11px 13px;font-family:inherit;cursor:pointer;text-align:left;opacity:{{ q.opacity }}" style-hover="border-color:#006fcf">
+<div style="display:flex;justify-content:space-between;gap:8px;width:100%"><span style="font-size:12.5px;font-weight:700;color:#00175a">{{ q.title }}</span><span style="font-size:10.5px;color:#0e7a55;white-space:nowrap;font-weight:700">{{ q.reach }}</span></div>
+<span style="font-size:11.5px;color:#5b6b8f">{{ q.sub }}</span>
+</button>
+</sc-for>
+<div style="border:1px solid #d7e2f2;background:#fff;border-radius:12px;padding:10px 13px;display:flex;flex-direction:column;gap:5px;font-size:11.5px;color:#5b6b8f">
+<span style="font-weight:700;color:#00175a;font-size:12px">Also in this inbox</span>
+<span>structural D1 · 768 phantom columns (Atlas) → catalog owner</span>
+<span>witness divergence · 'revenue' class B (+SHIPPED) ×412</span>
+<span style="display:flex;justify-content:space-between;gap:8px"><span>naming (batch tier) · 12 enricher suggestions ≥ gate</span><button style="border:1px solid #006fcf;color:#006fcf;background:#fff;border-radius:6px;padding:1px 9px;font-family:inherit;font-size:10.5px;font-weight:600;cursor:pointer">review 12</button></span>
+</div>
+<div style="font-size:11.5px;color:#5b6b8f">Entered by invitation at thresholds — never a red badge. Approve-rate this week <b style="color:#33415f">71%</b> <span>(&gt;95% flags rubber-stamping)</span>.</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:12px">
+<sc-if value="{{ hasCard }}" hint-placeholder-val="{{ true }}">
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:16px;padding:22px 24px;display:flex;flex-direction:column;gap:12px;box-shadow:0 1px 3px rgba(0,23,90,.07);animation:fadeUp .3s ease both">
+<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:11px;font-weight:700;letter-spacing:.05em;color:#5b6b8f">ONE DECISION</span><span style="font-size:11.5px;color:#0e7a55;background:#eaf6f0;border:1px solid #bfe3d2;border-radius:999px;padding:1px 10px;font-weight:600">{{ cardReach }}</span></div>
+<span style="font-size:17px;font-weight:700">{{ cardTitle }}</span>
+<div style="display:flex;flex-direction:column;gap:6px;font-size:13px;color:#33415f">
+<sc-for list="{{ cardEvidence }}" as="ev" hint-placeholder-count="3"><span>· {{ ev }}</span></sc-for>
+</div>
+<sc-if value="{{ cardConflict }}" hint-placeholder-val="{{ false }}">
+<div style="border:1.5px solid #b3282d;background:#fdf0f0;border-radius:10px;padding:10px 12px;font-size:12.5px;color:#b3282d;font-weight:600">⊘ Competing definition — changed denominator is never a variation. Pick the canonical one; the other becomes deprecated with a pointer.</div>
+</sc-if>
+<div style="display:flex;gap:8px;align-items:center">
+<button onClick="{{ approve }}" style="background:#006fcf;color:#fff;border:none;border-radius:9px;padding:9px 22px;font-family:inherit;font-size:13.5px;font-weight:700;cursor:pointer" style-hover="background:#00175a">{{ approveLabel }}</button>
+<button style="border:1px solid #d7e2f2;background:#fff;border-radius:9px;padding:9px 16px;font-family:inherit;font-size:13px;color:#00175a;cursor:pointer">{{ altLabel }}</button>
+<button onClick="{{ skip }}" style="border:none;background:none;padding:9px 10px;font-family:inherit;font-size:13px;color:#5b6b8f;cursor:pointer;text-decoration:underline">Not sure — skip</button>
+<span style="margin-left:auto;font-size:11.5px;color:#5b6b8f">recorded as you · reversible</span>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ allDone }}" hint-placeholder-val="{{ false }}">
+<div style="background:#fff;border:1px solid #bfe3d2;border-radius:16px;padding:26px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 3px rgba(0,23,90,.07);animation:fadeUp .3s ease both">
+<span style="font-size:17px;font-weight:800;color:#0e7a55">Queue clear.</span>
+<span style="font-size:13.5px;color:#33415f">{{ doneSummary }}</span>
+<span style="font-size:12px;color:#5b6b8f">Undo list kept — every decision is reversible from the ripple feed.</span>
+</div>
+</sc-if>
+
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:16px;padding:16px 20px;display:flex;flex-direction:column;gap:9px;box-shadow:0 1px 3px rgba(0,23,90,.07)">
+<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:700;font-size:13px">Docked profile · gcs_transactions</span><a href="Table Profile.dc.html" style="font-size:11.5px;font-weight:600">open full ›</a></div>
+<div style="display:flex;gap:14px;align-items:center">
+<svg width="52" height="52" viewBox="0 0 52 52"><circle cx="26" cy="26" r="22" fill="none" stroke="#eef3fa" stroke-width="6"></circle><circle cx="26" cy="26" r="22" fill="none" stroke="#0e7a55" stroke-width="6" stroke-linecap="round" stroke-dasharray="{{ donutDash }} 138" transform="rotate(-90 26 26)" style="transition:stroke-dasharray .8s ease"></circle><text x="26" y="30" text-anchor="middle" font-size="12" font-weight="800" font-family="Plus Jakarta Sans" fill="#00175a">{{ readyPct }}</text></svg>
+<div style="display:flex;flex-direction:column;gap:3px;font-size:12px;color:#33415f">
+<span>52 columns · {{ meaningCount }} with witnessed meaning</span>
+<span>6 measures · 31 facts · 5 witness kinds</span>
+<span style="color:#5b6b8f">what we don't know yet: {{ gapCount }} column meanings</span>
+</div>
+</div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:10px">
+<span style="font-weight:700;font-size:14px">Recent changes · ripple feed</span>
+<sc-for list="{{ feed }}" as="f" hint-placeholder-count="3">
+<div style="background:#fff;border:1px solid #d7e2f2;border-radius:12px;padding:10px 13px;display:flex;flex-direction:column;gap:3px;animation:{{ f.anim }}">
+<div style="display:flex;justify-content:space-between;gap:8px"><span style="font-size:12px;font-weight:700;font-family:'IBM Plex Mono',monospace">{{ f.obj }}</span><span style="font-size:10.5px;color:#5b6b8f;white-space:nowrap">{{ f.when }}</span></div>
+<span style="font-size:12px;color:{{ f.color }}">{{ f.what }}</span>
+<sc-if value="{{ f.mine }}" hint-placeholder-val="{{ false }}"><button style="align-self:flex-start;border:none;background:none;padding:0;font-family:inherit;font-size:11px;color:#006fcf;cursor:pointer;text-decoration:underline">undo</button></sc-if>
+</div>
+</sc-for>
+<div style="border-top:1px solid #d7e2f2;padding-top:10px;font-size:12px;color:#5b6b8f;line-height:1.5"><b style="color:#00175a">Why this tap matters:</b> analysts ask → variations accrue → the system proposes → your tap governs it → the next analyst's answer cites it ● governed. The flywheel is shown, not just implemented.</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1340,&quot;height&quot;:780}}">
+class Component extends DCLogic {
+  state = { idx: 0, decided: [], feedExtra: [] };
+  static QUEUE = [
+    { title: 'Name "TBB — UK" as governed child', sub: 'metric promotion · TBB family', reach: 'reach: 12 analysts',
+      cardTitle: 'Name "TBB — UK" as a governed child of TBB?', approve: 'Approve', alt: 'Rename…',
+      evidence: ['used 47× by 12 analysts in 60 days — crossed the threshold', 'delta: UK-only filter — denominator and source unchanged ✓', 'results consistent across all 47 runs'],
+      feed: { obj: 'TBB — UK', what: '◐ → ● governed child · by you', color: '#0e7a55' } },
+    { title: 'merch_id means "merchant key"', sub: 'column meaning · gcs_transactions', reach: 'reach: 3 facts → ◆',
+      cardTitle: 'Confirm: merch_id means "merchant key → merch_dim"?', approve: 'Approve', alt: 'Correct…',
+      evidence: ['mined from 412 real queries · BQ profile agrees', 'joins merch_dim in 214 observed queries', 'no conflicting witness'],
+      feed: { obj: 'gcs_transactions', what: 'merch_id ◐ → ● · 3 facts reached ◆ · by you', color: '#0e7a55' }, profile: true },
+    { title: 'TBB (gross) — definition conflict', sub: 'crimson · changed denominator', reach: 'reach: 2 domains', conflict: true,
+      cardTitle: 'Resolve: "TBB (gross)" sums authorized, not settled.', approve: 'Keep settled as canon', alt: 'Open both definitions',
+      evidence: ['TBB (settled) ● — 1.1k runs, owner S. Rivera', 'TBB (gross) ○ — 23 runs, no owner', 'the two differ by 6.1% in Q3'],
+      feed: { obj: 'TBB (gross)', what: '⊘ deprecated with pointer → TBB · by you', color: '#b3282d' } },
+  ];
+  static FEED0 = [
+    { obj: 'merch_dim', what: '◐ → ◆ · steward review', color: '#0e7a55', when: '2m ago' },
+    { obj: 'net_bps', what: 'claimed by A. Chen', color: '#33415f', when: '1h ago' },
+  ];
+  renderVals() {
+    const Q = Component.QUEUE, decided = this.state.decided;
+    const pending = Q.map((q, i) => i).filter((i) => !decided.includes(i));
+    const idx = pending.includes(this.state.idx) ? this.state.idx : pending[0];
+    const cur = idx !== undefined ? Q[idx] : null;
+    const decide = () => {
+      const fe = [{ ...Q[idx].feed, when: 'now', mine: true, anim: 'ripple 1.6s ease-out 1, fadeUp .3s ease both' }, ...this.state.feedExtra];
+      this.setState({ decided: [...decided, idx], feedExtra: fe });
+    };
+    const doneCount = decided.length;
+    return {
+      queue: Q.map((q, i) => ({
+        title: q.title, sub: decided.includes(i) ? 'done ✓' : q.sub, reach: q.reach,
+        frame: i === idx ? '1.5px solid #006fcf' : q.conflict ? '1px solid #e7b6b8' : '1px solid #d7e2f2',
+        bg: i === idx ? '#eaf2fb' : '#fff', opacity: decided.includes(i) ? '.45' : '1',
+        pick: () => { if (!decided.includes(i)) this.setState({ idx: i }); },
+      })),
+      remaining: pending.length,
+      hasCard: !!cur, allDone: !cur,
+      doneSummary: doneCount + ' decisions · 12 analysts now cite TBB — UK as governed · gcs_transactions climbed to ◆',
+      cardTitle: cur ? cur.cardTitle : '', cardReach: cur ? cur.reach : '',
+      cardEvidence: cur ? cur.evidence : [], cardConflict: !!(cur && cur.conflict),
+      approveLabel: cur ? cur.approve : '', altLabel: cur ? cur.alt : '',
+      approve: decide, skip: () => this.setState({ idx: pending.find((i) => i !== idx) ?? idx }),
+      feed: [...this.state.feedExtra, ...Component.FEED0.map((f) => ({ ...f, mine: false, anim: 'none' }))],
+      readyPct: decided.includes(1) ? '79%' : '73%',
+      donutDash: decided.includes(1) ? 109 : 101,
+      meaningCount: decided.includes(1) ? 41 : 38,
+      gapCount: decided.includes(1) ? 11 : 14,
+    };
+  }
+}
+</script>
+</body>
+</html>
