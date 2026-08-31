@@ -40,26 +40,46 @@ a:hover { color: var(--ink); }
   color: var(--ink-2); border-radius: var(--r-md); width: 30px;
   height: 30px; cursor: pointer; font-size: var(--fs-13);
 }
-.navlist { display: flex; flex-direction: column; gap: 2px; }
+/* the options: one tight cluster at the top, Claude-style, animated */
+.navlist { display: flex; flex-direction: column; gap: 1px; }
 .navlist a {
   display: flex; align-items: center; gap: 10px;
   text-decoration: none; color: var(--ink-2); font-weight: 600;
   font-size: var(--fs-13); padding: 8px 10px;
-  border-radius: var(--r-md); border: 1px solid transparent;
+  border-radius: var(--r-md);
+  transition: background-color 0.15s ease, color 0.15s ease;
+  animation: nav-in 0.3s ease both;
+}
+.navlist a:nth-child(1) { animation-delay: 0.02s; }
+.navlist a:nth-child(2) { animation-delay: 0.06s; }
+.navlist a:nth-child(3) { animation-delay: 0.1s; }
+.navlist a:nth-child(4) { animation-delay: 0.14s; }
+.navlist a:nth-child(5) { animation-delay: 0.18s; }
+@keyframes nav-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: none; }
 }
 .navlist a:hover { background: var(--bg); color: var(--ink); }
-.navlist a.active {
-  color: var(--accent); background: var(--bg);
-  border-color: var(--line);
-}
+.navlist a:hover .glyph { transform: translateX(2px); }
+.navlist a.active { color: var(--accent); background: var(--accent-soft); }
 .navlist .glyph { width: 18px; text-align: center;
-                  font-size: var(--fs-14); }
-.navdivider { border-top: 1px solid var(--line); margin: 2px 8px; }
-.tab-preview {
-  font-size: var(--fs-12); color: var(--ink-3);
+                  font-size: var(--fs-14);
+                  transition: transform 0.15s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .navlist a, .navlist .glyph { animation: none; transition: none; }
+}
+/* the space below the options is the chats shelf: Ask (E16) will
+ * fill it with real conversations; until then it says so honestly */
+.chats { margin-top: var(--s-4); padding: 0 10px;
+         display: flex; flex-direction: column; gap: 6px; }
+.chats-head {
+  font-size: var(--fs-11); font-weight: 700; letter-spacing: 0.06em;
+  color: var(--ink-3); text-transform: uppercase;
+}
+.chats-note {
+  margin: 0; font-size: var(--fs-12); color: var(--ink-3);
   border: 1px dashed var(--line-strong); border-radius: var(--r-md);
-  padding: 7px 10px; cursor: not-allowed; margin: 2px 0 0;
-  text-align: left;
+  padding: 8px 10px; cursor: not-allowed;
 }
 .sidefoot { display: flex; align-items: center; gap: var(--s-2);
             padding: 0 4px; justify-content: space-between; }
@@ -124,7 +144,7 @@ a:hover { color: var(--ink); }
   }
   .brand { padding: 0 6px; }
   .navlist { flex-direction: row; flex-wrap: wrap; }
-  .navdivider { display: none; }
+  .chats { display: none; }
   .sidefoot { margin-left: auto; }
 }
 
