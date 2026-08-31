@@ -1,0 +1,80 @@
+/** Synapse by Lumi — shell: hash router, theme toggle, build chip.
+ * Routes: #/home #/semantics #/cosmos #/artifacts #/operate
+ *         #/metric/<id> #/table/<physical>
+ * Deep links work — a metric profile is a URL you can send someone. */
+
+import { api } from "./api.js";
+import { renderHome } from "./pages/home.js";
+import { renderSemantics } from "./pages/semantics.js";
+import { renderMetric } from "./pages/metric.js";
+import { renderTable } from "./pages/table.js";
+import { renderCosmos } from "./pages/cosmos.js";
+import { renderArtifacts } from "./pages/artifacts.js";
+import { renderOperate } from "./pages/operate.js";
+
+const outlet = document.getElementById("outlet");
+let teardown = null;
+
+function parseRoute() {
+  const hash = location.hash.replace(/^#\/?/, "") || "home";
+  const [page, ...rest] = hash.split("/");
+  return { page, arg: decodeURIComponent(rest.join("/")) };
+}
+
+async function route() {
+  if (teardown) { try { teardown(); } catch { /* page gone */ } }
+  teardown = null;
+  const { page, arg } = parseRoute();
+  const tab = page === "metric" || page === "table" ? "semantics" : page;
+  document.querySelectorAll(".tabnav a").forEach((a) =>
+    a.classList.toggle("active", a.dataset.tab === tab));
+  outlet.classList.toggle("wide", page === "cosmos");
+  outlet.innerHTML = "";
+  const pages = {
+    home: renderHome,
+    semantics: renderSemantics,
+    metric: () => renderMetric(outlet, arg),
+    table: () => renderTable(outlet, arg),
+    cosmos: renderCosmos,
+    artifacts: renderArtifacts,
+    operate: renderOperate,
+  };
+  const render = pages[page] ?? renderHome;
+  teardown = await (page === "metric" || page === "table"
+    ? render()
+    : render(outlet)) ?? null;
+}
+
+window.addEventListener("hashchange", route);
+
+/* theme toggle — explicit choice wins over system */
+const toggle = document.getElementById("theme-toggle");
+const applyThemeGlyph = () => {
+  const dark =
+    document.documentElement.dataset.theme === "dark" ||
+    (!document.documentElement.dataset.theme &&
+      matchMedia("(prefers-color-scheme: dark)").matches);
+  toggle.textContent = dark ? "☀" : "☾";
+};
+toggle.addEventListener("click", () => {
+  const dark =
+    document.documentElement.dataset.theme === "dark" ||
+    (!document.documentElement.dataset.theme &&
+      matchMedia("(prefers-color-scheme: dark)").matches);
+  const next = dark ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("lumi-theme", next); } catch { /* fine */ }
+  applyThemeGlyph();
+});
+applyThemeGlyph();
+
+/* the build chip in the masthead — one fetch, honest when absent */
+api.home().then((home) => {
+  const chip = document.getElementById("build-chip");
+  if (home.available) {
+    chip.textContent = `build ${home.build_id.slice(0, 10)}…`;
+    chip.hidden = false;
+  }
+});
+
+route();

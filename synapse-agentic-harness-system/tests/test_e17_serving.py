@@ -144,6 +144,19 @@ def test_graph_map_renders_the_real_sky(tmp_path):
     assert any(e.get("scope") == "scoped_only" for e in joins), \
         "the studio CTE-scoped join must stay labeled in the sky"
     assert any(e["kind"] == "computed-from" for e in payload["edges"])
+    # the unified sky: domains are BODIES with membership tethers —
+    # one hub per well, human-asserted when a steward mapped it, and
+    # every table tethered to every domain that claims it
+    domains = [n for n in payload["nodes"] if n["kind"] == "domain"]
+    assert {d["id"].split(":", 1)[1] for d in domains} \
+        == {w["id"] for w in payload["wells"]}
+    assert all(d["tier"] == ("gu" if d["well"] == "UNMAPPED" else "ha")
+               for d in domains)
+    membership = [e for e in payload["edges"]
+                  if e["kind"] == "membership"]
+    tables = [n for n in payload["nodes"] if n["kind"] == "table"]
+    assert {e["a"] for e in membership} == {t["id"] for t in tables}
+    assert all(e["b"].startswith("domain:") for e in membership)
     for edge in payload["edges"]:
         assert edge["a"] in nodes and edge["b"] in nodes
     wells = {w["id"] for w in payload["wells"]}

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Synapse by Lumi</title>
+    <script>
+      // saved theme before first paint — no flash of the wrong mode
+      (function () {
+        var t = localStorage.getItem("lumi-theme");
+        if (t === "light" || t === "dark")
+          document.documentElement.dataset.theme = t;
+      })();
+    </script>
+    <!-- Lumi type. display=swap + full system fallbacks in tokens.css
+         keep the product working when the font CDN is unreachable. -->
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles/tokens.css" />
+    <link rel="stylesheet" href="/styles/app.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="masthead">
+        <a class="wordmark" href="#/home">LUMI</a>
+        <span class="tagline">powered by Synapse over Meridian</span>
+        <span class="spacer"></span>
+        <span id="build-chip" class="chip mono" hidden></span>
+        <span class="chip">actor: admin ●</span>
+        <button id="theme-toggle" class="icon-btn" type="button"
+                aria-label="Switch theme">☾</button>
+      </header>
+      <nav class="tabnav" aria-label="Sections">
+        <a href="#/home" data-tab="home">Home</a>
+        <a href="#/semantics" data-tab="semantics">Semantics</a>
+        <a href="#/cosmos" data-tab="cosmos">Cosmos</a>
+        <a href="#/artifacts" data-tab="artifacts">Artifacts</a>
+        <a href="#/operate" data-tab="operate">Operate</a>
+        <span class="tab-preview" title="The conversational surface ships with E16 — shown as a labeled door, never an unlabeled fake">Ask · E16</span>
+      </nav>
+      <main id="outlet" class="outlet"></main>
+    </div>
+    <script type="module" src="/js/main.js"></script>
+  </body>
+</html>
