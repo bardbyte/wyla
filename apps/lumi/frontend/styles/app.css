@@ -19,13 +19,13 @@ a:hover { color: var(--ink); }
 .spacer { margin-left: auto; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ── shell: Claude-style left sidebar ── */
-.shell { min-height: 100vh; display: flex; }
+/* ── shell: Claude-style left sidebar, pinned the full viewport ── */
+.shell { min-height: 100vh; }
 .sidenav {
-  flex: 0 0 220px; width: 220px; position: sticky; top: 0;
-  height: 100vh; box-sizing: border-box; overflow-y: auto;
+  position: fixed; top: 0; left: 0; bottom: 0; width: 220px;
+  box-sizing: border-box; overflow-y: auto; z-index: 10;
   display: flex; flex-direction: column; gap: var(--s-3);
-  padding: 18px 12px 16px; background: var(--surface);
+  padding: 18px 12px 12px; background: var(--surface);
   border-right: 1px solid var(--line);
 }
 .brand { display: flex; flex-direction: column; gap: 2px;
@@ -65,6 +65,7 @@ a:hover { color: var(--ink); }
 .navlist .glyph { width: 18px; text-align: center;
                   font-size: var(--fs-14);
                   transition: transform 0.15s ease; }
+.sidenav .spacer { margin-top: auto; margin-left: 0; }
 @media (prefers-reduced-motion: reduce) {
   .navlist a, .navlist .glyph { animation: none; transition: none; }
 }
@@ -81,14 +82,39 @@ a:hover { color: var(--ink); }
   border: 1px dashed var(--line-strong); border-radius: var(--r-md);
   padding: 8px 10px; cursor: not-allowed;
 }
-.sidefoot { display: flex; align-items: center; gap: var(--s-2);
-            padding: 0 4px; justify-content: space-between; }
-.main-col { flex: 1; min-width: 0; }
+/* the account row, the Claude way: avatar, name, role, one hover */
+.account {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: var(--r-md);
+  transition: background-color 0.15s ease;
+}
+.account:hover { background: var(--bg); }
+.avatar {
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  background: var(--accent); color: var(--on-accent);
+  display: grid; place-items: center;
+  font-size: var(--fs-11); font-weight: 700; letter-spacing: 0.02em;
+}
+.who { display: flex; flex-direction: column; line-height: 1.25;
+       font-size: var(--fs-12); min-width: 0; }
+.who b { color: var(--ink); font-size: var(--fs-13); }
+.who .role { color: var(--ink-3); white-space: nowrap; }
+.account .icon-btn { margin-left: auto; }
+.main-col { margin-left: 220px; min-width: 0; }
 /* in-page breadcrumb rows (pages render their own .masthead) */
 .masthead {
   display: flex; align-items: center; gap: var(--s-3);
   font-size: var(--fs-13); color: var(--ink-3);
 }
+/* ── Home as one flowing page: open sections, no boxes ── */
+.page-sec { display: flex; flex-direction: column; gap: var(--s-2); }
+.page-sec .sec-label {
+  font-size: var(--fs-11); font-weight: 700; letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+.page-sec.ruled { border-top: 1px solid var(--line);
+                  padding-top: var(--s-4); }
+
 /* ── the sources flow: four streams into one shared map ── */
 .flow {
   display: grid; align-items: stretch;
@@ -98,7 +124,8 @@ a:hover { color: var(--ink); }
 .flow-buckets { display: flex; flex-direction: column; gap: var(--s-2); }
 .flow-bucket {
   border: 1px solid var(--line); border-radius: var(--r-md);
-  background: var(--bg); padding: 10px 14px;
+  background: var(--surface); padding: 10px 14px;
+  box-shadow: var(--shadow);
   display: flex; flex-direction: column; gap: 4px; flex: 1;
 }
 .flow-bucket-title { font-weight: 700; color: var(--ink); }
@@ -135,9 +162,8 @@ a:hover { color: var(--ink); }
 }
 .outlet.wide { max-width: 1460px; }
 @media (max-width: 860px) {
-  .shell { flex-direction: column; }
   .sidenav {
-    position: static; width: auto; flex: none; height: auto;
+    position: static; width: auto; height: auto;
     flex-direction: row; align-items: center; flex-wrap: wrap;
     border-right: none; border-bottom: 1px solid var(--line);
     padding: 10px 14px;
@@ -145,7 +171,8 @@ a:hover { color: var(--ink); }
   .brand { padding: 0 6px; }
   .navlist { flex-direction: row; flex-wrap: wrap; }
   .chats { display: none; }
-  .sidefoot { margin-left: auto; }
+  .account { margin-left: auto; }
+  .main-col { margin-left: 0; }
 }
 
 /* ── primitives ── */

@@ -1,10 +1,15 @@
-/** Home. Hero doors, the six promises, LIVE PROOF, the Sources rail
- * (one card per source family, the ledger as the trust line), and
- * the exclusions card. The diff lives in Operate; network planes are
- * an operator detail, not a landing claim. */
+/** Home. One flowing page: hero doors, the six promises, LIVE
+ * PROOF, the sources flow story, exclusions. Open sections with
+ * quiet labels; no card boxes on the landing narrative. */
 
 import { api } from "../api.js";
-import { card, esc, loading, prose, unavailable } from "../ui.js";
+import { esc, loading, prose, unavailable } from "../ui.js";
+
+/* Home is one flowing page: open sections with quiet labels, not a
+ * stack of card boxes. Cards stay a component for dense surfaces. */
+const section = (label, body, cls = "") =>
+  `<section class="page-sec ${cls}">
+     <h2 class="sec-label">${label}</h2>${body}</section>`;
 
 const PROMISES = [
   ["continues your question", "“same for Canada” edits, never restarts"],
@@ -128,14 +133,15 @@ function flowRail(families, home, knowledgeFiles, artifacts) {
     "plus an answer key we keep to one side, only ever used to test ourselves",
     ...leftovers.map((f) => `also read: ${f.display}`),
   ];
-  return card(
+  return section(
     "HOW THE MAP GETS BUILT · four streams, one picture",
     `<div class="flow">
        <div class="flow-buckets">${bucketCards}</div>
        ${lane}
        ${fused}
      </div>
-     <div class="ledger">${footnotes.map(esc).join(" · ")}</div>`);
+     <div class="ledger">${footnotes.map(esc).join(" · ")}</div>`,
+    "ruled");
 }
 
 export async function renderHome(outlet) {
@@ -157,7 +163,7 @@ export async function renderHome(outlet) {
   const body = outlet.querySelector("#home-body");
   if (!body) return;
 
-  const promises = card(
+  const promises = section(
     "WHAT IT DOES · six promises from user research",
     `<div class="promises">${PROMISES.map(([lead, rest]) =>
       `<span>· <b>${esc(lead)}</b>: ${esc(rest)}</span>`).join("")}
@@ -184,7 +190,7 @@ export async function renderHome(outlet) {
           r.tables} tables witnessed</span></span></div>
       <div class="bar"><i style="width:${r.pct}%"></i></div>
     </div>`).join("");
-  const proof = card("LIVE PROOF · the system status, in the open", `
+  const proof = section("LIVE PROOF · the system status, in the open", `
     <div class="proof-counts">
       <span><b>${home.counts.tables ?? "?"}</b> tables${
         home.excluded_tables.length
@@ -208,14 +214,15 @@ export async function renderHome(outlet) {
   const shelf = sources.available
     ? flowRail(groupByFamily(sources.sources), home, knowledgeFiles,
         artifacts)
-    : card("SOURCES", `<p class="muted">${
-        esc(sources.reason ?? "loading the shelf…")}</p>`);
+    : section("SOURCES", `<p class="muted">${
+        esc(sources.reason ?? "loading the shelf…")}</p>`, "ruled");
 
-  const excluded = home.excluded_tables.length ? card(
+  const excluded = home.excluded_tables.length ? section(
     "EXCLUDED · with the reason on record",
     home.excluded_tables.map((t) =>
       `<div class="mono muted">${esc(t.physical)}: ${
-        prose(t.intentionally_excluded || t.reason)}</div>`).join(""))
+        prose(t.intentionally_excluded || t.reason)}</div>`).join(""),
+    "ruled")
     : "";
 
   body.innerHTML = `
