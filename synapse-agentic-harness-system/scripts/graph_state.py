@@ -102,10 +102,19 @@ def main() -> int:
     for rp in runs:
         rep = json.loads(rp.read_text(encoding="utf-8"))
         blind = rep.get("blind") or {}
-        tier = blind.get("tier", "?")
-        line = (f"{rp.parent.name:<14} prompt {rep.get('prompt_version', '?'):<6}"
-                f" blind {blind.get('recovered', '?')}/{blind.get('n', '?')}"
-                f" ({round(100 * blind.get('rate', 0))}%) → {tier}")
+        head = (f"{rp.parent.name:<14} prompt "
+                f"{rep.get('prompt_version', '?'):<6}")
+        if not blind:
+            print(head + f" plan only · "
+                  f"{rep.get('planned_metrics', 0)} metric + "
+                  f"{rep.get('planned_concepts', 0)} concept items "
+                  "planned, nothing asked or written")
+            continue
+        line = (head
+                + f" blind {blind.get('recovered', '?')}"
+                  f"/{blind.get('n', '?')}"
+                  f" ({round(100 * blind.get('rate', 0))}%)"
+                  f" → {blind.get('tier', '?')}")
         if blind.get("leaky_contexts") is not None:
             line += f" · leaky {blind['leaky_contexts']}"
         line += (f" · wrote {rep.get('metrics_enriched', 0)} metrics"
@@ -131,6 +140,12 @@ def main() -> int:
                 if recorded:
                     src, how = recorded, f"recorded by {mp.parent.name}"
                     break
+    skills = os.environ.get("MERIDIAN_SKILLS_DIR")
+    if skills:
+        n_sk = (sum(1 for p in Path(skills).rglob("*") if p.is_file())
+                if Path(skills).exists() else 0)
+        print(f"skills tree      {skills} (MERIDIAN_SKILLS_DIR) · "
+              f"{n_sk} files")
     if src and Path(src).exists():
         n = sum(1 for p in Path(src).rglob("*") if p.is_file())
         print(f"resolves to      {src}")

@@ -145,6 +145,54 @@ def test_env_file_configures_sources_dir(compiled, tmp_path):
         os.environ.pop("MERIDIAN_SOURCES_DIR", None)
 
 
+def test_skills_dir_env_walks_nested_areas(client, tmp_path):
+    """MERIDIAN_SKILLS_DIR points at the real skills tree (any
+    nesting: CFR/<skill>, CFR/TLS/<semantics>) and the shelf lists
+    it grouped by subpath — with reads resolved only through the
+    index, never user path math."""
+    tree = tmp_path / "skillsroot"
+    (tree / "CFR" / "RollRates").mkdir(parents=True)
+    (tree / "CFR" / "TLS").mkdir(parents=True)
+    (tree / "CFR" / "RollRates" / "knowledge.md").write_text(
+        "# Roll rates\nNever average monthly rates.", encoding="utf-8")
+    (tree / "CFR" / "TLS" / "semantics.md").write_text(
+        "# TLS semantics\nWhat TLS is.", encoding="utf-8")
+    os.environ["MERIDIAN_SKILLS_DIR"] = str(tree)
+    try:
+        listing = client.get("/api/meridian/artifacts").json()
+        assert listing["skills_dir"] == str(tree)
+        areas = {f["area"] for f in listing["files"]}
+        assert "CFR/RollRates" in areas and "CFR/TLS" in areas
+        doc = next(f for f in listing["files"]
+                   if f["rel"] == "skills/CFR/TLS/semantics.md")
+        served = client.get("/api/meridian/artifact_file",
+                            params={"rel": doc["rel"]}).json()
+        assert served["found"] and "TLS" in served["content"]
+        gone = client.get("/api/meridian/artifact_file",
+                          params={"rel": "../../etc/passwd"}).json()
+        assert gone["found"] is False
+    finally:
+        del os.environ["MERIDIAN_SKILLS_DIR"]
+
+
+def test_stage_keeps_text_extension(client, tmp_path):
+    """A dumped file stages under its real text extension; only
+    markdown gets the provenance comment header."""
+    os.environ["MERIDIAN_SOURCES_DIR"] = str(tmp_path / "sources")
+    try:
+        staged = client.post("/api/meridian/artifacts", json={
+            "business_unit": "CFR", "name": "codes",
+            "content": "code: kfs\n", "ext": "yaml"}).json()
+        assert staged["staged"] and staged["file"].endswith(".yaml")
+        path = tmp_path / "sources" / "artifacts" / staged["file"]
+        assert path.read_text(encoding="utf-8") == "code: kfs\n"
+        assert client.post("/api/meridian/artifacts", json={
+            "business_unit": "CFR", "name": "evil",
+            "content": "x", "ext": "exe"}).status_code == 422
+    finally:
+        del os.environ["MERIDIAN_SOURCES_DIR"]
+
+
 def test_empty_shelf_names_the_path(tmp_path):
     """No graph, no env, no silo sources: the payload says exactly
     where it looked and how to fix it — the designed empty state."""

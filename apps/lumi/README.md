@@ -24,11 +24,17 @@ reason — nothing is mocked, ever.** Builds compiled before E17-A lack
 `indexes/sources.json` and `indexes/graph_map.json`; one
 `laptop.py compile` lights up the Sources rail and the Cosmos.
 
-**Knowledge Files** (Home card + `#/artifacts`) read from the
-sources dir, resolved in order: `MERIDIAN_SOURCES_DIR` → the silo's
-own `sources/` if present → the absolute `--sources-dir` recorded by
-your latest `laptop.py build-graph` run (manifests record their input
-roots). The easiest way to set it: paste
+**Knowledge Files** (Home card + `#/artifacts`) read from two
+places: the skills tree (`MERIDIAN_SKILLS_DIR`, any nesting —
+`CFR/<skill>`, `CFR/TLS/<semantics>`; defaults to
+`<sources>/skills`) and the sources dir, resolved in order:
+`MERIDIAN_SOURCES_DIR` → the silo's own `sources/` if present → the
+absolute `--sources-dir` recorded by your latest
+`laptop.py build-graph` run (manifests record their input roots).
+Clicking a file opens the pullout reader (copy to clipboard, Esc or
+✕ to close); the creator stages typed knowledge or dumped text files
+into `sources/artifacts/`, and the SharePoint MCP connector button
+is a labeled door until the connector service lands. The easiest way to set it: paste
 `MERIDIAN_SOURCES_DIR=/path/to/$DATA/sources` into the silo's `.env`
 (see `.env.example`) — the app loads it at startup with the
 pipeline's own loader, and shell-exported variables always win over
