@@ -70,6 +70,11 @@ function flowRail(families, home, knowledgeFiles, artifacts) {
     const members = keys.map((k) => byFamily.get(k)).filter(Boolean);
     const read = members.reduce(
       (n, m) => n + (m.ledger.consumed ?? 0), 0);
+    const noted = members.reduce(
+      (n, m) => n + (m.ledger.deferred ?? 0)
+        + (m.ledger.inventoried ?? 0), 0);
+    const facts = members.reduce((n, m) => n
+      + Object.values(m.nodes).reduce((a, b) => a + b, 0), 0);
     const names = [...new Set(members.map((m) => m.display))];
     const isKnowledge = keys.includes("knowledge");
     return `
@@ -78,9 +83,12 @@ function flowRail(families, home, knowledgeFiles, artifacts) {
         <div class="muted">${esc(sub)}</div>
         <div class="flow-chips">${names.map((n) =>
           `<span class="chip">${esc(n)}</span>`).join("")}</div>
-        <div class="ledger">${read
-          ? `we read ${read} files from here`
-          : "read with every build"}</div>
+        <div class="ledger">${[
+          facts ? `${facts} facts on the map` : "",
+          read ? `we read ${read} files${
+            noted ? `, noted ${noted} more` : ""}`
+               : "read with every build",
+        ].filter(Boolean).join(" · ")}</div>
         ${isKnowledge ? (knowledgeFiles.length ? `
           <div class="ledger">${knowledgeFiles.length} files today:
             ${knowledgeFiles.slice(0, 4).map((f) => esc(f.name))
@@ -110,6 +118,7 @@ function flowRail(families, home, knowledgeFiles, artifacts) {
         </circle>`).join("")).join("")}
     </svg>`;
 
+  const namedSources = new Set(families.map((f) => f.display)).size;
   const fused = `
     <div class="flow-fusion">
       <div class="flow-bucket-title">One shared map</div>
@@ -118,10 +127,10 @@ function flowRail(families, home, knowledgeFiles, artifacts) {
         same thing, they back each other up. When they disagree, the
         disagreement stays visible until a person settles it.</p>
       <div class="proof-counts">
-        <span><b>${home.sources_count}</b> sources</span>
+        <span><b>${namedSources}</b> sources</span>
         <span><b>${home.counts.tables ?? 0}</b> tables</span>
         <span><b>${home.counts.metrics ?? 0}</b> metrics</span>
-        <span><b>${home.counts.vocab ?? 0}</b> business terms</span>
+        <span><b>${home.counts.vocab ?? 0}</b> terms and acronyms</span>
       </div>
       <div class="doors">
         <a class="linklike" href="#/cosmos">see it as a sky →</a>
