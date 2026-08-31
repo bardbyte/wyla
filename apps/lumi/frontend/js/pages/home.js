@@ -36,6 +36,108 @@ function groupByFamily(sources) {
   return [...families.values()];
 }
 
+/* the sources space, told as a story anyone can read: four streams
+ * of company knowledge flow into one shared map. Real names, real
+ * read-counts: the animation is decoration, the numbers are not. */
+const BUCKETS = [
+  ["The official records",
+   "what the company has written down about its data",
+   ["atlas_catalog", "atlas_mdm", "acropedia"]],
+  ["What stewards have approved",
+   "definitions people signed their names to",
+   ["marketplace", "domain_map", "steward"]],
+  ["What actually runs each day",
+   "the warehouse itself, and the questions people really ask it",
+   ["warehouse", "activity", "query_mining", "snippets"]],
+  ["What the teams know",
+   "the know-how each business unit keeps in its files",
+   ["knowledge"]],
+];
+
+function flowRail(families, home, knowledgeFiles, artifacts) {
+  const byFamily = new Map(families.map((f) => [f.family, f]));
+  const claimed = new Set(BUCKETS.flatMap(([, , keys]) => keys));
+  const leftovers = families.filter((f) =>
+    !claimed.has(f.family) && f.family !== "gold");
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const bucketCards = BUCKETS.map(([title, sub, keys]) => {
+    const members = keys.map((k) => byFamily.get(k)).filter(Boolean);
+    const read = members.reduce(
+      (n, m) => n + (m.ledger.consumed ?? 0), 0);
+    const names = [...new Set(members.map((m) => m.display))];
+    const isKnowledge = keys.includes("knowledge");
+    return `
+      <div class="flow-bucket">
+        <div class="flow-bucket-title">${esc(title)}</div>
+        <div class="muted">${esc(sub)}</div>
+        <div class="flow-chips">${names.map((n) =>
+          `<span class="chip">${esc(n)}</span>`).join("")}</div>
+        <div class="ledger">${read
+          ? `we read ${read} files from here`
+          : "read with every build"}</div>
+        ${isKnowledge ? (knowledgeFiles.length ? `
+          <div class="ledger">${knowledgeFiles.length} files today:
+            ${knowledgeFiles.slice(0, 4).map((f) => esc(f.name))
+              .join(" · ")}${knowledgeFiles.length > 4 ? " · …" : ""}
+            · <a class="linklike" href="#/artifacts">browse →</a></div>`
+          : `<div class="ledger">${prose(artifacts?.files_reason
+              ?? "shelf not visible from this machine")}</div>`) : ""}
+      </div>`;
+  }).join("");
+
+  // four streams meet in the middle: SVG stretches with the column,
+  // the travelling dots ride the same paths (SMIL, offline, no lib)
+  const ys = [50, 150, 250, 350];
+  const lane = `
+    <svg class="flow-lane" viewBox="0 0 150 400"
+         preserveAspectRatio="none" aria-hidden="true">
+      ${ys.map((y, i) => `
+        <path id="flow-p${i}" d="M 2 ${y} C 80 ${y}, 70 200, 148 200"
+          fill="none" stroke="currentColor" stroke-width="1.4"
+          vector-effect="non-scaling-stroke" opacity="0.3" />`).join("")}
+      ${reduced ? "" : ys.map((_, i) => [0, 1].map((k) => `
+        <circle class="flow-dot" r="3.2" opacity="0.85">
+          <animateMotion dur="3.6s" begin="${(i * 0.9 + k * 1.8).toFixed(1)}s"
+            repeatCount="indefinite" rotate="0">
+            <mpath href="#flow-p${i}"></mpath>
+          </animateMotion>
+        </circle>`).join("")).join("")}
+    </svg>`;
+
+  const fused = `
+    <div class="flow-fusion">
+      <div class="flow-bucket-title">One shared map</div>
+      <p class="muted">Every fact arrives with its receipt: where it
+        came from and when we saw it. When two sources describe the
+        same thing, they back each other up. When they disagree, the
+        disagreement stays visible until a person settles it.</p>
+      <div class="proof-counts">
+        <span><b>${home.sources_count}</b> sources</span>
+        <span><b>${home.counts.tables ?? 0}</b> tables</span>
+        <span><b>${home.counts.metrics ?? 0}</b> metrics</span>
+        <span><b>${home.counts.vocab ?? 0}</b> business terms</span>
+      </div>
+      <div class="doors">
+        <a class="linklike" href="#/cosmos">see it as a sky →</a>
+        <a class="linklike" href="#/semantics">browse what it knows →</a>
+      </div>
+    </div>`;
+
+  const footnotes = [
+    "plus an answer key we keep to one side, only ever used to test ourselves",
+    ...leftovers.map((f) => `also read: ${f.display}`),
+  ];
+  return card(
+    "HOW THE MAP GETS BUILT · four streams, one picture",
+    `<div class="flow">
+       <div class="flow-buckets">${bucketCards}</div>
+       ${lane}
+       ${fused}
+     </div>
+     <div class="ledger">${footnotes.map(esc).join(" · ")}</div>`);
+}
+
 export async function renderHome(outlet) {
   outlet.innerHTML = `
     <div class="hero">
@@ -103,32 +205,9 @@ export async function renderHome(outlet) {
 
   const knowledgeFiles = (artifacts?.files ?? [])
     .filter((f) => !f.staged);
-  const shelf = sources.available ? card(
-    "SOURCES · everything the company handed Meridian, and proof we read it",
-    `<div class="sources">${groupByFamily(sources.sources).map((s) => `
-      <div class="source">
-        <div><span class="chip acc">${esc(s.chip)}</span>${
-          s.subs.length
-            ? ` <span class="muted">${s.subs.map(esc).join(" · ")}</span>`
-            : ""}</div>
-        <div class="name">${esc(s.display)}</div>
-        <div class="counts mono">${
-          Object.entries(s.nodes)
-            .map(([k, n]) => `${esc(k)} ${n}`).join(" · ")
-          || "no served nodes (held out by design)"}</div>
-        ${Object.keys(s.ledger).length ? `<div class="ledger">ledger: ${
-          Object.entries(s.ledger)
-            .map(([k, n]) => `${n} ${esc(k)}`).join(" · ")}</div>` : ""}
-        ${s.family === "knowledge" ? (knowledgeFiles.length ? `
-          <div class="ledger">${knowledgeFiles.length} files on the
-            shelf: ${knowledgeFiles.slice(0, 6)
-              .map((f) => esc(f.name)).join(" · ")}${
-            knowledgeFiles.length > 6 ? " · …" : ""}</div>
-          <a class="linklike" href="#/artifacts">browse them →</a>`
-          : `<div class="ledger">${
-              prose(artifacts?.files_reason
-                ?? "shelf not visible from this machine")}</div>`) : ""}
-      </div>`).join("")}</div>`)
+  const shelf = sources.available
+    ? flowRail(groupByFamily(sources.sources), home, knowledgeFiles,
+        artifacts)
     : card("SOURCES", `<p class="muted">${
         esc(sources.reason ?? "loading the shelf…")}</p>`);
 

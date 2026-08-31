@@ -9,13 +9,27 @@ import {
 export async function renderTable(outlet, physical) {
   outlet.innerHTML = `
     <div class="masthead" style="padding:0">
-      <a class="linklike" href="#/semantics">Semantics</a>
+      <a class="linklike" href="#/semantics">← Semantics Explorer</a>
       <span class="muted">› Table Profile</span>
     </div>
+    <div id="siblings"></div>
     <div id="profile">${loading()}</div>`;
-  const detail = await api.table(physical);
+  const [detail, tablesPayload] = await Promise.all(
+    [api.table(physical), api.tables()]);
   const host = outlet.querySelector("#profile");
   if (!host) return;
+  // hop between tables without leaving the profile
+  if (tablesPayload.available && tablesPayload.rows.length > 1) {
+    outlet.querySelector("#siblings").innerHTML = `
+      <div class="card subnav"><span class="muted">tables:</span>
+        ${tablesPayload.rows.map((r) => `
+          <a class="chip mono linkchip ${
+              r.physical === physical ? "on" : ""}"
+            href="#/table/${encodeURIComponent(r.physical)}"
+            title="${esc(r.physical)} · ${r.metrics_here} metrics">${
+            esc(r.short)}</a>`).join("")}
+      </div>`;
+  }
   if (!detail.available) { host.innerHTML = unavailable(detail.reason); return; }
   if (!detail.found) {
     host.innerHTML = card("", `<p>${esc(physical)} is not in the
@@ -51,7 +65,7 @@ export async function renderTable(outlet, physical) {
               <span class="chip">${esc(mh.status_served)}</span>
               <span class="mono muted">${mh.support}</span>
             </div>`).join("")}`)}
-      ${card("JOINS: how, with evidence, never by vibes", `
+      ${card("JOINS: how, with evidence", `
         ${(detail.joins ?? []).length === 0
           ? `<span class="muted">no join evidence on record: co-usage
              alone is not a join</span>`
