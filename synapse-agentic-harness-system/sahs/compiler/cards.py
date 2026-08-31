@@ -39,7 +39,7 @@ def _lob_line(lob_info: list[dict[str, Any]]) -> str:
             notes.append(f"{witnesses['gmns']} gmns spec(s)")
         if witnesses.get("catalog_mined"):
             notes.append(f"mined support {witnesses['catalog_mined']}")
-        label = entry["code"] + (f" — {entry['name']}"
+        label = entry["code"] + (f": {entry['name']}"
                                  if entry.get("name") else "")
         rendered.append(f"{label} ({'; '.join(notes) or 'declared'})")
     return ("- line of business: " + " · ".join(rendered)
@@ -55,7 +55,7 @@ def _usage_line(usage_info: list[dict[str, Any]]) -> str:
     for entry in usage_info[:5]:
         label = entry["code"]
         if entry.get("name"):
-            label += f" — {entry['name']}"
+            label += f": {entry['name']}"
         if entry.get("parent"):
             label += f" ({entry['parent']})"
         rendered.append(f"{label} · {entry['support']}")
@@ -114,14 +114,16 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
         if column.sensitive:
             flags.append("SENSITIVE")
         if column.ungoverned:
-            flags.append("ungoverned — no business meaning on record")
+            flags.append("ungoverned, no business meaning on record")
         note = f" ({'; '.join(flags)})" if flags else ""
         desc = column.description
         supplementary = (f" | lumi: {column.description_supplementary}"
                          if column.description_supplementary else "")
+        meaning = f": {desc}{supplementary}" if (desc or supplementary) \
+            else ""
         column_rows.append(
             f"- {column.name} {column.data_type.lower()}"
-            f"{note} — {desc}{supplementary} "
+            f"{note}{meaning} "
             f"[prov:{column.type_source or 'bq'}"
             f"·agree={column.agreement_count}]")
     lines["columns"] = ["## columns"] + column_rows
@@ -134,7 +136,7 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
         # TRANSFORMED CTEs — the relationship exists; the raw tables do
         # NOT join safely without the stated preparation
         caveat = ("" if j.get("scope") == "raw_safe"
-                  else " — CTE-scoped, NOT raw-safe"
+                  else " (CTE-scoped, NOT raw-safe)"
                   + (f"; requires: {'; '.join(j['preconditions'][:2])}"
                      if j.get("preconditions") else ""))
         lines["joins"].append(
@@ -152,7 +154,7 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
     access = []
     restricted = acl_entry.get("restricted")
     if restricted == "unknown_policy":
-        access.append("- ⚠ row-access policy UNKNOWN (listing denied) — "
+        access.append("- ⚠ row-access policy UNKNOWN (listing denied): "
                       "live execution DENIED until resolved [prov:bq]")
     elif restricted:
         access.append(f"- row-access policy: {restricted} [prov:bq]")
@@ -165,7 +167,7 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
     conflicts = []
     for name, count in consensus.structural.items():
         if count:
-            conflicts.append(f"- {name}: {count} — see structural census")
+            conflicts.append(f"- {name}: {count}, see structural census")
     for column in consensus.columns.values():
         for flag in column.flags:
             conflicts.append(f"- {column.name}: {flag}")
@@ -175,7 +177,7 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
             + ", ".join(consensus.omitted_catalog_only))
     lines["conflicts"] = ["## conflicts"] + (conflicts or ["- none"])
     lines["footer"] = [f"[prov: consensus of bq+lumi+atlas via "
-                       f"merge_policy — every line traceable] {prov}"]
+                       f"merge_policy, every line traceable] {prov}"]
 
     # ── budgeter: fixed drop order, protected sections never dropped ──
     drop_order = [("columns", 12), ("joins", 3), ("filters", 3)]
@@ -261,12 +263,12 @@ def metric_card(metric: dict[str, Any],
     if metric.get("query_shape"):
         lines.append("- query shape: "
                      + "/".join(metric["query_shape"])
-                     + " — full SQL retained as evidence [prov:studio]")
+                     + " (full SQL retained as evidence) [prov:studio]")
     if metric.get("tables_associated_not_referenced"):
         lines.append(
             "- ⚠ associated but NOT referenced by the SQL: "
             + ", ".join(metric["tables_associated_not_referenced"])
-            + " — declared lineage the query never reads [prov:studio]")
+            + " (declared lineage the query never reads) [prov:studio]")
     if metric.get("data_owners"):
         lines.append("- data owners: "
                      + ", ".join(metric["data_owners"])
@@ -291,7 +293,7 @@ def metric_card(metric: dict[str, Any],
             lines.append(
                 f"- off-meridian by expression · fp={variant['fp']} · "
                 f"{variant['status']} · support {variant['support']} "
-                f"[prov:{variant['source']}] — "
+                f"[prov:{variant['source']}] "
                 f"`{variant['canonical_sql'][:100]}`")
     else:
         lines.append("- none recorded")
@@ -321,6 +323,6 @@ def concept_card(label: str, bindings: list[dict[str, Any]],
     n_classes = len({b["fp"] for b in bindings})
     lines.append("## conflicts")
     lines.append(
-        f"- {n_classes} distinct classes — resolver will ask below margin"
+        f"- {n_classes} distinct classes: resolver will ask below margin"
         if n_classes > 1 else "- none")
     return "\n".join(lines)

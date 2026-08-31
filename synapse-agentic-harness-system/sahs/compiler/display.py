@@ -26,16 +26,16 @@ from typing import Any
 SOURCE_DISPLAY: dict[str, dict[str, str]] = {
     "bq": {
         "family": "warehouse",
-        "display": "Lumi Warehouse — BigQuery Catalog",
+        "display": "Lumi Warehouse: BigQuery Catalog",
         "chip": "BQ Catalog",
         "blurb": "Tables, columns, and constraints as BigQuery itself "
                  "declares them."},
     "jobs_30d": {
         "family": "activity",
-        "display": "Query Activity — 30-Day Warehouse Logs",
+        "display": "Query Activity: 30-Day Warehouse Logs",
         "chip": "Activity 30d",
         "blurb": "Real queries run against the warehouse in the last "
-                 "30 days — true recency and usage."},
+                 "30 days: true recency and usage."},
     "std_tech_metadata": {
         "family": "atlas_mdm",
         "display": "Atlas MDM",
@@ -52,13 +52,13 @@ SOURCE_DISPLAY: dict[str, dict[str, str]] = {
         "family": "atlas_catalog",
         "display": "Atlas Data Federated Catalog",
         "chip": "Atlas Catalog",
-        "blurb": "The federated business-term catalog — official "
+        "blurb": "The federated business-term catalog, the official "
                  "names for business concepts."},
     "glossary": {
         "family": "acropedia",
         "display": "Acropedia",
         "chip": "Acropedia",
-        "blurb": "The enterprise glossary — acronyms and terms with "
+        "blurb": "The enterprise glossary: acronyms and terms with "
                  "their meanings."},
     "atlas": {
         "family": "atlas_catalog",
@@ -80,12 +80,12 @@ SOURCE_DISPLAY: dict[str, dict[str, str]] = {
     "studio_queries": {
         "family": "marketplace",
         "display": "Data Marketplace Steward Definitions",
-        "chip": "Marketplace", "sub": "Studio SQL",
-        "blurb": "The full certified SQL behind Marketplace metrics, "
-                 "as exported from Studio."},
+        "chip": "Marketplace", "sub": "certified SQL",
+        "blurb": "The full certified SQL behind Marketplace "
+                 "metrics."},
     "measures_catalog": {
         "family": "query_mining",
-        "display": "Metric Mining — BQ Query History",
+        "display": "Metric Mining: BQ Query History",
         "chip": "Query Mining",
         "blurb": "Metric expressions mined from real analyst queries "
                  "in the warehouse logs."},
@@ -93,8 +93,8 @@ SOURCE_DISPLAY: dict[str, dict[str, str]] = {
         "family": "knowledge",
         "display": "Knowledge Files",
         "chip": "Knowledge",
-        "blurb": "Curated domain knowledge files (per business unit) "
-                 "— the Artifacts shelf."},
+        "blurb": "Curated domain knowledge files (per business unit), "
+                 "the Artifacts shelf."},
     "blue_insights": {
         "family": "snippets",
         "display": "Analyst Snippet Library",
@@ -115,14 +115,14 @@ SOURCE_DISPLAY: dict[str, dict[str, str]] = {
                  "steward."},
     "gold_queries": {
         "family": "gold",
-        "display": "Gold Answer Key — evaluation only",
+        "display": "Gold Answer Key (evaluation only)",
         "chip": "Gold",
         "blurb": "The certified question/SQL answer key. Never feeds "
-                 "ranking — it is the exam, not the student."},
+                 "ranking: it is the exam, not the student."},
     "llm_enricher": {
         "family": "enrichment",
-        "display": "Synapse Enrichment — draft, pending steward "
-                   "review",
+        "display": "Synapse Enrichment (draft, pending steward "
+                   "review)",
         "chip": "Draft",
         "blurb": "Questions and grains drafted by the enrichment run "
                  "from real SQL evidence. Unreviewed until a steward "
@@ -131,7 +131,7 @@ SOURCE_DISPLAY: dict[str, dict[str, str]] = {
         "family": "steward",
         "display": "Steward Decision",
         "chip": "Steward",
-        "blurb": "A recorded human decision — the strongest evidence "
+        "blurb": "A recorded human decision, the strongest evidence "
                  "in the graph."},
 }
 
@@ -316,7 +316,7 @@ def build_sources_index(nodes: dict[str, Any],
         "readiness": readiness,
         "meta": {
             "contributes": "swept from prov.source over the folded "
-                           "graph — counts, never estimates",
+                           "graph: counts, never estimates",
             "ledger": "latest graph run's utilization ledger, grouped "
                       "by source (consumed / inventoried / deferred)",
             "readiness": "per LOB: share of its steward-mapped tables "

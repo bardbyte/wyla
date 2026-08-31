@@ -1,6 +1,6 @@
-/** Cosmos — the sky, from the compiler's graph_map.json (positions
+/** Cosmos: the sky, from the compiler's graph_map.json (positions
  * baked at compile; this page only renders). three.js is vendored
- * locally — no CDN, works offline. Encoding: size = usage, glow =
+ * locally: no CDN, works offline. Encoding: size = usage, glow =
  * trust tier, gold star = held by multiple domains. Click a body →
  * the rail, with a real link to its profile. */
 
@@ -55,7 +55,7 @@ export async function renderCosmos(outlet) {
           ? "steward-mapped" : "unmapped")}
         <div class="muted">${esc(node.sub ?? `${node.usage} tables`)}</div>
         <div class="muted">every dashed tether is a table this domain
-          claims — a gold star carries two</div>
+          claims; a gold star carries two</div>
         <a class="btn" href="#/semantics">browse its tables →</a>`);
       return;
     }
@@ -96,7 +96,7 @@ export async function renderCosmos(outlet) {
   scene.add(root);
 
   // shape = kind: domains are octahedral hubs at their well centers,
-  // tables spheres, metrics small orbiting spheres — one constellation
+  // tables spheres, metrics small orbiting spheres: one constellation
   const sphere = new THREE.SphereGeometry(1, 20, 20);
   const octa = new THREE.OctahedronGeometry(1, 0);
   const meshes = payload.nodes.map((node) => {
@@ -138,27 +138,90 @@ export async function renderCosmos(outlet) {
       const b = positions.get(edge.b);
       if (a && b) points.push(a, b);
     }
-    const edgeColor = dark ? 0x8fa8d8 : 0x9aa8c0;
+    // each kind gets its own hue so the toggle visibly changes the
+    // sky: joins in the accent blue, membership as slate dashed
+    // tethers, computed-from in the data hue
+    const KIND_STYLE = {
+      "joins": { color: dark ? 0x57a9f2 : 0x006fcf, opacity: 0.55 },
+      "membership": { color: dark ? 0x9db4e6 : 0x5b6b8f, opacity: 0.6 },
+      "computed-from": { color: dark ? 0x5e8df0 : 0x3b6fe0,
+                         opacity: 0.4 },
+    };
+    const style = KIND_STYLE[kind];
     const line = new THREE.LineSegments(
       new THREE.BufferGeometry().setFromPoints(points),
       kind === "membership"
         ? new THREE.LineDashedMaterial({
-            transparent: true, opacity: 0.22, color: edgeColor,
-            dashSize: 0.7, gapSize: 0.5 })
+            transparent: true, opacity: style.opacity,
+            color: style.color, dashSize: 0.7, gapSize: 0.5 })
         : new THREE.LineBasicMaterial({
-            transparent: true, opacity: kind === "joins" ? 0.35 : 0.16,
-            color: edgeColor }));
+            transparent: true, opacity: style.opacity,
+            color: style.color }));
     if (kind === "membership") line.computeLineDistances();
     line.visible = kind === "joins";
     edgeGroups[kind] = line;
     root.add(line);
   }
+  // adjacency for pick-highlight: click a body and its neighborhood
+  // lights up while the rest of the sky dims
+  const neighbors = new Map();
+  for (const edge of payload.edges) {
+    if (!neighbors.has(edge.a)) neighbors.set(edge.a, new Set());
+    if (!neighbors.has(edge.b)) neighbors.set(edge.b, new Set());
+    neighbors.get(edge.a).add(edge.b);
+    neighbors.get(edge.b).add(edge.a);
+  }
+  let highlight = null;
+  const clearHighlight = () => {
+    if (highlight) { root.remove(highlight); highlight = null; }
+    for (const mesh of meshes) {
+      const node = mesh.userData;
+      mesh.material.opacity = node.kind === "domain" ? 0.85 : 1;
+      mesh.material.transparent = node.kind === "domain";
+      mesh.material.emissiveIntensity =
+        (TIER_GLOW[node.tier] ?? 0.2)
+        * (node.kind === "domain" ? 0.35 : 0.6);
+    }
+  };
+  const highlightNode = (node) => {
+    clearHighlight();
+    const hood = neighbors.get(node.id) ?? new Set();
+    for (const mesh of meshes) {
+      const other = mesh.userData;
+      if (other.id === node.id) {
+        mesh.material.emissiveIntensity = 1.4;
+        continue;
+      }
+      if (!hood.has(other.id)) {
+        mesh.material.transparent = true;
+        mesh.material.opacity = 0.15;
+      }
+    }
+    const points = [];
+    for (const edge of payload.edges) {
+      if (edge.a !== node.id && edge.b !== node.id) continue;
+      const a = positions.get(edge.a);
+      const b = positions.get(edge.b);
+      if (a && b) points.push(a, b);
+    }
+    highlight = new THREE.LineSegments(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineBasicMaterial({
+        transparent: true, opacity: 0.95, color: 0xe8c98a }));
+    root.add(highlight);
+  };
   let edgeKind = "joins";
   const pills = body.querySelector("#edge-pills");
+  const edgeCounts = {};
+  for (const edge of payload.edges)
+    edgeCounts[edge.kind] = (edgeCounts[edge.kind] ?? 0) + 1;
+  edgeCounts.all = payload.edges.length;
   const drawPills = () => {
     pills.innerHTML = KINDS.map((k) =>
       `<button class="pill ${edgeKind === k ? "on" : ""}"
-        data-k="${k}">${k}</button>`).join("");
+        data-k="${k}">${k}</button>`).join("")
+      + `<span class="muted" id="edge-count">${
+        edgeCounts[edgeKind] ?? 0} edges lit</span>`;
   };
   pills.addEventListener("click", (e) => {
     const k = e.target?.dataset?.k;
@@ -186,19 +249,65 @@ export async function renderCosmos(outlet) {
   const rot = { x: -0.12, y: 0.3 };
   let dist = 46;
   let drag = null;
+  let dragJustEnded = false;         // pointerup precedes click
   renderer.domElement.style.cursor = "grab";
   const onDown = (e) => { drag = { x: e.clientX, y: e.clientY, moved: false }; };
-  const onMove = (e) => {
-    if (!drag) return;
-    const dx = e.clientX - drag.x;
-    const dy = e.clientY - drag.y;
-    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
-    rot.y += dx * 0.005;
-    rot.x = Math.max(-1.2, Math.min(1.2, rot.x + dy * 0.004));
-    drag.x = e.clientX;
-    drag.y = e.clientY;
+  const ray = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  const castAt = (e) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    ray.setFromCamera(pointer, camera);
+    return ray.intersectObjects(meshes, false)[0];
   };
-  const onUp = () => { drag = null; };
+  // hover: the sky answers the pointer: cursor, a name chip, a glow
+  const hoverChip = document.createElement("div");
+  hoverChip.className = "cosmos-hover";
+  hoverChip.hidden = true;
+  host.appendChild(hoverChip);
+  let hovered = null;
+  const unhover = () => {
+    if (!hovered) return;
+    hovered.scale.multiplyScalar(1 / 1.25);
+    hovered = null;
+    hoverChip.hidden = true;
+    if (!drag) renderer.domElement.style.cursor = "grab";
+  };
+  const onMove = (e) => {
+    if (drag) {
+      const dx = e.clientX - drag.x;
+      const dy = e.clientY - drag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+      rot.y += dx * 0.005;
+      rot.x = Math.max(-1.2, Math.min(1.2, rot.x + dy * 0.004));
+      drag.x = e.clientX;
+      drag.y = e.clientY;
+      return;
+    }
+    if (e.target !== renderer.domElement) { unhover(); return; }
+    const hit = castAt(e);
+    if (hit?.object !== hovered) {
+      unhover();
+      if (hit) {
+        hovered = hit.object;
+        hovered.scale.multiplyScalar(1.25);
+        renderer.domElement.style.cursor = "pointer";
+      }
+    }
+    if (hovered) {
+      const node = hovered.userData;
+      const rect = host.getBoundingClientRect();
+      hoverChip.textContent = `${node.label} · ${node.kind}`;
+      hoverChip.style.left = `${e.clientX - rect.left + 14}px`;
+      hoverChip.style.top = `${e.clientY - rect.top + 10}px`;
+      hoverChip.hidden = false;
+    }
+  };
+  const onUp = () => {
+    dragJustEnded = Boolean(drag?.moved);
+    drag = null;
+  };
   const onWheel = (e) => {
     e.preventDefault();
     dist = Math.max(18, Math.min(90, dist + e.deltaY * 0.04));
@@ -207,24 +316,17 @@ export async function renderCosmos(outlet) {
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
   renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
-  const ray = new THREE.Raycaster();
-  const pointer = new THREE.Vector2();
-  let selected = null;
   const onClick = (e) => {
-    if (drag && drag.moved) return;
-    const rect = renderer.domElement.getBoundingClientRect();
-    pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1,
-      -((e.clientY - rect.top) / rect.height) * 2 + 1);
-    ray.setFromCamera(pointer, camera);
-    const hit = ray.intersectObjects(meshes, false)[0];
-    if (!hit) return;
-    if (selected) {
-      selected.material.emissiveIntensity =
-        (TIER_GLOW[selected.userData.tier] ?? 0.2) * 0.6;
+    if (dragJustEnded) { dragJustEnded = false; return; }
+    const hit = castAt(e);
+    if (!hit) {
+      // empty space resets the sky
+      clearHighlight();
+      drawRail(null);
+      return;
     }
-    selected = hit.object;
-    selected.material.emissiveIntensity = 1.4;
-    drawRail(selected.userData);
+    highlightNode(hit.object.userData);
+    drawRail(hit.object.userData);
   };
   renderer.domElement.addEventListener("click", onClick);
 

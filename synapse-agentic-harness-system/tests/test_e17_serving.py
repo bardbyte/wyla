@@ -80,9 +80,9 @@ def test_display_registry_and_ledger_grouping():
                            "studio_queries"}
     assert display_for("glossary")["display"] == "Acropedia"
     assert display_for("measures_catalog")["display"] \
-        == "Metric Mining — BQ Query History"
+        == "Metric Mining: BQ Query History"
     assert display_for("bq")["display"] \
-        == "Lumi Warehouse — BigQuery Catalog"
+        == "Lumi Warehouse: BigQuery Catalog"
     unknown = display_for("mystery_feed")
     assert unknown["family"] == "unregistered"
     assert unknown["display"] == "mystery_feed"

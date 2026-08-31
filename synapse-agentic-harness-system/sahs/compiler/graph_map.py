@@ -80,8 +80,15 @@ def build_graph_map(consensus: dict[str, Any],
         code = str(row.get("code") or row.get("lob") or "?")
         for physical in row.get("tables", []):
             table_wells.setdefault(physical, []).append(code)
+    # only domains that actually hold something get a well — an empty
+    # domain is not information the sky should showcase (org rows with
+    # no tables would otherwise render "0 tables · 0% witnessed")
+    populated = {code for codes in table_wells.values()
+                 for code in codes}
     well_ids = [str(r.get("code") or r.get("lob") or "?")
-                for r in lobs]
+                for r in lobs
+                if str(r.get("code") or r.get("lob") or "?")
+                in populated]
     if any(p not in table_wells for p in physicals):
         well_ids.append("UNMAPPED")
     wells = []
@@ -103,7 +110,7 @@ def build_graph_map(consensus: dict[str, Any],
                     if str(r.get("code") or r.get("lob")) == well_id),
                    {})
         label = well_id if not row.get("name") \
-            else f"{well_id} — {row['name']}"
+            else f"{well_id}: {row['name']}"
         wells.append({"id": well_id, "label": label,
                       "sub": f"{len(members)} tables · "
                              f"{pct}% witnessed",
@@ -200,7 +207,7 @@ def build_graph_map(consensus: dict[str, Any],
         "schema": "meridian.graph_map/1",
         "nodes": map_nodes, "edges": map_edges, "wells": wells,
         "meta": {
-            "layout": "seeded-v1 (sha256 positions — same build, "
+            "layout": "seeded-v1 (sha256 positions: same build, "
                       "same sky)",
             "truncated": {
                 "mined_metrics": sum(

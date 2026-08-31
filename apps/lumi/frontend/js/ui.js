@@ -7,6 +7,12 @@ export const esc = (s) =>
     '"': "&quot;", "'": "&#39;",
   }[c]));
 
+// display-plane typography for served PROSE (reasons, blurbs):
+// em dashes never reach the page. Data artifacts shown verbatim
+// (SQL, cards, diffs) do not pass through here.
+export const prose = (s) =>
+  esc(String(s ?? "").replace(/\s+—\s+/g, ": ").replace(/—/g, "-"));
+
 export const TIER = {
   ha: { glyph: "●", word: "human-asserted" },
   gr: { glyph: "◆", word: "grounded" },
@@ -25,9 +31,9 @@ export const card = (label, body, cls = "") =>
 
 export const unavailable = (reason) =>
   card("NO COMPILED BUILD ON THIS MACHINE",
-    `<p>${esc(reason)}</p>
+    `<p>${prose(reason)}</p>
      <p class="muted">The product renders only the real promoted
-     build — nothing is mocked. Compile on this machine and this page
+     build: nothing is mocked. Compile on this machine and this page
      fills itself.</p>`, "empty");
 
 export const loading = () =>
@@ -43,13 +49,13 @@ export const feedbackBar = (screen, objectId, send) => {
   host.innerHTML = `
     <button class="linklike" data-vote="up" title="This reads right">👍</button>
     <button class="linklike" data-vote="down"
-      title="Something is off — a steward will see it">👎</button>`;
+      title="Something is off: a steward will see it">👎</button>`;
   host.addEventListener("click", (e) => {
     const vote = e.target?.dataset?.vote;
     if (!vote) return;
     send({ screen, object_id: objectId, vote });
     host.innerHTML =
-      `<span class="muted">noted — a steward will see it</span>`;
+      `<span class="muted">noted: a steward will see it</span>`;
   });
   return host;
 };

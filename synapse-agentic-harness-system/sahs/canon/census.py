@@ -187,7 +187,7 @@ def build_census(
             "label_normalization": E9_NOTE,
             "support_combiner": (
                 "per-class support = MAX over ranking witness families "
-                "(never summed across families — the upstream catalog "
+                "(never summed across families; the upstream catalog "
                 "was mined from a superset of the same query history); "
                 "gold_attested and audit_30d are shown per-witness but "
                 "excluded from the effective number and from "

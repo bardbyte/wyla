@@ -69,7 +69,7 @@ class MeridianData:
     def _load(self):
         current = _builds_root() / "CURRENT"
         if not current.exists():
-            return None, (f"no compiled build — {current} missing; "
+            return None, (f"no compiled build: {current} missing; "
                           "run `laptop.py compile` on this machine")
         stamp = (current.stat().st_mtime_ns,
                  current.read_text(encoding="utf-8").strip())
@@ -157,24 +157,34 @@ class MeridianData:
         shelf = self._aux("indexes/sources.json")
         if shelf is None:
             return self._unavailable(
-                "build predates the Sources shelf — recompile")
+                "build predates the Sources shelf; recompile")
         return {"available": True, "build_id": build.version, **shelf}
 
+    # steward-chosen browse order: the certified canon first, then the
+    # mined bulk awaiting review, then the pending specs, then the rest
+    _BROWSE_RANK = {"certified": 0, "unreviewed": 1,
+                    "pending_certification": 2}
+
     def explorer_metrics(self, q: str = "", status: str = "",
-                         lob: str = "", limit: int = 200) -> dict:
+                         lob: str = "", table: str = "",
+                         limit: int = 200) -> dict:
         build, reason = self._load()
         if build is None:
             return self._unavailable(reason)
         tier_of_metric, _ = self._bridge
         needle = (q or "").lower().strip()
         rows = []
-        for row in sorted(build.metrics,
-                          key=lambda r: (-int(r.get("support") or 0),
-                                         r["id"])):
+        for row in sorted(
+                build.metrics,
+                key=lambda r: (self._BROWSE_RANK.get(
+                    r.get("status_served") or r.get("status"), 3),
+                    -int(r.get("support") or 0), r["id"])):
             served = row.get("status_served") or row.get("status")
             if status and served != status:
                 continue
             if lob and (row.get("line_of_business") or "") != lob:
+                continue
+            if table and (row.get("table") or "") != table:
                 continue
             if needle and needle not in (
                     (row.get("label") or "") + " "
@@ -184,7 +194,7 @@ class MeridianData:
             rows.append({
                 "id": row["id"], "fp": row.get("fp", ""),
                 "label": row.get("label") or "",
-                "expr": (row.get("canonical_sql") or "")[:160],
+                "expr": (row.get("canonical_sql") or "")[:400],
                 "status_served": served,
                 "evidence_origin": row.get("evidence_origin", ""),
                 "tier": tier_of_metric(row),
@@ -292,7 +302,7 @@ class MeridianData:
         payload = self._aux("indexes/graph_map.json")
         if payload is None:
             return self._unavailable(
-                "build predates the cosmos map — recompile")
+                "build predates the cosmos map; recompile")
         return {"available": True, "build_id": build.version,
                 **payload}
 
@@ -324,20 +334,77 @@ class MeridianData:
         # runs/ tree holds
         return {"available": True, "runs": runs[-20:]}
 
+    # the knowledge inventory roots — everything the Artifacts browser
+    # may list and read. Path containment is enforced on read.
+    def _knowledge_files(self) -> list[dict]:
+        sources = _sources_dir()
+        entries: list[dict] = []
+
+        def _add(path: Path, area: str, staged: bool) -> None:
+            try:
+                size = path.stat().st_size
+            except OSError:
+                return
+            entries.append({
+                "rel": str(path.relative_to(sources)),
+                "name": path.name, "area": area,
+                "size": size, "staged": staged,
+                "kind": path.suffix.lstrip(".") or "file"})
+
+        skills = sources / "skills"
+        if skills.exists():
+            for path in sorted(skills.rglob("*")):
+                if path.is_file():
+                    parts = path.relative_to(skills).parts
+                    area = "/".join(parts[:-1]) or "skills"
+                    _add(path, area, staged=False)
+        staged_dir = sources / "artifacts"
+        if staged_dir.exists():
+            for path in sorted(staged_dir.glob("*")):
+                if path.is_file():
+                    _add(path, "staged", staged=True)
+        for path in sorted(sources.glob("*.md")):
+            _add(path, "reference docs", staged=False)
+        return entries
+
     def artifacts(self) -> dict:
         build, reason = self._load()
         shelf = (self._aux("indexes/sources.json") or {}) \
             if build is not None else {}
         known = [s for s in shelf.get("sources", [])
                  if s.get("family") == "knowledge"]
-        staged_dir = _sources_dir() / "artifacts"
-        staged = sorted(p.name for p in staged_dir.glob("*")
-                        if p.is_file()) if staged_dir.exists() else []
+        files = self._knowledge_files()
         return {"available": build is not None,
                 **({} if build is not None else {"reason": reason}),
                 "known": known,
-                "staged": staged,
-                "staging_dir": str(staged_dir)}
+                "files": files,
+                "staged": [f["name"] for f in files if f["staged"]],
+                "staging_dir": str(_sources_dir() / "artifacts")}
+
+    def artifact_file(self, rel: str) -> dict:
+        """Read ONE knowledge file, by the rel path the inventory
+        handed out. Containment enforced: the resolved path must live
+        under the sources dir AND appear in the inventory — no
+        traversal, no reading arbitrary files."""
+        sources = _sources_dir().resolve()
+        try:
+            target = (sources / rel).resolve()
+            target.relative_to(sources)
+        except (ValueError, OSError):
+            return {"found": False, "reason": "outside the shelf"}
+        inventory = {f["rel"] for f in self._knowledge_files()}
+        if rel not in inventory or not target.is_file():
+            return {"found": False,
+                    "reason": "not on the knowledge shelf"}
+        if target.stat().st_size > 1_000_000:
+            return {"found": False, "reason": "file too large to view"}
+        try:
+            content = target.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return {"found": False, "reason": "not a text file"}
+        return {"found": True, "rel": rel, "name": target.name,
+                "kind": target.suffix.lstrip(".") or "file",
+                "content": content}
 
 
 class FeedbackEvent(BaseModel):
@@ -376,8 +443,9 @@ def sources() -> dict:
 
 @router.get("/explorer/metrics")
 def explorer_metrics(q: str = "", status: str = "", lob: str = "",
-                     limit: int = 200) -> dict:
-    return _DATA.explorer_metrics(q, status, lob, min(limit, 1000))
+                     table: str = "", limit: int = 200) -> dict:
+    return _DATA.explorer_metrics(q, status, lob, table,
+                                  min(limit, 1000))
 
 
 @router.get("/explorer/tables")
@@ -415,6 +483,11 @@ def artifacts() -> dict:
     return _DATA.artifacts()
 
 
+@router.get("/artifact_file")
+def artifact_file(rel: str) -> dict:
+    return _DATA.artifact_file(rel)
+
+
 @router.post("/artifacts", status_code=201)
 def stage_artifact(req: ArtifactStageRequest) -> dict:
     slug = "".join(c if c.isalnum() or c in "-_" else "-"
@@ -426,13 +499,13 @@ def stage_artifact(req: ArtifactStageRequest) -> dict:
     path = staged_dir / f"{req.business_unit.lower()}_{slug}.md"
     if path.exists():
         return {"staged": False,
-                "reason": f"{path.name} already staged — pick another "
+                "reason": f"{path.name} already staged; pick another "
                           "name or edit the file directly"}
     header = (f"<!-- staged via Synapse by Lumi · actor {req.actor} · "
               f"business unit {req.business_unit} -->\n")
     path.write_text(header + req.content, encoding="utf-8")
     return {"staged": True, "file": path.name,
-            "note": "staged for ingestion — the Knowledge Files "
+            "note": "staged for ingestion. The Knowledge Files "
                     "loader picks this up when it lands (pinned "
                     "follow-up); until then it is visible here as "
                     "staged, never silently pretended into the graph"}

@@ -31,7 +31,7 @@ def _json(path: Path) -> dict[str, Any]:
 def build_diff(new_dir: Path, prev_dir: Path | None) -> str:
     lines = ["# DIFF vs previous build", ""]
     if prev_dir is None or not Path(prev_dir).exists():
-        lines.append("no previous build — this is the first promotion "
+        lines.append("no previous build: this is the first promotion "
                      "candidate")
         return "\n".join(lines)
     new_manifest = _json(new_dir / "manifest.json")

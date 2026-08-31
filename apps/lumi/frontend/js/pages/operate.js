@@ -1,4 +1,4 @@
-/** Operate — Builds & Diffs + Enrichment Runs, from the real reports.
+/** Operate: Builds & Diffs + Enrichment Runs, from the real reports.
  * Promote/rollback arrive with the steward loop (B2); this page is a
  * projection, never a second write path. */
 
@@ -24,7 +24,7 @@ export async function renderOperate(outlet) {
     const recon = builds.manifest.table_reconciliation ?? {};
     const excluded = (recon.missing ?? [])
       .filter((m) => m.intentionally_excluded).length;
-    buildsCard = card("CURRENT — the promoted build every surface reads", `
+    buildsCard = card("CURRENT: the promoted build every surface reads", `
       <div class="profile-head">
         <span class="profile-title mono">${esc(builds.current)}</span>
         <span class="chip tier-gr">promoted ✓</span>
@@ -43,9 +43,9 @@ export async function renderOperate(outlet) {
 
   const runs = runsPayload.available ? runsPayload.runs : [];
   const runsCard = card(
-    "ENRICHMENT RUNS — drafts, gated blind before any write",
+    "ENRICHMENT RUNS: drafts, gated blind before any write",
     runs.length === 0
-      ? `<p class="muted">no enrichment run recorded in this graph yet —
+      ? `<p class="muted">no enrichment run recorded in this graph yet -
          run laptop.py enrich and this page fills itself</p>`
       : runs.slice().reverse().map((run) => {
           const blind = run.blind;
@@ -75,14 +75,14 @@ export async function renderOperate(outlet) {
                 tokens</span>` : ""}
             </div>
             ${blind?.grader ? `<div class="muted" style="font-size:11px">
-              grader ${esc(blind.grader)} — a pass with leaky context
+              grader ${esc(blind.grader)}: a pass with leaky context
               measures leakage, not recovery</div>` : ""}
           </div>`;
         }).join(""));
 
   body.innerHTML = `${buildsCard}${runsCard}
     <div class="legend"><span class="muted">promote / rollback arrive
-      with the steward loop (B2) — this page is a projection, never a
+      with the steward loop (B2): this page is a projection, never a
       second write path</span></div>`;
   const toggle = body.querySelector("#toggle-diff");
   if (toggle) {

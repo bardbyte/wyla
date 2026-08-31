@@ -1,9 +1,8 @@
-/** Synapse by Lumi — shell: hash router, theme toggle, build chip.
+/** Synapse by Lumi: shell: hash router, theme toggle, build chip.
  * Routes: #/home #/semantics #/cosmos #/artifacts #/operate
  *         #/metric/<id> #/table/<physical>
- * Deep links work — a metric profile is a URL you can send someone. */
+ * Deep links work: a metric profile is a URL you can send someone. */
 
-import { api } from "./api.js";
 import { renderHome } from "./pages/home.js";
 import { renderSemantics } from "./pages/semantics.js";
 import { renderMetric } from "./pages/metric.js";
@@ -47,7 +46,7 @@ async function route() {
 
 window.addEventListener("hashchange", route);
 
-/* theme toggle — explicit choice wins over system */
+/* theme toggle: explicit choice wins over system */
 const toggle = document.getElementById("theme-toggle");
 const applyThemeGlyph = () => {
   const dark =
@@ -67,14 +66,5 @@ toggle.addEventListener("click", () => {
   applyThemeGlyph();
 });
 applyThemeGlyph();
-
-/* the build chip in the masthead — one fetch, honest when absent */
-api.home().then((home) => {
-  const chip = document.getElementById("build-chip");
-  if (home.available) {
-    chip.textContent = `build ${home.build_id.slice(0, 10)}…`;
-    chip.hidden = false;
-  }
-});
 
 route();

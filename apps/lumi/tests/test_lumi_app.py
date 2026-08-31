@@ -57,7 +57,8 @@ def test_shell_and_planes(client):
     health, and the planes echo — booleans, never secrets."""
     page = client.get("/")
     assert page.status_code == 200
-    assert "LUMI" in page.text and "powered by Synapse" in page.text
+    assert "SYNAPSE" in page.text and "powered by Lumi" in page.text
+    assert "Saheb Singh" in page.text  # logged-in identity, no build chip
     assert client.get("/health").json()["app"] == "synapse-by-lumi"
     planes = client.get("/api/lumi/planes").json()
     assert set(planes) == {"bq", "vertex"}
@@ -90,6 +91,54 @@ def test_read_plane_end_to_end(client):
     assert table["found"] and table["metrics_here"]
     cosmos = client.get("/api/meridian/graph_map").json()
     assert cosmos["available"] and cosmos["nodes"]
+
+
+def test_browse_order_and_table_filter(client):
+    """The Semantics explorer serves the steward-chosen order —
+    certified, then unreviewed, then pending_certification — and the
+    table filter narrows to exactly that table's metrics."""
+    rank = {"certified": 0, "unreviewed": 1, "pending_certification": 2}
+    rows = client.get("/api/meridian/explorer/metrics").json()["rows"]
+    ranks = [rank.get(r["status_served"], 3) for r in rows]
+    assert ranks == sorted(ranks), "browse order broke"
+    assert rows[0]["status_served"] == "certified"
+    assert all(len(r["expr"]) <= 400 for r in rows)
+
+    bound = next(r for r in rows if r["table"])
+    filtered = client.get("/api/meridian/explorer/metrics",
+                          params={"table": bound["table"]}).json()
+    assert filtered["rows"]
+    assert all(r["table"] == bound["table"] for r in filtered["rows"])
+
+
+def test_knowledge_shelf_and_containment(client):
+    """The Artifacts inventory lists real skill files grouped by area,
+    artifact_file serves one verbatim — and refuses traversal and
+    off-inventory paths (the shelf is the boundary)."""
+    os.environ["MERIDIAN_SOURCES_DIR"] = str(FX / "sources")
+    try:
+        listing = client.get("/api/meridian/artifacts").json()
+        files = listing["files"]
+        areas = {f["area"] for f in files}
+        assert any("CPS_RollRates" in a for a in areas)
+        assert "reference docs" in areas          # root tls_reference.md
+        doc = next(f for f in files if f["name"] == "knowledge.md")
+        served = client.get("/api/meridian/artifact_file",
+                            params={"rel": doc["rel"]}).json()
+        assert served["found"] and served["content"].strip()
+        assert served["kind"] == "md"
+
+        # inside sources/ but NOT on the shelf → refused
+        off = client.get("/api/meridian/artifact_file",
+                         params={"rel": "business_terms.csv"}).json()
+        assert off["found"] is False
+        # traversal → refused before any read
+        out = client.get("/api/meridian/artifact_file",
+                         params={"rel": "../identity/crosswalk.jsonl"}
+                         ).json()
+        assert out["found"] is False
+    finally:
+        del os.environ["MERIDIAN_SOURCES_DIR"]
 
 
 def test_feedback_and_staging(client, compiled, tmp_path):
