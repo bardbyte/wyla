@@ -56,7 +56,7 @@ class VertexModel:
             connection = VertexConnection.from_env()
         except AuthError as e:
             raise ModelUnavailable(
-                f"{e} — Ask needs the Vertex contract in the silo .env: "
+                f"{e}: Ask needs the Vertex contract in the silo .env: "
                 "LUMI_VERTEX_SA_KEY, VERTEX_PROJECT_ID, VERTEX_LOCATION "
                 "(default global), VERTEX_MODEL") from e
         return VertexModel(client=VertexClient(connection=connection,

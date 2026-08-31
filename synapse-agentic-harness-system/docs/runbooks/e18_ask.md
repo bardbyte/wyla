@@ -127,9 +127,55 @@ answer renders with those failures named in its limits. An answer
 whose verdict is `fail` is still shown — with the failure visible.
 That is the difference between honest and polished.
 
+## Stage B: the chat surface
+
+`#/ask` in Synapse by Lumi, `apps/lumi/frontend/js/pages/ask.js`. It
+is a **pure consumer** of the stream above: it opens one EventSource
+per session and every value it draws arrived on that stream. It never
+calls a model, never holds a key, never learns an endpoint. A test
+(`test_ask_surface.py`) fails the build if a vendor host or a key name
+ever appears in the frontend.
+
+What the surface does with each event:
+
+| event | what you see |
+|---|---|
+| `turn_started` … `contract_ready` | one line each in the theater strip, collapsed by default, its summary showing the latest step |
+| `clarify_request` | chips, inline, carrying their evidence; clicking one posts it back and it becomes your own turn |
+| `generate_token` | the written answer, painted on the animation frame |
+| `verify_progress` / `verify_verdict` | ✓/✗ per criterion with the evidence that flipped it |
+| `answer_payload` | the answer card: meridian line, grain, verdict chip, results, "How was this calculated?", limits, 👍/👎 |
+| `error` | a card with next actions, never a stack trace |
+| `budget_tick` / `turn_done` | the meter in the masthead |
+
+Pinned in the UI:
+
+- **The input is never blocked.** You can type the next question while
+  this one composes. Stop (button or `Esc`) fires the server-side
+  abort; regenerate re-runs the last turn.
+- **History comes from the store, the stream resumes at the head.**
+  A reload replays the durable transcript once and connects at
+  `?after=<head>`, so nothing renders twice. `#/ask/<session>` is a
+  deep link into a conversation.
+- **Served prose is de-dashed** (`prose()` in `js/ui.js`): evidence,
+  limits, criteria and error text. The SQL, the build id and the grain
+  are data artifacts and render verbatim.
+- **Sessions are the sidebar.** A session earns its name from the
+  first plan that binds a metric, so an untitled row means a
+  conversation that never reached a subject.
+
+### Driving it in a browser without Vertex
+
+The transport is the only thing worth faking, and it is faked from
+*outside* the product: build an `AskRuntime` with a `model_factory`
+and assign it to `apps.lumi.backend.ask._RUNTIME` before `create_app()`
+(the same substitution `tests/test_ask_loop.py` makes). Everything
+else — the build, the resolver, the contract, the sandbox, the
+verifier — stays real.
+
 ## Stage status
 
-Stage A (this runbook) is landed and tested. Stages B–F — the chat
-surface, the plan panel, the search constellation, the exploratory
-notebook lane, sessions/budgets/flywheel, and the TQSR loss function —
+Stages A and B are landed and tested. Stages C–F — the plan panel and
+version stepper, the search constellation, the exploratory notebook
+lane, sessions/budgets/flywheel accrual, and the TQSR loss function —
 build on this stream without changing it.

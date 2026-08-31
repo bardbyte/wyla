@@ -72,13 +72,13 @@ def validate_sql(build: Build, sql: str, metric_id: str = "") -> dict:
     if err is not None:
         return {"ok": False, "violations": [_entry(
             "parse_error", str(err)[:200],
-            "the SQL does not parse as BigQuery standard SQL — fix the "
+            "the SQL does not parse as BigQuery standard SQL: fix the "
             "syntax; validate_sql only accepts full SELECT statements")],
             "warnings": []}
     if result.kind in _DML_DDL:
         return {"ok": False, "violations": [_entry(
             "statement_not_allowed", f"statement kind: {result.kind}",
-            "only read-only SELECT/UNION queries are allowed — the "
+            "only read-only SELECT/UNION queries are allowed: the "
             "warehouse is written by pipelines, never by this tool")],
             "warnings": []}
     if result.kind not in _QUERY_KINDS:
@@ -167,7 +167,7 @@ def validate_sql(build: Build, sql: str, metric_id: str = "") -> dict:
         else:
             warnings.append(_entry(
                 "select_star", "SELECT * projects every column",
-                "name columns — cards list them; * defeats the "
+                "name columns: cards list them; * defeats the "
                 "column-level access check on future builds"))
 
     def _resolve_column(column: exp.Column) -> tuple[str | None, str]:
@@ -268,7 +268,7 @@ def validate_sql(build: Build, sql: str, metric_id: str = "") -> dict:
     if outer_select is not None and where_node is None \
             and not tree.find(exp.Group):
         warnings.append(_entry(
-            "no_where_filter", "no WHERE clause — full scan",
+            "no_where_filter", "no WHERE clause: full scan",
             "filter on the partition column (see the table card's "
             "grain line) to bound cost"))
 
@@ -290,7 +290,7 @@ def validate_sql(build: Build, sql: str, metric_id: str = "") -> dict:
                     "metric_expression_missing",
                     f"the certified expression for {row['label']!r} "
                     "does not appear in the query",
-                    f"use exactly: {row['canonical_sql']} — variants "
+                    f"use exactly: {row['canonical_sql']}: variants "
                     "must go through get_definition_line disclosure"))
             group = tree.find(exp.Group)
             group_columns = ([c.name for c in group.find_all(exp.Column)]
@@ -314,14 +314,14 @@ def validate_sql(build: Build, sql: str, metric_id: str = "") -> dict:
                 warnings.append(_entry(
                     "dims_unchecked",
                     f"{row['label']!r} declares no approved dimensions",
-                    "GROUP BY conformance cannot be checked — the "
+                    "GROUP BY conformance cannot be checked: the "
                     "steward should extend the contract"))
             if grain and any(grain in _dim_tokens(c)
                              for c in group_columns):
                 warnings.append(_entry(
                     "group_by_at_metric_grain",
                     f"grouping at the metric's own grain ({grain})",
-                    "the aggregate degenerates to row level — usually "
+                    "the aggregate degenerates to row level: usually "
                     "a coarser dimension is meant"))
 
     return {"ok": not violations, "violations": violations,

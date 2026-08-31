@@ -1,0 +1,501 @@
+/** Ask (E18 Stage B): the chat surface, a pure consumer of the
+ * turn's event stream.
+ *
+ * The UX contract, in code:
+ *   - input is never blocked; the response streams from the first
+ *     token, and deterministic steps land in the theater strip
+ *     immediately, so structure visibly answers while composition
+ *     thinks;
+ *   - work is visible but tucked away: the strip is collapsed by
+ *     default and expands to the step detail;
+ *   - interactive elements ARE messages: chips render inline, block
+ *     the run until answered, and the choice appears as the user's
+ *     turn;
+ *   - stop means stop (server-side abort), regenerate re-runs the
+ *     last turn;
+ *   - errors are cards with next actions, never dead ends.
+ *
+ * Nothing here calls a model or holds a key. Every value rendered
+ * arrives on the stream from the real loop.
+ */
+
+import { api } from "../api.js";
+import { renderMarkdown } from "../md.js";
+import { esc, prose } from "../ui.js";
+
+const SESSION_KEY = "synapse-ask-session";
+
+const STEP_COPY = {
+  classify_result: (e) => `read the turn: ${e.kind.replace("_", " ")}`
+    + (e.model_used ? "" : " (deterministic)"),
+  resolve_started: (e) => `searching the graph for ${
+    (e.slots || []).join(", ") || "the plan"}`,
+  resolve_result: (e) => (e.bound
+    ? `bound ${e.bound.label || e.bound.id} on ${e.bound.table}`
+    : (e.slots_resolved || []).length
+      ? `re-resolved ${e.slots_resolved.join(", ")}`
+      : "nothing needed re-resolving")
+    + (e.elapsed_ms !== undefined ? ` · ${e.elapsed_ms}ms` : ""),
+  plan_delta: (e) => (e.changes || []).length
+    ? `plan v${e.version}: ${e.changes.map(
+        (c) => `${c.slot} → ${c.to}`).join(", ")}`
+    : `plan v${e.version} started`,
+  contract_ready: (e) =>
+    `${e.contract.will_verify.length} promises to verify, all unproven`,
+};
+
+export async function renderAsk(outlet, wanted = "") {
+  outlet.innerHTML = `
+    <div class="masthead" style="padding:0">
+      <span class="muted">Ask · a governed answer with its receipts</span>
+      <span class="spacer"></span>
+      <span class="muted" id="ask-meter"></span>
+      <button class="btn" id="ask-new">new session</button>
+    </div>
+    <div class="ask">
+      <div class="ask-thread" id="ask-thread"></div>
+      <div class="ask-composer">
+        <textarea id="ask-input" rows="1"
+          placeholder="Ask about your data…"></textarea>
+        <div class="ask-actions">
+          <span class="muted" id="ask-hint">Enter to send ·
+            Shift+Enter for a new line · Esc to stop</span>
+          <span class="spacer"></span>
+          <button class="btn" id="ask-regen" hidden>regenerate</button>
+          <button class="btn" id="ask-stop" hidden>stop</button>
+          <button class="btn primary" id="ask-send">Ask</button>
+        </div>
+      </div>
+    </div>`;
+
+  const thread = outlet.querySelector("#ask-thread");
+  const input = outlet.querySelector("#ask-input");
+  const sendBtn = outlet.querySelector("#ask-send");
+  const stopBtn = outlet.querySelector("#ask-stop");
+  const regenBtn = outlet.querySelector("#ask-regen");
+  const meter = outlet.querySelector("#ask-meter");
+
+  const state = { session: null, source: null, turns: new Map(),
+                  lastText: "", running: false, seq: 0 };
+
+  // ── session ──────────────────────────────────────────────
+  const say = (html, cls = "") => {
+    const el = document.createElement("div");
+    el.className = `ask-note ${cls}`;
+    el.innerHTML = html;
+    thread.appendChild(el);
+    scroll();
+    return el;
+  };
+  const scroll = () => { thread.scrollTop = thread.scrollHeight; };
+
+  let boot = null;
+  const stored = wanted || localStorage.getItem(SESSION_KEY);
+  if (stored) {
+    boot = await api.askSession(stored);
+    if (!boot.available) boot = null;
+  }
+  if (!boot) {
+    const created = await api.askNewSession("analyst");
+    if (!created.available) {
+      say(`<b>Ask is not available.</b> ${esc(created.reason ?? "")}`,
+          "error");
+      return () => {};
+    }
+    boot = await api.askSession(created.session.id);
+    if (!boot.available) {
+      say(`<b>Ask is not available.</b> ${esc(boot.reason ?? "")}`, "error");
+      return () => {};
+    }
+  }
+  state.session = boot.session;
+  localStorage.setItem(SESSION_KEY, state.session.id);
+  window.dispatchEvent(new CustomEvent("synapse:sessions"));
+  // History comes from the STORE (durable, survives a restart); the
+  // stream then starts at the bus head, so nothing renders twice.
+  state.seq = boot.head || 0;
+  replay(boot);
+
+  // ── the transcript, rebuilt from the record ──────────────
+  function replay(payload) {
+    const messages = payload.messages || [];
+    messages.forEach((message, i) => {
+      const turnId = message.turn_id || "replay";
+      if (message.role === "user" && message.text) {
+        userBubble(message.text);
+      } else if (message.payload?.clarify) {
+        // a question is still live only if nothing came after it
+        chips(turnFor(turnId), message.payload.clarify,
+              { answered: i < messages.length - 1 });
+      } else if (message.payload?.schema === "a2ui.answer/1") {
+        const turn = turnFor(turnId);
+        turn.buffer = message.text || message.payload.prose || "";
+        paint(turn);
+        turn.title.textContent = "answered earlier in this session";
+        answerCard(turn, message.payload);
+      }
+    });
+    if (payload.budget) budget(payload.budget);
+    if (payload.running) {
+      say("a turn was already running here: reconnected to it, so the "
+          + "written answer picks up from this point", "warn");
+    }
+  }
+
+  function userBubble(text) {
+    const el = document.createElement("div");
+    el.className = "ask-user";
+    el.textContent = text;
+    thread.appendChild(el);
+    scroll();
+  }
+
+  function turnFor(turnId) {
+    let turn = state.turns.get(turnId);
+    if (turn) return turn;
+    const el = document.createElement("div");
+    el.className = "ask-turn";
+    el.innerHTML = `
+      <details class="theater">
+        <summary><span class="tri">▸</span>
+          <span class="theater-title">working…</span></summary>
+        <div class="theater-steps"></div>
+      </details>
+      <div class="ask-prose md"></div>
+      <div class="ask-extras"></div>`;
+    thread.appendChild(el);
+    turn = {
+      el, steps: el.querySelector(".theater-steps"),
+      title: el.querySelector(".theater-title"),
+      prose: el.querySelector(".ask-prose"),
+      extras: el.querySelector(".ask-extras"),
+      buffer: "", stepCount: 0, painting: false,
+    };
+    state.turns.set(turnId, turn);
+    scroll();
+    return turn;
+  }
+
+  function step(turn, text, mark = "·") {
+    const row = document.createElement("div");
+    row.className = "theater-step";
+    row.innerHTML = `<span class="mark">${esc(mark)}</span>
+      <span>${prose(text)}</span>`;
+    turn.steps.appendChild(row);
+    turn.stepCount += 1;
+    turn.title.textContent = text;      // the collapsed line is the
+    scroll();                           // latest thing that happened
+  }
+
+  function paint(turn) {
+    if (turn.painting) return;
+    turn.painting = true;
+    requestAnimationFrame(() => {
+      turn.painting = false;
+      turn.prose.innerHTML = renderMarkdown(turn.buffer, "md");
+      scroll();
+    });
+  }
+
+  function chips(turn, clarify, { answered = false } = {}) {
+    const box = document.createElement("div");
+    box.className = "card chips-card";
+    box.innerHTML = `
+      <div class="chips-question">${prose(clarify.question)}</div>
+      <div class="chips-row">
+        ${(clarify.options || []).map((option, i) => `
+          <button class="chip-choice" data-i="${i}"${
+            answered ? " disabled" : ""}>
+            <b>${esc(option.label)}</b>
+            ${option.why ? `<span class="muted">${prose(option.why)}</span>`
+              : ""}
+            ${option.evidence
+              ? `<span class="muted mono">${prose(option.evidence)}</span>`
+              : ""}
+          </button>`).join("")}
+      </div>
+      <div class="muted">${answered ? "answered"
+        : "remembered for this session: I will not ask twice"}</div>`;
+    box.addEventListener("click", (e) => {
+      const button = e.target.closest?.(".chip-choice");
+      if (!button || button.disabled || state.running) return;
+      const option = clarify.options[Number(button.dataset.i)];
+      box.querySelectorAll(".chip-choice").forEach((b) => {
+        b.disabled = true;
+        b.classList.toggle("on", b === button);
+      });
+      // the choice becomes the user's turn, exactly like typing it
+      userBubble(option.label);
+      send(option.label, { slot: clarify.slot, value: option.value,
+                           label: option.label });
+    });
+    turn.extras.appendChild(box);
+    scroll();
+  }
+
+  function resultTable(payload) {
+    const rows = payload.rows || [];
+    if (!rows.length) return "";
+    const cols = (payload.result_schema || []).map(
+      (c) => (typeof c === "string" ? c : c.name)).filter(Boolean);
+    const keys = cols.length ? cols : Object.keys(rows[0] || {});
+    const shown = rows.slice(0, 12);
+    return `
+      <div class="result-wrap">
+        <table class="result">
+          <thead><tr>${keys.map(
+            (k) => `<th>${esc(k)}</th>`).join("")}</tr></thead>
+          <tbody>${shown.map((r) => `<tr>${keys.map(
+            (k) => `<td>${esc(Array.isArray(r) ? r[keys.indexOf(k)]
+              : r[k])}</td>`).join("")}</tr>`).join("")}</tbody>
+        </table>
+      </div>
+      ${rows.length > shown.length ? `<div class="muted">${
+        rows.length - shown.length} further rows in the result, not
+        shown here</div>` : ""}`;
+  }
+
+  function verdictChip(verdict) {
+    const passed = verdict.will_verify.filter((c) => c.passed).length;
+    const total = verdict.will_verify.length;
+    const cls = verdict.verdict === "pass" ? "tier-gr" : "tier-in";
+    return `<span class="chip ${cls}">verified ${passed}/${total}</span>`;
+  }
+
+  function answerCard(turn, payload) {
+    const card = document.createElement("div");
+    card.className = "card answer-card";
+    card.innerHTML = `
+      <div class="answer-head">
+        <span class="chip acc">${esc(payload.metric.label
+          || payload.metric.id)}</span>
+        ${verdictChip(payload.verdict)}
+        <span class="muted">one row = ${esc(payload.grain)}</span>
+        <span class="spacer"></span>
+        <span class="muted mono">${esc(payload.build_id)}</span>
+      </div>
+      <div class="meridian">${prose(payload.meridian_line)}</div>
+      ${resultTable(payload)}
+      <details class="answer-detail">
+        <summary><span class="tri">▸</span>How was this calculated?</summary>
+        <div class="answer-detail-body">
+          <div class="verdict-list">
+            ${payload.verdict.will_verify.map((c) => `
+              <div class="verdict-row ${c.passed ? "ok" : "no"}">
+                <span>${c.passed ? "✓" : "✗"}</span>
+                <span>${prose(c.text)}</span>
+                <span class="muted">${prose(c.evidence)}</span>
+              </div>`).join("")}
+          </div>
+          <pre class="block sqlblock">${esc(payload.sql)}</pre>
+          <button class="btn" data-copy>copy the SQL</button>
+        </div>
+      </details>
+      ${payload.limits.length ? `
+        <div class="limits">${payload.limits.map(
+          (l) => `<div class="muted">· ${prose(l)}</div>`).join("")}</div>`
+        : ""}
+      <div class="legend">
+        ${(payload.actions || []).filter((a) => a.enabled).map(
+          (a) => `<a class="linklike" href="${esc(a.href)}">${
+            esc(a.label)}</a>`).join("")}
+        <span class="spacer"></span>
+        <button class="linklike" data-vote="up"
+          title="This reads right">👍</button>
+        <button class="linklike" data-vote="down"
+          title="Something is off">👎</button>
+      </div>`;
+    card.addEventListener("click", async (e) => {
+      if (e.target.closest?.("[data-copy]")) {
+        try { await navigator.clipboard.writeText(payload.sql); } catch {}
+        e.target.closest("[data-copy]").textContent = "copied ✓";
+      }
+      const vote = e.target.closest?.("[data-vote]")?.dataset.vote;
+      if (vote) {
+        await api.askFeedback(state.session.id,
+                              { vote, subject: "answer" });
+        e.target.closest(".legend").insertAdjacentHTML(
+          "beforeend", `<span class="muted">noted</span>`);
+      }
+    });
+    turn.extras.appendChild(card);
+    scroll();
+  }
+
+  function errorCard(turn, event) {
+    const card = document.createElement("div");
+    card.className = "card error-card";
+    card.innerHTML = `
+      <div class="card-label">${esc(event.code)}</div>
+      <p>${prose(event.message)}</p>
+      ${(event.next_actions || []).length ? `
+        <div class="legend">${event.next_actions.map(
+          (a) => `<span class="chip">${prose(a)}</span>`).join("")}</div>`
+        : ""}`;
+    turn.extras.appendChild(card);
+    scroll();
+  }
+
+  function budget(tick) {
+    const cost = tick.cost_usd === null || tick.cost_usd === undefined
+      ? `${tick.tokens} tokens`
+      : `$${tick.cost_usd} · ${tick.tokens} tokens`;
+    meter.textContent = cost;
+    meter.title = tick.cost_note || "";
+  }
+
+  // ── the stream: the single source of UI truth ────────────
+  function connect() {
+    if (state.source) state.source.close();
+    const source = new EventSource(
+      api.askStreamUrl(state.session.id, state.seq));
+    state.source = source;
+    source.onmessage = () => {};        // every event is named
+    for (const name of [
+      "turn_started", "classify_result", "plan_delta", "resolve_started",
+      "resolve_result", "clarify_request", "contract_ready",
+      "generate_token", "verify_progress", "verify_verdict",
+      "answer_payload", "budget_tick", "budget_grace", "turn_done",
+      "error"]) {
+      source.addEventListener(name, (message) => {
+        let event;
+        try { event = JSON.parse(message.data); } catch { return; }
+        state.seq = Math.max(state.seq, event.seq || 0);
+        handle(event);
+      });
+    }
+  }
+
+  function handle(event) {
+    const turn = turnFor(event.turn_id || "loose");
+    switch (event.ev) {
+      case "turn_started":
+        setRunning(true);
+        step(turn, "started");
+        break;
+      case "classify_result":
+      case "resolve_started":
+      case "resolve_result":
+      case "plan_delta":
+      case "contract_ready":
+        step(turn, STEP_COPY[event.ev](event));
+        break;
+      case "clarify_request":
+        chips(turn, event);
+        break;
+      case "generate_token":
+        turn.buffer += event.delta || "";
+        paint(turn);
+        break;
+      case "verify_progress":
+        step(turn, `${event.criterion.text}: ${event.criterion.evidence}`,
+             event.criterion.passed ? "✓" : "✗");
+        break;
+      case "verify_verdict":
+        step(turn, `verdict: ${event.verdict}`,
+             event.verdict === "pass" ? "✓" : "✗");
+        break;
+      case "answer_payload":
+        answerCard(turn, event.payload);
+        break;
+      case "error":
+        if (event.code !== "trace") errorCard(turn, event);
+        break;
+      case "budget_tick":
+      case "budget_grace":
+        budget(event);
+        if (event.ev === "budget_grace") say(esc(event.message), "warn");
+        break;
+      case "turn_done":
+        setRunning(false);
+        turn.title.textContent =
+          `${event.status} · ${turn.stepCount} steps · ${
+            event.elapsed_ms}ms`;
+        budget(event);
+        // the session may have just earned its title
+        window.dispatchEvent(new CustomEvent("synapse:sessions"));
+        break;
+      default:
+        break;
+    }
+  }
+
+  // ── sending ──────────────────────────────────────────────
+  function setRunning(running) {
+    state.running = running;
+    sendBtn.disabled = running;
+    stopBtn.hidden = !running;
+    regenBtn.hidden = running || !state.lastText;
+    // the input is NEVER blocked: you can type your next question
+    // while this one is still composing
+    input.placeholder = running
+      ? "working… (Esc stops it)" : "Ask about your data…";
+  }
+
+  async function send(text, choice = null) {
+    if (!text.trim()) return;
+    state.lastText = text;
+    setRunning(true);
+    const accepted = await api.askSend(state.session.id, text, choice);
+    if (!accepted.available) {
+      const turn = turnFor("loose");
+      errorCard(turn, {code: accepted.busy ? "busy" : "unavailable",
+                       message: accepted.reason || "refused",
+                       next_actions: accepted.busy ? ["stop the running turn"]
+                         : ["compile a build", "check the .env"]});
+      setRunning(false);
+    }
+  }
+
+  const grow = () => {
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
+  };
+
+  sendBtn.addEventListener("click", () => {
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    grow();
+    userBubble(text);
+    send(text);
+  });
+  input.addEventListener("input", grow);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendBtn.click();
+    }
+  });
+  stopBtn.addEventListener("click", async () => {
+    await api.askStop(state.session.id);
+  });
+  regenBtn.addEventListener("click", () => {
+    if (!state.lastText) return;
+    userBubble(state.lastText);
+    send(state.lastText);
+  });
+  const onKey = (e) => {
+    if (e.key === "Escape" && state.running) api.askStop(state.session.id);
+  };
+  window.addEventListener("keydown", onKey);
+  outlet.querySelector("#ask-new").addEventListener("click", () => {
+    localStorage.removeItem(SESSION_KEY);
+    if (location.hash.startsWith("#/ask/")) {
+      location.hash = "#/ask";     // the router tears this page down
+      return;                      // and renders the new one: once
+    }
+    if (state.source) state.source.close();
+    window.removeEventListener("keydown", onKey);
+    renderAsk(outlet);
+  });
+
+  connect();
+  setRunning(Boolean(boot.running));
+  input.focus();
+
+  return () => {
+    if (state.source) state.source.close();
+    window.removeEventListener("keydown", onKey);
+  };
+}

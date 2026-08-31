@@ -59,7 +59,7 @@ def render_answer(build: Build, plan: Plan, gen: Generation,
     for warning in gen.warnings:
         limits.append(f"{warning.get('code')}: {warning.get('detail')}")
     for failure in contract.failures():
-        limits.append(f"unverified — {failure.text}: {failure.evidence}")
+        limits.append(f"unverified, {failure.text}: {failure.evidence}")
     if gen.repaired:
         limits.append("the first composed query was refused by the "
                       "validator and repaired before running")

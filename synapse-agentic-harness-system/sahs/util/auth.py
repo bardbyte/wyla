@@ -149,7 +149,7 @@ def configure_vertex_network(endpoint: str) -> dict[str, str]:
     proxy = _first_env("HTTPS_PROXY", "https_proxy")
     summary["proxy"] = (f"via corporate proxy {redact_url(proxy)} "
                         "(the proven contract)" if proxy
-                        else "no proxy configured — direct")
+                        else "no proxy configured: direct")
     return summary
 
 
@@ -284,12 +284,12 @@ class BQConnection:
         project = resolve_bq_project()
         if not project:
             raise AuthError(
-                "no BigQuery project configured — set BQ_PROJECT_ID (or "
+                "no BigQuery project configured: set BQ_PROJECT_ID (or "
                 "LUMI_BQ_PROJECT / GOOGLE_CLOUD_PROJECT), e.g. in .env")
         key = resolve_bq_key_path()
         if key is None:
             raise AuthError(
-                "no SA key configured — set GOOGLE_APPLICATION_"
+                "no SA key configured: set GOOGLE_APPLICATION_"
                 "CREDENTIALS (or LUMI_BQ_SA_KEY) to the key-file path, "
                 "e.g. in .env")
         if not key.exists():
@@ -356,14 +356,14 @@ class VertexConnection:
         project = resolve_vertex_project()
         if not project:
             raise AuthError(
-                "no Vertex project configured — set VERTEX_PROJECT_ID "
+                "no Vertex project configured: set VERTEX_PROJECT_ID "
                 "(or LUMI_VERTEX_PROJECT / GOOGLE_CLOUD_PROJECT), "
                 "e.g. in .env. This is a DIFFERENT project than the "
                 "BQ one and is never borrowed from a BQ_* variable")
         key = resolve_vertex_key_path()
         if key is None:
             raise AuthError(
-                "no Vertex SA key configured — set LUMI_VERTEX_SA_KEY "
+                "no Vertex SA key configured: set LUMI_VERTEX_SA_KEY "
                 "(or GOOGLE_APPLICATION_CREDENTIALS) to the key-file "
                 "path, e.g. in .env")
         if not key.exists():
