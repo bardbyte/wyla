@@ -61,7 +61,7 @@ def test_reconcile_d1_to_d5_counts_and_handlers(tmp_path):
     assert "mdm_only_col" not in gms_card.split("## conflicts")[0].replace(
         "omitted catalog-only", "")  # D1 never renders as a column row
     assert "omitted catalog-only columns (D1): mdm_only_col" in gms_card
-    assert "ungoverned — no business meaning on record" in gms_card  # D2
+    assert "ungoverned, no business meaning on record" in gms_card  # D2
     assert "| lumi: Signed transaction amount" in gms_card           # D4
 
 
@@ -181,13 +181,13 @@ def test_lob_index_joins_sources_and_pedigree_serving(tmp_path):
 
     gms_card = (build_dir / "cards" / "tables"
                 / "dw__gms_transaction.md").read_text()
-    assert ("- line of business: GMNS — Global Merchant & Network "
+    assert ("- line of business: GMNS: Global Merchant & Network "
             "Services (steward; corroborated by") in gms_card
     assert "payment_detail.card.network" in gms_card   # nested, full path
     assert "- used by: " in gms_card
     wwcas_card = (build_dir / "cards" / "tables"
                   / "dw__wwcas_authorization.md").read_text()
-    assert "CRO — Credit Risk Ops (SBS)" in wwcas_card  # usage ≠ ownership
+    assert "CRO: Credit Risk Ops (SBS)" in wwcas_card  # usage ≠ ownership
 
     metrics = [json.loads(x) for x in
                (build_dir / "indexes" / "metrics.jsonl"

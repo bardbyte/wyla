@@ -1,4 +1,4 @@
-/** Table Profile — columns as servable, metrics-here, scope-honest
+/** Table Profile: columns as servable, metrics-here, scope-honest
  * joins, the 30-day cost prior, and the served card verbatim. */
 
 import { api } from "../api.js";
@@ -33,16 +33,16 @@ export async function renderTable(outlet, physical) {
         <span class="muted">${columns.length} columns servable</span>
       </div>
       ${prior ? `<div class="muted">usage prior: p50
-        <span class="mono">${esc(String(prior.p50 ?? "—"))}</span> · p95
-        <span class="mono">${esc(String(prior.p95 ?? "—"))}</span>
+        <span class="mono">${esc(String(prior.p50 ?? "-"))}</span> · p95
+        <span class="mono">${esc(String(prior.p95 ?? "-"))}</span>
         bytes/query (30-day activity)</div>` : ""}
     </div>
 
     <div class="grid2">
-      ${card(`METRICS ON THIS TABLE — ${
+      ${card(`METRICS ON THIS TABLE: ${
           (detail.metrics_here ?? []).length}`, `
         ${(detail.metrics_here ?? []).length === 0
-          ? `<span class="muted">no witnessed metric yet — ask about
+          ? `<span class="muted">no witnessed metric yet: ask about
              this table and the mining will catch up</span>`
           : (detail.metrics_here ?? []).map((mh) => `
             <div class="family-row">
@@ -51,9 +51,9 @@ export async function renderTable(outlet, physical) {
               <span class="chip">${esc(mh.status_served)}</span>
               <span class="mono muted">${mh.support}</span>
             </div>`).join("")}`)}
-      ${card("JOINS — how, with evidence, never by vibes", `
+      ${card("JOINS: how, with evidence, never by vibes", `
         ${(detail.joins ?? []).length === 0
-          ? `<span class="muted">no join evidence on record — co-usage
+          ? `<span class="muted">no join evidence on record: co-usage
              alone is not a join</span>`
           : (detail.joins ?? []).map((j) => `
             <div class="joinrow">
@@ -62,7 +62,7 @@ export async function renderTable(outlet, physical) {
                 esc(j.a === physical ? j.b : j.a)}</a>
               <span class="chip">${esc(j.source)}</span>
               ${j.scope === "scoped_only"
-                ? `<span class="warn">◐ CTE-scoped — NOT raw-safe</span>`
+                ? `<span class="warn">◐ CTE-scoped: NOT raw-safe</span>`
                 : ""}
               ${j.on ? `<span class="mono muted">on ${
                 esc(Array.isArray(j.on) ? j.on.join(" AND ") : j.on)}
@@ -70,13 +70,13 @@ export async function renderTable(outlet, physical) {
             </div>`).join("")}`)}
     </div>
 
-    ${card("COLUMNS — as BigQuery can serve them",
+    ${card("COLUMNS: as BigQuery can serve them",
       `<div class="colchips">${columns.map(([name, type]) =>
         `<span class="chip mono">${esc(name.split(".").pop())}
           <span class="muted">${esc(type)}</span></span>`).join("")}
        </div>`)}
 
-    ${detail.card ? card("THE SERVED CARD — what the agent reads",
+    ${detail.card ? card("THE SERVED CARD: what the agent reads",
       `<pre class="block">${esc(detail.card)}</pre>`) : ""}
 
     <div class="legend"><span class="spacer"></span><span id="fb"></span></div>`;

@@ -1,4 +1,4 @@
-/** Metric Profile — the artboard wired to the full metric row:
+/** Metric Profile: the artboard wired to the full metric row:
  * meaning with per-field provenance, witness bars + agreement, the
  * family with crimson conflict rows from real ReviewItems, binding,
  * who-uses, B2-labeled actions, the feedback affordance. */
@@ -44,7 +44,7 @@ export async function renderMetric(outlet, id) {
         ? `<code class="sqlchip">${esc(m.canonical_sql)}</code>` : ""}
       <div class="muted">${m.fp
         ? `fp <span class="mono">${esc(m.fp.slice(0, 8))}…</span> · ` : ""}
-        evidence origin: ${esc(m.evidence_origin || "—")} · status
+        evidence origin: ${esc(m.evidence_origin || "-")} · status
         transitions via the clerk (E7)</div>
     </div>
 
@@ -55,7 +55,7 @@ export async function renderMetric(outlet, id) {
               m.question_source
                 ? ` <span class="chip">${esc(m.question_source)}</span>` : ""}
              </span>`
-          : `<span class="muted">no question on record — the
+          : `<span class="muted">no question on record: the
              enrichment loop drafts one, a steward confirms it</span>`}
         ${(m.grain || m.grain_observed)
           ? `<span>grain: <b>${esc(m.grain || m.grain_observed)}</b>${
@@ -67,9 +67,9 @@ export async function renderMetric(outlet, id) {
           ? `<span class="muted">filters (part of its identity):
              <span class="mono">${(m.common_filters ?? [])
                .map(esc).join(" · ")}</span></span>` : ""}`)}
-      ${card(`WITNESSES — agreement ${m.witness_agreement ?? 0}`, `
+      ${card(`WITNESSES: agreement ${m.witness_agreement ?? 0}`, `
         ${Object.keys(witnesses).length === 0
-          ? `<span class="muted">no ranking witness yet — this is what
+          ? `<span class="muted">no ranking witness yet: this is what
              “unverified” means</span>`
           : Object.entries(witnesses).map(([w, n]) => `
             <div class="witness"><span>${esc(w)}</span>
@@ -78,9 +78,9 @@ export async function renderMetric(outlet, id) {
               <span class="mono muted">×${n}</span></div>`).join("")}`)}
     </div>
 
-    ${card("FAMILY — same expression class, competing registrations", `
+    ${card("FAMILY: same expression class, competing registrations", `
       ${(detail.family ?? []).length === 0 && conflicts.length === 0
-        ? `<span class="muted">no variants recorded — quiet accruals
+        ? `<span class="muted">no variants recorded: quiet accruals
            appear here</span>` : ""}
       ${(detail.family ?? []).map((f) => `
         <div class="family-row"><span>${esc(f.label || f.id)}</span>
@@ -88,7 +88,7 @@ export async function renderMetric(outlet, id) {
           <span class="mono muted">${esc(String(f.support ?? ""))}</span>
         </div>`).join("")}
       ${conflicts.map((r) => `
-        <div class="conflict">⊘ ${esc(String(r.proposal ?? r.kind))} —
+        <div class="conflict">⊘ ${esc(String(r.proposal ?? r.kind))} -
           <span class="muted">${esc(String(
             r.agent_recommendation ?? "steward decides"))}</span>
         </div>`).join("")}`)}

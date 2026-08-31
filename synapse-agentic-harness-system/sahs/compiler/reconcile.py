@@ -166,7 +166,7 @@ def reconcile(graph: GraphDir) -> dict[str, TableConsensus]:
                 consensus.tickets.append({
                     "ticket": "sensitivity_conflict",
                     "table": physical, "column": name,
-                    "detail": f"flagged by {flagged[0]} only — "
+                    "detail": f"flagged by {flagged[0]} only: "
                               "most-restrictive applied while open"})
             consensus.columns[name] = column
         out[tid] = consensus

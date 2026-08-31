@@ -1,1 +1,1 @@
-{"physical": "data.raw_gms_feed", "reason": "upstream lineage endpoint — verified identity, no extracted columns by design (no 00-17 archive dir)", "verified_by": "fixture", "verified_on": "2026-08-30", "notes": ""}
+{"physical": "data.raw_gms_feed", "reason": "upstream lineage endpoint: verified identity, no extracted columns by design (no 00-17 archive dir)", "verified_by": "fixture", "verified_on": "2026-08-30", "notes": ""}

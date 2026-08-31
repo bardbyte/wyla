@@ -5,8 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <title>Synapse by Lumi</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%2300175a'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23006fcf'/%3E%3C/svg%3E" />
     <script>
-      // saved theme before first paint — no flash of the wrong mode
+      // saved theme before first paint: no flash of the wrong mode
       (function () {
         var t = localStorage.getItem("lumi-theme");
         if (t === "light" || t === "dark")
@@ -26,11 +27,10 @@
   <body>
     <div class="shell">
       <header class="masthead">
-        <a class="wordmark" href="#/home">LUMI</a>
-        <span class="tagline">powered by Synapse over Meridian</span>
+        <a class="wordmark" href="#/home">SYNAPSE</a>
+        <span class="tagline">powered by Lumi</span>
         <span class="spacer"></span>
-        <span id="build-chip" class="chip mono" hidden></span>
-        <span class="chip">actor: admin ●</span>
+        <span class="chip">Saheb Singh ●</span>
         <button id="theme-toggle" class="icon-btn" type="button"
                 aria-label="Switch theme">☾</button>
       </header>
@@ -40,7 +40,7 @@
         <a href="#/cosmos" data-tab="cosmos">Cosmos</a>
         <a href="#/artifacts" data-tab="artifacts">Artifacts</a>
         <a href="#/operate" data-tab="operate">Operate</a>
-        <span class="tab-preview" title="The conversational surface ships with E16 — shown as a labeled door, never an unlabeled fake">Ask · E16</span>
+        <span class="tab-preview" title="The conversational surface ships with E16: shown as a labeled door, never an unlabeled fake">Ask · E16</span>
       </nav>
       <main id="outlet" class="outlet"></main>
     </div>

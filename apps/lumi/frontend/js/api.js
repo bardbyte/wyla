@@ -1,5 +1,5 @@
 /** Typed-ish client for the Meridian read plane. Every payload
- * carries `available`; false means no compiled build — pages render
+ * carries `available`; false means no compiled build: pages render
  * their designed empty state with the server's own reason. */
 
 async function get(url) {
@@ -8,7 +8,7 @@ async function get(url) {
     if (!r.ok) return { available: false, reason: `${url} → ${r.status}` };
     return await r.json();
   } catch {
-    return { available: false, reason: "console unreachable — is the server running?" };
+    return { available: false, reason: "console unreachable: is the server running?" };
   }
 }
 
@@ -21,8 +21,11 @@ export const api = {
     if (params.q) search.set("q", params.q);
     if (params.status) search.set("status", params.status);
     if (params.lob) search.set("lob", params.lob);
+    if (params.table) search.set("table", params.table);
     return get(`/api/meridian/explorer/metrics?${search}`);
   },
+  artifactFile: (rel) =>
+    get(`/api/meridian/artifact_file?rel=${encodeURIComponent(rel)}`),
   tables: () => get("/api/meridian/explorer/tables"),
   metric: (id) => get(`/api/meridian/metric/${encodeURIComponent(id)}`),
   table: (physical) =>

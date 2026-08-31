@@ -1,9 +1,10 @@
-/** Home — the capabilities page (Lumi Home artboard, real build).
- * Hero → promises → LIVE PROOF → network planes → diff → the Sources
- * rail (the ledger as trust centerpiece) → exclusions → legend. */
+/** Home. Hero doors, the six promises, LIVE PROOF, the Sources rail
+ * (one card per source family, the ledger as the trust line), and
+ * the exclusions card. The diff lives in Operate; network planes are
+ * an operator detail, not a landing claim. */
 
 import { api } from "../api.js";
-import { card, esc, kv, loading, unavailable } from "../ui.js";
+import { card, esc, loading, prose, unavailable } from "../ui.js";
 
 const PROMISES = [
   ["continues your question", "“same for Canada” edits, never restarts"],
@@ -14,29 +15,50 @@ const PROMISES = [
   ["right access, automatically", "entitled users never file tickets"],
 ];
 
+/* one shelf card per FAMILY: merged counts, merged ledger, the
+ * sub-sources named small. The enrichment loop is an internal stage
+ * (it lives in Operate), not a company source; it never shelves. */
+function groupByFamily(sources) {
+  const families = new Map();
+  for (const s of sources) {
+    if (s.family === "enrichment") continue;
+    const entry = families.get(s.family) ?? {
+      family: s.family, display: s.display, chip: s.chip,
+      subs: [], nodes: {}, ledger: {},
+    };
+    if (s.sub) entry.subs.push(s.sub);
+    for (const [k, n] of Object.entries(s.contributes?.nodes ?? {}))
+      entry.nodes[k] = (entry.nodes[k] ?? 0) + n;
+    for (const [k, n] of Object.entries(s.ledger ?? {}))
+      entry.ledger[k] = (entry.ledger[k] ?? 0) + n;
+    families.set(s.family, entry);
+  }
+  return [...families.values()];
+}
+
 export async function renderHome(outlet) {
   outlet.innerHTML = `
     <div class="hero">
-      <h1>One company. One number.</h1>
-      <p>Ask in plain words. Get governed numbers with receipts —
-         every answer carries its meridian line.</p>
+      <h1>Ask in plain words. Get governed numbers with receipts.</h1>
+      <p>Every answer carries its meridian line.</p>
       <div class="doors">
         <a class="btn primary" href="#/semantics">Explore semantics</a>
         <a class="btn" href="#/cosmos">Open the cosmos</a>
+        <a class="btn" href="#/artifacts">Knowledge files</a>
         <a class="btn" href="#/operate" id="door-operate">Operate</a>
       </div>
     </div>
     <div id="home-body">${loading()}</div>`;
 
-  const [home, sources, planes] = await Promise.all(
-    [api.home(), api.sources(), api.planes()]);
+  const [home, sources, artifacts] = await Promise.all(
+    [api.home(), api.sources(), api.artifacts()]);
   const body = outlet.querySelector("#home-body");
   if (!body) return;
 
   const promises = card(
-    "WHAT IT DOES — six promises from user research",
+    "WHAT IT DOES · six promises from user research",
     `<div class="promises">${PROMISES.map(([lead, rest]) =>
-      `<span>· <b>${esc(lead)}</b> — ${esc(rest)}</span>`).join("")}
+      `<span>· <b>${esc(lead)}</b>: ${esc(rest)}</span>`).join("")}
      </div>`);
 
   if (!home.available) {
@@ -60,69 +82,62 @@ export async function renderHome(outlet) {
           r.tables} tables witnessed</span></span></div>
       <div class="bar"><i style="width:${r.pct}%"></i></div>
     </div>`).join("");
-  const proof = card("LIVE PROOF — the system status, in the open", `
+  const proof = card("LIVE PROOF · the system status, in the open", `
     <div class="proof-counts">
-      <span><b>${home.counts.tables ?? "—"}</b> tables${
+      <span><b>${home.counts.tables ?? "?"}</b> tables${
         home.excluded_tables.length
           ? ` <span class="muted">(+${home.excluded_tables.length
-            } excluded — on record)</span>` : ""}</span>
-      <span><b>${home.counts.metrics ?? "—"}</b> metrics</span>
-      <span><b>${home.counts.vocab ?? "—"}</b> vocab</span>
+            } excluded, on record)</span>` : ""}</span>
+      <span><b>${home.counts.metrics ?? "?"}</b> metrics</span>
+      <span><b>${home.counts.vocab ?? "?"}</b> vocab</span>
     </div>
     <div class="stack">${stack}</div>
     <div class="muted">joins <b>${home.joins.total}</b>${
       home.joins.scoped_only
-        ? ` <span class="warn">· ${home.joins.scoped_only} CTE-scoped ◐ —
+        ? ` <span class="warn">· ${home.joins.scoped_only} CTE-scoped ◐,
            evidence the relationship exists, not that raw tables join
            safely</span>` : ""}</div>
     ${readiness}
     <div class="muted">open reviews <b>${home.open_reviews}</b> ·
       sources <b>${home.sources_count}</b></div>`);
 
-  const planesCard = card("NETWORK PLANES — what this machine carries", `
-    <div class="muted">BQ (PSC, direct): key ${
-      planes?.bq?.key ? "✓" : "—"} · project ${
-      planes?.bq?.project ? "✓" : "—"} · endpoint ${
-      planes?.bq?.endpoint ? "✓" : "default"}</div>
-    <div class="muted">Vertex (proxy): key ${
-      planes?.vertex?.key ? "✓" : "—"} · project ${
-      planes?.vertex?.project ? "✓" : "—"} · model
-      <span class="mono">${esc(planes?.vertex?.model ?? "—")}</span></div>
-    <div class="muted">booleans only — configured or not, never
-      values; enrichment and dry-runs stay with laptop.py</div>`);
-
-  const diff = home.diff ? card(
-    "SINCE LAST BUILD — the diff, verbatim",
-    `<pre class="block">${esc(home.diff.split("\n").slice(0, 14)
-      .join("\n"))}</pre>`) : "";
-
+  const knowledgeFiles = (artifacts?.files ?? [])
+    .filter((f) => !f.staged);
   const shelf = sources.available ? card(
-    "SOURCES — everything the company handed Meridian, and proof we read it",
-    `<div class="sources">${sources.sources.map((s) => `
+    "SOURCES · everything the company handed Meridian, and proof we read it",
+    `<div class="sources">${groupByFamily(sources.sources).map((s) => `
       <div class="source">
         <div><span class="chip acc">${esc(s.chip)}</span>${
-          s.sub ? ` <span class="muted">· ${esc(s.sub)}</span>` : ""}</div>
+          s.subs.length
+            ? ` <span class="muted">${s.subs.map(esc).join(" · ")}</span>`
+            : ""}</div>
         <div class="name">${esc(s.display)}</div>
         <div class="counts mono">${
-          Object.entries(s.contributes.nodes)
-            .map(([k, n]) => `${esc(k)} ${n}`).join(" · ") || "—"}</div>
+          Object.entries(s.nodes)
+            .map(([k, n]) => `${esc(k)} ${n}`).join(" · ")
+          || "no served nodes (held out by design)"}</div>
         ${Object.keys(s.ledger).length ? `<div class="ledger">ledger: ${
           Object.entries(s.ledger)
             .map(([k, n]) => `${n} ${esc(k)}`).join(" · ")}</div>` : ""}
+        ${s.family === "knowledge" && knowledgeFiles.length ? `
+          <div class="ledger">${knowledgeFiles.length} files on the
+            shelf: ${knowledgeFiles.slice(0, 6)
+              .map((f) => esc(f.name)).join(" · ")}${
+            knowledgeFiles.length > 6 ? " · …" : ""}</div>
+          <a class="linklike" href="#/artifacts">browse them →</a>` : ""}
       </div>`).join("")}</div>`)
     : card("SOURCES", `<p class="muted">${
         esc(sources.reason ?? "loading the shelf…")}</p>`);
 
   const excluded = home.excluded_tables.length ? card(
-    "EXCLUDED — with the reason on record",
+    "EXCLUDED · with the reason on record",
     home.excluded_tables.map((t) =>
-      `<div class="mono muted">${esc(t.physical)} — ${
-        esc(t.intentionally_excluded || t.reason)}</div>`).join(""))
+      `<div class="mono muted">${esc(t.physical)}: ${
+        prose(t.intentionally_excluded || t.reason)}</div>`).join(""))
     : "";
 
   body.innerHTML = `
     <div class="grid2">${promises}${proof}</div>
-    <div class="grid2">${planesCard}${diff || ""}</div>
     ${shelf}${excluded}
     <div class="legend">legend:
       <span class="chip tier-ha">● human</span>

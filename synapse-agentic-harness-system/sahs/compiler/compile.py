@@ -173,11 +173,11 @@ def compile_build(graph_root: Path, builds_root: Path
             if phys in built:
                 continue
             reason = (
-                "table node exists but ZERO columns on record — no "
+                "table node exists but ZERO columns on record: no "
                 "has_column edge from any plane (archive 02, atlas "
                 "std_tech)"
                 if f"table:{phys}" in nodes else
-                "no table node in the graph — never attested by any "
+                "no table node in the graph: never attested by any "
                 "archive or catalog quad")
             entry = {"physical": phys, "reason": reason}
             if phys in excluded:
@@ -588,12 +588,12 @@ def compile_build(graph_root: Path, builds_root: Path
                 "under one catalog id (or one exact label@table). "
                 "Mined labels are near-unique by construction, so "
                 "same-intent-different-formula across DIFFERENT names "
-                "is invisible to this counter — that class of "
+                "is invisible to this counter; that class of "
                 "disagreement surfaces through concept_conflicts, "
                 "alias work, and enrichment review, not here.",
             "metric_duplicate_ids":
                 "one expression class registered under multiple "
-                "catalog ids — duplicate catalog entries (steward "
+                "catalog ids: duplicate catalog entries (steward "
                 "review material).",
         },
         "structural": structural_census(consensus),

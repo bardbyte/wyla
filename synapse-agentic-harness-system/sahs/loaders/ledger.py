@@ -24,36 +24,36 @@ from typing import Any
 # pinned deliberate deferrals (exact filename → reason)
 DEFERRALS: tuple[tuple[str, str], ...] = (
     ("audit_30d.jsonl.gz",
-     "corroboration digests only — raw audit gz unread by design "
+     "corroboration digests only: raw audit gz unread by design "
      "(two witnesses of the same events don't vote twice)"),
     ("tls_reference.md",
      "TLS rulebook: doc evidence node later, never parsed"),
     ("sample_codes.sql",
-     "SQLite-dialect demo material — deliberately not canonicalized "
+     "SQLite-dialect demo material, deliberately not canonicalized "
      "as BigQuery (dialect trap)"),
     ("knowledge.md",
-     "skill prose — doc-evidence concern, not machine-parsed"),
+     "skill prose: doc-evidence concern, not machine-parsed"),
     ("data_specs.md",
-     "skill-pack data-spec prose — doc-evidence concern, "
+     "skill-pack data-spec prose: doc-evidence concern, "
      "not machine-parsed"),
     ("chart_contract.yaml",
-     "skill-pack chart/presentation contract — rendering concern, "
+     "skill-pack chart/presentation contract: rendering concern, "
      "not semantics"),
     ("qa_checks.yaml",
-     "skill-pack QA checks — eval-layer concern, deferred until the "
+     "skill-pack QA checks: eval-layer concern, deferred until the "
      "harness consumes them"),
     ("_summary.json",
-     "per-table extraction summary — operational metadata, "
+     "per-table extraction summary: operational metadata, "
      "not semantic"),
     ("summary.json",
-     "extraction summary metadata — operational (consumed rows win "
+     "extraction summary metadata: operational (consumed rows win "
      "where a loader reads one)"),
     ("run_manifest.json",
-     "MDM extraction run manifest — operational metadata"),
+     "MDM extraction run manifest: operational metadata"),
     ("_profile_summary.json",
-     "profiling run summary — operational metadata"),
+     "profiling run summary: operational metadata"),
     ("_state.json",
-     "extractor checkpoint state — operational, not semantic"),
+     "extractor checkpoint state: operational, not semantic"),
     (".DS_Store", "OS metadata"),
 )
 # pinned deliberate deferrals (filename-prefix → reason)
@@ -61,42 +61,42 @@ DEFERRAL_PREFIXES: tuple[tuple[str, str], ...] = (
     ("00_physical_table_resource",
      "physical-layer twin of the consumed 00 logical resource"),
     ("04_logical_table_options",
-     "table options/labels — deferred until a card section "
+     "table options/labels: deferred until a card section "
      "consumes them"),
     ("06_physical_table_meta",
-     "physical-layer twin of the logical artifact (01 is consumed) — "
+     "physical-layer twin of the logical artifact (01 is consumed): "
      "wire only if a divergence question arises"),
     ("07_physical_columns",
-     "physical-layer twin of the logical artifact (02 is consumed) — "
+     "physical-layer twin of the logical artifact (02 is consumed): "
      "wire only if a divergence question arises"),
     ("08_physical_column_field_paths",
-     "physical-layer twin of the logical artifact (03 is consumed) — "
+     "physical-layer twin of the logical artifact (03 is consumed): "
      "wire only if a divergence question arises"),
     ("09_physical_table_options",
      "physical-layer twin of the table options artifact"),
     ("12_physical_constraints",
      "physical-layer twin of the logical constraints (11 is "
-     "consumed) — same declarations at physical grain"),
-    ("14_profile", "column-profiling plan/coverage metadata — "
+     "consumed): same declarations at physical grain"),
+    ("14_profile", "column-profiling plan/coverage metadata: "
      "operational, not semantic"),
     ("15_low_cardinality_manifest",
-     "value-profile manifest — profiling coverage metadata, "
+     "value-profile manifest: profiling coverage metadata, "
      "operational"),
     ("_batch_summary",
-     "extraction batch summary — the registry input when used as "
+     "extraction batch summary: the registry input when used as "
      "--registry; operational otherwise"),
 )
 # pinned deliberate deferrals (filename-extension → reason)
 DEFERRAL_EXTENSIONS: tuple[tuple[str, str], ...] = (
-    (".bak", "editor backup — the live file is the source of record"),
+    (".bak", "editor backup: the live file is the source of record"),
 )
 # pinned deliberate deferrals (path-segment → reason)
 DEFERRED_DIRS: tuple[tuple[str, str], ...] = (
-    ("_history", "run-level history — index validation only"),
-    ("_run_logs", "execution logs — operational, not semantic"),
-    ("_shared", "shared extraction scratch — operational"),
-    ("_profile_chunks", "profiling chunk scratch — operational"),
-    ("14_profile_plan", "column-profiling plan metadata — "
+    ("_history", "run-level history: index validation only"),
+    ("_run_logs", "execution logs: operational, not semantic"),
+    ("_shared", "shared extraction scratch: operational"),
+    ("_profile_chunks", "profiling chunk scratch: operational"),
+    ("14_profile_plan", "column-profiling plan metadata: "
      "operational, not semantic"),
 )
 
@@ -143,7 +143,7 @@ class UtilizationLedger:
         # paired 15_ value-profile jsons, …)
         parent = path.resolve().parent
         if (parent, path.stem) in consumed_stems:
-            return "deferred", ("format twin — the same artifact was "
+            return "deferred", ("format twin: the same artifact was "
                                 "consumed in another serialization")
         for name, reason in DEFERRALS:
             if path.name == name:
@@ -156,7 +156,7 @@ class UtilizationLedger:
                 return "deferred", reason
         if path.suffix == ".json" \
                 and "15_low_cardinality_values" in path.parts:
-            return "deferred", ("value profile in JSON form — the "
+            return "deferred", ("value profile in JSON form: the "
                                 "loader consumes the CSV form; "
                                 "JSON-only profiles await a reader")
         return "inventoried", ""
