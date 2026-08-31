@@ -1,13 +1,14 @@
-/** Artifacts: the knowledge shelf. The full-width shelf lists every
- * knowledge file grouped by skill area (CFR, CFR/TLS, …, any
- * nesting); clicking one opens a Claude-style pullout panel from the
- * right — rendered Markdown (code files as code), copy to clipboard,
- * close (button or Esc). The creator below takes typed knowledge,
- * dumped files, or — next — a SharePoint MCP connector; other
- * connectors sit visibly disabled, never fake. */
+/** Artifacts: the knowledge shelf as a Finder-style folder tree.
+ * Folders open and close with disclosure triangles (native
+ * details/summary, any nesting: skills/CFR/TLS/...); clicking a file
+ * slides the pullout reader in from the right (rendered Markdown,
+ * copy, ✕/Esc). The creator below takes typed knowledge, dumped
+ * files, or the SharePoint MCP connector door; other connectors sit
+ * visibly disabled, never fake. */
 
 import { api } from "../api.js";
 import { renderMarkdown } from "../md.js";
+import { createPullout } from "../pullout.js";
 import { card, esc, loading } from "../ui.js";
 
 const fmtSize = (n) =>
@@ -15,23 +16,44 @@ const fmtSize = (n) =>
 
 const TEXT_EXT = ["md", "txt", "csv", "json", "yaml", "yml", "sql"];
 
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    // headless / permission-less fallback
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    let ok = false;
-    try { ok = document.execCommand("copy"); } catch { ok = false; }
-    ta.remove();
-    return ok;
+/* rel paths → a nested folder tree (Finder-style, folders first) */
+function buildTree(files) {
+  const root = { folders: new Map(), files: [] };
+  for (const f of files) {
+    const parts = f.rel.split("/");
+    let node = root;
+    for (const part of parts.slice(0, -1)) {
+      if (!node.folders.has(part))
+        node.folders.set(part, { folders: new Map(), files: [] });
+      node = node.folders.get(part);
+    }
+    node.files.push(f);
   }
+  return root;
+}
+
+function renderTree(node, depth = 0) {
+  const folders = [...node.folders.entries()].map(([name, child]) => `
+    <details class="tree-folder" ${depth < 1 ? "open" : ""}>
+      <summary><span class="tri">▸</span><span class="folder-ico">▣</span>
+        ${esc(name)}<span class="muted tree-count">${
+        countFiles(child)}</span></summary>
+      <div class="tree-children">${renderTree(child, depth + 1)}</div>
+    </details>`).join("");
+  const files = node.files.map((f) => `
+    <button class="artifact-file tree-file" data-rel="${esc(f.rel)}"
+      title="${esc(f.rel)}">
+      <span class="artifact-name clip">${esc(f.name)}</span>
+      ${f.staged ? '<span class="chip">staged</span>' : ""}
+      <span class="chip">${esc(f.kind)}</span>
+      <span class="muted mono">${fmtSize(f.size)}</span>
+    </button>`).join("");
+  return folders + files;
+}
+
+function countFiles(node) {
+  return node.files.length + [...node.folders.values()]
+    .reduce((n, child) => n + countFiles(child), 0);
 }
 
 export async function renderArtifacts(outlet) {
@@ -41,58 +63,16 @@ export async function renderArtifacts(outlet) {
       <span class="spacer"></span><span class="muted" id="a-count"></span>
     </div>
     <div class="artifact-list card" id="a-list">${loading()}</div>
-    <div id="a-stage-card"></div>
-    <aside class="artifact-panel" id="a-panel" aria-label="Reader"
-      hidden>
-      <div class="artifact-panel-head">
-        <span class="profile-title clip" id="a-panel-title"></span>
-        <span class="chip" id="a-panel-kind"></span>
-        <span class="spacer"></span>
-        <button class="btn" id="a-copy" title="Copy the file to the
-          clipboard">copy</button>
-        <button class="icon-btn" id="a-close"
-          aria-label="Close the reader">✕</button>
-      </div>
-      <div class="muted mono clip" id="a-panel-rel"></div>
-      <div class="artifact-panel-body md" id="a-panel-body"></div>
-    </aside>`;
+    <div id="a-stage-card"></div>`;
+  const pullout = createPullout(outlet);
 
   const payload = await api.artifacts();
   const listHost = outlet.querySelector("#a-list");
-  const panel = outlet.querySelector("#a-panel");
   if (!listHost) return;
 
   const files = payload.files ?? [];
   outlet.querySelector("#a-count").textContent =
     `${files.length} files on the shelf`;
-
-  // ── the pullout reader ──
-  let openContent = "";
-  const closePanel = () => {
-    panel.classList.remove("open");     // slide out ...
-    setTimeout(() => { panel.hidden = true; }, 260);  // ... then hide
-    listHost.querySelectorAll(".artifact-file.on")
-      .forEach((el) => el.classList.remove("on"));
-  };
-  const openPanel = (file) => {
-    openContent = file.content;
-    outlet.querySelector("#a-panel-title").textContent = file.name;
-    outlet.querySelector("#a-panel-kind").textContent = file.kind;
-    outlet.querySelector("#a-panel-rel").textContent = file.rel;
-    outlet.querySelector("#a-panel-body").innerHTML =
-      renderMarkdown(file.content, file.kind);
-    panel.hidden = false;
-    requestAnimationFrame(() => panel.classList.add("open"));
-  };
-  outlet.querySelector("#a-close").addEventListener("click", closePanel);
-  const onKey = (e) => { if (e.key === "Escape") closePanel(); };
-  window.addEventListener("keydown", onKey);
-  const copyBtn = outlet.querySelector("#a-copy");
-  copyBtn.addEventListener("click", async () => {
-    const ok = await copyText(openContent);
-    copyBtn.textContent = ok ? "copied ✓" : "copy failed";
-    setTimeout(() => { copyBtn.textContent = "copy"; }, 1600);
-  });
 
   if (!files.length) {
     listHost.innerHTML = card("THE SHELF", `<p class="muted">${
@@ -101,27 +81,10 @@ export async function renderArtifacts(outlet) {
       <p class="muted">Stage one below and it appears here.</p>`,
       "empty");
   } else {
-    const groups = new Map();
-    for (const f of files) {
-      const key = f.staged ? "staged (awaiting the loader)" : f.area;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(f);
-    }
     listHost.innerHTML = `
-      <div class="card-label">THE SHELF · grouped by skill area</div>
-      <div class="artifact-groups">
-      ${[...groups.entries()].map(([area, members]) => `
-        <div class="artifact-group">
-          <div class="artifact-area">${esc(area)}</div>
-          ${members.map((f) => `
-            <button class="artifact-file" data-rel="${esc(f.rel)}"
-              title="${esc(f.rel)}">
-              <span class="artifact-name clip">${esc(f.name)}</span>
-              <span class="chip">${esc(f.kind)}</span>
-              <span class="muted mono">${fmtSize(f.size)}</span>
-            </button>`).join("")}
-        </div>`).join("")}
-      </div>`;
+      <div class="card-label">THE SHELF · folders open like a
+        finder</div>
+      <div class="tree">${renderTree(buildTree(files))}</div>`;
     listHost.addEventListener("click", async (e) => {
       const button = e.target.closest?.(".artifact-file");
       if (!button) return;
@@ -129,13 +92,18 @@ export async function renderArtifacts(outlet) {
         .forEach((el) => el.classList.remove("on"));
       button.classList.add("on");
       const file = await api.artifactFile(button.dataset.rel);
+      const clear = () => button.classList.remove("on");
       if (!file.found) {
-        openPanel({ name: "not available", kind: "!",
-          rel: button.dataset.rel,
-          content: file.reason ?? "could not open it" });
+        pullout.open({ title: "not available", kind: "!",
+          sub: button.dataset.rel,
+          raw: file.reason ?? "could not open it",
+          onClose: clear });
         return;
       }
-      openPanel(file);
+      pullout.open({
+        title: file.name, kind: file.kind, sub: file.rel,
+        html: renderMarkdown(file.content, file.kind),
+        raw: file.content, onClose: clear });
     });
   }
 
@@ -191,7 +159,7 @@ export async function renderArtifacts(outlet) {
       business_unit: bu.value, name: name.value, content: content.value });
     if (body.ok && body.staged) {
       result.textContent = `staged as ${body.file}. ${body.note ?? ""}`;
-      window.removeEventListener("keydown", onKey);
+      pullout.teardown();
       renderArtifacts(outlet);            // re-list with the new file
     } else {
       result.textContent = body.reason
@@ -225,7 +193,7 @@ export async function renderArtifacts(outlet) {
       }
       result.textContent = outcomes.join(" · ");
       if (outcomes.some((o) => o.includes("staged as"))) {
-        window.removeEventListener("keydown", onKey);
+        pullout.teardown();
         renderArtifacts(outlet);
       }
     });
@@ -236,5 +204,5 @@ export async function renderArtifacts(outlet) {
     note.hidden = !note.hidden;
   });
 
-  return () => window.removeEventListener("keydown", onKey);
+  return pullout.teardown;
 }

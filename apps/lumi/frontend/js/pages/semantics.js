@@ -1,9 +1,8 @@
-/** Semantics Explorer. Metrics browse in the steward order (certified
- * first, then the unreviewed bulk, then pending specs), filterable by
- * status AND by table, searchable; every row shows the name and the
- * exact calculation. Every column header carries an ⓘ explaining
- * what the number means. Nothing gets cut off silently: long names
- * ellipsize with the full value on hover. */
+/** Semantics Explorer: the metrics browser. Steward order
+ * (certified first, then the unreviewed bulk, then pending specs),
+ * filterable by status AND by table, searchable; every row shows
+ * the name and the exact calculation, every header carries an ⓘ.
+ * Tables live on their own tab now. */
 
 import { api } from "../api.js";
 import { card, esc, loading, tierChip, unavailable } from "../ui.js";
@@ -27,14 +26,6 @@ const INFO = {
     + "this calculation",
   usedby: "Org units seen running it in the 30-day activity window",
   table: "The table this calculation reads. Click to open its profile",
-  lob: "The line of business a steward mapped the table to",
-  columns: "Columns BigQuery can actually serve for this table",
-  metricsCol: "Witnessed metrics computed on this table",
-  joins: "Join evidence touching this table (declared, measured, or "
-    + "certified-SQL scoped)",
-  tickets: "Open data-quality tickets from the structural census, "
-    + "e.g. columns declared upstream that BigQuery cannot serve "
-    + "(phantom columns). Zero is good news",
 };
 
 const th = (label, info) =>
@@ -42,13 +33,13 @@ const th = (label, info) =>
      aria-label="${esc(info)}">ⓘ</span></span>`;
 
 export async function renderSemantics(outlet) {
-  const state = { mode: "metrics", q: "", status: "", table: "" };
+  const state = { q: "", status: "", table: "" };
   outlet.innerHTML = `
     <div class="masthead" style="padding:0">
       <span class="muted">Understand · Semantics Explorer</span>
+      <a class="linklike" href="#/tables">tables →</a>
     </div>
     <div class="card toolbar">
-      <div class="pills" id="mode-pills"></div>
       <input class="search" id="search"
         placeholder="search name, calculation, question…" />
       <div class="pills" id="status-pills"></div>
@@ -91,17 +82,11 @@ export async function renderSemantics(outlet) {
   };
 
   async function draw() {
-    pills(outlet.querySelector("#mode-pills"), ["metrics", "tables"],
-      state.mode, (v) => { state.mode = v; draw(); });
     pills(outlet.querySelector("#status-pills"), STATUSES, state.status,
       (v) => { state.status = v; draw(); }, STATUS_LABEL);
-    const metricsMode = state.mode === "metrics";
-    outlet.querySelector("#search").style.display =
-      metricsMode ? "" : "none";
-    tableSelect.style.display = metricsMode ? "" : "none";
     const list = outlet.querySelector("#list");
     list.innerHTML = loading();
-    if (metricsMode) {
+    {
       const data = await api.metrics(
         { q: state.q, status: state.status, table: state.table });
       if (!list.isConnected) return;
@@ -151,36 +136,6 @@ export async function renderSemantics(outlet) {
         : card("", `<p class="muted">no metrics match. A narrower
             filter, or nothing here yet: nothing here means the graph
             holds no witness for it.</p>`, "empty");
-    } else {
-      const data = tablesPayload.available ? tablesPayload
-        : await api.tables();
-      if (!list.isConnected) return;
-      if (!data.available) { list.innerHTML = unavailable(data.reason); return; }
-      outlet.querySelector("#count").textContent =
-        `${data.rows.length} tables`;
-      list.innerHTML = `
-        <div class="card table-card">
-          <div class="thead cols-tables">
-            ${th("TABLE", INFO.table)}
-            ${th("LOB", INFO.lob)}
-            ${th("COLUMNS", INFO.columns)}
-            ${th("METRICS", INFO.metricsCol)}
-            ${th("JOINS", INFO.joins)}
-            ${th("DQ TICKETS", INFO.tickets)}
-          </div>
-          ${data.rows.map((r) => `
-          <div class="trow cols-tables">
-            <a class="linklike mono clip" title="${esc(r.physical)}"
-              href="#/table/${encodeURIComponent(r.physical)}">${
-              esc(r.physical)}</a>
-            <span>${esc(r.lob) || `<span class="muted">unmapped</span>`}</span>
-            <span class="mono">${r.columns}</span>
-            <span class="mono">${r.metrics_here}</span>
-            <span class="mono">${r.joins}</span>
-            <span class="${r.tickets ? "warn" : "muted"}" title="${esc(
-              INFO.tickets)}">${r.tickets || "0 ✓"}</span>
-          </div>`).join("")}
-        </div>`;
     }
   }
 
