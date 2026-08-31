@@ -52,8 +52,38 @@ def _graph_root() -> Path:
 
 
 def _sources_dir() -> Path:
-    return Path(os.environ.get("MERIDIAN_SOURCES_DIR",
-                               _SILO / "sources"))
+    """The sources dir the Knowledge Files shelf reads. Resolution:
+    MERIDIAN_SOURCES_DIR env wins; else the silo's own sources/ when
+    it exists; else the absolute sources root the latest graph run
+    RECORDED in its manifest (the data this graph actually read, on
+    this machine); else the silo default, for honest messaging."""
+    env = os.environ.get("MERIDIAN_SOURCES_DIR")
+    if env:
+        return Path(env)
+    default = _SILO / "sources"
+    if default.exists():
+        return default
+    recorded = _manifest_sources_root()
+    if recorded is not None and recorded.exists():
+        return recorded
+    return default
+
+
+def _manifest_sources_root() -> Path | None:
+    """→ the "sources" root recorded by the newest graph run manifest
+    that carries one (laptop.py build-graph records absolute input
+    roots), or None."""
+    runs = sorted(_graph_root().glob("runs/*/manifest.json"))
+    for manifest_path in reversed(runs):
+        try:
+            payload = json.loads(
+                manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        recorded = (payload.get("roots") or {}).get("sources")
+        if recorded:
+            return Path(recorded)
+    return None
 
 
 class MeridianData:
@@ -374,12 +404,23 @@ class MeridianData:
         known = [s for s in shelf.get("sources", [])
                  if s.get("family") == "knowledge"]
         files = self._knowledge_files()
-        return {"available": build is not None,
-                **({} if build is not None else {"reason": reason}),
-                "known": known,
-                "files": files,
-                "staged": [f["name"] for f in files if f["staged"]],
-                "staging_dir": str(_sources_dir() / "artifacts")}
+        sources = _sources_dir()
+        payload = {"available": build is not None,
+                   **({} if build is not None else {"reason": reason}),
+                   "known": known,
+                   "files": files,
+                   "staged": [f["name"] for f in files if f["staged"]],
+                   "sources_dir": str(sources),
+                   "staging_dir": str(sources / "artifacts")}
+        if not files:
+            # the honest empty state names the path checked and the fix
+            payload["files_reason"] = (
+                f"no knowledge files under {sources} on this machine. "
+                "Set MERIDIAN_SOURCES_DIR to your data root's sources/ "
+                "(the --sources-dir you build the graph with) and "
+                "restart, or re-run laptop.py build-graph so the graph "
+                "records where its sources live.")
+        return payload
 
     def artifact_file(self, rel: str) -> dict:
         """Read ONE knowledge file, by the rel path the inventory

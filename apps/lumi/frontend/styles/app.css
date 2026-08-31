@@ -19,48 +19,161 @@ a:hover { color: var(--ink); }
 .spacer { margin-left: auto; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ── shell ── */
-.shell { min-height: 100vh; display: flex; flex-direction: column; }
-.masthead {
-  display: flex; align-items: center; gap: var(--s-3);
-  padding: 14px 28px 0; font-size: var(--fs-13); color: var(--ink-3);
-  max-width: 1240px; width: 100%; margin: 0 auto;
+/* ── shell: Claude-style left sidebar, pinned the full viewport ── */
+.shell { min-height: 100vh; }
+.sidenav {
+  position: fixed; top: 0; left: 0; bottom: 0; width: 220px;
+  box-sizing: border-box; overflow-y: auto; z-index: 10;
+  display: flex; flex-direction: column; gap: var(--s-3);
+  padding: 18px 12px 12px; background: var(--surface);
+  border-right: 1px solid var(--line);
 }
+.brand { display: flex; flex-direction: column; gap: 2px;
+         padding: 0 10px var(--s-2); }
 .wordmark {
   font-weight: 800; letter-spacing: 0.02em; font-size: var(--fs-16);
   color: var(--ink); text-decoration: none;
 }
-.tagline { border-left: 1px solid var(--line); padding-left: var(--s-3); }
+.tagline { font-size: var(--fs-12); color: var(--ink-3); }
 .icon-btn {
   border: 1px solid var(--line); background: var(--surface);
   color: var(--ink-2); border-radius: var(--r-md); width: 30px;
   height: 30px; cursor: pointer; font-size: var(--fs-13);
 }
-.tabnav {
-  display: flex; gap: 2px; align-items: center;
-  max-width: 1240px; width: 100%; margin: 10px auto 0;
-  padding: 0 28px; flex-wrap: wrap;
+/* the options: one tight cluster at the top, Claude-style, animated */
+.navlist { display: flex; flex-direction: column; gap: 1px; }
+.navlist a {
+  display: flex; align-items: center; gap: 10px;
+  text-decoration: none; color: var(--ink-2); font-weight: 600;
+  font-size: var(--fs-13); padding: 8px 10px;
+  border-radius: var(--r-md);
+  transition: background-color 0.15s ease, color 0.15s ease;
+  animation: nav-in 0.3s ease both;
 }
-.tabnav a {
-  text-decoration: none; color: var(--ink-3); font-weight: 600;
-  font-size: var(--fs-13); padding: 7px 16px; border-radius: var(--r-md);
-  border: 1px solid transparent;
+.navlist a:nth-child(1) { animation-delay: 0.02s; }
+.navlist a:nth-child(2) { animation-delay: 0.06s; }
+.navlist a:nth-child(3) { animation-delay: 0.1s; }
+.navlist a:nth-child(4) { animation-delay: 0.14s; }
+.navlist a:nth-child(5) { animation-delay: 0.18s; }
+@keyframes nav-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: none; }
 }
-.tabnav a.active {
-  color: var(--ink); background: var(--surface);
-  border-color: var(--line); box-shadow: var(--shadow);
+.navlist a:hover { background: var(--bg); color: var(--ink); }
+.navlist a:hover .glyph { transform: translateX(2px); }
+.navlist a.active { color: var(--accent); background: var(--accent-soft); }
+.navlist .glyph { width: 18px; text-align: center;
+                  font-size: var(--fs-14);
+                  transition: transform 0.15s ease; }
+.sidenav .spacer { margin-top: auto; margin-left: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .navlist a, .navlist .glyph { animation: none; transition: none; }
 }
-.tab-preview {
-  margin-left: var(--s-2); font-size: var(--fs-12);
-  color: var(--ink-3); border: 1px dashed var(--line-strong);
-  border-radius: var(--r-md); padding: 6px 14px; cursor: not-allowed;
+/* the space below the options is the chats shelf: Ask (E16) will
+ * fill it with real conversations; until then it says so honestly */
+.chats { margin-top: var(--s-4); padding: 0 10px;
+         display: flex; flex-direction: column; gap: 6px; }
+.chats-head {
+  font-size: var(--fs-11); font-weight: 700; letter-spacing: 0.06em;
+  color: var(--ink-3); text-transform: uppercase;
+}
+.chats-note {
+  margin: 0; font-size: var(--fs-12); color: var(--ink-3);
+  border: 1px dashed var(--line-strong); border-radius: var(--r-md);
+  padding: 8px 10px; cursor: not-allowed;
+}
+/* the account row, the Claude way: avatar, name, role, one hover */
+.account {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: var(--r-md);
+  transition: background-color 0.15s ease;
+}
+.account:hover { background: var(--bg); }
+.avatar {
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  background: var(--accent); color: var(--on-accent);
+  display: grid; place-items: center;
+  font-size: var(--fs-11); font-weight: 700; letter-spacing: 0.02em;
+}
+.who { display: flex; flex-direction: column; line-height: 1.25;
+       font-size: var(--fs-12); min-width: 0; }
+.who b { color: var(--ink); font-size: var(--fs-13); }
+.who .role { color: var(--ink-3); white-space: nowrap; }
+.account .icon-btn { margin-left: auto; }
+.main-col { margin-left: 220px; min-width: 0; }
+/* in-page breadcrumb rows (pages render their own .masthead) */
+.masthead {
+  display: flex; align-items: center; gap: var(--s-3);
+  font-size: var(--fs-13); color: var(--ink-3);
+}
+/* ── Home as one flowing page: open sections, no boxes ── */
+.page-sec { display: flex; flex-direction: column; gap: var(--s-2); }
+.page-sec .sec-label {
+  font-size: var(--fs-11); font-weight: 700; letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+.page-sec.ruled { border-top: 1px solid var(--line);
+                  padding-top: var(--s-4); }
+
+/* ── the sources flow: four streams into one shared map ── */
+.flow {
+  display: grid; align-items: stretch;
+  grid-template-columns: minmax(280px, 1.1fr) 130px minmax(280px, 1fr);
+  gap: var(--s-2);
+}
+.flow-buckets { display: flex; flex-direction: column; gap: var(--s-2); }
+.flow-bucket {
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--surface); padding: 10px 14px;
+  box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 4px; flex: 1;
+}
+.flow-bucket-title { font-weight: 700; color: var(--ink); }
+.flow-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.flow-lane { width: 100%; height: 100%; min-height: 320px;
+             color: var(--accent); display: block; }
+.flow-dot { fill: currentColor; }
+.flow-fusion {
+  border: 1px solid var(--accent-soft); border-radius: var(--r-md);
+  background: var(--accent-soft); padding: 16px 18px;
+  display: flex; flex-direction: column; gap: var(--s-2);
+  justify-content: center;
+}
+@media (max-width: 980px) {
+  .flow { grid-template-columns: 1fr; }
+  .flow-lane { display: none; }
+}
+
+/* profile sibling strips: hop between tables/metrics in place
+   (.card.subnav outranks .card's column direction) */
+.card.subnav {
+  flex-direction: row; flex-wrap: wrap; align-items: center;
+  gap: 6px; padding: 10px 14px;
+}
+.linkchip { text-decoration: none; cursor: pointer; }
+.linkchip:hover { border-color: var(--accent); }
+.linkchip.on {
+  border-color: var(--accent); color: var(--accent); font-weight: 700;
 }
 .outlet {
   max-width: 1240px; width: 100%; margin: 0 auto;
-  padding: var(--s-4) 28px var(--s-7);
+  padding: var(--s-4) 28px var(--s-7); box-sizing: border-box;
   display: flex; flex-direction: column; gap: var(--s-4);
 }
-.outlet.wide { max-width: 1420px; }
+.outlet.wide { max-width: 1460px; }
+@media (max-width: 860px) {
+  .sidenav {
+    position: static; width: auto; height: auto;
+    flex-direction: row; align-items: center; flex-wrap: wrap;
+    border-right: none; border-bottom: 1px solid var(--line);
+    padding: 10px 14px;
+  }
+  .brand { padding: 0 6px; }
+  .navlist { flex-direction: row; flex-wrap: wrap; }
+  .chats { display: none; }
+  .account { margin-left: auto; }
+  .main-col { margin-left: 0; }
+}
 
 /* ── primitives ── */
 .card {
@@ -342,7 +455,8 @@ textarea.input { font-family: var(--font-mono); font-size: var(--fs-12);
 .cosmos-label {
   position: absolute; pointer-events: none;
   font: 600 11px var(--font-mono); letter-spacing: 0.06em;
-  white-space: nowrap;
+  white-space: nowrap; text-align: center;
+  transform: translate(-50%, -130%);   /* centered above its well */
 }
 .cosmos-label span { font-weight: 400; font-size: 9.5px;
                      opacity: 0.65; }

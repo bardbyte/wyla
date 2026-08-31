@@ -11,13 +11,37 @@ import {
 export async function renderMetric(outlet, id) {
   outlet.innerHTML = `
     <div class="masthead" style="padding:0">
-      <a class="linklike" href="#/semantics">Semantics</a>
+      <a class="linklike" href="#/semantics">← Semantics Explorer</a>
       <span class="muted">› Metric Profile</span>
     </div>
+    <div id="siblings"></div>
     <div id="profile">${loading()}</div>`;
   const detail = await api.metric(id);
   const host = outlet.querySelector("#profile");
   if (!host) return;
+  // hop between the metrics of the same table without going back
+  const bound = detail.metric?.table;
+  if (bound) {
+    api.metrics({ table: bound, limit: 14 }).then((peers) => {
+      const rows = (peers.rows ?? []).filter((r) => r.id);
+      const strip = outlet.querySelector("#siblings");
+      if (!strip || rows.length < 2) return;
+      strip.innerHTML = `
+        <div class="card subnav">
+          <span class="muted">on <span class="mono">${
+            esc(bound.split(".").pop())}</span>:</span>
+          ${rows.map((r) => `
+            <a class="chip linkchip ${r.id === detail.metric.id
+                ? "on" : ""}"
+              href="#/metric/${encodeURIComponent(r.id)}"
+              title="${esc(r.expr || r.label || r.id)}">${
+              esc(r.label) || `${esc((r.fp || r.id).slice(0, 8))}…`}</a>`)
+            .join("")}
+          <a class="linklike" href="#/table/${
+            encodeURIComponent(bound)}">the table →</a>
+        </div>`;
+    });
+  }
   if (!detail.available) { host.innerHTML = unavailable(detail.reason); return; }
   if (!detail.found || !detail.metric) {
     host.innerHTML = card("", `<p>metric ${esc(id)} is not in the

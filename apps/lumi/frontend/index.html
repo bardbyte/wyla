@@ -26,23 +26,37 @@
   </head>
   <body>
     <div class="shell">
-      <header class="masthead">
-        <a class="wordmark" href="#/home">SYNAPSE</a>
-        <span class="tagline">powered by Lumi</span>
+      <aside class="sidenav">
+        <div class="brand">
+          <a class="wordmark" href="#/home">SYNAPSE</a>
+          <span class="tagline">powered by Lumi</span>
+        </div>
+        <nav class="navlist" aria-label="Sections">
+          <a href="#/home" data-tab="home"><span class="glyph">⌂</span>Home</a>
+          <a href="#/artifacts" data-tab="artifacts"><span class="glyph">▤</span>Artifacts</a>
+          <a href="#/semantics" data-tab="semantics"><span class="glyph">◈</span>Semantics Explorer</a>
+          <a href="#/cosmos" data-tab="cosmos"><span class="glyph">✦</span>Cosmos</a>
+          <a href="#/operate" data-tab="operate"><span class="glyph">⚙</span>Operate</a>
+        </nav>
+        <div class="chats" aria-label="Chats">
+          <div class="chats-head">Chats</div>
+          <p class="chats-note">Ask lands here with E16: your
+            conversations with the map, saved and searchable.</p>
+        </div>
         <span class="spacer"></span>
-        <span class="chip">Saheb Singh ●</span>
-        <button id="theme-toggle" class="icon-btn" type="button"
-                aria-label="Switch theme">☾</button>
-      </header>
-      <nav class="tabnav" aria-label="Sections">
-        <a href="#/home" data-tab="home">Home</a>
-        <a href="#/semantics" data-tab="semantics">Semantics</a>
-        <a href="#/cosmos" data-tab="cosmos">Cosmos</a>
-        <a href="#/artifacts" data-tab="artifacts">Artifacts</a>
-        <a href="#/operate" data-tab="operate">Operate</a>
-        <span class="tab-preview" title="The conversational surface ships with E16: shown as a labeled door, never an unlabeled fake">Ask · E16</span>
-      </nav>
-      <main id="outlet" class="outlet"></main>
+        <div class="account">
+          <span class="avatar" aria-hidden="true">SS</span>
+          <span class="who">
+            <b>Saheb Singh</b>
+            <span class="role">Steward</span>
+          </span>
+          <button id="theme-toggle" class="icon-btn" type="button"
+                  aria-label="Switch theme">☾</button>
+        </div>
+      </aside>
+      <div class="main-col">
+        <main id="outlet" class="outlet"></main>
+      </div>
     </div>
     <script type="module" src="/js/main.js"></script>
   </body>

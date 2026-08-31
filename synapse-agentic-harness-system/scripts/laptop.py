@@ -459,9 +459,17 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
 
     (graph_root / "runs" / run_id).mkdir(parents=True, exist_ok=True)
     manifest = graph_root / "runs" / run_id / "manifest.json"
+    # absolute input roots recorded so serving layers can find the
+    # data this graph actually read (e.g. Knowledge Files) without
+    # extra configuration on the same machine
+    roots = {label: str(Path(value).resolve())
+             for label, value in (("sources", args.sources_dir),
+                                  ("bq_archive", args.bq_archive),
+                                  ("mdm_archive", args.mdm_archive))
+             if value}
     manifest.write_text(json.dumps({
-        "run_id": run_id, "archived": False, "reports": reports,
-        "utilization": utilization},
+        "run_id": run_id, "archived": False, "roots": roots,
+        "reports": reports, "utilization": utilization},
         indent=1) + "\n", encoding="utf-8")
     console.output(manifest)
 

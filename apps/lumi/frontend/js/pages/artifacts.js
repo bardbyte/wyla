@@ -38,10 +38,11 @@ export async function renderArtifacts(outlet) {
     `${files.length} files on the shelf`;
 
   if (!files.length) {
-    listHost.innerHTML = card("THE SHELF", `<p class="muted">no
-      knowledge files found${payload.reason
-        ? ` (${esc(payload.reason)})` : ""}. Stage one below and it
-      appears here.</p>`, "empty");
+    listHost.innerHTML = card("THE SHELF", `<p class="muted">${
+      esc(payload.files_reason ?? payload.reason
+        ?? "no knowledge files found")}</p>
+      <p class="muted">Stage one below and it appears here.</p>`,
+      "empty");
   } else {
     const groups = new Map();
     for (const f of files) {

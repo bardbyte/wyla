@@ -1,4 +1,5 @@
-/** Synapse by Lumi: shell: hash router, theme toggle, build chip.
+/** Synapse by Lumi: shell: hash router over the left sidebar,
+ * theme toggle.
  * Routes: #/home #/semantics #/cosmos #/artifacts #/operate
  *         #/metric/<id> #/table/<physical>
  * Deep links work: a metric profile is a URL you can send someone. */
@@ -25,7 +26,7 @@ async function route() {
   teardown = null;
   const { page, arg } = parseRoute();
   const tab = page === "metric" || page === "table" ? "semantics" : page;
-  document.querySelectorAll(".tabnav a").forEach((a) =>
+  document.querySelectorAll(".navlist a[data-tab]").forEach((a) =>
     a.classList.toggle("active", a.dataset.tab === tab));
   outlet.classList.toggle("wide", page === "cosmos");
   outlet.innerHTML = "";

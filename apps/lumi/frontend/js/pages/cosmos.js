@@ -7,7 +7,11 @@
 import { api } from "../api.js";
 import { card, esc, loading, tierChip, unavailable } from "../ui.js";
 
-const TIER_COLOR = { ha: 0x0e7a55, gr: 0x1f9e78, in: 0xc9962e, gu: 0x8b98b0 };
+// Amex brand ramp: trust still reads as GLOW + the rail's tier words,
+// hue stays in the blue family (bright blue = strongest evidence)
+const TIER_COLOR = (dark) => dark
+  ? { ha: 0x57a9f2, gr: 0x82bef7, in: 0x64789e, gu: 0x475572 }
+  : { ha: 0x006fcf, gr: 0x4da2e8, in: 0x7f9cc4, gu: 0xb0c0d8 };
 const TIER_GLOW = { ha: 0.9, gr: 0.55, in: 0.45, gu: 0.15 };
 const KINDS = ["joins", "membership", "computed-from", "all"];
 
@@ -99,8 +103,10 @@ export async function renderCosmos(outlet) {
   // tables spheres, metrics small orbiting spheres: one constellation
   const sphere = new THREE.SphereGeometry(1, 20, 20);
   const octa = new THREE.OctahedronGeometry(1, 0);
+  const palette = TIER_COLOR(dark);
   const meshes = payload.nodes.map((node) => {
-    const color = node.star ? 0xe8c98a : TIER_COLOR[node.tier] ?? 0x8b98b0;
+    const color = node.star ? 0xe8c98a
+      : palette[node.tier] ?? palette.gu;
     const mesh = new THREE.Mesh(
       node.kind === "domain" ? octa : sphere,
       new THREE.MeshStandardMaterial({
@@ -158,7 +164,7 @@ export async function renderCosmos(outlet) {
             transparent: true, opacity: style.opacity,
             color: style.color }));
     if (kind === "membership") line.computeLineDistances();
-    line.visible = kind === "joins";
+    line.visible = true;              // default view: all edges
     edgeGroups[kind] = line;
     root.add(line);
   }
@@ -210,7 +216,7 @@ export async function renderCosmos(outlet) {
         transparent: true, opacity: 0.95, color: 0xe8c98a }));
     root.add(highlight);
   };
-  let edgeKind = "joins";
+  let edgeKind = "all";
   const pills = body.querySelector("#edge-pills");
   const edgeCounts = {};
   for (const edge of payload.edges)
@@ -246,7 +252,8 @@ export async function renderCosmos(outlet) {
     };
   });
 
-  const rot = { x: -0.12, y: 0.3 };
+  const rot = { x: 1.12, y: 0.3 };   // start overhead: every
+                                     // business unit in one look
   let dist = 46;
   let drag = null;
   let dragJustEnded = false;         // pointerup precedes click
