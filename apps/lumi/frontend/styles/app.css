@@ -533,7 +533,7 @@ textarea.input { font-family: var(--font-mono); font-size: var(--fs-12);
  * A column that owns the viewport: the thread scrolls, the composer
  * stays put. Reading width is capped at 74ch like every other prose
  * surface, so an answer reads the way the metric profile reads. */
-.outlet.chat { max-width: 940px; height: 100vh; padding-bottom: var(--s-4);
+.outlet.chat { max-width: 1280px; height: 100vh; padding-bottom: var(--s-4);
                overflow: hidden; }
 .ask { flex: 1; min-height: 0; display: flex; flex-direction: column;
        gap: var(--s-3); }
@@ -681,3 +681,83 @@ table.result tr:last-child td { border-bottom: none; }
   .ask-actions #ask-hint { display: none; }
   .outlet.chat { height: auto; overflow: visible; }
 }
+
+/* ── Ask · the plan rail (E18 Stage C) ──
+ * The plan is the session's state, so it sits BESIDE the conversation
+ * rather than behind a click. Under 1200px the rail moves below the
+ * thread; the markup does not change, only the grid. */
+.ask-cols {
+  flex: 1; min-height: 0; display: grid; gap: var(--s-4);
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+.ask-cols.no-rail { grid-template-columns: minmax(0, 1fr); }
+.ask-cols.no-rail .plan-rail { display: none; }
+.plan-rail {
+  display: flex; flex-direction: column; gap: var(--s-2);
+  overflow-y: auto; min-height: 0; font-size: var(--fs-12);
+  border-left: 1px solid var(--line); padding-left: var(--s-4);
+}
+.plan-head { display: flex; align-items: center; gap: var(--s-2);
+             font-size: var(--fs-13); color: var(--ink); }
+.plan-sub { font-size: var(--fs-11); }
+.stepper { display: flex; align-items: center; gap: 2px; }
+.stepper .mono { font-size: var(--fs-11); color: var(--ink-2);
+                 min-width: 26px; text-align: center; }
+.stepper .icon-btn { width: 22px; height: 22px; font-size: var(--fs-13);
+                     display: inline-flex; align-items: center;
+                     justify-content: center; }
+.stepper .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.plan-slots { display: flex; flex-direction: column; gap: 2px;
+              transition: opacity var(--t-fast); }
+.plan-slots.ghost { opacity: 0.6; }
+.plan-slot {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px;
+  padding: 6px 8px; border-radius: var(--r-sm);
+  border: 1px solid transparent;
+}
+.plan-slot.changed { border-color: var(--accent);
+                     background: var(--accent-soft);
+                     animation: slot-in var(--t-med) ease both; }
+@keyframes slot-in {
+  from { transform: translateX(4px); opacity: 0.4; }
+  to { transform: none; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plan-slot.changed { animation: none; }
+}
+.plan-key { color: var(--ink-3); min-width: 76px; font-size: var(--fs-11);
+            text-transform: uppercase; letter-spacing: 0.04em; }
+.plan-val { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+.plan-binding, .plan-from, .plan-sum {
+  flex-basis: 100%; font-size: var(--fs-11); color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.plan-rail .btn { align-self: flex-start; }
+@media (max-width: 1200px) {
+  .ask-cols { grid-template-columns: minmax(0, 1fr); }
+  .plan-rail { border-left: none; padding-left: 0; max-height: 240px;
+               border-top: 1px solid var(--line); padding-top: var(--s-3); }
+}
+
+/* the join and grain preview: fan-out judged before any work runs */
+.preview-card { gap: var(--s-2); border-left: 3px solid var(--tier-high); }
+.preview-card.v-unproven { border-left-color: var(--tier-mid); }
+.preview-card.v-unsafe, .preview-card.v-unwitnessed {
+  border-left-color: var(--conflict);
+}
+.preview-head { display: flex; gap: var(--s-2); align-items: baseline;
+                font-size: var(--fs-13); }
+.preview-mark { font-family: var(--font-mono); flex: none; width: 14px; }
+.preview-card.v-safe .preview-mark { color: var(--tier-high); }
+.preview-card.v-unproven .preview-mark { color: var(--tier-mid); }
+.preview-card.v-unsafe .preview-mark,
+.preview-card.v-unwitnessed .preview-mark { color: var(--conflict); }
+.preview-grain { font-size: var(--fs-12); }
+.preview-join { display: flex; flex-direction: column; gap: 3px;
+                border-top: 1px solid var(--surface-2);
+                padding-top: var(--s-2); font-size: var(--fs-12); }
+.preview-join-head { display: flex; gap: var(--s-2); align-items: center;
+                     flex-wrap: wrap; }
+.preview-on { font-size: var(--fs-11); color: var(--ink-2);
+              background: var(--surface-2); border-radius: var(--r-sm);
+              padding: 4px 8px; overflow-x: auto; }

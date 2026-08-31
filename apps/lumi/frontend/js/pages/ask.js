@@ -22,6 +22,7 @@
 import { api } from "../api.js";
 import { renderMarkdown } from "../md.js";
 import { esc, prose } from "../ui.js";
+import { planPanel } from "../planpanel.js";
 
 const SESSION_KEY = "synapse-ask-session";
 
@@ -50,8 +51,11 @@ export async function renderAsk(outlet, wanted = "") {
       <span class="muted">Ask · a governed answer with its receipts</span>
       <span class="spacer"></span>
       <span class="muted" id="ask-meter"></span>
+      <button class="btn" id="ask-plan-toggle" aria-pressed="true"
+        >plan</button>
       <button class="btn" id="ask-new">new session</button>
     </div>
+    <div class="ask-cols">
     <div class="ask">
       <div class="ask-thread" id="ask-thread"></div>
       <div class="ask-composer">
@@ -66,6 +70,8 @@ export async function renderAsk(outlet, wanted = "") {
           <button class="btn primary" id="ask-send">Ask</button>
         </div>
       </div>
+    </div>
+    <aside class="plan-rail" id="ask-plan"></aside>
     </div>`;
 
   const thread = outlet.querySelector("#ask-thread");
@@ -114,6 +120,8 @@ export async function renderAsk(outlet, wanted = "") {
   // History comes from the STORE (durable, survives a restart); the
   // stream then starts at the bus head, so nothing renders twice.
   state.seq = boot.head || 0;
+  const panel = planPanel(outlet.querySelector("#ask-plan"), state);
+  panel.load(boot.plan_versions || []);
   replay(boot);
 
   // ── the transcript, rebuilt from the record ──────────────
@@ -255,6 +263,58 @@ export async function renderAsk(outlet, wanted = "") {
         shown here</div>` : ""}`;
   }
 
+  const PREVIEW_MARK = { safe: "✓", unproven: "?", unsafe: "✗",
+                         unwitnessed: "✗" };
+
+  function previewCard(turn, preview) {
+    const card = document.createElement("div");
+    card.className = `card preview-card v-${esc(preview.verdict)}`;
+    card.innerHTML = `
+      <div class="card-label">before running: join and grain</div>
+      <div class="preview-head">
+        <span class="preview-mark">${
+          PREVIEW_MARK[preview.verdict] || "?"}</span>
+        <b>${prose(preview.headline)}</b>
+      </div>
+      <div class="preview-grain muted">one row means
+        <b>${esc(preview.grain)}</b>${preview.grain_source
+          ? ` · ${prose(preview.grain_source)}` : ""}</div>
+      ${preview.joins.map((j) => `
+        <div class="preview-join">
+          <div class="preview-join-head">
+            <span class="preview-mark">${PREVIEW_MARK[j.verdict] || "?"}</span>
+            <b>${esc(preview.base.short)} → ${esc(j.short)}</b>
+            ${j.source ? `<span class="chip">${esc(j.source)}${
+              j.support ? ` · ${esc(j.support)}` : ""}</span>` : ""}
+            ${j.rows !== null && j.rows !== undefined
+              ? `<span class="muted">${esc(
+                  Number(j.rows).toLocaleString())} rows</span>` : ""}
+          </div>
+          ${j.on ? `<div class="mono preview-on">${esc(j.on)}</div>` : ""}
+          <div class="muted">${prose(j.why)}</div>
+          ${j.alternates ? `<div class="muted">${esc(j.alternates)} other
+            witness${j.alternates > 1 ? "es" : ""} for this pair: open the
+            table profile to compare them</div>` : ""}
+        </div>`).join("")}
+      ${preview.verdict !== "safe" ? `
+        <div class="legend">
+          <a class="linklike" href="#/table/${esc(preview.base.table)}"
+            >inspect the join</a>
+          <button class="linklike" data-steward>ask a steward</button>
+        </div>` : ""}`;
+    card.addEventListener("click", async (e) => {
+      if (!e.target.closest?.("[data-steward]")) return;
+      await api.askFeedback(state.session.id,
+        { vote: "down", subject: "join_preview",
+          note: `${preview.verdict}: ${preview.headline}` });
+      e.target.replaceWith(Object.assign(document.createElement("span"),
+        { className: "muted",
+          textContent: "flagged: a steward will see this join" }));
+    });
+    turn.extras.appendChild(card);
+    scroll();
+  }
+
   function verdictChip(verdict) {
     const passed = verdict.will_verify.filter((c) => c.passed).length;
     const total = verdict.will_verify.length;
@@ -376,9 +436,22 @@ export async function renderAsk(outlet, wanted = "") {
       case "classify_result":
       case "resolve_started":
       case "resolve_result":
+        step(turn, STEP_COPY[event.ev](event));
+        break;
       case "plan_delta":
+        step(turn, STEP_COPY[event.ev](event));
+        panel.delta(event);              // mark what this turn moved
+        break;
       case "contract_ready":
         step(turn, STEP_COPY[event.ev](event));
+        panel.plan(event.plan, event.plan?.version);
+        if (event.preview) {
+          if ((event.preview.joins || []).length) {
+            previewCard(turn, event.preview);   // a join to judge
+          } else {
+            step(turn, event.preview.headline, "✓");
+          }
+        }
         break;
       case "clarify_request":
         chips(turn, event);
@@ -479,6 +552,24 @@ export async function renderAsk(outlet, wanted = "") {
     if (e.key === "Escape" && state.running) api.askStop(state.session.id);
   };
   window.addEventListener("keydown", onKey);
+  const railBtn = outlet.querySelector("#ask-plan-toggle");
+  const cols = outlet.querySelector(".ask-cols");
+  const applyRail = (on) => {
+    cols.classList.toggle("no-rail", !on);
+    railBtn.setAttribute("aria-pressed", String(on));
+    railBtn.classList.toggle("primary", on);
+  };
+  let railOn = true;
+  try { railOn = localStorage.getItem("synapse-ask-rail") !== "off"; }
+  catch { /* private mode: the rail just stays on */ }
+  applyRail(railOn);
+  railBtn.addEventListener("click", () => {
+    railOn = !railOn;
+    try { localStorage.setItem("synapse-ask-rail", railOn ? "on" : "off"); }
+    catch { /* fine */ }
+    applyRail(railOn);
+  });
+
   outlet.querySelector("#ask-new").addEventListener("click", () => {
     localStorage.removeItem(SESSION_KEY);
     if (location.hash.startsWith("#/ask/")) {

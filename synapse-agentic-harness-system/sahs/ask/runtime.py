@@ -160,6 +160,36 @@ class AskRuntime:
         rt.thread.start()
         return {"turn_id": turn_id, "session_id": session_id}
 
+    def restore_plan(self, session_id: str, version: int) -> dict:
+        """Restore is a NEW version carrying an old one's content, never
+        a rewind. The chain stays append-only, so "what did we actually
+        ask" remains answerable after any amount of undo, and the
+        restore itself is a defensible event rather than a hole."""
+        rt = self.runtime(session_id)
+        if rt.running:
+            raise TurnBusy("a turn is running: stop it before restoring "
+                           "a plan version under it")
+        versions = self.store.plan_versions(session_id)
+        if not versions:
+            raise KeyError(f"no plan versions in {session_id}")
+        wanted = next((v for v in versions
+                       if int(v["version"]) == int(version)), None)
+        if wanted is None:
+            raise KeyError(f"no plan version {version} in {session_id}")
+        top = versions[-1]
+        if int(top["version"]) == int(version):
+            return {"restored": False, "version": int(version),
+                    "reason": "that version is already the current plan"}
+        plan = dict(wanted["plan"])
+        parent = int(top["version"])
+        plan["version"] = parent + 1
+        plan["parent"] = parent
+        row = self.store.add_plan_version(
+            session_id, plan, parent=parent,
+            summary=f"restored from v{version}: {wanted.get('summary', '')}")
+        return {"restored": True, "version": int(row["version"]),
+                "from_version": int(version), "summary": row["summary"]}
+
     def stop(self, session_id: str) -> dict:
         """Stop means stop: the same abort path the breaker uses. The
         loop halts between steps, keeps partial state, and the budget

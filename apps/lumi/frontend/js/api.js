@@ -79,6 +79,9 @@ export const api = {
   askStop: (id) => post(`/api/sessions/${encodeURIComponent(id)}/stop`),
   askFeedback: (id, payload) =>
     post(`/api/sessions/${encodeURIComponent(id)}/feedback`, payload),
+  askRestorePlan: (id, version) =>
+    post(`/api/sessions/${encodeURIComponent(id)}/plan/restore`,
+      { version }),
   askStreamUrl: (id, after = 0) =>
     `/api/sessions/${encodeURIComponent(id)}/stream?after=${after}`,
 };

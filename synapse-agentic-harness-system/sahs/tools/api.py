@@ -38,6 +38,7 @@ class Build:
     schema: dict[str, dict[str, str]]
     cost_priors: dict[str, dict[str, Any]] = field(default_factory=dict)
     lob: list[dict[str, Any]] = field(default_factory=list)
+    tables: list[dict[str, Any]] = field(default_factory=list)
     _db: sqlite3.Connection | None = field(default=None, repr=False)
 
     @classmethod
@@ -65,6 +66,7 @@ class Build:
                 (path / "indexes" / "cost_priors.json").read_text())
             if (path / "indexes" / "cost_priors.json").exists() else {},
             lob=_jsonl(path / "indexes" / "lob.jsonl"),
+            tables=_jsonl(path / "indexes" / "tables.jsonl"),
         )
 
     @property
@@ -73,6 +75,13 @@ class Build:
 
     def short_table(self, physical: str) -> str:
         return physical.split(".")[-1]
+
+    def table_facts(self, physical: str) -> dict[str, Any]:
+        """Row count and declared keys for one table, or {} when the
+        build carries neither. Callers must treat {} as "unknown" and
+        say so: an absent row count is never a zero."""
+        return next((t for t in self.tables
+                     if t.get("physical") == physical), {})
 
     def physical_of(self, name: str) -> str | None:
         name = (name or "").strip().lower()

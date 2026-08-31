@@ -26,6 +26,7 @@ from .events import EventBus
 from .generate import generate
 from .model import ModelUnavailable
 from .plan import Plan, PlanError, apply_edit
+from .preview import join_grain_preview
 from .render import RenderRefused, render_answer
 from .resolve import resolve_plan
 from .store import SessionStore
@@ -128,13 +129,18 @@ def run_turn(*, build: Build, store: SessionStore, bus: EventBus,
             return
 
         # ── the contract, before any work ────────────────────
-        contract = build_contract(
-            plan, multi_table=len(outcome.result.get("tables") or []) > 1)
+        # the join and grain preview rides on contract_ready because
+        # that IS the acceptance moment: a fan-out warning is only
+        # useful while the plan can still change.
+        tables = outcome.result.get("tables") or []
+        contract = build_contract(plan, multi_table=len(tables) > 1)
+        preview = join_grain_preview(build, plan, tables)
         store.add_plan_version(session_id, plan.to_dict(),
                                parent=plan.parent, turn_id=turn_id,
                                summary=plan.summary())
         bus.emit("contract_ready", turn_id=turn_id,
-                 contract=contract.to_dict(), plan=plan.to_dict())
+                 contract=contract.to_dict(), plan=plan.to_dict(),
+                 preview=preview)
 
         # ── generate (streams; never sees the verdict) ───────
         abort.check()

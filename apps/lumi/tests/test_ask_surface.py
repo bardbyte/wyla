@@ -106,6 +106,21 @@ def test_the_page_never_holds_a_key_or_an_endpoint():
             assert banned not in low, f"{name} carries {banned!r}"
 
 
+def test_the_plan_rail_is_wired_and_styled():
+    """Stage C: the plan is the session's state, so it has to reach the
+    page, be restorable, and have somewhere to render."""
+    PANEL = (FRONTEND / "js" / "planpanel.js").read_text(encoding="utf-8")
+    assert "planPanel" in ASK_JS and 'id="ask-plan"' in ASK_JS
+    assert "panel.delta(event)" in ASK_JS, "plan_delta never marks a slot"
+    assert "panel.plan(" in ASK_JS, "contract_ready never reaches the rail"
+    assert "previewCard" in ASK_JS, "the join preview has no renderer"
+    # the chain is the one authority for what versions exist
+    assert "refresh()" in PANEL and "api.askRestorePlan" in PANEL
+    for css_class in ("plan-rail", "plan-slot", "stepper", "preview-card",
+                      "preview-join", "plan-key", "plan-val"):
+        assert f".{css_class}" in CSS, f"no CSS rule for .{css_class}"
+
+
 def test_the_classes_the_page_emits_are_styled():
     """A zero-build frontend ships whatever it says: a class with no
     rule renders as unstyled text and nobody finds out until a user

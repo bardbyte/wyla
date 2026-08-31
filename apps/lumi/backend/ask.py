@@ -14,6 +14,7 @@ Paths follow the E18 contract:
     POST /api/sessions/{id}/messages       {text, choice?} → turn_id
     GET  /api/sessions/{id}/stream         → SSE (meridian.event/1)
     POST /api/sessions/{id}/stop           → cancel server-side
+    POST /api/sessions/{id}/plan/restore   → an old plan, as a NEW version
     POST /api/sessions/{id}/feedback       → 👍/👎 on an answer
 """
 
@@ -122,6 +123,27 @@ def post_message(session_id: str, req: NewMessage) -> dict:
 def stop_turn(session_id: str) -> dict:
     runtime, _ = _ask()
     return {"available": True, **runtime.stop(session_id)}
+
+
+class RestorePlan(BaseModel):
+    version: int = Field(ge=1)
+
+
+@router.post("/sessions/{session_id}/plan/restore")
+def restore_plan(session_id: str, req: RestorePlan) -> dict:
+    """Undo as scrubbing, not archaeology. The restored plan is
+    appended as the newest version, so the chain never loses a step."""
+    runtime, _ = _ask()
+    from sahs.ask.runtime import TurnBusy
+    if runtime.store.get_session(session_id) is None:
+        return _unavailable(f"no session {session_id}")
+    try:
+        return {"available": True,
+                **runtime.restore_plan(session_id, req.version)}
+    except TurnBusy as e:
+        return {"available": False, "reason": str(e), "busy": True}
+    except KeyError as e:
+        return _unavailable(str(e).strip("'"))
 
 
 @router.post("/sessions/{session_id}/feedback", status_code=201)

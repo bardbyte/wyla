@@ -1,4 +1,4 @@
-# E18 Ask — the agentic loop (Stage A)
+# E18 Ask: the agentic loop and its surface (Stages A-C)
 
 One stateful loop carrying the versioned semantic plan; stateless
 workers around it. It runs **in-process** with the Synapse app, not as
@@ -173,9 +173,57 @@ and assign it to `apps.lumi.backend.ask._RUNTIME` before `create_app()`
 else — the build, the resolver, the contract, the sandbox, the
 verifier — stays real.
 
+## Stage C: the plan panel, the stepper, and the fan-out preview
+
+The plan is the session's state, so it sits BESIDE the conversation in
+a rail rather than behind a click (put it away with the `plan` button;
+under 1200px the rail moves below the thread). Every slot shows where
+its value came from, and the slot a mutation moved is marked while the
+rest visibly hold: that is what makes "same for Canada" legible as one
+change rather than a re-plan.
+
+**The version stepper is scrubbing, not archaeology.** `‹ v3 ›` walks
+the chain; an older version renders as a ghost and offers Restore.
+Restore *appends* the old plan as the newest version
+(`POST /api/sessions/{id}/plan/restore`), so the chain only ever grows
+and "what did we actually ask" stays answerable after any amount of
+undo. The store's chain is the single authority for what versions
+exist: the rail reconciles against it rather than counting its own
+events.
+
+**The join and grain preview** rides on `contract_ready`, because that
+is the acceptance moment: a fan-out warning is only useful while the
+plan can still change. It needed no new event; the family stays pinned.
+
+Its verdict is decided from evidence, never guessed:
+
+| verdict | when | what it says |
+|---|---|---|
+| `safe` | one table, or the join lands on the far side's DECLARED primary key | "1,020 gms_transaction rows stay 1,020 after the join" |
+| `unproven` | a real ON clause, but the far-side key is not a declared primary key | "this join may inflate totals" and names the missing fact |
+| `unsafe` | the only witness is `scoped_only`, or the pair is unattested | a CTE-scoped witness is evidence the relationship exists, never that the raw tables join safely |
+
+Note what it does **not** do: the wireframe's "1.2M becomes 3.8M ×3.2"
+needs a multiplier nobody has without executing. Rather than invent
+one, `unproven` names the fact that is missing. A test pins that no
+arithmetic appears in an unproven payload.
+
+This needs two facts as DATA rather than as prose on a card, so the
+compiler now writes `indexes/tables.jsonl`: row counts and declared
+primary keys per table. An absent row count is reported as absent, never
+as a zero.
+
+### What the walk covers, and what it does not
+
+The browser walk (75 checks) drives the rail, the stepper, restore, and
+the single-table preview. It does **not** drive the multi-table card:
+no question against this fixture resolves to two tables, and inventing
+one would have meant faking plan state. That card's three verdicts are
+proven directly against the real compiled build in
+`test_ask_plan_stage_c.py` instead.
+
 ## Stage status
 
-Stages A and B are landed and tested. Stages C–F — the plan panel and
-version stepper, the search constellation, the exploratory notebook
-lane, sessions/budgets/flywheel accrual, and the TQSR loss function —
-build on this stream without changing it.
+Stages A, B and C are landed and tested. Stages D, E and F (the
+exploratory notebook lane, sessions/budgets/flywheel accrual, and the
+TQSR loss function) build on this stream without changing it.
