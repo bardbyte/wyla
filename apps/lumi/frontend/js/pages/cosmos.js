@@ -9,7 +9,7 @@ import { card, esc, loading, tierChip, unavailable } from "../ui.js";
 
 const TIER_COLOR = { ha: 0x0e7a55, gr: 0x1f9e78, in: 0xc9962e, gu: 0x8b98b0 };
 const TIER_GLOW = { ha: 0.9, gr: 0.55, in: 0.45, gu: 0.15 };
-const KINDS = ["joins", "computed-from", "all"];
+const KINDS = ["joins", "membership", "computed-from", "all"];
 
 export async function renderCosmos(outlet) {
   outlet.innerHTML = `
@@ -41,24 +41,37 @@ export async function renderCosmos(outlet) {
     </div>`;
   const rail = body.querySelector("#rail");
   const drawRail = (node) => {
-    rail.innerHTML = node
-      ? card(node.kind.toUpperCase(), `
-          <div class="profile-title mono">${esc(node.label)}</div>
-          ${tierChip(node.tier)}
-          <div class="muted">well ${esc(node.well)}${
-            node.star ? " · ★ held by multiple domains" : ""}</div>
-          <div class="muted">usage <span class="mono">${node.usage}</span>${
-            node.kind === "table" && node.metrics_here !== undefined
-              ? ` · ${node.metrics_here} metrics here` : ""}${
-            node.kind === "metric" && node.status
-              ? ` · ${esc(node.status)}` : ""}</div>
-          <a class="btn" href="#/${node.kind === "table"
-            ? `table/${encodeURIComponent(node.id.replace(/^table:/, ""))}`
-            : `metric/${encodeURIComponent(node.id)}`}">open profile →</a>`)
-      : card("ENCODING", `
-          <p class="muted">${esc(payload.meta.encoding)}</p>
-          <p class="muted">drag to orbit · wheel to zoom · click a body
-            to read it</p>`);
+    if (!node) {
+      rail.innerHTML = card("ENCODING", `
+        <p class="muted">${esc(payload.meta.encoding)}</p>
+        <p class="muted">drag to orbit · wheel to zoom · click a body
+          to read it</p>`);
+      return;
+    }
+    if (node.kind === "domain") {
+      rail.innerHTML = card("DOMAIN", `
+        <div class="profile-title mono">${esc(node.label)}</div>
+        ${tierChip(node.tier, node.tier === "ha"
+          ? "steward-mapped" : "unmapped")}
+        <div class="muted">${esc(node.sub ?? `${node.usage} tables`)}</div>
+        <div class="muted">every dashed tether is a table this domain
+          claims — a gold star carries two</div>
+        <a class="btn" href="#/semantics">browse its tables →</a>`);
+      return;
+    }
+    rail.innerHTML = card(node.kind.toUpperCase(), `
+      <div class="profile-title mono">${esc(node.label)}</div>
+      ${tierChip(node.tier)}
+      <div class="muted">well ${esc(node.well)}${
+        node.star ? " · ★ held by multiple domains" : ""}</div>
+      <div class="muted">usage <span class="mono">${node.usage}</span>${
+        node.kind === "table" && node.metrics_here !== undefined
+          ? ` · ${node.metrics_here} metrics here` : ""}${
+        node.kind === "metric" && node.status
+          ? ` · ${esc(node.status)}` : ""}</div>
+      <a class="btn" href="#/${node.kind === "table"
+        ? `table/${encodeURIComponent(node.id.replace(/^table:/, ""))}`
+        : `metric/${encodeURIComponent(node.id)}`}">open profile →</a>`);
   };
   drawRail(null);
 
@@ -82,16 +95,26 @@ export async function renderCosmos(outlet) {
   const root = new THREE.Group();
   scene.add(root);
 
+  // shape = kind: domains are octahedral hubs at their well centers,
+  // tables spheres, metrics small orbiting spheres — one constellation
   const sphere = new THREE.SphereGeometry(1, 20, 20);
+  const octa = new THREE.OctahedronGeometry(1, 0);
   const meshes = payload.nodes.map((node) => {
     const color = node.star ? 0xe8c98a : TIER_COLOR[node.tier] ?? 0x8b98b0;
-    const mesh = new THREE.Mesh(sphere, new THREE.MeshStandardMaterial({
-      color, emissive: color,
-      emissiveIntensity: (TIER_GLOW[node.tier] ?? 0.2) * 0.6,
-      roughness: 0.4,
-    }));
-    const scale = node.star ? 1.15
-      : Math.min(0.3 + Math.sqrt(Math.max(node.usage, 1)) / 30, 1.6);
+    const mesh = new THREE.Mesh(
+      node.kind === "domain" ? octa : sphere,
+      new THREE.MeshStandardMaterial({
+        color, emissive: color,
+        emissiveIntensity: (TIER_GLOW[node.tier] ?? 0.2)
+          * (node.kind === "domain" ? 0.35 : 0.6),
+        roughness: 0.4,
+        transparent: node.kind === "domain",
+        opacity: node.kind === "domain" ? 0.85 : 1,
+      }));
+    const scale = node.kind === "domain"
+      ? Math.min(1.0 + Math.sqrt(Math.max(node.usage, 1)) / 4, 2.2)
+      : node.star ? 1.15
+        : Math.min(0.3 + Math.sqrt(Math.max(node.usage, 1)) / 30, 1.6);
     mesh.scale.setScalar(node.kind === "metric" ? scale * 0.6 : scale);
     mesh.position.set(...node.pos);
     mesh.userData = node;
@@ -107,7 +130,7 @@ export async function renderCosmos(outlet) {
   const positions = new Map(payload.nodes.map((n) =>
     [n.id, new THREE.Vector3(...n.pos)]));
   const edgeGroups = {};
-  for (const kind of ["joins", "computed-from"]) {
+  for (const kind of ["joins", "membership", "computed-from"]) {
     const points = [];
     for (const edge of payload.edges) {
       if (edge.kind !== kind) continue;
@@ -115,12 +138,18 @@ export async function renderCosmos(outlet) {
       const b = positions.get(edge.b);
       if (a && b) points.push(a, b);
     }
+    const edgeColor = dark ? 0x8fa8d8 : 0x9aa8c0;
     const line = new THREE.LineSegments(
       new THREE.BufferGeometry().setFromPoints(points),
-      new THREE.LineBasicMaterial({
-        transparent: true, opacity: kind === "joins" ? 0.35 : 0.16,
-        color: dark ? 0x8fa8d8 : 0x9aa8c0,
-      }));
+      kind === "membership"
+        ? new THREE.LineDashedMaterial({
+            transparent: true, opacity: 0.22, color: edgeColor,
+            dashSize: 0.7, gapSize: 0.5 })
+        : new THREE.LineBasicMaterial({
+            transparent: true, opacity: kind === "joins" ? 0.35 : 0.16,
+            color: edgeColor }));
+    if (kind === "membership") line.computeLineDistances();
+    line.visible = kind === "joins";
     edgeGroups[kind] = line;
     root.add(line);
   }

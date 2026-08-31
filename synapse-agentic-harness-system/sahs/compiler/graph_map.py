@@ -6,9 +6,11 @@ no RNG), so the same build always renders the same sky and a diff in
 the map is a diff in the data.
 
 Shape (consumed by <synapse-cosmos>):
-  nodes: [{id, label, kind: table|metric, tier, usage, well, star,
-           pos: [x,y,z], columns?, metrics_here?, status?}]
-  edges: [{a, b, kind: joins|computed-from, source?, scope?, on?}]
+  nodes: [{id, label, kind: domain|table|metric, tier, usage, well,
+           star, pos: [x,y,z], columns?, metrics_here?, status?,
+           sub?}]
+  edges: [{a, b, kind: joins|membership|computed-from, source?,
+           scope?, on?}]
   wells: [{id, label, sub, center: [x,y,z]}]
   meta:  {layout, truncated, encoding}
 
@@ -109,6 +111,20 @@ def build_graph_map(consensus: dict[str, Any],
 
     map_nodes: list[dict[str, Any]] = []
     table_pos: dict[str, list[float]] = {}
+    # domains are BODIES, not just labels: one hub per well, sitting
+    # at its center, human-asserted when a steward mapped it. The
+    # unified sky is domains + tables + metrics in one constellation.
+    for well in wells:
+        members = ([p for p, w in table_wells.items()
+                    if w[0] == well["id"]]
+                   if well["id"] != "UNMAPPED" else
+                   [p for p in physicals if p not in table_wells])
+        map_nodes.append({
+            "id": f"domain:{well['id']}", "label": well["id"],
+            "kind": "domain",
+            "tier": "ha" if well["id"] != "UNMAPPED" else "gu",
+            "usage": len(members), "well": well["id"], "star": False,
+            "pos": list(well["center"]), "sub": well["sub"]})
     for physical in physicals:
         my_wells = table_wells.get(physical, ["UNMAPPED"])
         well = my_wells[0]
@@ -171,6 +187,14 @@ def build_graph_map(consensus: dict[str, Any],
                 map_edges.append({"a": node["id"],
                                   "b": f"table:{row['table']}",
                                   "kind": "computed-from"})
+    # membership: every table tethers to EVERY domain that claims it —
+    # a star table carries two tethers, which is exactly its story
+    for physical in physicals:
+        for well_id in sorted(set(table_wells.get(physical)
+                                  or ["UNMAPPED"])):
+            map_edges.append({"a": f"table:{physical}",
+                              "b": f"domain:{well_id}",
+                              "kind": "membership"})
 
     return {
         "schema": "meridian.graph_map/1",
@@ -182,9 +206,11 @@ def build_graph_map(consensus: dict[str, Any],
                 "mined_metrics": sum(
                     1 for r in metric_rows
                     if r.get("status") not in ("certified", "pending"))},
-            "encoding": "size = usage · glow = trust tier · gold "
+            "encoding": "shape = kind (domain hub · table · metric) · "
+                        "size = usage · glow = trust tier · gold "
                         "star = held by multiple domains · "
-                        "scoped_only joins are CTE-scoped, not "
-                        "raw-safe",
+                        "membership tethers a table to every domain "
+                        "that claims it · scoped_only joins are "
+                        "CTE-scoped, not raw-safe",
         },
     }
