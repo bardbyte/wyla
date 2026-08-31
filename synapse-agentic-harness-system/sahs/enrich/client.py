@@ -33,6 +33,8 @@ class VertexClient:
     connection: VertexConnection
     token_provider: Callable[[], str] | None = None
     transport: Callable[[dict], dict] | None = None   # tests inject
+    stream_transport: Callable[[dict], Any] | None = None  # ditto,
+                                 # for the streaming path (E18 Ask)
     sleep: Callable[[float], None] = time.sleep
     usage: dict[str, int] = field(default_factory=lambda: {
         "calls": 0, "prompt_tokens": 0, "output_tokens": 0})
@@ -59,11 +61,11 @@ class VertexClient:
         creds.refresh(Request(session=self.connection.token_session()))
         return creds.token
 
-    def _url(self) -> str:
+    def _url(self, method: str = "generateContent") -> str:
         c = self.connection
         return (f"{c.endpoint}/v1/projects/{c.project}/locations/"
                 f"{c.location}/publishers/google/models/"
-                f"{c.model}:generateContent")
+                f"{c.model}:{method}")
 
     def _post(self, body: dict) -> dict:
         if self.transport is not None:
@@ -192,6 +194,83 @@ class VertexClient:
         raise EnrichTransportError(
             f"vertex unreachable after {len(_BACKOFFS) + 1} attempts — "
             f"last: {last_error}")
+
+
+    # ── streaming (E18 Ask): the chat surface needs first-token
+    # latency, so the conversational lane rides :streamGenerateContent.
+    # The batch enrichment path above is untouched.
+    def generate_stream(self, prompt: str, *, system: str = "",
+                        temperature: float = 0.3,
+                        max_output_tokens: int = 1500,
+                        json_mode: bool = False):
+        """Yield text deltas as the model produces them.
+
+        No retry loop here on purpose: a stream that dies mid-answer
+        cannot be silently restarted without lying about what the user
+        already read. The caller surfaces the break as an honest error
+        event and offers regenerate."""
+        body: dict[str, Any] = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_output_tokens,
+            },
+        }
+        if json_mode:
+            body["generationConfig"]["responseMimeType"] = "application/json"
+        if system:
+            body["systemInstruction"] = {"parts": [{"text": system}]}
+        budget = (os.environ.get("GEMINI_THINKING_BUDGET") or "").strip()
+        if budget and self.thinking_ok:
+            body["generationConfig"]["thinkingConfig"] = {
+                "thinkingBudget": int(budget)}
+        self.usage["calls"] = self.usage.get("calls", 0) + 1
+
+        if self.stream_transport is not None:
+            for chunk in self.stream_transport(body):
+                yield chunk
+            return
+
+        request = urllib.request.Request(
+            self._url("streamGenerateContent") + "?alt=sse",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Authorization": f"Bearer {self._token()}",
+                     "Content-Type": "application/json"},
+            method="POST")
+        try:
+            with urllib.request.urlopen(
+                    request, timeout=120,
+                    context=self.connection.ssl_context()) as response:
+                for raw in response:
+                    line = raw.decode("utf-8").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if not payload or payload == "[DONE]":
+                        continue
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    usage = chunk.get("usageMetadata") or {}
+                    if usage:
+                        self.usage["prompt_tokens"] = usage.get(
+                            "promptTokenCount", self.usage["prompt_tokens"])
+                        self.usage["output_tokens"] = usage.get(
+                            "candidatesTokenCount",
+                            self.usage["output_tokens"])
+                    for candidate in chunk.get("candidates", []):
+                        for part in (candidate.get("content", {})
+                                     .get("parts", [])):
+                            text = part.get("text")
+                            if text:
+                                yield text
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:400]
+            raise EnrichTransportError(
+                f"vertex refused the stream (HTTP {e.code}): {detail}")
+        except urllib.error.URLError as e:
+            raise EnrichTransportError(f"vertex unreachable: {e.reason}")
 
 
 def parse_json_answer(text: str) -> dict | None:
