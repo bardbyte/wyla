@@ -337,14 +337,13 @@ textarea.input { font-family: var(--font-mono); font-size: var(--fs-12);
 .thead > span { display: inline-flex; align-items: center;
                 min-width: 0; }
 
-/* ── artifacts browser ── */
-.artifact-browser { display: grid;
-                    grid-template-columns: 340px minmax(0, 1fr);
-                    gap: var(--s-4); align-items: start; }
-@media (max-width: 960px) {
-  .artifact-browser { grid-template-columns: 1fr; }
+/* ── artifacts shelf + the pullout reader ── */
+.artifact-list { max-height: 60vh; overflow-y: auto; }
+.artifact-groups {
+  display: grid; gap: var(--s-2) var(--s-4);
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  align-items: start;
 }
-.artifact-list { max-height: 70vh; overflow-y: auto; }
 .artifact-group { display: flex; flex-direction: column; gap: 2px; }
 .artifact-area {
   font-size: var(--fs-11); font-weight: 700; letter-spacing: 0.05em;
@@ -362,9 +361,27 @@ textarea.input { font-family: var(--font-mono); font-size: var(--fs-12);
 .artifact-file.on { border-color: var(--accent);
                     background: var(--accent-soft); }
 .artifact-name { font-weight: 600; }
-.artifact-view { min-height: 40vh; }
-.artifact-view-head { display: flex; align-items: baseline;
-                      gap: var(--s-3); flex-wrap: wrap; }
+/* the reader slides in from the right, the Claude way */
+.artifact-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 30;
+  width: min(680px, 92vw); box-sizing: border-box;
+  background: var(--surface); border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-lift);
+  display: flex; flex-direction: column; gap: var(--s-2);
+  padding: var(--s-4) var(--s-5);
+  transform: translateX(103%);
+  transition: transform 0.25s ease;
+}
+.artifact-panel.open { transform: none; }
+.artifact-panel[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .artifact-panel { transition: none; }
+}
+.artifact-panel-head { display: flex; align-items: center;
+                       gap: var(--s-2); }
+.artifact-panel-body { overflow-y: auto; flex: 1; min-height: 0;
+                       padding-right: var(--s-2); }
+.connectors .btn { font-size: var(--fs-12); padding: 6px 12px; }
 
 /* markdown rendering */
 .md { display: flex; flex-direction: column; gap: var(--s-2);

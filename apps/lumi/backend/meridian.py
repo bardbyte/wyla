@@ -51,6 +51,16 @@ def _graph_root() -> Path:
     return Path(os.environ.get("MERIDIAN_GRAPH_DIR", _SILO / "graph"))
 
 
+def _skills_dir() -> Path:
+    """The skills tree the Knowledge Files shelf walks (areas =
+    subfolders, nesting welcome: CFR/<skill>, CFR/TLS/<semantics>).
+    MERIDIAN_SKILLS_DIR wins; else <sources>/skills."""
+    env = os.environ.get("MERIDIAN_SKILLS_DIR")
+    if env:
+        return Path(env)
+    return _sources_dir() / "skills"
+
+
 def _sources_dir() -> Path:
     """The sources dir the Knowledge Files shelf reads. Resolution:
     MERIDIAN_SOURCES_DIR env wins; else the silo's own sources/ when
@@ -366,36 +376,47 @@ class MeridianData:
 
     # the knowledge inventory roots — everything the Artifacts browser
     # may list and read. Path containment is enforced on read.
-    def _knowledge_files(self) -> list[dict]:
+    def _knowledge_index(self) -> tuple[list[dict], dict[str, Path]]:
+        """The shelf inventory AND the only resolution map for
+        reading a file: every path in the map was constructed here
+        from the trusted roots — user input never does path math."""
         sources = _sources_dir()
+        skills = _skills_dir()
         entries: list[dict] = []
+        paths: dict[str, Path] = {}
 
-        def _add(path: Path, area: str, staged: bool) -> None:
+        def _add(path: Path, rel: str, area: str,
+                 staged: bool) -> None:
             try:
                 size = path.stat().st_size
             except OSError:
                 return
             entries.append({
-                "rel": str(path.relative_to(sources)),
-                "name": path.name, "area": area,
+                "rel": rel, "name": path.name, "area": area,
                 "size": size, "staged": staged,
                 "kind": path.suffix.lstrip(".") or "file"})
+            paths[rel] = path
 
-        skills = sources / "skills"
         if skills.exists():
             for path in sorted(skills.rglob("*")):
                 if path.is_file():
                     parts = path.relative_to(skills).parts
                     area = "/".join(parts[:-1]) or "skills"
-                    _add(path, area, staged=False)
+                    _add(path, "skills/" + "/".join(parts), area,
+                         staged=False)
         staged_dir = sources / "artifacts"
         if staged_dir.exists():
             for path in sorted(staged_dir.glob("*")):
                 if path.is_file():
-                    _add(path, "staged", staged=True)
-        for path in sorted(sources.glob("*.md")):
-            _add(path, "reference docs", staged=False)
-        return entries
+                    _add(path, f"artifacts/{path.name}", "staged",
+                         staged=True)
+        if sources.exists():
+            for path in sorted(sources.glob("*.md")):
+                _add(path, path.name, "reference docs", staged=False)
+        return entries, paths
+
+    def _knowledge_files(self) -> list[dict]:
+        return self._knowledge_index()[0]
 
     def artifacts(self) -> dict:
         build, reason = self._load()
@@ -412,29 +433,26 @@ class MeridianData:
                    "staged": [f["name"] for f in files if f["staged"]],
                    "sources_dir": str(sources),
                    "staging_dir": str(sources / "artifacts")}
+        payload["skills_dir"] = str(_skills_dir())
         if not files:
-            # the honest empty state names the path checked and the fix
+            # the honest empty state names the paths checked + the fix
             payload["files_reason"] = (
-                f"no knowledge files under {sources} on this machine. "
-                "Set MERIDIAN_SOURCES_DIR to your data root's sources/ "
-                "(the --sources-dir you build the graph with) and "
-                "restart, or re-run laptop.py build-graph so the graph "
-                "records where its sources live.")
+                f"no knowledge files found: skills at {_skills_dir()} "
+                f"and sources at {sources} are both empty on this "
+                "machine. Point MERIDIAN_SKILLS_DIR at your skills "
+                "tree (CFR/, TLS/, any nesting) or "
+                "MERIDIAN_SOURCES_DIR at your data root's sources/ "
+                "in the silo .env and restart.")
         return payload
 
     def artifact_file(self, rel: str) -> dict:
-        """Read ONE knowledge file, by the rel path the inventory
-        handed out. Containment enforced: the resolved path must live
-        under the sources dir AND appear in the inventory — no
-        traversal, no reading arbitrary files."""
-        sources = _sources_dir().resolve()
-        try:
-            target = (sources / rel).resolve()
-            target.relative_to(sources)
-        except (ValueError, OSError):
-            return {"found": False, "reason": "outside the shelf"}
-        inventory = {f["rel"] for f in self._knowledge_files()}
-        if rel not in inventory or not target.is_file():
+        """Read ONE knowledge file, by the rel key the inventory
+        handed out. Containment by construction: rel only ever LOOKS
+        UP a path the index built from the trusted roots — user
+        input never touches the filesystem path math."""
+        _, paths = self._knowledge_index()
+        target = paths.get(rel)
+        if target is None or not target.is_file():
             return {"found": False,
                     "reason": "not on the knowledge shelf"}
         if target.stat().st_size > 1_000_000:
@@ -461,10 +479,13 @@ class ArtifactStageRequest(BaseModel):
     """Stage a new Knowledge File for a business unit. This is a
     SOURCE drop, not a graph write: the file lands in
     sources/artifacts/ where the ingestion ledger will meet it —
-    the clerk stays the only graph writer."""
+    the clerk stays the only graph writer. ``ext`` keeps a dumped
+    file's real text extension (md by default)."""
     business_unit: str = Field(pattern=r"^[A-Za-z0-9_-]{1,40}$")
     name: str = Field(min_length=1, max_length=80)
     content: str = Field(min_length=1, max_length=200_000)
+    ext: str = Field(default="md",
+                     pattern=r"^(md|txt|csv|json|yaml|yml|sql)$")
     actor: str = "admin"
 
 
@@ -537,13 +558,15 @@ def stage_artifact(req: ArtifactStageRequest) -> dict:
         return {"staged": False, "reason": "name yields an empty slug"}
     staged_dir = _sources_dir() / "artifacts"
     staged_dir.mkdir(parents=True, exist_ok=True)
-    path = staged_dir / f"{req.business_unit.lower()}_{slug}.md"
+    path = staged_dir / f"{req.business_unit.lower()}_{slug}.{req.ext}"
     if path.exists():
         return {"staged": False,
                 "reason": f"{path.name} already staged; pick another "
                           "name or edit the file directly"}
+    # provenance header only where the format tolerates a comment
     header = (f"<!-- staged via Synapse by Lumi · actor {req.actor} · "
-              f"business unit {req.business_unit} -->\n")
+              f"business unit {req.business_unit} -->\n"
+              if req.ext == "md" else "")
     path.write_text(header + req.content, encoding="utf-8")
     return {"staged": True, "file": path.name,
             "note": "staged for ingestion. The Knowledge Files "
