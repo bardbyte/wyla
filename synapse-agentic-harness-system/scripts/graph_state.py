@@ -20,6 +20,10 @@ from pathlib import Path
 SILO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SILO))
 
+from sahs.util.auth import load_dotenv  # noqa: E402
+
+load_dotenv()          # .env paths ride along; shell exports win
+
 
 def _aux(build_dir: Path, rel: str):
     p = build_dir / rel
@@ -33,8 +37,10 @@ def _aux(build_dir: Path, rel: str):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--graph", default=str(SILO / "graph"))
-    ap.add_argument("--builds", default=str(SILO / "builds"))
+    ap.add_argument("--graph", default=os.environ.get(
+        "MERIDIAN_GRAPH_DIR") or str(SILO / "graph"))
+    ap.add_argument("--builds", default=os.environ.get(
+        "MERIDIAN_BUILDS_DIR") or str(SILO / "builds"))
     args = ap.parse_args()
     graph = Path(args.graph)
     builds = Path(args.builds)
