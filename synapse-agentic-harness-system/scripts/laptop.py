@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -491,8 +492,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     for name, fn in (("census", cmd_census), ("make-tasks", cmd_make_tasks)):
         p = sub.add_parser(name)
-        p.add_argument("--sources-dir", required=True)
-        p.add_argument("--registry", required=True,
+        p.add_argument("--sources-dir", default=None)
+        p.add_argument("--registry", default=None,
                        help="_batch_summary.csv or newline table list")
         p.add_argument("--out", required=True)
         p.add_argument("--run-id", default="")
@@ -517,8 +518,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK if ok else EXIT_GATE_FAILURE
 
     p = sub.add_parser("compile")
-    p.add_argument("--graph", required=True)
-    p.add_argument("--builds", required=True)
+    p.add_argument("--graph", default=None)
+    p.add_argument("--builds", default=None)
     p.add_argument("--out", required=True)
     p.add_argument("--run-id", default="")
     p.add_argument("--plain", action="store_true")
@@ -574,8 +575,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK if ok else EXIT_GATE_FAILURE
 
     p = sub.add_parser("enrich")
-    p.add_argument("--graph", required=True)
-    p.add_argument("--builds", required=True)
+    p.add_argument("--graph", default=None)
+    p.add_argument("--builds", default=None)
     p.add_argument("--out", required=True)
     p.add_argument("--limit", type=int, default=200,
                    help="max items per target this run")
@@ -595,13 +596,13 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(fn=cmd_enrich)
 
     p = sub.add_parser("build-graph")
-    p.add_argument("--graph", required=True, help="graph/ root (L2)")
-    p.add_argument("--crosswalk", required=True,
+    p.add_argument("--graph", default=None, help="graph/ root (L2)")
+    p.add_argument("--crosswalk", default=None,
                    help="identity/crosswalk.jsonl (E1)")
-    p.add_argument("--bq-archive", default="")
-    p.add_argument("--mdm-archive", default="")
-    p.add_argument("--sources-dir", default="")
-    p.add_argument("--registry", default="")
+    p.add_argument("--bq-archive", default=None)
+    p.add_argument("--mdm-archive", default=None)
+    p.add_argument("--sources-dir", default=None)
+    p.add_argument("--registry", default=None)
     p.add_argument("--no-jobs-30d", action="store_true",
                    help="A8: exclude every fact derived from the 30-day "
                         "query history (jobs witness, cost priors, "
@@ -614,6 +615,43 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--fresh", action="store_true")
     p.set_defaults(fn=cmd_build_graph)
     args = parser.parse_args(argv)
+
+    # Every path flag is .env-configurable (paste once, run
+    # anywhere): precedence flag > exported env > .env file > silo
+    # default. load_dotenv never overrides shell exports.
+    from sahs.util.auth import load_dotenv
+    load_dotenv()
+    silo = Path(__file__).resolve().parents[1]
+    env_paths = {
+        "graph": ("MERIDIAN_GRAPH_DIR", str(silo / "graph")),
+        "builds": ("MERIDIAN_BUILDS_DIR", str(silo / "builds")),
+        "sources_dir": ("MERIDIAN_SOURCES_DIR", None),
+        "registry": ("MERIDIAN_REGISTRY", None),
+        "bq_archive": ("MERIDIAN_BQ_ARCHIVE", None),
+        "mdm_archive": ("MERIDIAN_MDM_ARCHIVE", None),
+        "crosswalk": ("MERIDIAN_CROSSWALK", None),
+    }
+    for attr, (env_name, fallback) in env_paths.items():
+        if getattr(args, attr, "sentinel") is None:
+            setattr(args, attr,
+                    os.environ.get(env_name) or fallback)
+    if getattr(args, "crosswalk", "sentinel") is None and args.graph:
+        args.crosswalk = str(Path(args.graph) / "identity"
+                             / "crosswalk.jsonl")
+    must_have = {"census": ("sources_dir", "registry"),
+                 "make-tasks": ("sources_dir", "registry"),
+                 "build-graph": ("crosswalk",)}
+    for attr in must_have.get(args.command, ()):
+        if not getattr(args, attr, None):
+            env_name = env_paths[attr][0]
+            parser.error(
+                f"--{attr.replace('_', '-')} is not set: pass the "
+                f"flag, or put {env_name}=... in the silo .env")
+    # loaders treat empty string as "skip this archive"
+    for attr in ("bq_archive", "mdm_archive", "sources_dir",
+                 "registry"):
+        if getattr(args, attr, "sentinel") is None:
+            setattr(args, attr, "")
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

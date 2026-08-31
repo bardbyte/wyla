@@ -124,6 +124,27 @@ def test_knowledge_files_resolve_from_graph_manifest(client):
     assert "files_reason" not in listing
 
 
+def test_env_file_configures_sources_dir(compiled, tmp_path):
+    """Paste MERIDIAN_SOURCES_DIR into the .env and the shelf finds
+    it: create_app loads the pipeline's .env (never overriding real
+    shell exports)."""
+    env_file = tmp_path / "test.env"
+    env_file.write_text(
+        f"MERIDIAN_SOURCES_DIR={FX / 'sources'}\n", encoding="utf-8")
+    os.environ["SAHS_ENV_FILE"] = str(env_file)
+    os.environ["MERIDIAN_BUILDS_DIR"] = str(compiled["builds"])
+    os.environ["MERIDIAN_GRAPH_DIR"] = str(compiled["graph"])
+    assert "MERIDIAN_SOURCES_DIR" not in os.environ
+    try:
+        via_env = TestClient(create_app())
+        listing = via_env.get("/api/meridian/artifacts").json()
+        assert listing["sources_dir"] == str(FX / "sources")
+        assert listing["files"]
+    finally:
+        del os.environ["SAHS_ENV_FILE"]
+        os.environ.pop("MERIDIAN_SOURCES_DIR", None)
+
+
 def test_empty_shelf_names_the_path(tmp_path):
     """No graph, no env, no silo sources: the payload says exactly
     where it looked and how to fix it — the designed empty state."""
