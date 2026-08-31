@@ -111,6 +111,31 @@ def test_browse_order_and_table_filter(client):
     assert all(r["table"] == bound["table"] for r in filtered["rows"])
 
 
+def test_knowledge_files_resolve_from_graph_manifest(client):
+    """The laptop scenario: no MERIDIAN_SOURCES_DIR, no silo
+    sources/ checkout — the shelf still fills, because build-graph
+    records its absolute --sources-dir in the run manifest and the
+    API falls back to it. This is the bug where Knowledge Files
+    did not preload in the UI."""
+    assert "MERIDIAN_SOURCES_DIR" not in os.environ
+    listing = client.get("/api/meridian/artifacts").json()
+    assert listing["files"], "manifest-roots fallback found no files"
+    assert str(FX / "sources") in listing["sources_dir"]
+    assert "files_reason" not in listing
+
+
+def test_empty_shelf_names_the_path(tmp_path):
+    """No graph, no env, no silo sources: the payload says exactly
+    where it looked and how to fix it — the designed empty state."""
+    os.environ["MERIDIAN_BUILDS_DIR"] = str(tmp_path / "empty")
+    os.environ["MERIDIAN_GRAPH_DIR"] = str(tmp_path / "graph")
+    bare = TestClient(create_app())
+    listing = bare.get("/api/meridian/artifacts").json()
+    assert listing["files"] == []
+    assert "MERIDIAN_SOURCES_DIR" in listing["files_reason"]
+    assert listing["sources_dir"] in listing["files_reason"]
+
+
 def test_knowledge_shelf_and_containment(client):
     """The Artifacts inventory lists real skill files grouped by area,
     artifact_file serves one verbatim — and refuses traversal and

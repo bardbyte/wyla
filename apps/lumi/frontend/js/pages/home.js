@@ -119,12 +119,15 @@ export async function renderHome(outlet) {
         ${Object.keys(s.ledger).length ? `<div class="ledger">ledger: ${
           Object.entries(s.ledger)
             .map(([k, n]) => `${n} ${esc(k)}`).join(" · ")}</div>` : ""}
-        ${s.family === "knowledge" && knowledgeFiles.length ? `
+        ${s.family === "knowledge" ? (knowledgeFiles.length ? `
           <div class="ledger">${knowledgeFiles.length} files on the
             shelf: ${knowledgeFiles.slice(0, 6)
               .map((f) => esc(f.name)).join(" · ")}${
             knowledgeFiles.length > 6 ? " · …" : ""}</div>
-          <a class="linklike" href="#/artifacts">browse them →</a>` : ""}
+          <a class="linklike" href="#/artifacts">browse them →</a>`
+          : `<div class="ledger">${
+              prose(artifacts?.files_reason
+                ?? "shelf not visible from this machine")}</div>`) : ""}
       </div>`).join("")}</div>`)
     : card("SOURCES", `<p class="muted">${
         esc(sources.reason ?? "loading the shelf…")}</p>`);

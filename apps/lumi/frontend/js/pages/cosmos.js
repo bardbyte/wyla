@@ -158,7 +158,7 @@ export async function renderCosmos(outlet) {
             transparent: true, opacity: style.opacity,
             color: style.color }));
     if (kind === "membership") line.computeLineDistances();
-    line.visible = kind === "joins";
+    line.visible = true;              // default view: all edges
     edgeGroups[kind] = line;
     root.add(line);
   }
@@ -210,7 +210,7 @@ export async function renderCosmos(outlet) {
         transparent: true, opacity: 0.95, color: 0xe8c98a }));
     root.add(highlight);
   };
-  let edgeKind = "joins";
+  let edgeKind = "all";
   const pills = body.querySelector("#edge-pills");
   const edgeCounts = {};
   for (const edge of payload.edges)

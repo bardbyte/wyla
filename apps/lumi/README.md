@@ -24,6 +24,15 @@ reason — nothing is mocked, ever.** Builds compiled before E17-A lack
 `indexes/sources.json` and `indexes/graph_map.json`; one
 `laptop.py compile` lights up the Sources rail and the Cosmos.
 
+**Knowledge Files** (Home card + `#/artifacts`) read from the
+sources dir, resolved in order: `MERIDIAN_SOURCES_DIR` → the silo's
+own `sources/` if present → the absolute `--sources-dir` recorded by
+your latest `laptop.py build-graph` run (manifests record their input
+roots). Older graphs predate that record: either set
+`MERIDIAN_SOURCES_DIR=$DATA/sources` before `uvicorn`, or re-run
+`build-graph` once. When the shelf is empty the page says exactly
+which path it checked.
+
 The same `.env` as the pipeline rides along: `/api/lumi/planes`
 reports the BQ (PSC) and Vertex (proxy) planes as booleans —
 configured or not, never values. The app itself calls neither;
@@ -33,7 +42,7 @@ enrichment and dry-runs stay with `laptop.py`.
 
 | route | screen |
 |---|---|
-| `#/home` | capabilities: hero, six promises, LIVE PROOF, planes, diff, the Sources rail (ledger as trust centerpiece), exclusions |
+| `#/home` | capabilities: hero + doors, six promises, LIVE PROOF, the Sources rail (ledger as trust centerpiece), exclusions |
 | `#/semantics` | Explorer — metrics (search + status filters) and tables |
 | `#/metric/<id>` · `#/table/<t>` | the profiles — deep-linkable URLs |
 | `#/cosmos` | the graph sky from `graph_map.json` (positions baked at compile) |
