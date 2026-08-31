@@ -56,6 +56,7 @@ a:hover { color: var(--ink); }
 .navlist a:nth-child(4) { animation-delay: 0.14s; }
 .navlist a:nth-child(5) { animation-delay: 0.18s; }
 .navlist a:nth-child(6) { animation-delay: 0.22s; }
+.navlist a:nth-child(7) { animation-delay: 0.26s; }
 @keyframes nav-in {
   from { opacity: 0; transform: translateX(-6px); }
   to { opacity: 1; transform: none; }
@@ -70,19 +71,34 @@ a:hover { color: var(--ink); }
 @media (prefers-reduced-motion: reduce) {
   .navlist a, .navlist .glyph { animation: none; transition: none; }
 }
-/* the space below the options is the chats shelf: Ask (E16) will
- * fill it with real conversations; until then it says so honestly */
-.chats { margin-top: var(--s-4); padding: 0 10px;
+/* the space below the options is the chats shelf: the real Ask
+ * sessions on this machine, newest first */
+.chats { margin-top: var(--s-4); padding: 0 10px; min-height: 0;
          display: flex; flex-direction: column; gap: 6px; }
 .chats-head {
   font-size: var(--fs-11); font-weight: 700; letter-spacing: 0.06em;
   color: var(--ink-3); text-transform: uppercase;
 }
+.chats-body { display: flex; flex-direction: column; gap: 1px;
+              overflow-y: auto; min-height: 0; }
 .chats-note {
   margin: 0; font-size: var(--fs-12); color: var(--ink-3);
   border: 1px dashed var(--line-strong); border-radius: var(--r-md);
-  padding: 8px 10px; cursor: not-allowed;
+  padding: 8px 10px;
 }
+.chat-row {
+  display: flex; align-items: center; gap: 8px;
+  text-decoration: none; color: var(--ink-2); font-size: var(--fs-12);
+  padding: 6px 8px; border-radius: var(--r-sm);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.chat-row:hover { background: var(--bg); color: var(--ink); }
+.chat-row.on { background: var(--accent-soft); color: var(--accent);
+               font-weight: 600; }
+.chat-title { overflow: hidden; text-overflow: ellipsis;
+              white-space: nowrap; }
+.chat-when { margin-left: auto; color: var(--ink-3);
+             font-size: var(--fs-11); flex: none; }
 /* the account row, the Claude way: avatar, name, role, one hover */
 .account {
   display: flex; align-items: center; gap: 10px;
@@ -512,3 +528,236 @@ textarea.input { font-family: var(--font-mono); font-size: var(--fs-12);
   box-shadow: var(--shadow-lift);
 }
 .cosmos-rail { display: flex; flex-direction: column; gap: var(--s-3); }
+
+/* ── Ask (E18) ──
+ * A column that owns the viewport: the thread scrolls, the composer
+ * stays put. Reading width is capped at 74ch like every other prose
+ * surface, so an answer reads the way the metric profile reads. */
+.outlet.chat { max-width: 1280px; height: 100vh; padding-bottom: var(--s-4);
+               overflow: hidden; }
+.ask { flex: 1; min-height: 0; display: flex; flex-direction: column;
+       gap: var(--s-3); }
+.ask-thread {
+  flex: 1; min-height: 0; overflow-y: auto; scroll-behavior: smooth;
+  display: flex; flex-direction: column; gap: var(--s-4);
+  padding-right: var(--s-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ask-thread { scroll-behavior: auto; }
+}
+.ask-user {
+  align-self: flex-end; max-width: 80%;
+  background: var(--accent-soft); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  padding: 10px 14px; font-size: var(--fs-14);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.ask-turn { display: flex; flex-direction: column; gap: var(--s-2);
+            animation: ask-in 0.25s ease both; }
+@keyframes ask-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .ask-turn { animation: none; } }
+.ask-note { font-size: var(--fs-12); color: var(--ink-3); }
+.ask-note.error { color: var(--conflict); }
+.ask-note.warn { color: var(--tier-mid); }
+.ask-prose { max-width: 74ch; }
+.ask-prose:empty { display: none; }
+.ask-extras { display: flex; flex-direction: column; gap: var(--s-3); }
+.ask-extras:empty { display: none; }
+
+/* the theater strip: work is visible, but tucked away */
+.theater { align-self: flex-start; max-width: 100%; }
+.theater > summary {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  list-style: none; font-size: var(--fs-12); color: var(--ink-3);
+  border: 1px solid var(--line); border-radius: 99px;
+  padding: 4px 12px; background: var(--surface);
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.theater > summary::-webkit-details-marker { display: none; }
+.theater > summary:hover { border-color: var(--line-strong);
+                           color: var(--ink-2); }
+.theater .tri { transition: transform 0.15s ease; display: inline-block; }
+.theater[open] > summary .tri { transform: rotate(90deg); }
+.theater-title { overflow: hidden; text-overflow: ellipsis;
+                 white-space: nowrap; max-width: 62ch; }
+.theater-steps {
+  display: flex; flex-direction: column; gap: 3px;
+  margin: var(--s-2) 0 0 12px; padding-left: var(--s-3);
+  border-left: 1px solid var(--line);
+  font-size: var(--fs-12); color: var(--ink-3);
+}
+.theater-step { display: flex; gap: 8px; align-items: baseline; }
+.theater-step .mark { color: var(--ink-3); width: 12px; flex: none;
+                      font-family: var(--font-mono); }
+
+/* chips: interactive elements ARE messages */
+.chips-card { gap: var(--s-3); }
+.chips-question { font-size: var(--fs-14); font-weight: 600;
+                  color: var(--ink); }
+.chips-row { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.chip-choice {
+  display: flex; flex-direction: column; gap: 2px; text-align: left;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-md); padding: 9px 13px; cursor: pointer;
+  font: inherit; font-size: var(--fs-13); color: var(--ink-2);
+  max-width: 320px;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.chip-choice b { color: var(--ink); }
+.chip-choice span { font-size: var(--fs-11); }
+.chip-choice:hover:not(:disabled) { border-color: var(--accent);
+                                    background: var(--accent-soft); }
+.chip-choice:disabled { opacity: 0.55; cursor: default; }
+.chip-choice.on { border-color: var(--accent); opacity: 1;
+                  background: var(--accent-soft); }
+
+/* the answer card: the meridian line first, receipts one click away */
+.answer-card { gap: var(--s-3); }
+.answer-head { display: flex; align-items: center; gap: var(--s-2);
+               flex-wrap: wrap; font-size: var(--fs-12); }
+.meridian {
+  font-size: var(--fs-13); color: var(--ink-2);
+  border-left: 3px solid var(--accent); padding-left: var(--s-3);
+}
+.answer-detail > summary {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  list-style: none; font-size: var(--fs-13); font-weight: 600;
+  color: var(--accent);
+}
+.answer-detail > summary::-webkit-details-marker { display: none; }
+.answer-detail .tri { transition: transform 0.15s ease;
+                      display: inline-block; }
+.answer-detail[open] > summary .tri { transform: rotate(90deg); }
+.answer-detail-body { display: flex; flex-direction: column;
+                      gap: var(--s-3); margin-top: var(--s-3); }
+.verdict-list { display: flex; flex-direction: column; gap: 4px; }
+.verdict-row {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--s-2); align-items: baseline; font-size: var(--fs-12);
+}
+.verdict-row.ok > span:first-child { color: var(--tier-high); }
+.verdict-row.no > span:first-child { color: var(--conflict); }
+.verdict-row.no { color: var(--ink-3); }
+.limits { display: flex; flex-direction: column; gap: 2px;
+          border-top: 1px solid var(--surface-2); padding-top: var(--s-2);
+          font-size: var(--fs-12); }
+.result-wrap { overflow-x: auto; border: 1px solid var(--line);
+               border-radius: var(--r-md); }
+table.result { border-collapse: collapse; width: 100%;
+               font-size: var(--fs-12); }
+table.result th, table.result td {
+  text-align: left; padding: 6px 10px; white-space: nowrap;
+  border-bottom: 1px solid var(--surface-2);
+}
+table.result th { background: var(--surface-2); color: var(--ink-3);
+                  font-size: var(--fs-11); font-weight: 700;
+                  letter-spacing: 0.04em; text-transform: uppercase; }
+table.result td { font-family: var(--font-mono); color: var(--ink-2); }
+table.result tr:last-child td { border-bottom: none; }
+.error-card { border-color: var(--conflict); background: var(--conflict-soft); }
+.error-card .card-label { color: var(--conflict); }
+.error-card p { margin: 0; font-size: var(--fs-13); }
+
+/* the composer: never disabled, even mid-turn */
+.ask-composer {
+  display: flex; flex-direction: column; gap: var(--s-2);
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  background: var(--surface); padding: var(--s-3);
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s ease;
+}
+.ask-composer:focus-within { border-color: var(--accent); }
+.ask-composer textarea {
+  border: none; outline: none; resize: none; background: transparent;
+  font: inherit; font-size: var(--fs-14); color: var(--ink);
+  line-height: 1.5; max-height: 200px; overflow-y: auto;
+}
+.ask-actions { display: flex; align-items: center; gap: var(--s-2);
+               font-size: var(--fs-11); }
+@media (max-width: 700px) {
+  .ask-actions #ask-hint { display: none; }
+  .outlet.chat { height: auto; overflow: visible; }
+}
+
+/* ── Ask · the plan rail (E18 Stage C) ──
+ * The plan is the session's state, so it sits BESIDE the conversation
+ * rather than behind a click. Under 1200px the rail moves below the
+ * thread; the markup does not change, only the grid. */
+.ask-cols {
+  flex: 1; min-height: 0; display: grid; gap: var(--s-4);
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+.ask-cols.no-rail { grid-template-columns: minmax(0, 1fr); }
+.ask-cols.no-rail .plan-rail { display: none; }
+.plan-rail {
+  display: flex; flex-direction: column; gap: var(--s-2);
+  overflow-y: auto; min-height: 0; font-size: var(--fs-12);
+  border-left: 1px solid var(--line); padding-left: var(--s-4);
+}
+.plan-head { display: flex; align-items: center; gap: var(--s-2);
+             font-size: var(--fs-13); color: var(--ink); }
+.plan-sub { font-size: var(--fs-11); }
+.stepper { display: flex; align-items: center; gap: 2px; }
+.stepper .mono { font-size: var(--fs-11); color: var(--ink-2);
+                 min-width: 26px; text-align: center; }
+.stepper .icon-btn { width: 22px; height: 22px; font-size: var(--fs-13);
+                     display: inline-flex; align-items: center;
+                     justify-content: center; }
+.stepper .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.plan-slots { display: flex; flex-direction: column; gap: 2px;
+              transition: opacity var(--t-fast); }
+.plan-slots.ghost { opacity: 0.6; }
+.plan-slot {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px;
+  padding: 6px 8px; border-radius: var(--r-sm);
+  border: 1px solid transparent;
+}
+.plan-slot.changed { border-color: var(--accent);
+                     background: var(--accent-soft);
+                     animation: slot-in var(--t-med) ease both; }
+@keyframes slot-in {
+  from { transform: translateX(4px); opacity: 0.4; }
+  to { transform: none; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plan-slot.changed { animation: none; }
+}
+.plan-key { color: var(--ink-3); min-width: 76px; font-size: var(--fs-11);
+            text-transform: uppercase; letter-spacing: 0.04em; }
+.plan-val { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+.plan-binding, .plan-from, .plan-sum {
+  flex-basis: 100%; font-size: var(--fs-11); color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.plan-rail .btn { align-self: flex-start; }
+@media (max-width: 1200px) {
+  .ask-cols { grid-template-columns: minmax(0, 1fr); }
+  .plan-rail { border-left: none; padding-left: 0; max-height: 240px;
+               border-top: 1px solid var(--line); padding-top: var(--s-3); }
+}
+
+/* the join and grain preview: fan-out judged before any work runs */
+.preview-card { gap: var(--s-2); border-left: 3px solid var(--tier-high); }
+.preview-card.v-unproven { border-left-color: var(--tier-mid); }
+.preview-card.v-unsafe, .preview-card.v-unwitnessed {
+  border-left-color: var(--conflict);
+}
+.preview-head { display: flex; gap: var(--s-2); align-items: baseline;
+                font-size: var(--fs-13); }
+.preview-mark { font-family: var(--font-mono); flex: none; width: 14px; }
+.preview-card.v-safe .preview-mark { color: var(--tier-high); }
+.preview-card.v-unproven .preview-mark { color: var(--tier-mid); }
+.preview-card.v-unsafe .preview-mark,
+.preview-card.v-unwitnessed .preview-mark { color: var(--conflict); }
+.preview-grain { font-size: var(--fs-12); }
+.preview-join { display: flex; flex-direction: column; gap: 3px;
+                border-top: 1px solid var(--surface-2);
+                padding-top: var(--s-2); font-size: var(--fs-12); }
+.preview-join-head { display: flex; gap: var(--s-2); align-items: center;
+                     flex-wrap: wrap; }
+.preview-on { font-size: var(--fs-11); color: var(--ink-2);
+              background: var(--surface-2); border-radius: var(--r-sm);
+              padding: 4px 8px; overflow-x: auto; }

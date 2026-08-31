@@ -1,0 +1,229 @@
+# E18 Ask: the agentic loop and its surface (Stages A-C)
+
+One stateful loop carrying the versioned semantic plan; stateless
+workers around it. It runs **in-process** with the Synapse app, not as
+a subprocess, so a turn is a thread inside the server and the events
+it emits are the objects the browser receives.
+
+```
+classify → apply → delta-resolve → validate → generate → verify → render
+```
+
+## Start it
+
+```bash
+# from the repo root
+uvicorn apps.lumi.backend.app:app --port 8400
+```
+
+Ask mounts at `/api/sessions*`. Paths and credentials come from the
+silo `.env` (see `.env.example`); nothing is passed on the command
+line and no key ever reaches the browser.
+
+| variable | what it does |
+|---|---|
+| `MERIDIAN_BUILDS_DIR` / `MERIDIAN_GRAPH_DIR` | which build Ask answers from, where sessions and events are written (`graph/runs/ask/`) |
+| `LUMI_VERTEX_SA_KEY` | the Vertex service-account key (a DIFFERENT project than BQ) |
+| `VERTEX_PROJECT_ID` · `VERTEX_LOCATION` · `VERTEX_MODEL` | the model contract; location defaults to `global`, model to `gemini-3.1-pro-preview` |
+| `SAHS_ALLOW_LIVE=1` + `ASK_EXECUTE=live` | BOTH required before Ask executes for real; otherwise every query is a dry run that returns zero rows by design |
+| `SYNAPSE_COST_IN` / `SYNAPSE_COST_OUT` | dollars per million tokens. Unset → the budget meter reports tokens and says the rate is not configured, rather than inventing a price |
+
+## Drive it without any UI
+
+```bash
+python scripts/ask_demo.py "acquirer net spend by day"
+python scripts/ask_demo.py "acquirer net spend" --pick 1 \
+       --then "same for Canada"
+```
+
+A real run against the fixture build looks like this — note the
+timings, which are the whole UX bet:
+
+```
+> acquirer net spend            [analyst · build b_2cd603279061]
+  classify: new_question (deterministic) first turn of the session
+  resolved in 0.6ms: Acquirer Net Spend
+? What should one row mean?
+    1. transaction              declared by another metric on this table
+    2. card member              declared by another metric on this table
+    3. card member x day        declared by another metric on this table
+    4. one row for the whole window   no grain on record for this metric
+> transaction
+  classify: mutate (deterministic) the analyst picked transaction
+  plan v2: grain '' → 'transaction'
+  resolved in 0.0ms: (nothing new)
+  contract (all false until proven):
+    ✗ the query runs against the promoted build
+    ✗ every table, column and metric it names is real
+    ✗ one row means: transaction
+    ✗ the scan stays inside the cost gates
+    ✗ the written answer says only what the query supports
+```
+
+## Or with curl
+
+```bash
+S=$(curl -s -XPOST localhost:8400/api/sessions \
+      -H 'content-type: application/json' -d '{"kind":"analyst"}' \
+      | python -c 'import sys,json;print(json.load(sys.stdin)["session"]["id"])')
+
+curl -N "localhost:8400/api/sessions/$S/stream" &      # watch it live
+
+curl -s -XPOST "localhost:8400/api/sessions/$S/messages" \
+     -H 'content-type: application/json' \
+     -d '{"text":"acquirer net spend by day"}'
+
+# answer a clarify by posting the chip back as a structured choice
+curl -s -XPOST "localhost:8400/api/sessions/$S/messages" \
+     -H 'content-type: application/json' \
+     -d '{"text":"transaction","choice":{"slot":"grain","value":"transaction"}}'
+
+curl -s -XPOST "localhost:8400/api/sessions/$S/stop"    # stop means stop
+```
+
+`GET /api/sessions/{id}/stream?once=1` closes at `turn_done` (handy in
+scripts); `?after=<seq>` or a `Last-Event-ID` header resumes exactly
+where a dropped connection left off.
+
+## The event family (`meridian.event/1`)
+
+`turn_started · classify_result · plan_delta · resolve_started ·
+resolve_result · clarify_request · contract_ready · generate_token ·
+verify_progress · verify_verdict · answer_payload · notebook_artifact ·
+budget_tick · budget_grace · turn_done · error`
+
+The stream is the single source of UI truth and the events file is the
+record: replay is re-consuming `graph/runs/ask/events/<session>.jsonl`.
+
+## What is pinned
+
+- **Deterministic until you can't.** The first turn of a session and
+  every chip answer classify without a model call. Resolution is the
+  resolver, not a prompt, and is measured in the tests: under 300ms.
+- **One clarifying question per turn**, ranked metric → grain →
+  filter binding, chips carrying real evidence. Below-margin is a
+  success state; the resolver never argmaxes.
+- **Grain is required.** No grain, no contract, no answer. The
+  serializer raises rather than rendering an ungoverned payload.
+- **Single-slot mutation.** "Same for Canada" moves one slot,
+  computed in code, and only that slot is re-resolved.
+- **Default-FAIL contract.** Every criterion starts false; UNKNOWN is
+  a failure (a cost gate that cannot read a byte estimate does not
+  wave the query through). The verifier is fresh-context, read-only,
+  and never sees the generator's reasoning.
+- **Budgets and breakers in code.** Session and turn caps, one turn
+  per session, oversized results truncated with the withheld count
+  carried. The stop button fires the same abort the breaker fires.
+- **The deterministic half needs no model.** The model is built at
+  first use, so a machine with no Vertex still resolves, still asks
+  its clarifying question, and reports the missing contract as an
+  honest error card with next actions.
+
+## Where an unreachable warehouse lands
+
+A dry run that cannot reach BigQuery does not kill the turn: the
+`executes` and `cost_gate` criteria fail on the evidence, and the
+answer renders with those failures named in its limits. An answer
+whose verdict is `fail` is still shown — with the failure visible.
+That is the difference between honest and polished.
+
+## Stage B: the chat surface
+
+`#/ask` in Synapse by Lumi, `apps/lumi/frontend/js/pages/ask.js`. It
+is a **pure consumer** of the stream above: it opens one EventSource
+per session and every value it draws arrived on that stream. It never
+calls a model, never holds a key, never learns an endpoint. A test
+(`test_ask_surface.py`) fails the build if a vendor host or a key name
+ever appears in the frontend.
+
+What the surface does with each event:
+
+| event | what you see |
+|---|---|
+| `turn_started` … `contract_ready` | one line each in the theater strip, collapsed by default, its summary showing the latest step |
+| `clarify_request` | chips, inline, carrying their evidence; clicking one posts it back and it becomes your own turn |
+| `generate_token` | the written answer, painted on the animation frame |
+| `verify_progress` / `verify_verdict` | ✓/✗ per criterion with the evidence that flipped it |
+| `answer_payload` | the answer card: meridian line, grain, verdict chip, results, "How was this calculated?", limits, 👍/👎 |
+| `error` | a card with next actions, never a stack trace |
+| `budget_tick` / `turn_done` | the meter in the masthead |
+
+Pinned in the UI:
+
+- **The input is never blocked.** You can type the next question while
+  this one composes. Stop (button or `Esc`) fires the server-side
+  abort; regenerate re-runs the last turn.
+- **History comes from the store, the stream resumes at the head.**
+  A reload replays the durable transcript once and connects at
+  `?after=<head>`, so nothing renders twice. `#/ask/<session>` is a
+  deep link into a conversation.
+- **Served prose is de-dashed** (`prose()` in `js/ui.js`): evidence,
+  limits, criteria and error text. The SQL, the build id and the grain
+  are data artifacts and render verbatim.
+- **Sessions are the sidebar.** A session earns its name from the
+  first plan that binds a metric, so an untitled row means a
+  conversation that never reached a subject.
+
+### Driving it in a browser without Vertex
+
+The transport is the only thing worth faking, and it is faked from
+*outside* the product: build an `AskRuntime` with a `model_factory`
+and assign it to `apps.lumi.backend.ask._RUNTIME` before `create_app()`
+(the same substitution `tests/test_ask_loop.py` makes). Everything
+else — the build, the resolver, the contract, the sandbox, the
+verifier — stays real.
+
+## Stage C: the plan panel, the stepper, and the fan-out preview
+
+The plan is the session's state, so it sits BESIDE the conversation in
+a rail rather than behind a click (put it away with the `plan` button;
+under 1200px the rail moves below the thread). Every slot shows where
+its value came from, and the slot a mutation moved is marked while the
+rest visibly hold: that is what makes "same for Canada" legible as one
+change rather than a re-plan.
+
+**The version stepper is scrubbing, not archaeology.** `‹ v3 ›` walks
+the chain; an older version renders as a ghost and offers Restore.
+Restore *appends* the old plan as the newest version
+(`POST /api/sessions/{id}/plan/restore`), so the chain only ever grows
+and "what did we actually ask" stays answerable after any amount of
+undo. The store's chain is the single authority for what versions
+exist: the rail reconciles against it rather than counting its own
+events.
+
+**The join and grain preview** rides on `contract_ready`, because that
+is the acceptance moment: a fan-out warning is only useful while the
+plan can still change. It needed no new event; the family stays pinned.
+
+Its verdict is decided from evidence, never guessed:
+
+| verdict | when | what it says |
+|---|---|---|
+| `safe` | one table, or the join lands on the far side's DECLARED primary key | "1,020 gms_transaction rows stay 1,020 after the join" |
+| `unproven` | a real ON clause, but the far-side key is not a declared primary key | "this join may inflate totals" and names the missing fact |
+| `unsafe` | the only witness is `scoped_only`, or the pair is unattested | a CTE-scoped witness is evidence the relationship exists, never that the raw tables join safely |
+
+Note what it does **not** do: the wireframe's "1.2M becomes 3.8M ×3.2"
+needs a multiplier nobody has without executing. Rather than invent
+one, `unproven` names the fact that is missing. A test pins that no
+arithmetic appears in an unproven payload.
+
+This needs two facts as DATA rather than as prose on a card, so the
+compiler now writes `indexes/tables.jsonl`: row counts and declared
+primary keys per table. An absent row count is reported as absent, never
+as a zero.
+
+### What the walk covers, and what it does not
+
+The browser walk (75 checks) drives the rail, the stepper, restore, and
+the single-table preview. It does **not** drive the multi-table card:
+no question against this fixture resolves to two tables, and inventing
+one would have meant faking plan state. That card's three verdicts are
+proven directly against the real compiled build in
+`test_ask_plan_stage_c.py` instead.
+
+## Stage status
+
+Stages A, B and C are landed and tested. Stages D, E and F (the
+exploratory notebook lane, sessions/budgets/flywheel accrual, and the
+TQSR loss function) build on this stream without changing it.

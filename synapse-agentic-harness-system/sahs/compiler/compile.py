@@ -675,6 +675,36 @@ def compile_build(graph_root: Path, builds_root: Path
         json.dumps(cost_priors, indent=1, sort_keys=True) + "\n",
         encoding="utf-8")
 
+    # E18/C - the table facts a fan-out judgement needs as DATA rather
+    # than as prose on a card: row counts and declared primary keys.
+    # Whether a join can double-count is decidable from these two
+    # facts plus the join's witness, so the preview can be honest
+    # before any query runs instead of guessing after it.
+    table_rows = []
+    for tid, c in sorted(consensus.items()):
+        record = nodes.get(tid)
+        props = record.props if record is not None else {}
+        keys = sorted(
+            name for name, _col in c.columns.items()
+            if (nodes.get(f"col:{c.physical}.{name}") is not None
+                and nodes[f"col:{c.physical}.{name}"].props.get(
+                    "is_primary_key")))
+        row = {"physical": c.physical, "columns": len(c.columns),
+               "primary_key": keys}
+        total = props.get("total_rows")
+        if total not in (None, ""):
+            try:
+                row["total_rows"] = int(total)
+            except (TypeError, ValueError):
+                pass                     # unparseable count is no count
+        for key in ("object_type", "partition_latest", "lifecycle"):
+            if props.get(key):
+                row[key] = props[key]
+        table_rows.append(row)
+    (build_dir / "indexes" / "tables.jsonl").write_text(
+        "".join(json.dumps(t, sort_keys=True) + "\n" for t in table_rows),
+        encoding="utf-8")
+
     # ── E17 serving surfaces: the Sources shelf + the cosmos map ──
     # display-plane projections of what the graph already holds; the
     # console renders these files, it never re-derives them

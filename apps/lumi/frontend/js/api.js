@@ -12,6 +12,26 @@ async function get(url) {
   }
 }
 
+// Ask posts carry the same contract as the gets: the body always
+// answers `available`, so a refusal (no build, a busy turn) is data the
+// page can render, never an exception it has to guess at.
+async function post(url, body) {
+  try {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    });
+    const payload = await r.json().catch(() => ({}));
+    if (!r.ok && payload.available === undefined) {
+      return { available: false, reason: `${url} → ${r.status}` };
+    }
+    return payload;
+  } catch {
+    return { available: false, reason: "console unreachable: is the server running?" };
+  }
+}
+
 export const api = {
   home: () => get("/api/meridian/home"),
   sources: () => get("/api/meridian/sources"),
@@ -46,4 +66,22 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
+
+  /* ── Ask (E18): sessions, turns, the stream ──────────────
+   * The page never learns a model endpoint and never holds a key.
+   * It posts a turn, then reads the event stream the server emits. */
+  askSessions: (limit = 30) => get(`/api/sessions?limit=${limit}`),
+  askNewSession: (kind = "analyst") => post("/api/sessions", { kind }),
+  askSession: (id) => get(`/api/sessions/${encodeURIComponent(id)}`),
+  askSend: (id, text, choice = null) =>
+    post(`/api/sessions/${encodeURIComponent(id)}/messages`,
+      { text, choice }),
+  askStop: (id) => post(`/api/sessions/${encodeURIComponent(id)}/stop`),
+  askFeedback: (id, payload) =>
+    post(`/api/sessions/${encodeURIComponent(id)}/feedback`, payload),
+  askRestorePlan: (id, version) =>
+    post(`/api/sessions/${encodeURIComponent(id)}/plan/restore`,
+      { version }),
+  askStreamUrl: (id, after = 0) =>
+    `/api/sessions/${encodeURIComponent(id)}/stream?after=${after}`,
 };

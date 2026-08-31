@@ -38,6 +38,7 @@ class Build:
     schema: dict[str, dict[str, str]]
     cost_priors: dict[str, dict[str, Any]] = field(default_factory=dict)
     lob: list[dict[str, Any]] = field(default_factory=list)
+    tables: list[dict[str, Any]] = field(default_factory=list)
     _db: sqlite3.Connection | None = field(default=None, repr=False)
 
     @classmethod
@@ -48,7 +49,7 @@ class Build:
             path = path / current.read_text(encoding="utf-8").strip()
         if not (path / "manifest.json").exists():
             raise FileNotFoundError(
-                f"no build at {path} — run `laptop.py compile` first "
+                f"no build at {path}: run `laptop.py compile` first "
                 "(or point at a builds/ root containing CURRENT)")
         return cls(
             root=path,
@@ -65,6 +66,7 @@ class Build:
                 (path / "indexes" / "cost_priors.json").read_text())
             if (path / "indexes" / "cost_priors.json").exists() else {},
             lob=_jsonl(path / "indexes" / "lob.jsonl"),
+            tables=_jsonl(path / "indexes" / "tables.jsonl"),
         )
 
     @property
@@ -73,6 +75,13 @@ class Build:
 
     def short_table(self, physical: str) -> str:
         return physical.split(".")[-1]
+
+    def table_facts(self, physical: str) -> dict[str, Any]:
+        """Row count and declared keys for one table, or {} when the
+        build carries neither. Callers must treat {} as "unknown" and
+        say so: an absent row count is never a zero."""
+        return next((t for t in self.tables
+                     if t.get("physical") == physical), {})
 
     def physical_of(self, name: str) -> str | None:
         name = (name or "").strip().lower()
@@ -117,7 +126,7 @@ def search_metrics(build: Build, intent: str, top_k: int = 8) -> dict:
                         for g in r.get("mgroups", [r.get("mgroup", "")])),
     } for _, _, _, r in scored[:top_k]],
         "hint": "" if scored else
-        "no metric matches — try search_concepts, or describe_table "
+        "no metric matches: try search_concepts, or describe_table "
         "to browse what a table offers"}
 
 
@@ -141,7 +150,7 @@ def search_concepts(build: Build, phrase: str, table: str = "",
         "authority": r["authority"], "source": r["source"], "fp": r["fp"],
     } for _, _, _, r in scored[:top_k]],
         "hint": "" if scored else
-        f"no binding for {phrase!r} — resolve() can route the whole "
+        f"no binding for {phrase!r}: resolve() can route the whole "
         "question, or the concept may need a steward"}
 
 
@@ -159,7 +168,7 @@ def describe_table(build: Build, name: str) -> dict:
     card = (build.root / "cards" / "tables"
             / f"{physical.replace('.', '__')}.md")
     return {"table": physical, "card": card.read_text(encoding="utf-8")
-            if card.exists() else "(card missing — compiler bug)",
+            if card.exists() else "(card missing: compiler bug)",
             "build": build.version}
 
 
@@ -175,7 +184,7 @@ def sample_values(build: Build, table: str, column: str) -> dict:
         if row.get("key") == key:
             return {"table": physical, "column": column,
                     "values": row["values"],
-                    "coverage_note": "compiled snapshot domain — "
+                    "coverage_note": "compiled snapshot domain: "
                                      "not a live query"}
     return {"error": f"no compiled domain for {physical}.{column}",
             "hint": "only confirmed low-cardinality columns carry "
@@ -195,18 +204,18 @@ def get_definition_line(build: Build, metric_id: str,
                 "hint": "ids come from search_metrics / resolve"}
     if row["status"] == "certified" and not row.get("parent_fp"):
         line = (f"Using certified '{row['label']}' "
-                f"({row['source']}) on {row['table']} — the meridian "
+                f"({row['source']}) on {row['table']}: the meridian "
                 f"line for this metric.")
     else:
-        # served vocabulary: governance status, then evidence origin —
+        # served vocabulary: governance status, then evidence origin.
         # "unreviewed, usage_mining" cannot be read as an endorsement
         line = (f"Using '{row['label']}' "
                 f"[{row.get('status_served') or row['status']}, "
                 f"{row.get('evidence_origin') or row['source']}] "
                 f"on {row['table']}"
-                + (f" — off-meridian variant of {row['parent_fp']}"
+                + (f": off-meridian variant of {row['parent_fp']}"
                    if row.get("parent_fp") else
-                   " — not yet on the meridian line")
+                   ": not yet on the meridian line")
                 + ".")
     return {"definition_line": line, "metric": row["id"],
             "status": row["status"],

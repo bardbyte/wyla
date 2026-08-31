@@ -147,7 +147,7 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
                 "error": error or None, "meta": meta}
 
     if mode not in ("snapshot", "live"):
-        return _finish("error", error=f"unknown mode {mode!r} — "
+        return _finish("error", error=f"unknown mode {mode!r}: "
                        "snapshot | live")
 
     # 1. parse (static — no execution object exists yet)
@@ -156,7 +156,7 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
         return _finish("error", error=f"parse_error: {str(err)[:160]}")
     if result.kind in _DML_DDL or result.kind not in _QUERY_KINDS:
         return _finish("denied",
-                       error=f"statement_not_allowed: {result.kind} — "
+                       error=f"statement_not_allowed: {result.kind}: "
                              "read-only SELECT only")
     meta["fp"] = result.fp_expr
 
@@ -166,7 +166,7 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
         physical = build.physical_of(raw)
         if physical is None:
             return _finish("error",
-                           error=f"unknown_table: {raw!r} — validate_sql "
+                           error=f"unknown_table: {raw!r}: validate_sql "
                                  "first; describe_table lists tables")
         tables.append(physical)
     meta["tables"] = sorted(set(tables))
@@ -186,7 +186,7 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
                 "denied",
                 error="policy_unknown: live execution DENIED for "
                       + ", ".join(unknown)
-                      + " — the row-access policy could not be read at "
+                      + ": the row-access policy could not be read at "
                         "extraction; resolve the sensitivity_conflict "
                         "ticket, recompile, then retry. Snapshot mode "
                         "(dry-run) remains available.")
@@ -198,7 +198,7 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
         if env.get("SAHS_ALLOW_LIVE") != "1":
             return _finish(
                 "denied",
-                error="live_disabled: live mode is default-deny — set "
+                error="live_disabled: live mode is default-deny: set "
                       "SAHS_ALLOW_LIVE=1 on the laptop to enable; "
                       "snapshot mode answers most questions")
 
