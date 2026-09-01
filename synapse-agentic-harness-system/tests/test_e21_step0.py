@@ -95,6 +95,90 @@ def test_report_written_even_when_no_model_ever_answered(tmp_path):
     assert "json calls: 0" in path.read_text()
 
 
+# ── 0a field lesson: the token seam (first real-graph run) ───
+class _FakeCreds:
+    def __init__(self):
+        self.refreshes = 0
+        self.token = "tok"
+
+    @property
+    def valid(self):
+        return self.refreshes > 0
+
+    def refresh(self, request):
+        self.refreshes += 1
+
+
+def _client(monkeypatch, tmp_path, creds):
+    import types
+    from sahs.enrich.client import VertexClient
+    from sahs.util.auth import VertexConnection
+    fake_sa = types.SimpleNamespace(
+        Credentials=types.SimpleNamespace(
+            from_service_account_file=lambda *a, **k: creds))
+    fake_req = types.SimpleNamespace(Request=lambda session=None: (
+        lambda *a, **k: None))
+    # this container has no google-auth: fake the whole package chain
+    # (the laptop runs the real one; the seam under test is ours)
+    modules = {
+        "google": types.SimpleNamespace(oauth2=None, auth=None),
+        "google.oauth2": types.SimpleNamespace(service_account=fake_sa),
+        "google.oauth2.service_account": fake_sa,
+        "google.auth": types.SimpleNamespace(),
+        "google.auth.transport": types.SimpleNamespace(requests=fake_req),
+        "google.auth.transport.requests": fake_req,
+    }
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    connection = VertexConnection(
+        project="p", location="global", model="m",
+        endpoint="https://example.invalid", key_path=tmp_path / "k.json")
+    monkeypatch.setattr(VertexConnection, "token_session",
+                        lambda self: None)
+    return VertexClient(connection=connection)
+
+
+def test_one_token_per_client_not_per_call(monkeypatch, tmp_path):
+    """E21 0a: fresh credentials per call meant every model call risked
+    a token round-trip; one proxy blip between the SQL call and the
+    prose stream killed the turn. Cached credentials refresh once."""
+    creds = _FakeCreds()
+    client = _client(monkeypatch, tmp_path, creds)
+    assert client._token() == "tok"
+    assert client._token() == "tok"
+    assert client._token() == "tok"
+    assert creds.refreshes == 1
+
+
+def test_a_dead_token_endpoint_fails_typed_fast_and_off_the_ladder(
+        monkeypatch, tmp_path):
+    """The 405-second failure: token errors rode the generic retry
+    ladder as if they were rate limits. Now they raise
+    EnrichTransportError immediately — generate() must not sleep the
+    backoff ladder on them, and the stream path gets the same typed
+    error the loop renders as the honest model_unavailable card."""
+    from sahs.enrich.client import EnrichTransportError
+
+    class _DeadCreds(_FakeCreds):
+        def refresh(self, request):
+            raise OSError("Connection to oauth2.googleapis.com timed out")
+
+    slept: list[float] = []
+    client = _client(monkeypatch, tmp_path, _DeadCreds())
+    client.sleep = slept.append
+    with pytest.raises(EnrichTransportError) as err:
+        client.generate("hi")
+    assert "oauth2.googleapis.com" in str(err.value)
+    assert "vertex_check" in str(err.value)
+    assert slept == [2], (
+        "one quick token retry is allowed; the 2/4/8/16 ladder is not")
+
+    slept.clear()
+    with pytest.raises(EnrichTransportError):
+        list(client.generate_stream("hi"))
+    assert slept == [2]
+
+
 # ── 0b: the matrix ───────────────────────────────────────────
 @pytest.fixture(scope="module")
 def compiled(tmp_path_factory):
