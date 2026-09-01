@@ -93,8 +93,9 @@ class SessionStore:
     # ── sessions ─────────────────────────────────────────────
     def create_session(self, kind: str = "analyst", *, build_id: str = "",
                        actor: str = "admin", title: str = "") -> dict:
-        if kind not in ("analyst", "steward"):
-            raise ValueError("kind is analyst or steward (the two hats)")
+        if kind not in ("analyst", "steward", "assistant"):
+            raise ValueError("kind is analyst, steward, or assistant "
+                             "(the two hats, and the v2 chat)")
         row = {"id": _new_id("s"), "kind": kind, "title": title,
                "build_id": build_id, "actor": actor, "skills": "[]",
                "created_at": now_iso(), "updated_at": now_iso()}

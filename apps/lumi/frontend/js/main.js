@@ -14,6 +14,7 @@ import { renderArtifacts } from "./pages/artifacts.js";
 import { renderOperate } from "./pages/operate.js";
 import { renderAsk } from "./pages/ask.js";
 import { refreshChats } from "./chats.js";
+import { renderChat } from "./pages/chat.js";
 
 const outlet = document.getElementById("outlet");
 let teardown = null;
@@ -34,6 +35,7 @@ async function route() {
     a.classList.toggle("active", a.dataset.tab === tab));
   outlet.classList.toggle("wide", page === "cosmos");
   outlet.classList.toggle("chat", page === "ask");
+  outlet.classList.toggle("chatv2page", page === "chat");
   outlet.innerHTML = "";
   const pages = {
     home: renderHome,
@@ -42,6 +44,7 @@ async function route() {
     metric: () => renderMetric(outlet, arg),
     table: () => renderTable(outlet, arg),
     ask: () => renderAsk(outlet, arg),
+    chat: () => renderChat(outlet, arg),
     cosmos: renderCosmos,
     artifacts: renderArtifacts,
     operate: renderOperate,
