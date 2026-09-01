@@ -5,6 +5,15 @@ answering ladder land on the Stage A-C loop as Steps 0-8, one PR per
 step, each gated on the E19 capability suite and reporting its delta
 on the same line.
 
+> **Superseded in sequencing by the Agent Loop v1 spec**
+> (`docs/specs/agent_loop_v1.md`). Every turn becomes the agent loop;
+> determinism relocates into the tools; the spec's §9 build order
+> REPLACES Step 4's "explore.py" and re-sequences Steps 1-8 (the
+> mapping is under the step table below). Step 0 stands unchanged:
+> nothing ships against latency or navigation targets until a real
+> model has answered once, because the spec's own pins (p50 <3s
+> single-hop, <15s navigation) are only measurable against Vertex.
+
 ## Step 0a — the real-Vertex run (LAPTOP; blocks everything)
 
 Nothing past Step 0 starts until a real model has answered once. On
@@ -72,6 +81,19 @@ boundary; the full graph is expected to differentiate).
 | 6 | L4 exploratory lane | F7 demo on the real snapshot |
 | 7 | search constellation | driven by `subgraph_used`, non-blocking |
 | 8 | flywheel + sessions + hybrid recall | L0 lift on paraphrase tasks |
+
+### Where each step lives under the Agent Loop (spec §9)
+
+| E21 step | its home in the loop build order |
+|---|---|
+| 1 typecheck | INSIDE `plan_set` — runs on every call, teaching errors as tool results (§9.1, **landed**: `sahs/loop/tools.py`) |
+| 2 digest + skills | the system prompt's world digest + skills slot (§9.3) |
+| 3 ladder + subgraph_used | stop conditions in the prompt; the sub-graph records itself on the loop state (§9.1 records, §9.2 discloses) |
+| 4 explore + scout + compaction | REPLACED: the loop IS the explore phase (§9.2); scout is §9.5 |
+| 5 L3 checks | the plan's `checks` slot, written via `plan_set`, read by the verifier |
+| 6 exploratory lane | the loop with `run_sql` snapshot on (§9.5) |
+| 7 constellation | unchanged, non-blocking, still driven by subgraph_used |
+| 8 flywheel | after §9.4's navigation tasks and trajectory ritual |
 
 Standing pins: one PR per step with the E19 delta line in its body ·
 no worker beyond the scout · no live execution in L4 · no write to
