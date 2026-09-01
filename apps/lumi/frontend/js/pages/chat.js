@@ -138,7 +138,7 @@ export async function renderChat(outlet, wanted = "") {
   const skillChips = el("chat-skill-chips");
   async function refreshSkills() {
     try {
-      const got = await api.askSkills();
+      const got = await api.chatSkills();
       state.skillsAvailable = got.available ? (got.skills || []) : [];
     } catch { state.skillsAvailable = []; }
     paintSkillChips();
@@ -162,6 +162,8 @@ export async function renderChat(outlet, wanted = "") {
           <input type="checkbox" data-skill="${esc(s.name)}"
             ${state.skillsLoaded.has(s.name) ? "checked" : ""}>
           <span><b>${esc(s.title || s.name)}</b>
+            ${s.origin ? `<span class="origin-tag o-${esc(s.origin
+              .replace(/[^a-z]/g, ""))}">${esc(s.origin)}</span>` : ""}
             <span class="muted">${esc(s.description || "")}</span>
           </span></label>`).join("")
       : `<div class="muted" style="padding:6px">No skills yet:

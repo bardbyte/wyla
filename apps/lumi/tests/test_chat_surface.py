@@ -51,9 +51,13 @@ def test_every_chat_helper_exists_and_is_served():
                   "/sessions/{session_id}/stream",
                   "/sessions/{session_id}/stop",
                   "/sessions/{session_id}/skills",
+                  '"/skills"',
                   "/artifacts/{artifact_id}",
                   "/artifacts/{artifact_id}/versions"):
         assert route in BACKEND, f"no served route {route}"
+    # the picker lists the chat shelf (both origins), not ask's
+    assert "api.chatSkills()" in CHAT_JS
+    assert "origin-tag" in CHAT_JS and ".origin-tag" in CSS
 
 
 def test_the_shell_offers_the_door():

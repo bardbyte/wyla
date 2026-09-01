@@ -10,6 +10,7 @@ key, never calls a model.
     GET  /api/chat/sessions/{id}/stream            → SSE (meridian.event/1)
     POST /api/chat/sessions/{id}/stop
     POST /api/chat/sessions/{id}/rename            {title}
+    GET  /api/chat/skills                          → both shelves
     POST /api/chat/sessions/{id}/skills            {names}
     GET  /api/chat/artifacts/{artifact_id}[?version=]
     GET  /api/chat/artifacts/{artifact_id}/versions
@@ -120,6 +121,12 @@ def rename(session_id: str, req: Rename) -> dict:
         return _unavailable(f"no session {session_id}")
     runtime.store.set_title(session_id, req.title)
     return {"available": True, "title": req.title[:120]}
+
+
+@router.get("/skills")
+def list_skills() -> dict:
+    runtime, _ = _chat()
+    return {"available": True, "skills": runtime.skills()}
 
 
 @router.post("/sessions/{session_id}/skills")

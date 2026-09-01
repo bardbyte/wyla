@@ -9,5 +9,6 @@ from .events import ASSISTANT_EVENTS                  # noqa: F401
 from .loop import ASSISTANT_VERSION, run_assistant_turn  # noqa: F401
 from .runtime import AssistantRuntime                 # noqa: F401
 from .sandbox import run_python                       # noqa: F401
+from .skills_loader import all_skills, builtin_skills  # noqa: F401
 from .store import AssistantStore                     # noqa: F401
 from .tools import AssistantState, assistant_toolkit  # noqa: F401

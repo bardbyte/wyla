@@ -17,11 +17,11 @@ from typing import Any, Callable
 from sahs.ask.budget import Abort, Budget
 from sahs.ask.model import ModelUnavailable
 from sahs.ask.runtime import BuildUnavailable, LazyModel, TurnBusy
-from sahs.loop.skills import load_skills
 from sahs.tools.api import Build
 
 from .events import ASSISTANT_EVENTS, EventBus
 from .loop import run_assistant_turn
+from .skills_loader import load_packs
 from .store import AssistantStore
 
 
@@ -108,15 +108,17 @@ class AssistantRuntime:
             row["running"] = bool(rt and rt.running)
         return rows
 
-    # ── skills (same store, same picker) ─────────────────────
+    # ── skills: both shelves, one picker (§13.3) ─────────────
     def skills(self) -> list[dict]:
-        from sahs.loop.skills import list_skills
-        return [{"name": s.name, "title": s.title,
-                 "description": s.description}
-                for s in list_skills(self.graph_root)]
+        from .skills_loader import all_skills
+        return [{"name": p.name, "title": p.title,
+                 "description": p.description, "origin": p.origin}
+                for p in all_skills(self.graph_root)]
 
     def set_skills(self, session_id: str, names: list[str]) -> dict:
         from sahs.loop.skills import MAX_LOADED
+
+        from .skills_loader import load_packs
         session = self.store.get_session(session_id)
         if session is None:
             raise KeyError(session_id)
@@ -124,12 +126,12 @@ class AssistantRuntime:
             return {"ok": False,
                     "reason": f"at most {MAX_LOADED} skills load at "
                               "once"}
-        loaded, missing = load_skills(self.graph_root, list(names))
+        loaded, missing = load_packs(self.graph_root, list(names))
         if missing:
             return {"ok": False,
                     "reason": "no such skill: " + ", ".join(missing)}
-        self.store.set_skills(session_id, [s.name for s in loaded])
-        return {"ok": True, "skills": [s.name for s in loaded]}
+        self.store.set_skills(session_id, [p.name for p in loaded])
+        return {"ok": True, "skills": [p.name for p in loaded]}
 
     # ── turns ────────────────────────────────────────────────
     def start_turn(self, session_id: str, text: str) -> dict:
@@ -147,7 +149,7 @@ class AssistantRuntime:
         self.store.add_message(session_id, "user", text,
                                turn_id=turn_id)
         model = LazyModel(lambda: self.model_for(rt.budget))
-        loaded, _missing = load_skills(
+        loaded, _missing = load_packs(
             self.graph_root, list(session.get("skills") or []))
 
         def worker() -> None:
@@ -157,7 +159,7 @@ class AssistantRuntime:
                     budget=rt.budget, abort=rt.abort, model=model,
                     session=session, turn_id=turn_id, text=text,
                     workspace=self.workspace(session_id),
-                    skills=loaded,
+                    skills=loaded, graph_root=self.graph_root,
                     snapshot_runner=self.snapshot_runner)
             except ModelUnavailable as e:
                 rt.bus.emit("error", turn_id=turn_id,

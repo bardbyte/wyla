@@ -37,6 +37,7 @@ class AssistantState(LoopState):
     artifacts_touched: list[str] = field(default_factory=list)
     facts: set[str] = field(default_factory=set)
     facts_log: list[dict[str, Any]] = field(default_factory=list)
+    skills_loaded: list[str] = field(default_factory=list)
 
 
 def assistant_toolkit(build: Build, state: AssistantState, *,
@@ -46,7 +47,9 @@ def assistant_toolkit(build: Build, state: AssistantState, *,
                       substrate: Any = None,
                       snapshot_runner: Any = None,
                       ledger_path: Path | None = None,
-                      scout: Any = None) -> dict[str, ToolSpec]:
+                      scout: Any = None,
+                      graph_root: Path | None = None
+                      ) -> dict[str, ToolSpec]:
     kit = meridian_toolkit(build, state, substrate=substrate,
                            snapshot_runner=snapshot_runner,
                            ledger_path=ledger_path, scout=scout)
@@ -137,6 +140,33 @@ def assistant_toolkit(build: Build, state: AssistantState, *,
             {"artifact_id": r["artifact_id"], "type": r["type"],
              "title": r["title"], "version": r["version"]}
             for r in rows], "count": len(rows)}
+
+    # ── skills: doctrine on demand (§7/§13.3) ────────────────
+    from .skills_loader import all_skills, get_skill
+
+    def list_skills() -> dict[str, Any]:
+        packs = all_skills(graph_root)
+        return {"skills": [{"name": p.name, "title": p.title,
+                            "description": p.description,
+                            "origin": p.origin} for p in packs],
+                "count": len(packs)}
+
+    def load_skill(name: str) -> dict[str, Any]:
+        name = str(name).strip()
+        if name in state.skills_loaded:
+            return {"ok": True, "name": name,
+                    "note": f"skill {name!r} is already loaded this "
+                            "turn — its text is in your steps above"}
+        pack = get_skill(graph_root, name)
+        if pack is None:
+            names = ", ".join(
+                f"{p.name} ({p.origin})"
+                for p in all_skills(graph_root)) or "none"
+            return {"error": f"no skill named {name!r}",
+                    "hint": f"available: {names}"}
+        state.skills_loaded.append(name)
+        return {"ok": True, "name": pack.name, "title": pack.title,
+                "origin": pack.origin, "text": pack.text}
 
     from . import checks as _checks
 
@@ -301,6 +331,29 @@ def assistant_toolkit(build: Build, state: AssistantState, *,
                 "title, latest version. Update rather than duplicate "
                 "when the user is iterating on the same thing."),
             fn=list_artifacts),
+        ToolSpec(
+            name="list_skills",
+            signature="list_skills()",
+            maps_to="the skill shelf",
+            description=(
+                "The doctrine packs on the shelf — built-in method "
+                "notes and the analyst's own briefings — as names "
+                "with one-line descriptions and origins.\n"
+                "Cheap to call; load_skill pulls one in."),
+            fn=list_skills),
+        ToolSpec(
+            name="load_skill",
+            signature="load_skill(name)",
+            maps_to="the skill shelf",
+            description=(
+                "Pull one pack's full text into this turn — the "
+                "result IS the doctrine, follow it while it applies.\n"
+                "Load when the task matches the description: a \"why "
+                "did it change\" wants analysis-playbooks; writing "
+                "SQL against unfamiliar ground wants meridian-sql. "
+                "Packs steer where you look; they never add tables, "
+                "metrics, or numbers to the world."),
+            fn=load_skill),
     )})
     return kit
 

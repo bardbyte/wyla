@@ -793,6 +793,12 @@ table.result tr:last-child td { border-bottom: none; }
 }
 .skills-row:hover { background: rgba(0, 0, 0, 0.04); }
 .skills-row .muted { display: block; font-size: 12px; }
+.origin-tag {
+  font-size: 10px; padding: 1px 6px; border-radius: 8px;
+  margin-left: 6px; vertical-align: 1px; letter-spacing: 0.02em;
+}
+.origin-tag.o-builtin { background: #e8f0e8; color: #2e5e3a; }
+.origin-tag.o-unreviewed { background: #f4ead8; color: #7a5a1e; }
 
 /* ── Ask: "what the model saw" (the trajectory, from the events) ── */
 .saw-toggle { font-size: 12px; }

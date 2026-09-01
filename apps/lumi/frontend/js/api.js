@@ -86,6 +86,7 @@ export const api = {
   chatStop: (id) => post(`/api/chat/sessions/${encodeURIComponent(id)}/stop`),
   chatRename: (id, title) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/rename`, { title }),
+  chatSkills: () => get("/api/chat/skills"),
   chatSetSkills: (id, names) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/skills`, { names }),
   chatArtifact: (id, version = null) =>

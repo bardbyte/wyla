@@ -30,6 +30,7 @@ from sahs.tools.api import Build
 
 from .events import EventBus
 from .sandbox import prepare_workspace
+from .skills_loader import all_skills, render_skill_index
 from .store import AssistantStore
 from .tools import AssistantState, assistant_toolkit, render_tool_block
 
@@ -84,7 +85,8 @@ _DIGEST_CACHE: dict[str, str] = {}
 
 
 def system_prompt(build: Build, skills: list[Skill] | None,
-                  tool_block: str) -> str:
+                  tool_block: str,
+                  skill_index: list[Any] | None = None) -> str:
     digest = _DIGEST_CACHE.get(build.version)
     if digest is None:
         digest = synapse_digest(build)
@@ -93,6 +95,13 @@ def system_prompt(build: Build, skills: list[Skill] | None,
     loaded = render_skills(skills or [])
     if loaded:
         parts += ["", loaded]
+    # progressive disclosure: names and one-liners only — the full
+    # pack enters the turn via load_skill, or not at all
+    shelf = render_skill_index(
+        skill_index or [],
+        exclude=frozenset(s.name for s in (skills or [])))
+    if shelf:
+        parts += ["", shelf]
     parts += ["", PROTOCOL]
     return "\n".join(parts) + tool_block
 
@@ -142,6 +151,20 @@ def _compact(tool: str, result: Any) -> str:
             return f"{result.get('count', 0)} artifacts: " + "; ".join(
                 f"{a['artifact_id']} {a['type']} \"{a['title']}\" "
                 f"v{a['version']}" for a in result.get("artifacts", []))
+        if tool == "load_skill":
+            # the pack text IS the point: it must reach the next
+            # prompt whole, never compacted to three lines
+            if result.get("text"):
+                return (f"skill {result.get('name')} "
+                        f"({result.get('origin')}) loaded — this "
+                        "doctrine now applies:\n"
+                        + str(result["text"]).strip())
+            if result.get("note"):
+                return str(result["note"])
+        if tool == "list_skills":
+            return f"{result.get('count', 0)} packs: " + "; ".join(
+                f"{s['name']} ({s['origin']}) — {s['description']}"
+                for s in result.get("skills", []))[:900]
     return compact_result(tool, result)
 
 
@@ -152,12 +175,14 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                        skills: list[Skill] | None = None,
                        substrate: Any = None,
                        snapshot_runner: Any = None,
+                       graph_root: Path | None = None,
                        max_steps: int = MAX_STEPS,
                        wall_seconds: float = WALL_SECONDS) -> str:
     session_id = session["id"]
     started = time.perf_counter()
     bus.emit("turn_started", turn_id=turn_id, text=text,
-             build_id=build.version, version=ASSISTANT_VERSION)
+             build_id=build.version, version=ASSISTANT_VERSION,
+             skills=[s.name for s in (skills or [])])
     budget.start_turn()
     prepare_workspace(workspace, build.root)
 
@@ -166,8 +191,10 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                             session_id=session_id, turn_id=turn_id,
                             workspace=workspace, model=model,
                             substrate=substrate,
-                            snapshot_runner=snapshot_runner)
-    system = system_prompt(build, skills, render_tool_block(kit))
+                            snapshot_runner=snapshot_runner,
+                            graph_root=graph_root)
+    system = system_prompt(build, skills, render_tool_block(kit),
+                           skill_index=all_skills(graph_root))
     bus.emit("model_prompt", turn_id=turn_id, n=0, kind="system",
              content=system[:12000])
     history = _history_block(store, session_id)
@@ -327,7 +354,8 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                     payload={"clarify": result["clarify"]})
                 bus.emit("chips", turn_id=turn_id,
                          clarify=result["clarify"])
-                _finish(bus, budget, turn_id, "clarify", started)
+                _finish(bus, budget, turn_id, "clarify", started,
+                        skills_loaded=list(state.skills_loaded))
                 return "clarify"
             steps.append({"n": loop_budget.steps, "tool": name,
                           "args": args, "summary": summary,
@@ -363,7 +391,8 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
         store.set_title(session_id, title)
     _finish(bus, budget, turn_id, status, started,
             steps=loop_budget.steps,
-            subgraph_used=state.subgraph)
+            subgraph_used=state.subgraph,
+            skills_loaded=list(state.skills_loaded))
     return status
 
 
