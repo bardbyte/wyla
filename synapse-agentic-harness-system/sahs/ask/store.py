@@ -164,9 +164,11 @@ class SessionStore:
 
     def messages(self, session_id: str) -> list[dict]:
         with self._conn() as conn:
+            # rowid breaks same-second ties in INSERTION order; the
+            # random message id would shuffle a fast turn's transcript
             rows = conn.execute(
                 "SELECT * FROM messages WHERE session_id=? "
-                "ORDER BY created_at, id", (session_id,)).fetchall()
+                "ORDER BY created_at, rowid", (session_id,)).fetchall()
         out = []
         for r in rows:
             item = dict(r)

@@ -144,6 +144,11 @@ def compact_result(tool: str, result: dict[str, Any]) -> str:
                 + (f"; warnings: {warned}" if warned else ""))
     if tool == "note":
         return f"noted ({result.get('notes')})"
+    if tool == "delegate_scout":
+        # §6: scout summaries arrive already compact — keep them
+        return (f"scout ({result.get('steps', 0)} looks, "
+                f"{len(result.get('cards_read', []))} cards):\n"
+                + str(result.get("summary", ""))[:1600])
     return _short(result, 240)
 
 
@@ -227,9 +232,14 @@ def navigate_loop(*, build: Build, store: Any, bus: Any, budget: Any,
     session_id = session["id"]
     state = LoopState(plan=plan,
                       notes=list((resume or {}).get("notes") or []))
+
+    def scout(question: str) -> dict[str, Any]:
+        from .scout import run_scout        # late: scout uses toolkit
+        return run_scout(build, model, question, substrate=substrate)
+
     kit = toolkit(build, state, substrate=substrate,
                   snapshot_runner=snapshot_runner,
-                  ledger_path=ledger_path)
+                  ledger_path=ledger_path, scout=scout)
     system = system_prompt(build, skills,
                            tool_block=render_tool_block(kit))
     loop_budget = LoopBudget(max_steps=max_steps,

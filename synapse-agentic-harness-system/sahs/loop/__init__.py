@@ -8,5 +8,8 @@ prompt, then the navigation evals, then the scout.
 """
 
 from .loop import (LoopBudget, navigate_loop)             # noqa: F401
+from .prompt import PROMPT_VERSION, system_prompt         # noqa: F401
+from .scout import run_scout                              # noqa: F401
+from .skills import Skill, list_skills, load_skills       # noqa: F401
 from .tools import (LoopState, SnapshotRunner, ToolSpec,  # noqa: F401
                     render_tool_block, toolkit)

@@ -71,10 +71,14 @@ class _SessionRuntime:
 class AskRuntime:
     def __init__(self, *, builds_root: Path, graph_root: Path,
                  store_path: Path, events_dir: Path | None = None,
-                 model_factory: Callable[[Budget], Any] | None = None
-                 ) -> None:
+                 model_factory: Callable[[Budget], Any] | None = None,
+                 snapshot_runner: Any = None) -> None:
         self.builds_root = Path(builds_root)
         self.graph_root = Path(graph_root)
+        # the exploratory lane (Agent Loop v1 §9.5) is just the loop
+        # with a frozen-extract runner attached; None keeps run_sql's
+        # snapshot mode honest ("no frozen snapshot is attached")
+        self.snapshot_runner = snapshot_runner
         self.events_dir = Path(events_dir) if events_dir else None
         if self.events_dir:
             self.events_dir.mkdir(parents=True, exist_ok=True)
@@ -190,7 +194,8 @@ class AskRuntime:
             run_turn(build=build, store=self.store, bus=rt.bus,
                      budget=rt.budget, abort=rt.abort, model=model,
                      session=session, turn_id=turn_id, text=text,
-                     choice=choice)
+                     choice=choice,
+                     snapshot_runner=self.snapshot_runner)
 
         rt.thread = threading.Thread(target=worker, daemon=True,
                                      name=f"ask-{turn_id}")

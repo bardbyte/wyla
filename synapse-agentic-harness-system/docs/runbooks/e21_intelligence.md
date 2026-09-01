@@ -87,13 +87,13 @@ boundary; the full graph is expected to differentiate).
 | E21 step | its home in the loop build order |
 |---|---|
 | 1 typecheck | INSIDE `plan_set` — runs on every call, teaching errors as tool results (§9.1, **landed**: `sahs/loop/tools.py`) |
-| 2 digest + skills | the system prompt's world digest + skills slot (§9.3) |
-| 3 ladder + subgraph_used | stop conditions in the prompt; the sub-graph records itself on the loop state (§9.1 records, §9.2 discloses) |
-| 4 explore + scout + compaction | REPLACED: the loop IS the explore phase (§9.2, **landed**: `sahs/loop/loop.py`, behind `SYNAPSE_NAVIGATE=1` until §9.4 grades it); scout is §9.5 |
+| 2 digest + skills | **landed** (§9.3): `sahs/loop/digest.py` generates SYNAPSE.md from the indexes; skills load per session via the Ask picker into the navigator's prompt |
+| 3 ladder + subgraph_used | stop conditions in the prompt (§9.3, landed); the sub-graph records itself and travels on `loop_done` |
+| 4 explore + scout + compaction | REPLACED: the loop IS the explore phase (§9.2, **landed**: `sahs/loop/loop.py`, behind `SYNAPSE_NAVIGATE=1` until the §9.4 numbers hold the bar); scout **landed** (§9.5: `sahs/loop/scout.py`) |
 | 5 L3 checks | the plan's `checks` slot, written via `plan_set`, read by the verifier |
-| 6 exploratory lane | the loop with `run_sql` snapshot on (§9.5) |
+| 6 exploratory lane | **landed** (§9.5): the loop with a frozen-extract runner attached (`AskRuntime(snapshot_runner=…)`); without one, `run_sql` snapshot says so honestly |
 | 7 constellation | unchanged, non-blocking, still driven by subgraph_used |
-| 8 flywheel | after §9.4's navigation tasks and trajectory ritual |
+| 8 flywheel | after the §9.4 real-model baseline (landed: 30 tasks + grader + `scripts/nav_eval.py --real`; the number arrives by paste) |
 
 Standing pins: one PR per step with the E19 delta line in its body ·
 no worker beyond the scout · no live execution in L4 · no write to

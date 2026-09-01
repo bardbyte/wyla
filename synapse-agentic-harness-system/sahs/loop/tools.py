@@ -185,10 +185,15 @@ def _tier(row: dict[str, Any]) -> str:
 def toolkit(build: Build, state: LoopState, *,
             substrate: Any = None,
             snapshot_runner: SnapshotRunner | None = None,
-            ledger_path: Path | None = None) -> dict[str, ToolSpec]:
-    """The twelve tools of Agent Loop v1, closed over one build and one
-    session's state. ``delegate_scout`` joins in §9.5; ``verify``,
-    truth writes, and live execution are not tools by design."""
+            ledger_path: Path | None = None,
+            scout: Callable[[str], dict[str, Any]] | None = None
+            ) -> dict[str, ToolSpec]:
+    """The tools of Agent Loop v1, closed over one build and one
+    session's state. ``delegate_scout`` appears only when a scout
+    runner is wired in (the loop wires one; a bare kit has none, and
+    the scout's own kit never gets one — no worker spawns workers).
+    ``verify``, truth writes, and live execution are not tools by
+    design."""
 
     # ── list_tables ── Glob ──────────────────────────────────
     def list_tables(domain: str = "", lob: str = "") -> dict[str, Any]:
@@ -766,7 +771,36 @@ def toolkit(build: Build, state: LoopState, *,
         state.pending_question = clarify
         return {"ok": True, "ends_turn": True, "clarify": clarify}
 
+    # ── delegate_scout ── Task (present only when wired) ─────
+    def delegate_scout(question: str) -> dict[str, Any]:
+        if not (question or "").strip():
+            return _err("a scout needs a question",
+                        "one concrete errand, e.g. \"which table "
+                        "holds merchant country and what are its "
+                        "join paths?\"")
+        result = scout(question) if scout else {}
+        # the scout's reads join the parent's sub-graph: disclosure
+        # stays complete no matter who did the looking
+        for card in result.get("cards_read", []):
+            if card not in state.subgraph["cards_read"]:
+                state.subgraph["cards_read"].append(card)
+        return {"summary": result.get("summary", ""),
+                "steps": result.get("steps", 0),
+                "cards_read": result.get("cards_read", [])}
+
     # ── the registry: signatures and descriptions VERBATIM ───
+    scouts = () if scout is None else (
+        ToolSpec(
+            name="delegate_scout",
+            signature="delegate_scout(question)",
+            maps_to="Task",
+            description=(
+                "A read-only scout explores one question and returns "
+                "a summary of at most 400 tokens.\n"
+                "Hard cap on its looks; it cannot write the plan, ask "
+                "the user, or delegate further."),
+            fn=delegate_scout),
+    )
     return {spec.name: spec for spec in (
         ToolSpec(
             name="list_tables",
@@ -880,7 +914,7 @@ def toolkit(build: Build, state: LoopState, *,
                 "One question, named options with evidence; ends "
                 "the turn."),
             fn=ask_user, writes=True, ends_turn=True),
-    )}
+    ) + scouts}
 
 
 def render_tool_block(kit: dict[str, ToolSpec]) -> str:

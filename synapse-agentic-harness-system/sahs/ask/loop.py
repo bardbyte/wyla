@@ -199,7 +199,8 @@ def run_turn(*, build: Build, store: SessionStore, bus: EventBus,
              budget: Budget, abort: Abort, model: Any,
              session: dict[str, Any], turn_id: str, text: str,
              choice: dict[str, Any] | None = None,
-             navigate: bool | None = None) -> None:
+             navigate: bool | None = None,
+             snapshot_runner: Any = None) -> None:
     session_id = session["id"]
     started = time.perf_counter()
     bus.emit("turn_started", turn_id=turn_id, text=text,
@@ -244,6 +245,7 @@ def run_turn(*, build: Build, store: SessionStore, bus: EventBus,
                 abort=abort, model=model, session=session,
                 turn_id=turn_id, plan=prior, finish=finish,
                 skills=session.get("_skills_loaded"),
+                snapshot_runner=snapshot_runner,
                 resume=_resume_context(store, session_id, choice))
             return
 
@@ -337,6 +339,7 @@ def run_turn(*, build: Build, store: SessionStore, bus: EventBus,
                 abort=abort, model=model, session=session,
                 turn_id=turn_id, plan=plan, finish=finish,
                 skills=session.get("_skills_loaded"),
+                snapshot_runner=snapshot_runner,
                 resolver=outcome.result, clarify=outcome.clarify)
             return
 

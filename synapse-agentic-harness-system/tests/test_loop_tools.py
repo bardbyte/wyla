@@ -107,7 +107,8 @@ def test_the_write_surface_is_exactly_three_tools(kit):
     assert enders == {"ask_user"}
     # not tools, by design: the harness verifies, the clerk writes
     # truth, live execution does not exist in the loop; the scout
-    # arrives in §9.5
+    # (§9.5) appears only when a runner is wired in — a bare kit,
+    # like the scout's own kit, has none
     for absent in ("verify", "write_truth", "execute_live",
                    "delegate_scout"):
         assert absent not in tools
