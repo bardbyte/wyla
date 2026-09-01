@@ -45,21 +45,56 @@ class VertexClient:
                                  # retries and self-heals are invisible
                                  # without it (a call can legitimately
                                  # sit through 5 attempts × 120s)
+    _creds: Any = field(default=None, repr=False)  # cached credentials:
+                                 # one token per lifetime, not per call
 
     def _note(self, message: str) -> None:
         if self.log is not None:
             self.log(f"    [vertex] {message}")
 
     def _token(self) -> str:
+        """One credentials object per client, refreshed only when the
+        cached token is no longer valid (google-auth tracks expiry).
+        A refresh failure raises EnrichTransportError IMMEDIATELY: a
+        token endpoint that cannot even be reached is a dead network,
+        not a rate limit, so it must never ride the backoff ladder —
+        the loop turns it into the honest model_unavailable card
+        instead of a 6-minute hang (E21 0a field lesson)."""
         if self.token_provider is not None:
             return str(self.token_provider())
-        from google.auth.transport.requests import Request  # type: ignore
-        from google.oauth2 import service_account           # type: ignore
-        creds = service_account.Credentials.from_service_account_file(
-            str(self.connection.key_path),
-            scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        creds.refresh(Request(session=self.connection.token_session()))
-        return creds.token
+        try:
+            from google.auth.transport.requests import Request  # type: ignore
+            from google.oauth2 import service_account           # type: ignore
+            if self._creds is None:
+                self._creds = \
+                    service_account.Credentials.from_service_account_file(
+                        str(self.connection.key_path),
+                        scopes=["https://www.googleapis.com/auth/"
+                                "cloud-platform"])
+            if not self._creds.valid:
+                request = Request(session=self.connection.token_session())
+                try:                     # bound the wait: 15s, not the
+                    import functools     # transport's 120s default
+                    shim = functools.partial(request, timeout=15)
+                except Exception:
+                    shim = request
+                attempt = shim
+                try:
+                    self._creds.refresh(attempt)
+                except TypeError:        # a google-auth that objects to
+                    attempt = request    # the pinned timeout: retry
+                    self._creds.refresh(attempt)   # unbounded, once
+                except Exception:
+                    self.sleep(2)        # one quick retry for a blip,
+                    self._creds.refresh(attempt)   # still bounded
+            return self._creds.token
+        except EnrichTransportError:
+            raise
+        except Exception as e:
+            raise EnrichTransportError(
+                f"token: {e}: the OAuth fetch to oauth2.googleapis.com "
+                "failed before any model call was made. Check the "
+                "proxy/VPN, then python scripts/vertex_check.py") from e
 
     def _url(self, method: str = "generateContent") -> str:
         c = self.connection
