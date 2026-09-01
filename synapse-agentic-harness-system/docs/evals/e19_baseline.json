@@ -1,0 +1,685 @@
+{
+ "schema": "meridian.e19_baseline/1",
+ "build_id": "b_2cd603279061",
+ "transport": "scripted",
+ "runs": [
+  {
+   "config": "pinned",
+   "margin": null,
+   "line": {
+    "answered_pct": 100.0,
+    "wrong_when_answered_pct": 0.0,
+    "false_abstain_pct": 0.0,
+    "false_answer_pct": 0.0
+   },
+   "tiers": {
+    "T1": {
+     "passed": 4,
+     "total": 4
+    },
+    "T2": {
+     "passed": 2,
+     "total": 2
+    },
+    "T3": {
+     "passed": 4,
+     "total": 4
+    },
+    "T4": {
+     "passed": 1,
+     "total": 1
+    },
+    "T5": {
+     "passed": 2,
+     "total": 2
+    },
+    "T6": {
+     "passed": 3,
+     "total": 3
+    },
+    "T7": {
+     "passed": 1,
+     "total": 1
+    },
+    "T10": {
+     "passed": 3,
+     "total": 3
+    }
+   },
+   "results": [
+    {
+     "task_id": "t1_cnp_expands",
+     "tier": "T1",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 1ms"
+    },
+    {
+     "task_id": "t1_aa_unscoped_refuses",
+     "tier": "T1",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t1_aa_scoped_narrows",
+     "tier": "T1",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t1_alif_gmns",
+     "tier": "T1",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t2_certified_bind",
+     "tier": "T2",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 20ms"
+    },
+    {
+     "task_id": "t2_gmns_bind",
+     "tier": "T2",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 19ms"
+    },
+    {
+     "task_id": "t3_grain_has_evidence",
+     "tier": "T3",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 20ms"
+    },
+    {
+     "task_id": "t3_nothing_matches",
+     "tier": "T3",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 11ms"
+    },
+    {
+     "task_id": "t3_dis_consumer",
+     "tier": "T3",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "named_options"
+    },
+    {
+     "task_id": "t3_dis_declined",
+     "tier": "T3",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "named_options"
+    },
+    {
+     "task_id": "t4_one_slot_canada",
+     "tier": "T4",
+     "passed": true,
+     "answered": true,
+     "wrong": false,
+     "expects_answer": true,
+     "detail": "ok in 60ms"
+    },
+    {
+     "task_id": "t5_contract_before_work",
+     "tier": "T5",
+     "passed": true,
+     "answered": true,
+     "wrong": false,
+     "expects_answer": true,
+     "detail": "ok in 27ms"
+    },
+    {
+     "task_id": "t5_judge_fails_closed",
+     "tier": "T5",
+     "passed": true,
+     "answered": true,
+     "wrong": false,
+     "expects_answer": true,
+     "detail": "ok in 28ms"
+    },
+    {
+     "task_id": "t6_single_table_safe",
+     "tier": "T6",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t6_no_key_unproven",
+     "tier": "T6",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t6_unwitnessed_unsafe",
+     "tier": "T6",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t7_answer_receipts",
+     "tier": "T7",
+     "passed": true,
+     "answered": true,
+     "wrong": false,
+     "expects_answer": true,
+     "detail": "ok in 27ms"
+    },
+    {
+     "task_id": "t10_chargebacks",
+     "tier": "T10",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 10ms"
+    },
+    {
+     "task_id": "t10_loyalty",
+     "tier": "T10",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 9ms"
+    },
+    {
+     "task_id": "t10_forecast",
+     "tier": "T10",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 9ms"
+    }
+   ]
+  },
+  {
+   "config": "looser",
+   "margin": 0.05,
+   "line": {
+    "answered_pct": 100.0,
+    "wrong_when_answered_pct": 0.0,
+    "false_abstain_pct": 0.0,
+    "false_answer_pct": 0.0
+   },
+   "tiers": {
+    "T1": {
+     "passed": 4,
+     "total": 4
+    },
+    "T2": {
+     "passed": 2,
+     "total": 2
+    },
+    "T3": {
+     "passed": 4,
+     "total": 4
+    },
+    "T4": {
+     "passed": 1,
+     "total": 1
+    },
+    "T5": {
+     "passed": 2,
+     "total": 2
+    },
+    "T6": {
+     "passed": 3,
+     "total": 3
+    },
+    "T7": {
+     "passed": 1,
+     "total": 1
+    },
+    "T10": {
+     "passed": 3,
+     "total": 3
+    }
+   },
+   "results": [
+    {
+     "task_id": "t1_cnp_expands",
+     "tier": "T1",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t1_aa_unscoped_refuses",
+     "tier": "T1",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t1_aa_scoped_narrows",
+     "tier": "T1",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t1_alif_gmns",
+     "tier": "T1",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t2_certified_bind",
+     "tier": "T2",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 6ms"
+    },
+    {
+     "task_id": "t2_gmns_bind",
+     "tier": "T2",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 13ms"
+    },
+    {
+     "task_id": "t3_grain_has_evidence",
+     "tier": "T3",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 13ms"
+    },
+    {
+     "task_id": "t3_nothing_matches",
+     "tier": "T3",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 15ms"
+    },
+    {
+     "task_id": "t3_dis_consumer",
+     "tier": "T3",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "named_options"
+    },
+    {
+     "task_id": "t3_dis_declined",
+     "tier": "T3",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "named_options"
+    },
+    {
+     "task_id": "t4_one_slot_canada",
+     "tier": "T4",
+     "passed": true,
+     "answered": true,
+     "wrong": false,
+     "expects_answer": true,
+     "detail": "ok in 48ms"
+    },
+    {
+     "task_id": "t5_contract_before_work",
+     "tier": "T5",
+     "passed": true,
+     "answered": true,
+     "wrong": false,
+     "expects_answer": true,
+     "detail": "ok in 24ms"
+    },
+    {
+     "task_id": "t5_judge_fails_closed",
+     "tier": "T5",
+     "passed": true,
+     "answered": true,
+     "wrong": false,
+     "expects_answer": true,
+     "detail": "ok in 24ms"
+    },
+    {
+     "task_id": "t6_single_table_safe",
+     "tier": "T6",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t6_no_key_unproven",
+     "tier": "T6",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t6_unwitnessed_unsafe",
+     "tier": "T6",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t7_answer_receipts",
+     "tier": "T7",
+     "passed": true,
+     "answered": true,
+     "wrong": false,
+     "expects_answer": true,
+     "detail": "ok in 23ms"
+    },
+    {
+     "task_id": "t10_chargebacks",
+     "tier": "T10",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 7ms"
+    },
+    {
+     "task_id": "t10_loyalty",
+     "tier": "T10",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 6ms"
+    },
+    {
+     "task_id": "t10_forecast",
+     "tier": "T10",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 6ms"
+    }
+   ]
+  },
+  {
+   "config": "strict",
+   "margin": 0.3,
+   "line": {
+    "answered_pct": 100.0,
+    "wrong_when_answered_pct": 0.0,
+    "false_abstain_pct": 0.0,
+    "false_answer_pct": 0.0
+   },
+   "tiers": {
+    "T1": {
+     "passed": 4,
+     "total": 4
+    },
+    "T2": {
+     "passed": 2,
+     "total": 2
+    },
+    "T3": {
+     "passed": 4,
+     "total": 4
+    },
+    "T4": {
+     "passed": 1,
+     "total": 1
+    },
+    "T5": {
+     "passed": 2,
+     "total": 2
+    },
+    "T6": {
+     "passed": 3,
+     "total": 3
+    },
+    "T7": {
+     "passed": 1,
+     "total": 1
+    },
+    "T10": {
+     "passed": 3,
+     "total": 3
+    }
+   },
+   "results": [
+    {
+     "task_id": "t1_cnp_expands",
+     "tier": "T1",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t1_aa_unscoped_refuses",
+     "tier": "T1",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t1_aa_scoped_narrows",
+     "tier": "T1",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t1_alif_gmns",
+     "tier": "T1",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t2_certified_bind",
+     "tier": "T2",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 7ms"
+    },
+    {
+     "task_id": "t2_gmns_bind",
+     "tier": "T2",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 7ms"
+    },
+    {
+     "task_id": "t3_grain_has_evidence",
+     "tier": "T3",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 7ms"
+    },
+    {
+     "task_id": "t3_nothing_matches",
+     "tier": "T3",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 15ms"
+    },
+    {
+     "task_id": "t3_dis_consumer",
+     "tier": "T3",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "named_options"
+    },
+    {
+     "task_id": "t3_dis_declined",
+     "tier": "T3",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "named_options"
+    },
+    {
+     "task_id": "t4_one_slot_canada",
+     "tier": "T4",
+     "passed": true,
+     "answered": true,
+     "wrong": false,
+     "expects_answer": true,
+     "detail": "ok in 39ms"
+    },
+    {
+     "task_id": "t5_contract_before_work",
+     "tier": "T5",
+     "passed": true,
+     "answered": true,
+     "wrong": false,
+     "expects_answer": true,
+     "detail": "ok in 24ms"
+    },
+    {
+     "task_id": "t5_judge_fails_closed",
+     "tier": "T5",
+     "passed": true,
+     "answered": true,
+     "wrong": false,
+     "expects_answer": true,
+     "detail": "ok in 24ms"
+    },
+    {
+     "task_id": "t6_single_table_safe",
+     "tier": "T6",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t6_no_key_unproven",
+     "tier": "T6",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t6_unwitnessed_unsafe",
+     "tier": "T6",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 0ms"
+    },
+    {
+     "task_id": "t7_answer_receipts",
+     "tier": "T7",
+     "passed": true,
+     "answered": true,
+     "wrong": false,
+     "expects_answer": true,
+     "detail": "ok in 22ms"
+    },
+    {
+     "task_id": "t10_chargebacks",
+     "tier": "T10",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 5ms"
+    },
+    {
+     "task_id": "t10_loyalty",
+     "tier": "T10",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 5ms"
+    },
+    {
+     "task_id": "t10_forecast",
+     "tier": "T10",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 5ms"
+    }
+   ]
+  }
+ ]
+}
