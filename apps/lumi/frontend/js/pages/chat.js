@@ -20,11 +20,6 @@ const PALETTE = ["#2f6feb", "#e8710a", "#1a9850", "#9970ab",
 export async function renderChat(outlet, wanted = "") {
   outlet.innerHTML = `
     <div class="chatv2">
-      <aside class="chat-side">
-        <button class="btn primary" id="chat-new">＋ New chat</button>
-        <input id="chat-search" placeholder="Search chats…">
-        <div class="chat-recents" id="chat-recents"></div>
-      </aside>
       <div class="chat-main">
         <div class="chat-masthead">
           <span class="muted" id="chat-build"></span>
@@ -77,9 +72,10 @@ export async function renderChat(outlet, wanted = "") {
     scroll();
   };
 
-  // ── boot: reopen or create ───────────────────────────────
+  // ── boot: reopen or create ("new" always starts fresh) ───
   let boot = null;
-  const stored = wanted || localStorage.getItem(SESSION_KEY);
+  const stored = wanted === "new" ? ""
+    : wanted || localStorage.getItem(SESSION_KEY);
   if (stored) {
     boot = await api.chatSession(stored);
     if (!boot.available) boot = null;
@@ -95,42 +91,18 @@ export async function renderChat(outlet, wanted = "") {
   }
   state.session = boot.session;
   localStorage.setItem(SESSION_KEY, state.session.id);
+  if (wanted !== state.session.id) {
+    // settle the URL on the real session without re-routing
+    history.replaceState(null, "", `#/chat/${state.session.id}`);
+  }
   el("chat-build").textContent =
     `build ${state.session.build_id || "?"}`;
   state.skillsLoaded = new Set(boot.session.skills || []);
 
-  // ── sidebar ──────────────────────────────────────────────
-  async function refreshRecents() {
-    const got = await api.chatSessions();
-    const rows = got.available ? got.sessions : [];
-    const needle = el("chat-search").value.trim().toLowerCase();
-    el("chat-recents").innerHTML = rows
-      .filter((r) => !needle
-        || (r.title || "untitled").toLowerCase().includes(needle))
-      .map((r) => `
-        <div class="recent-row${r.id === state.session.id
-          ? " on" : ""}" data-id="${esc(r.id)}">
-          <span class="recent-title">${esc(r.title
-            || "New chat")}</span>
-          <span class="muted">${esc((r.updated_at
-            || "").slice(5, 16).replace("T", " "))}</span>
-        </div>`).join("")
-      || `<div class="muted" style="padding:8px">No chats yet.</div>`;
-    for (const row of outlet.querySelectorAll(".recent-row")) {
-      row.addEventListener("click", () => {
-        localStorage.setItem(SESSION_KEY, row.dataset.id);
-        location.hash = `#/chat/${row.dataset.id}`;
-      });
-    }
-  }
-  el("chat-search").addEventListener("input", refreshRecents);
-  el("chat-new").addEventListener("click", async () => {
-    const created = await api.chatNewSession();
-    if (created.available) {
-      localStorage.setItem(SESSION_KEY, created.session.id);
-      location.hash = `#/chat/${created.session.id}`;
-    }
-  });
+  // the chat list lives in the shell nav now — one nav, not two;
+  // this just tells the shelf something changed
+  const pingShelf = () =>
+    window.dispatchEvent(new CustomEvent("synapse:sessions"));
 
   // ── skills (same picker contract as Ask) ─────────────────
   const skillsBtn = el("chat-skills-btn");
@@ -276,6 +248,117 @@ export async function renderChat(outlet, wanted = "") {
       class="chartv2" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
   }
 
+  function tableHTML(spec) {
+    const cols = spec.columns || [];
+    const head = cols.map((c) =>
+      `<th data-key="${esc(c.key)}">${esc(c.label)}${
+        c.status ? ` <span class="muted">(${esc(c.status)})</span>`
+                 : ""}</th>`).join("");
+    const body = (spec.rows || []).map((r) =>
+      `<tr>${cols.map((c) =>
+        `<td>${esc(String(r[c.key] ?? ""))}</td>`).join("")}</tr>`)
+      .join("");
+    return `<div class="tablewrap"><table class="sortable">
+      <thead><tr>${head}</tr></thead>
+      <tbody>${body}</tbody></table></div>`;
+  }
+
+  function kpiTile(spec) {
+    const delta = typeof spec.delta === "number"
+      ? `<span class="kpi-delta ${spec.delta >= 0 ? "up" : "down"}">${
+          spec.delta >= 0 ? "▲" : "▼"} ${
+          esc(String(Math.abs(spec.delta)))}</span>` : "";
+    return `<div class="kpi-tile">
+      ${spec.label ? `<div class="kpi-label">${esc(spec.label)}</div>`
+                   : ""}
+      <div class="kpi-value">${esc(String(spec.value ?? "—"))}${
+        spec.unit ? `<span class="kpi-unit">${esc(spec.unit)}</span>`
+                  : ""}${delta}</div>
+    </div>`;
+  }
+
+  function tileFooter(spec) {
+    const prov = spec.provenance;
+    return `<div class="tile-footer">
+      ${statusChip(prov)}
+      ${spec.watermark ? `<span class="status-chip s-exploratory">${
+        esc(spec.watermark)}</span>` : ""}
+      ${prov && prov.meridian_line ? `<span class="meridian"
+        title="${esc(prov.meridian_line)}">${
+        prose(prov.meridian_line)}</span>` : ""}
+    </div>`;
+  }
+
+  const TIER_STROKE = { certified: ["#2e7d32", ""],
+                        witnessed: ["#8a6d1a", "6 3"] };
+
+  function diagramSVG(spec, width = 640) {
+    const nodes = spec.nodes || [];
+    const lanes = { metric: [], concept: [], table: [] };
+    for (const n of nodes) {
+      (lanes[n.kind] || lanes.concept).push(n);
+    }
+    const cols = [lanes.metric, lanes.concept, lanes.table]
+      .filter((lane) => lane.length);
+    const rowH = 54;
+    const height = Math.max(...cols.map((c) => c.length), 1)
+      * rowH + 30;
+    const pos = new Map();
+    cols.forEach((lane, ci) => {
+      const x = 90 + ci * ((width - 180) / Math.max(cols.length - 1,
+                                                    1));
+      lane.forEach((n, ri) => {
+        const y = 30 + ri * rowH
+          + (height - 40 - lane.length * rowH) / 2;
+        pos.set(n.id, [cols.length === 1 ? width / 2 : x, y]);
+      });
+    });
+    let body = "";
+    for (const e of spec.edges || []) {
+      const a = pos.get(e.a); const b = pos.get(e.b);
+      if (!a || !b) continue;
+      const [stroke, dash] = TIER_STROKE[e.tier]
+        || ["#9a938a", "2 4"];
+      body += `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}"
+        y2="${b[1]}" stroke="${stroke}" stroke-width="1.6"
+        ${dash ? `stroke-dasharray="${dash}"` : ""}>
+        <title>${esc(e.rel || "")}${e.tier ? ` (${esc(e.tier)})`
+                                           : ""}</title></line>`;
+    }
+    const DOT = { certified: "#2e7d32", pending: "#b07d1e" };
+    for (const n of nodes) {
+      const p = pos.get(n.id);
+      if (!p) continue;
+      const label = n.label.length > 26
+        ? n.label.slice(0, 25) + "…" : n.label;
+      body += `<g class="dg-node dg-${esc(n.kind || "other")}">
+        <rect x="${p[0] - 78}" y="${p[1] - 15}" width="156"
+          height="30" rx="8"/>
+        ${n.status ? `<circle cx="${p[0] - 66}" cy="${p[1]}" r="4"
+          fill="${DOT[n.status] || "#9a938a"}"><title>${
+          esc(n.status)}</title></circle>` : ""}
+        <text x="${p[0] + (n.status ? 6 : 0)}" y="${p[1] + 4}"
+          text-anchor="middle"><title>${esc(n.id)}</title>${
+          esc(label)}</text></g>`;
+    }
+    return `<svg viewBox="0 0 ${width} ${height}" class="diagramv2"
+      xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
+  }
+
+  function panelBody(type, spec) {
+    const mark = spec.watermark
+      ? `<div class="watermark-band">${esc(spec.watermark)}</div>`
+      : "";
+    if (type === "chart") return mark + chartSVG(spec, 460, 230);
+    if (type === "table") return mark + tableHTML(spec);
+    if (type === "kpi") return mark + kpiTile(spec);
+    if (type === "document") {
+      return mark + `<div class="md docview">${
+        renderMarkdown(spec.markdown || "", "md")}</div>`;
+    }
+    return "";
+  }
+
   function renderArtifactBody(row) {
     const spec = row.spec || {};
     const prov = spec.provenance;
@@ -294,21 +377,10 @@ export async function renderChat(outlet, wanted = "") {
       return chartSVG(spec) + footer;
     }
     if (row.type === "table") {
-      const cols = spec.columns || [];
-      const head = cols.map((c) =>
-        `<th data-key="${esc(c.key)}">${esc(c.label)}${
-          c.status ? ` <span class="muted">(${esc(c.status)})</span>`
-                   : ""}</th>`).join("");
-      const body = (spec.rows || []).map((r) =>
-        `<tr>${cols.map((c) =>
-          `<td>${esc(String(r[c.key] ?? ""))}</td>`).join("")}</tr>`)
-        .join("");
       const mark = spec.watermark
         ? `<div class="watermark-band">${esc(spec.watermark)}</div>`
         : "";
-      return `${mark}<div class="tablewrap"><table class="sortable">
-        <thead><tr>${head}</tr></thead>
-        <tbody>${body}</tbody></table></div>${footer}`;
+      return mark + tableHTML(spec) + footer;
     }
     if (row.type === "document") {
       const mark = spec.watermark
@@ -317,7 +389,52 @@ export async function renderChat(outlet, wanted = "") {
       return mark + `<div class="md docview">${
         renderMarkdown(spec.markdown || "", "md")}</div>` + footer;
     }
+    if (row.type === "kpi") {
+      return kpiTile(spec) + footer;
+    }
+    if (row.type === "dashboard") {
+      const filters = (spec.filters || []).map((f) => `
+        <span class="dash-filter" data-slot="${esc(f.slot)}">
+          <span class="muted">${esc(f.label || f.slot)}:</span>
+          ${f.options.map((o) => `<button class="filter-opt${
+            o === f.active ? " active" : ""}" data-slot="${
+            esc(f.slot)}" data-value="${esc(o)}">${esc(o)}</button>`)
+            .join("")}
+        </span>`).join("");
+      const panels = (spec.panels || []).map((p) => `
+        <div class="dash-panel dash-${esc(p.type)}">
+          ${p.title ? `<div class="dash-panel-title">${
+            esc(p.title)}</div>` : ""}
+          ${panelBody(p.type, p.spec || {})}
+          ${tileFooter(p.spec || {})}
+        </div>`).join("");
+      return `${filters ? `<div class="dash-filters">${filters}
+        </div>` : ""}
+        <div class="dash-grid">${panels}</div>
+        ${spec.notes ? `<div class="dash-notes md">${
+          renderMarkdown(spec.notes, "md")}</div>` : ""}${footer}`;
+    }
+    if (row.type === "diagram") {
+      if (spec.kind === "mermaid") {
+        return `<pre class="mermaid-src">${esc(spec.source || "")
+          }</pre><div class="muted" style="font-size:12px">mermaid
+          source — export .mmd to render elsewhere</div>` + footer;
+      }
+      return diagramSVG(spec) + footer;
+    }
     return `<pre>${esc(JSON.stringify(spec, null, 1))}</pre>`;
+  }
+
+  function bindDashboardFilters(container, row) {
+    for (const btn of container.querySelectorAll(".filter-opt")) {
+      btn.addEventListener("click", () => {
+        if (btn.classList.contains("active")) return;
+        // rule 3 in the UI: a filter pick is a whatif REQUEST in
+        // the conversation, never a hidden client-side query
+        send(`Set ${btn.dataset.slot} to ${btn.dataset.value} on `
+             + `"${row.title}" and update it`);
+      });
+    }
   }
 
   function download(name, mime, content) {
@@ -383,6 +500,34 @@ export async function renderChat(outlet, wanted = "") {
         (row.spec.markdown || "")
         + `\n\n---\n${provenanceLine(row)}\n`)]);
     }
+    if (row.type === "dashboard") {
+      buttons.push(["HTML", () => {
+        const styles = [...document.styleSheets].map((sheet) => {
+          try {
+            return [...sheet.cssRules].map((r) => r.cssText).join("\n");
+          } catch { return ""; }
+        }).join("\n");
+        download(`${slug}.html`, "text/html",
+          `<!doctype html><meta charset="utf-8"><title>${
+            esc(row.title)}</title><style>${styles}</style>` +
+          `<body style="max-width:900px;margin:24px auto;` +
+          `font-family:sans-serif"><h2>${esc(row.title)}</h2>` +
+          el("panel-body").innerHTML +
+          `<p style="font-size:11px;color:#777">${
+            esc(provenanceLine(row))}</p></body>`);
+      }]);
+    }
+    if (row.type === "diagram") {
+      if (row.spec.kind === "mermaid") {
+        buttons.push(["MMD", () => download(`${slug}.mmd`,
+          "text/plain",
+          (row.spec.source || "") + `\n%% ${provenanceLine(row)}\n`)]);
+      } else {
+        buttons.push(["SVG", () => download(`${slug}.svg`,
+          "image/svg+xml",
+          el("panel-body").querySelector("svg").outerHTML)]);
+      }
+    }
     box.innerHTML = "";
     for (const [label, fn] of buttons) {
       const b = document.createElement("button");
@@ -402,6 +547,9 @@ export async function renderChat(outlet, wanted = "") {
     el("chat-panel").hidden = false;
     el("panel-title").textContent = row.title;
     el("panel-body").innerHTML = renderArtifactBody(row);
+    if (row.type === "dashboard") {
+      bindDashboardFilters(el("panel-body"), row);
+    }
     exportButtons(row);
     const versions = await api.chatArtifactVersions(artifactId);
     const select = el("panel-version");
@@ -493,7 +641,8 @@ export async function renderChat(outlet, wanted = "") {
     div.className = "card artifact-inline";
     div.innerHTML = `
       <span class="glyph">${{ chart: "📊", table: "▦",
-        document: "🗎" }[event.type] || "▣"}</span>
+        document: "🗎", dashboard: "▥", diagram: "✦",
+        kpi: "◉" }[event.type] || "▣"}</span>
       <b>${esc(event.title)}</b>
       <span class="muted">v${event.version}${
         event.spec?.watermark
@@ -565,7 +714,7 @@ export async function renderChat(outlet, wanted = "") {
         break;
       case "artifact":
         artifactCard(turn, event);
-        refreshRecents();
+        pingShelf();
         break;
       case "chips":
         if (event.clarify) chipRow(null, event.clarify);
@@ -582,7 +731,7 @@ export async function renderChat(outlet, wanted = "") {
             || event.status === "stopped") {
           turn.el.classList.add("partial");
         }
-        refreshRecents();
+        pingShelf();
         break;
       case "error":
         if (event.code !== "trace") {
@@ -673,7 +822,7 @@ export async function renderChat(outlet, wanted = "") {
     api.chatStop(state.session.id));
 
   subscribe();
-  refreshRecents();
+  pingShelf();
   refreshSkills();
   return () => { if (state.source) state.source.close(); };
 }

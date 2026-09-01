@@ -198,6 +198,83 @@ def assistant_toolkit(build: Build, state: AssistantState, *,
         return _checks.verify_answer(state, build, model, sql=sql,
                                      claim=claim, substrate=substrate)
 
+    # ── the magic pair (§4): whatif and compare ──────────────
+    def whatif(sql: str, find: str, replace: str) -> dict[str, Any]:
+        if not str(find):
+            return {"error": "whatif changes ONE slot: pass the "
+                             "exact fragment to find",
+                    "hint": "a literal ('US'), a date, a threshold — "
+                            "copied verbatim from the SQL"}
+        occurrences = sql.count(find)
+        if not occurrences:
+            return {"error": f"{find!r} does not appear in the SQL",
+                    "hint": "pass the fragment exactly as written — "
+                            "quotes and case included"}
+        new_sql = sql.replace(find, replace)
+        result = run_sql(new_sql, mode="snapshot")
+        if isinstance(result, dict):
+            result = dict(result)
+            result["sql"] = new_sql
+            result["changed"] = {"find": find, "replace": replace,
+                                 "occurrences": occurrences}
+        return result
+
+    def compare(a: str, b: str, column: str = "",
+                labels: list[str] | None = None) -> dict[str, Any]:
+        rows_a, err = _checks._load_rows(workspace, a)
+        if err:
+            return {"error": err, "hint": "both results must exist"}
+        rows_b, err = _checks._load_rows(workspace, b)
+        if err:
+            return {"error": err, "hint": "both results must exist"}
+        key, err = _checks._numeric_key(rows_a, column)
+        if err:
+            return {"error": err, "hint": "name the column to align"}
+        name_a, name_b = (list(labels or []) + [a, b])[:2]
+        dims = [k for k in rows_a[0] if k != key]
+
+        def _dim_key(row: dict[str, Any]) -> tuple:
+            return tuple(row.get(k) for k in dims)
+
+        index_b = {_dim_key(r): r for r in rows_b}
+        frame, only_a = [], 0
+        for row in rows_a[:200]:
+            other = index_b.pop(_dim_key(row), None)
+            va = row.get(key)
+            vb = (other or {}).get(key)
+            if other is None:
+                only_a += 1
+            entry = {k: row.get(k) for k in dims}
+            entry[name_a] = va
+            entry[name_b] = vb
+            if isinstance(va, (int, float)) \
+                    and isinstance(vb, (int, float)):
+                entry["delta"] = vb - va
+                entry["pct"] = round((vb - va) / va, 4) if va else None
+            frame.append(entry)
+        ta = float(sum(r.get(key) or 0 for r in rows_a))
+        tb = float(sum(r.get(key) or 0 for r in rows_b))
+        return {"frame": frame, "aligned_on": dims,
+                "column": key,
+                "totals": {name_a: ta, name_b: tb, "delta": tb - ta},
+                "only_in_a": only_a, "only_in_b": len(index_b),
+                "hint": "an aligned frame, not a verdict — "
+                        "check_crosscheck is the check; artifact a "
+                        "table or chart to keep it (provenance "
+                        "still required)"}
+
+    def constellation(title: str = "",
+                      ids: list[str] | None = None) -> dict[str, Any]:
+        graph = _checks.build_subgraph(build, state, ids)
+        if not graph.get("nodes"):
+            return {"error": "nothing to draw yet",
+                    "hint": graph.get("hint")
+                    or "pass metric:/table:/concept: ids, or touch "
+                       "the graph first"}
+        return artifact("diagram", title or "Constellation",
+                        {"kind": "graph", "nodes": graph["nodes"],
+                         "edges": graph["edges"]})
+
     kit.update({spec.name: spec for spec in (
         ToolSpec(
             name="subgraph",
@@ -278,6 +355,42 @@ def assistant_toolkit(build: Build, state: AssistantState, *,
                 "Call it before showing a governed number; the "
                 "passing fact is citable in provenance.facts."),
             fn=verify_answer),
+        ToolSpec(
+            name="whatif",
+            signature="whatif(sql, find, replace)",
+            maps_to="the magic pair",
+            description=(
+                "Re-run a query with one slot changed: the exact "
+                "fragment `find` becomes `replace`, the new SQL runs "
+                "on the snapshot, rows save as q<N>.\n"
+                "The cheapest magic there is — a country, a month, a "
+                "threshold — and how a dashboard filter re-runs. The "
+                "fragment must match verbatim, quotes included."),
+            fn=whatif),
+        ToolSpec(
+            name="compare",
+            signature="compare(a, b, column?, labels?)",
+            maps_to="the magic pair",
+            description=(
+                "Align two saved results (q<N>) on their shared "
+                "dimensions: side-by-side values, delta, pct, "
+                "totals, and what appears on only one side.\n"
+                "The \"same thing, side by side\" primitive — "
+                "periods, cohorts, definitions. It aligns; it does "
+                "not verify — check_crosscheck is the check."),
+            fn=compare),
+        ToolSpec(
+            name="constellation",
+            signature="constellation(title?, ids?)",
+            maps_to="the receipts",
+            description=(
+                "Draw what the answer used: the subgraph behind "
+                "this turn (or the ids you pass) lands in the panel "
+                "as a graph diagram — metrics with status, tables, "
+                "concepts, joins with their tiers.\n"
+                "The visual receipts. Call it when the user asks "
+                "\"what did you use\" or a lineage view would help."),
+            fn=constellation, writes=True),
     )})
 
     kit.update({spec.name: spec for spec in (
@@ -304,7 +417,15 @@ def assistant_toolkit(build: Build, state: AssistantState, *,
                 "chart: {kind: line|bar|scatter|area, series: "
                 "[{name, points: [[x, y], …]}], unit?}. table: "
                 "{columns: [{key, label}], rows: [{…}]}. document: "
-                "{markdown}. Any spec that shows numbers MUST carry "
+                "{markdown}. kpi: {value, unit?, label?, delta?}. "
+                "dashboard: {panels: [{type: kpi|chart|table|"
+                "document, title?, spec}], filters?: [{slot, "
+                "options, active?}], notes?} — each numeric panel "
+                "carries its OWN provenance; a filter pick arrives "
+                "as a whatif request in conversation. diagram: "
+                "{kind: graph, nodes, edges} (subgraph shape; "
+                "constellation draws it for you) or {kind: mermaid, "
+                "source}. Any spec that shows numbers MUST carry "
                 "provenance {status, meridian_line} — the renderer "
                 "refuses undisclosed numbers, and composed numbers "
                 "keep an EXPLORATORY watermark until a check fact is "

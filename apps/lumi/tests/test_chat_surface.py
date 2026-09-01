@@ -20,6 +20,7 @@ SILO = REPO_ROOT / "synapse-agentic-harness-system"
 
 CHAT_JS = (FRONTEND / "js" / "pages" / "chat.js").read_text(
     encoding="utf-8")
+CHATS_JS = (FRONTEND / "js" / "chats.js").read_text(encoding="utf-8")
 API_JS = (FRONTEND / "js" / "api.js").read_text(encoding="utf-8")
 MAIN_JS = (FRONTEND / "js" / "main.js").read_text(encoding="utf-8")
 INDEX = (FRONTEND / "index.html").read_text(encoding="utf-8")
@@ -61,19 +62,45 @@ def test_every_chat_helper_exists_and_is_served():
 
 
 def test_the_shell_offers_the_door():
-    assert 'href="#/chat" data-tab="chat"' in INDEX
+    # one nav, not two: "New ask" starts a chat; the shelf below
+    # lists them; the old Ask tab left the nav (deep links survive)
+    assert 'href="#/chat/new" data-tab="chat"' in INDEX
+    assert "New ask" in INDEX
+    assert 'data-tab="ask"' not in INDEX
+    assert 'class="chats-search"' in INDEX
     assert "chat: () => renderChat(outlet, arg)" in MAIN_JS
     assert 'page === "chat"' in MAIN_JS
+    assert "api.chatSessions" in CHATS_JS
+    assert "#/chat/" in CHATS_JS
+    # the page itself carries no second sidebar
+    assert "chat-side" not in CHAT_JS
+    assert 'wanted === "new"' in CHAT_JS
 
 
 def test_the_claude_shape_is_present():
-    for piece in ("chat-side", "chat-recents", "chat-panel",
-                  "chat-thread", "chat-chiprow", "panel-version",
-                  "panel-export", "chat-new", "chat-search"):
+    for piece in ("chat-panel", "chat-thread", "chat-chiprow",
+                  "panel-version", "panel-export", "pingShelf"):
         assert piece in CHAT_JS, piece
-    for cls in (".chatv2", ".chat-panel", ".recent-row",
-                ".chartv2", ".artifact-footer"):
+    for cls in (".chatv2", ".chat-panel", ".chat-row",
+                ".chats-search", ".chartv2", ".artifact-footer"):
         assert cls in CSS, cls
+
+
+def test_dashboards_and_diagrams_render():
+    for piece in ("kpiTile", "diagramSVG", "dash-grid",
+                  "filter-opt", "mermaid-src",
+                  "bindDashboardFilters", "tileFooter"):
+        assert piece in CHAT_JS, piece
+    for cls in (".dash-grid", ".kpi-tile", ".tile-footer",
+                ".diagramv2", ".filter-opt"):
+        assert cls in CSS, cls
+    # a filter pick goes through the conversation, never a hidden
+    # client-side query — the binder composes a whatif message
+    assert "whatif" in CHAT_JS.split("bindDashboardFilters")[1][:600]
+    # dashboards export as an HTML bundle; diagrams as SVG or .mmd
+    assert '".html"' in CHAT_JS.replace("`${slug}.html`",
+                                        '".html"')
+    assert ".mmd" in CHAT_JS
 
 
 def test_governance_is_visible_not_just_enforced():

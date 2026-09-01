@@ -122,10 +122,23 @@ def _history_block(store: AssistantStore, session_id: str,
 
 def _compact(tool: str, result: Any) -> str:
     if isinstance(result, dict):
-        if tool == "run_sql" and result.get("saved_as"):
+        if tool in ("run_sql", "whatif") and result.get("saved_as"):
+            changed = result.get("changed") or {}
             return (compact_result(tool, result)
                     + f"\nrows saved: meridian.rows("
-                      f"{result['saved_as']!r})")
+                      f"{result['saved_as']!r})"
+                    + (f"\nchanged {changed['find']!r} → "
+                       f"{changed['replace']!r}" if changed else ""))
+        if tool == "compare" and result.get("totals"):
+            totals = " · ".join(f"{k} {v:,.4g}"
+                                for k, v in result["totals"].items())
+            return (f"aligned {len(result.get('frame', []))} rows "
+                    f"on {', '.join(result.get('aligned_on', []))} "
+                    f"({result.get('column')}): {totals}"
+                    + (f"; only_in_a {result['only_in_a']}, "
+                       f"only_in_b {result['only_in_b']}"
+                       if result.get("only_in_a")
+                       or result.get("only_in_b") else ""))
         if tool == "python":
             head = str(result.get("stdout", ""))[:600]
             tail = (f"\nstderr: {str(result.get('stderr'))[:300]}"
@@ -134,7 +147,7 @@ def _compact(tool: str, result: Any) -> str:
                      if result.get("files") else "")
             return (f"{'ok' if result.get('ok') else 'FAILED'} in "
                     f"{result.get('elapsed_ms')}ms\n{head}{tail}{files}")
-        if tool in ("artifact", "artifact_update"):
+        if tool in ("artifact", "artifact_update", "constellation"):
             if result.get("error"):
                 probs = "; ".join(
                     f"{p.get('code')}: {p.get('detail')} — "

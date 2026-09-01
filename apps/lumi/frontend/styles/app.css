@@ -71,10 +71,16 @@ a:hover { color: var(--ink); }
 @media (prefers-reduced-motion: reduce) {
   .navlist a, .navlist .glyph { animation: none; transition: none; }
 }
-/* the space below the options is the chats shelf: the real Ask
- * sessions on this machine, newest first */
+/* the space below the options is the chats shelf: the real Synapse
+ * conversations on this machine, newest first — one nav, not two */
 .chats { margin-top: var(--s-4); padding: 0 10px; min-height: 0;
-         display: flex; flex-direction: column; gap: 6px; }
+         display: flex; flex-direction: column; gap: 6px;
+         flex: 1; }
+.chats-search {
+  width: 100%; box-sizing: border-box; padding: 5px 8px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: transparent; color: inherit; font-size: var(--fs-12);
+}
 .chats-head {
   font-size: var(--fs-11); font-weight: 700; letter-spacing: 0.06em;
   color: var(--ink-3); text-transform: uppercase;
@@ -826,28 +832,8 @@ table.result tr:last-child td { border-bottom: none; }
 /* ── Synapse v2: the Claude-shaped chat (spec §10) ── */
 .chatv2 {
   display: grid;
-  grid-template-columns: 230px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0; height: calc(100vh - 52px); min-height: 480px;
-}
-.chat-side {
-  border-right: 1px solid var(--line, #d5d2ca);
-  padding: 10px; display: flex; flex-direction: column; gap: 8px;
-  overflow-y: auto;
-}
-.chat-side #chat-search {
-  width: 100%; box-sizing: border-box; padding: 6px 8px;
-  border: 1px solid var(--line, #d5d2ca); border-radius: 6px;
-  background: transparent; color: inherit;
-}
-.recent-row {
-  padding: 7px 8px; border-radius: 8px; cursor: pointer;
-  display: flex; flex-direction: column; gap: 2px;
-}
-.recent-row:hover { background: rgba(0, 0, 0, 0.05); }
-.recent-row.on { background: rgba(0, 0, 0, 0.08); }
-.recent-title {
-  font-size: 13px; white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis;
 }
 .chat-main {
   display: flex; flex-direction: column; min-width: 0;
@@ -937,9 +923,68 @@ table.result tr:last-child td { border-bottom: none; }
   border-bottom: 1px solid var(--line, #d5d2ca);
 }
 .docview { font-size: 14px; }
+
+/* dashboards: tiles, each carrying its own disclosure (§13.4) */
+.dash-filters {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  padding: 6px 0 10px; font-size: 12.5px;
+}
+.dash-filter { display: inline-flex; gap: 4px; align-items: center; }
+.filter-opt {
+  border: 1px solid var(--line, #d5d2ca); background: transparent;
+  color: inherit; border-radius: 999px; padding: 2px 10px;
+  font-size: 12px; cursor: pointer;
+}
+.filter-opt.active {
+  background: var(--accent-soft, #dce8f8);
+  border-color: var(--accent, #2f6feb); font-weight: 600;
+}
+.dash-grid {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.dash-panel {
+  border: 1px solid var(--line, #d5d2ca); border-radius: 10px;
+  padding: 10px; min-width: 0; overflow: hidden;
+}
+.dash-panel.dash-chart, .dash-panel.dash-table {
+  grid-column: span 2;
+}
+.dash-panel-title { font-size: 12.5px; font-weight: 700;
+  margin-bottom: 6px; }
+.dash-notes { margin-top: 10px; font-size: 13px; }
+.kpi-tile { padding: 2px 0 4px; }
+.kpi-label { font-size: 12px; color: var(--muted, #7a756a);
+  text-transform: uppercase; letter-spacing: 0.04em; }
+.kpi-value { font-size: 28px; font-weight: 800; line-height: 1.2; }
+.kpi-unit { font-size: 13px; font-weight: 500; margin-left: 5px;
+  color: var(--muted, #7a756a); }
+.kpi-delta { font-size: 13px; font-weight: 600; margin-left: 8px; }
+.kpi-delta.up { color: #2e7d32; }
+.kpi-delta.down { color: #b3392f; }
+.tile-footer {
+  display: flex; gap: 6px; align-items: center; margin-top: 6px;
+  font-size: 11.5px; min-width: 0;
+}
+.tile-footer .meridian {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted, #7a756a);
+}
+
+/* diagrams: the receipts, drawn (§13.4) */
+.diagramv2 { width: 100%; height: auto; }
+.diagramv2 .dg-node rect {
+  fill: var(--panel, #efece4); stroke: var(--line, #d5d2ca);
+}
+.diagramv2 .dg-metric rect { stroke: var(--accent, #2f6feb); }
+.diagramv2 .dg-node text { font-size: 11px;
+  fill: var(--ink, #222018); }
+.mermaid-src {
+  background: var(--panel, #efece4); border-radius: 8px;
+  padding: 10px; font-size: 12px; overflow-x: auto;
+}
 @media (max-width: 1100px) {
   .chatv2 { grid-template-columns: 1fr; }
-  .chat-side { display: none; }
   .chat-panel { position: fixed; right: 0; top: 52px; bottom: 0;
     background: var(--bg, #faf8f3); max-width: 92vw; z-index: 40; }
 }

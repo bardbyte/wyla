@@ -26,8 +26,12 @@ from __future__ import annotations
 
 from typing import Any
 
-TYPES: tuple[str, ...] = ("chart", "table", "document")
+TYPES: tuple[str, ...] = ("chart", "table", "document", "kpi",
+                          "dashboard", "diagram")
 CHART_KINDS = ("line", "bar", "scatter", "area")
+DIAGRAM_KINDS = ("graph", "mermaid")
+# a dashboard nests tiles, never another dashboard (or a diagram)
+PANEL_TYPES = ("kpi", "chart", "table", "document")
 STATUSES = ("certified", "pending", "composed", "exploratory")
 # statuses that may shed the watermark without a cited check fact
 SELF_STANDING = ("certified", "pending")
@@ -169,6 +173,148 @@ def validate_artifact(type: str, spec: Any, *,
         out["markdown"] = markdown if isinstance(markdown, str) else ""
         # prose numbers cannot be schema-detected; a document is
         # exploratory unless provenance is declared
+        shows_numbers = bool(spec.get("provenance"))
+
+    elif type == "kpi":
+        value = spec.get("value")
+        if not _numeric(value):
+            problems.append(_problem(
+                "kpi_value", "a kpi needs a numeric value",
+                "spec: {\"value\": <number>, \"unit\"?, \"label\"?, "
+                "\"delta\"?} plus provenance {status, meridian_line}"))
+        shows_numbers = True
+        out.update(value=value if _numeric(value) else None,
+                   unit=str(spec.get("unit", "")),
+                   label=str(spec.get("label", "")),
+                   **({"delta": spec["delta"]}
+                      if _numeric(spec.get("delta")) else {}))
+
+    elif type == "dashboard":
+        panels = spec.get("panels")
+        clean_panels: list[dict[str, Any]] = []
+        marked = False
+        if not isinstance(panels, list) or not panels:
+            problems.append(_problem(
+                "dashboard_panels",
+                "a dashboard needs a non-empty panels list",
+                "panels: [{\"type\": kpi|chart|table|document, "
+                "\"title\"?, \"spec\": {…}}] — each numeric panel "
+                "carries its OWN provenance"))
+        else:
+            for i, panel in enumerate(panels):
+                ptype = str(panel.get("type", "")) \
+                    if isinstance(panel, dict) else ""
+                if ptype not in PANEL_TYPES:
+                    problems.append(_problem(
+                        "panel_type",
+                        f"panels[{i}] type {ptype!r} is not one of "
+                        + ", ".join(PANEL_TYPES),
+                        "a dashboard nests tiles, never another "
+                        "dashboard"))
+                    continue
+                sub_spec = panel.get("spec")
+                sub, sub_problems = validate_artifact(
+                    ptype,
+                    sub_spec if isinstance(sub_spec, dict) else {},
+                    build_id=build_id, facts=facts, build=build)
+                if sub_problems:
+                    problems.extend(_problem(
+                        p["code"],
+                        f"panels[{i}] ({ptype}): {p['detail']}",
+                        p["hint"]) for p in sub_problems)
+                    continue
+                clean_panels.append({
+                    "type": ptype,
+                    "title": str(panel.get("title", ""))[:120],
+                    "spec": sub})
+                marked = marked or bool(sub.get("watermark"))
+        filters: list[dict[str, Any]] = []
+        for j, item in enumerate(spec.get("filters") or []):
+            slot = str((item or {}).get("slot", "")).strip() \
+                if isinstance(item, dict) else ""
+            options = (item or {}).get("options") \
+                if isinstance(item, dict) else None
+            if not slot or not isinstance(options, list) \
+                    or not options:
+                problems.append(_problem(
+                    "dashboard_filter",
+                    f"filters[{j}] needs a slot and options",
+                    "filters: [{\"slot\": \"country\", \"options\": "
+                    "[\"US\", \"CA\"], \"active\"?}] — picking one "
+                    "sends a whatif request through the conversation, "
+                    "never a hidden query"))
+                continue
+            options = [str(o) for o in options][:12]
+            active = str(item.get("active", options[0]))
+            filters.append({
+                "slot": slot, "label": str(item.get("label", slot)),
+                "options": options,
+                "active": active if active in options
+                else options[0]})
+        out.update(panels=clean_panels, filters=filters,
+                   notes=str(spec.get("notes", ""))[:2000])
+        if marked:
+            out["watermark"] = "EXPLORATORY"
+        shows_numbers = False        # the tiles carry the disclosure
+
+    elif type == "diagram":
+        kind = str(spec.get("kind", "")).lower()
+        if kind not in DIAGRAM_KINDS:
+            problems.append(_problem(
+                "diagram_kind", f"diagram kind {spec.get('kind')!r} "
+                "is not one of " + ", ".join(DIAGRAM_KINDS),
+                "graph: {nodes, edges} as subgraph()/constellation "
+                "return them; mermaid: {source} for lineage, "
+                "funnels, decision trees"))
+        if kind == "mermaid":
+            source = spec.get("source")
+            if not isinstance(source, str) or not source.strip():
+                problems.append(_problem(
+                    "diagram_source",
+                    "a mermaid diagram needs source text",
+                    "spec: {\"kind\": \"mermaid\", \"source\": "
+                    "\"flowchart TD; …\"}"))
+            out.update(kind="mermaid",
+                       source=(source if isinstance(source, str)
+                               else "")[:6000])
+        elif kind == "graph":
+            nodes = spec.get("nodes")
+            clean_nodes: list[dict[str, Any]] = []
+            if not isinstance(nodes, list) or not nodes:
+                problems.append(_problem(
+                    "diagram_nodes",
+                    "a graph diagram needs a non-empty nodes list",
+                    "nodes: [{\"id\", \"kind\"?, \"label\"?, "
+                    "\"status\"?}] — subgraph() returns exactly this "
+                    "shape"))
+            else:
+                for n in nodes:
+                    if isinstance(n, dict) and n.get("id"):
+                        clean_nodes.append({
+                            "id": str(n["id"]),
+                            "kind": str(n.get("kind", "")),
+                            "label": str(n.get("label")
+                                         or n["id"])[:80],
+                            **({"status": str(n["status"])}
+                               if n.get("status") else {})})
+            ids = {n["id"] for n in clean_nodes}
+            clean_edges: list[dict[str, Any]] = []
+            for j, e in enumerate(spec.get("edges") or []):
+                a, b = str((e or {}).get("a", "")), \
+                    str((e or {}).get("b", ""))
+                if a not in ids or b not in ids:
+                    problems.append(_problem(
+                        "diagram_edges",
+                        f"edges[{j}] joins {a!r}–{b!r} but both ends "
+                        "must be node ids",
+                        "every edge endpoint must appear in nodes"))
+                    continue
+                clean_edges.append({
+                    "a": a, "b": b, "rel": str(e.get("rel", "")),
+                    **({"tier": str(e["tier"])}
+                       if e.get("tier") else {})})
+            out.update(kind="graph", nodes=clean_nodes,
+                       edges=clean_edges)
         shows_numbers = bool(spec.get("provenance"))
 
     # ── the rendering rules ──────────────────────────────────
