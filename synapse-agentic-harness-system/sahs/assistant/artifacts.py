@@ -74,7 +74,8 @@ def _check_provenance(spec: dict[str, Any],
 
 def validate_artifact(type: str, spec: Any, *,
                       build_id: str = "",
-                      facts: frozenset[str] = frozenset()
+                      facts: frozenset[str] = frozenset(),
+                      build: Any = None
                       ) -> tuple[dict[str, Any] | None,
                                  list[dict[str, str]]]:
     """→ (normalized spec, []) or (None, teaching problems)."""
@@ -173,6 +174,30 @@ def validate_artifact(type: str, spec: Any, *,
     # ── the rendering rules ──────────────────────────────────
     if shows_numbers or spec.get("provenance") is not None:
         prov = _check_provenance(spec, problems)
+        # rule 1 with teeth: "certified" is a claim about the BUILD,
+        # not a vibe — it must name the metric, and the metric must
+        # actually be certified there
+        if str((prov or {}).get("status", "")).lower() == "certified":
+            metric_id = (prov or {}).get("metric_id", "")
+            if not metric_id:
+                problems.append(_problem(
+                    "certified_needs_metric",
+                    "status certified without a metric_id",
+                    "name the governed metric in provenance."
+                    "metric_id (from search_semantics or resolve), "
+                    "or use status composed/exploratory"))
+            elif build is not None:
+                row = next((m for m in getattr(build, "metrics", [])
+                            if m.get("id") == metric_id), None)
+                served = (row or {}).get("status_served")                     or (row or {}).get("status")
+                if row is None or served != "certified":
+                    problems.append(_problem(
+                        "status_overclaimed",
+                        f"{metric_id} is "
+                        + ("not in this build" if row is None
+                           else f"{served}, not certified"),
+                        "say what it IS — the reader decides what "
+                        "certified means, not the chart"))
         if prov:
             out["provenance"] = {
                 "status": str(prov.get("status", "")).lower(),

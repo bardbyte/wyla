@@ -111,6 +111,7 @@ def test_rule_one_passes_disclosed_numbers():
     spec = {"kind": "line",
             "series": [{"name": "spend", "points": [["d1", 1.0]]}],
             "provenance": {"status": "certified",
+                           "metric_id": "metric:301a4f124096",
                            "meridian_line": "Using certified "
                                             "'Acquirer Net Spend'."}}
     normalized, problems = validate_artifact("chart", spec,
@@ -229,11 +230,15 @@ def test_reasoning_turn_needs_no_tools(compiled):
 
 
 def test_artifact_refusal_teaches_and_the_second_try_lands(compiled):
+    build, _ = compiled
+    spend = next(m for m in build.metrics
+                 if m["label"] == "Acquirer Net Spend"
+                 and m["status"] == "certified")
     naked = {"kind": "line", "series": [
         {"name": "spend", "points": [["2026-08-01", 4.0],
                                      ["2026-08-02", 6.0]]}]}
     disclosed = dict(naked, provenance={
-        "status": "certified",
+        "status": "certified", "metric_id": spend["id"],
         "meridian_line": "Using certified 'Acquirer Net Spend' on "
                          "dw.gms_transaction."})
     model = Scripted([
@@ -262,9 +267,14 @@ def test_artifact_refusal_teaches_and_the_second_try_lands(compiled):
 
 
 def test_artifact_update_makes_a_version_not_a_copy(compiled):
+    build, _ = compiled
+    count = next(m for m in build.metrics
+                 if m["label"] == "Transaction Count"
+                 and m["status"] == "certified")
     disclosed = {"kind": "bar", "series": [
         {"name": "n", "points": [["a", 1.0]]}],
         "provenance": {"status": "certified",
+                       "metric_id": count["id"],
                        "meridian_line": "Using certified "
                                         "'Transaction Count'."}}
     v2 = dict(disclosed, series=[{"name": "n",

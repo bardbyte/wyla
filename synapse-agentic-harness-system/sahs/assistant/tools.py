@@ -36,11 +36,13 @@ class AssistantState(LoopState):
     queries_saved: int = 0
     artifacts_touched: list[str] = field(default_factory=list)
     facts: set[str] = field(default_factory=set)
+    facts_log: list[dict[str, Any]] = field(default_factory=list)
 
 
 def assistant_toolkit(build: Build, state: AssistantState, *,
                       store: AssistantStore, session_id: str,
                       turn_id: str, workspace: Path,
+                      model: Any = None,
                       substrate: Any = None,
                       snapshot_runner: Any = None,
                       ledger_path: Path | None = None,
@@ -81,7 +83,7 @@ def assistant_toolkit(build: Build, state: AssistantState, *,
                  spec: dict[str, Any]) -> dict[str, Any]:
         normalized, problems = validate_artifact(
             type, spec, build_id=build.version,
-            facts=frozenset(state.facts))
+            facts=frozenset(state.facts), build=build)
         if problems:
             return {"error": "artifact refused",
                     "problems": problems,
@@ -114,7 +116,7 @@ def assistant_toolkit(build: Build, state: AssistantState, *,
                                "create one with artifact()")}
         normalized, problems = validate_artifact(
             current["type"], spec, build_id=build.version,
-            facts=frozenset(state.facts))
+            facts=frozenset(state.facts), build=build)
         if problems:
             return {"error": "artifact refused", "problems": problems,
                     "hint": "the previous version stands; fix these "
@@ -135,6 +137,118 @@ def assistant_toolkit(build: Build, state: AssistantState, *,
             {"artifact_id": r["artifact_id"], "type": r["type"],
              "title": r["title"], "version": r["version"]}
             for r in rows], "count": len(rows)}
+
+    from . import checks as _checks
+
+    def subgraph(ids: list[str] | None = None) -> dict[str, Any]:
+        return _checks.build_subgraph(build, state, ids)
+
+    def check_reconcile(sql: str, metric: str) -> dict[str, Any]:
+        return _checks.check_reconcile(state, build, sql=sql,
+                                       metric=metric)
+
+    def check_part_whole(breakdown: str, total: str, column: str = "",
+                         ) -> dict[str, Any]:
+        return _checks.check_part_whole(state, workspace,
+                                        breakdown=breakdown,
+                                        total=total, column=column)
+
+    def check_crosscheck(a: str, b: str,
+                         column: str = "") -> dict[str, Any]:
+        return _checks.check_crosscheck(state, workspace, a=a, b=b,
+                                        column=column)
+
+    def check_coverage(result: str) -> dict[str, Any]:
+        return _checks.check_coverage(state, workspace, result=result)
+
+    def check_fanout(tables: list[str]) -> dict[str, Any]:
+        return _checks.check_fanout(state, build, tables=tables)
+
+    def verify_answer(sql: str, claim: str = "") -> dict[str, Any]:
+        return _checks.verify_answer(state, build, model, sql=sql,
+                                     claim=claim, substrate=substrate)
+
+    kit.update({spec.name: spec for spec in (
+        ToolSpec(
+            name="subgraph",
+            signature="subgraph(ids?)",
+            maps_to="the receipts",
+            description=(
+                "The nodes and edges behind a set of facts — pass "
+                "metric:/table:/concept: ids, or nothing for "
+                "everything this turn touched.\n"
+                "This is the citation record and the constellation's "
+                "food: what the answer actually used, as data."),
+            fn=subgraph),
+        ToolSpec(
+            name="check_reconcile",
+            signature="check_reconcile(sql, metric)",
+            maps_to="verification",
+            description=(
+                "Does composed SQL contain the certified expression "
+                "of a governed metric, verbatim? Returns a citable "
+                "FACT (structural method).\n"
+                "For a NUMERIC reconcile, run both on the snapshot "
+                "and check_crosscheck the saved results. A passing "
+                "fact cited in provenance.facts lets a composed "
+                "number shed its watermark."),
+            fn=check_reconcile),
+        ToolSpec(
+            name="check_part_whole",
+            signature="check_part_whole(breakdown, total, column?)",
+            maps_to="verification",
+            description=(
+                "Do the slices add up to the total? Compares saved "
+                "results (q<N>) within ±0.5%.\n"
+                "The first check to run on any breakdown: a failure "
+                "means double count, missing slice, or mismatched "
+                "filters — say which before charting."),
+            fn=check_part_whole),
+        ToolSpec(
+            name="check_crosscheck",
+            signature="check_crosscheck(a, b, column?)",
+            maps_to="verification",
+            description=(
+                "Do two independently-computed results agree? "
+                "Compares saved results (q<N>) within ±0.5%.\n"
+                "Two routes to the same number is the strongest "
+                "check there is; a disagreement is a finding, not "
+                "an embarrassment."),
+            fn=check_crosscheck),
+        ToolSpec(
+            name="check_coverage",
+            signature="check_coverage(result)",
+            maps_to="verification",
+            description=(
+                "Did the query actually cover the ground: rows "
+                "present, no null keys?\n"
+                "Run it before trusting any aggregate — an empty or "
+                "holed result charted confidently is the worst bug "
+                "an analyst can ship."),
+            fn=check_coverage),
+        ToolSpec(
+            name="check_fanout",
+            signature="check_fanout(tables)",
+            maps_to="verification",
+            description=(
+                "Is there a raw-safe join on record between these "
+                "tables, so no row double-counts?\n"
+                "Run before any join-based number; a candidate-tier "
+                "edge is evidence of a relationship, not of safety."),
+            fn=check_fanout),
+        ToolSpec(
+            name="verify_answer",
+            signature="verify_answer(sql, claim?)",
+            maps_to="the fresh-context verifier",
+            description=(
+                "The verifier as a tool: names are real, the query "
+                "validates on the build, and (with a claim) a "
+                "fresh-context judge confirms the words say only "
+                "what the SQL supports.\n"
+                "Call it before showing a governed number; the "
+                "passing fact is citable in provenance.facts."),
+            fn=verify_answer),
+    )})
 
     kit.update({spec.name: spec for spec in (
         ToolSpec(

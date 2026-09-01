@@ -164,7 +164,8 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
     state = AssistantState()
     kit = assistant_toolkit(build, state, store=store,
                             session_id=session_id, turn_id=turn_id,
-                            workspace=workspace, substrate=substrate,
+                            workspace=workspace, model=model,
+                            substrate=substrate,
                             snapshot_runner=snapshot_runner)
     system = system_prompt(build, skills, render_tool_block(kit))
     bus.emit("model_prompt", turn_id=turn_id, n=0, kind="system",
