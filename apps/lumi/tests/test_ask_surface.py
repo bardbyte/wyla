@@ -149,3 +149,33 @@ def test_served_prose_on_this_surface_is_de_dashed():
     for verbatim in ("payload.sql", "payload.build_id", "payload.grain"):
         assert f"esc({verbatim})" in ASK_JS, (
             f"{verbatim} is a data artifact and must render verbatim")
+
+
+def test_the_skill_picker_is_wired_end_to_end():
+    """Agent Loop v1: the analyst chooses what the session carries.
+    The picker, the chips, the popover, and both api helpers must
+    exist — and the helpers must point at routes the app serves."""
+    assert 'id="ask-skills-btn"' in ASK_JS
+    assert 'id="ask-skill-chips"' in ASK_JS
+    assert 'id="ask-skills-pop"' in ASK_JS
+    assert "api.askSkills(" in ASK_JS
+    assert "api.askSetSkills(" in ASK_JS
+    assert "askSkills:" in API_JS and "askSetSkills:" in API_JS
+    backend = (REPO_ROOT / "apps" / "lumi" / "backend"
+               / "ask.py").read_text(encoding="utf-8")
+    assert '@router.get("/skills")' in backend
+    assert '@router.post("/sessions/{session_id}/skills")' in backend
+    assert ".ask-skillbar" in CSS and ".skills-pop" in CSS
+
+
+def test_the_saw_panel_renders_only_from_the_event_stream():
+    """"What the model saw" is rebuilt purely from loop_* events, so
+    replaying the events file shows exactly the live view — the panel
+    can never know more than the trajectory record."""
+    assert "function buildSaw(" in ASK_JS
+    assert "function sawButton(" in ASK_JS
+    assert "what the model saw" in ASK_JS
+    for stash in ('case "loop_prompt":', "turn.saw.system",
+                  "turn.saw.prompts", "turn.saw.steps"):
+        assert stash in ASK_JS, stash
+    assert ".saw-panel" in CSS

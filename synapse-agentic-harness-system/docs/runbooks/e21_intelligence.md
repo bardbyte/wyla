@@ -5,6 +5,15 @@ answering ladder land on the Stage A-C loop as Steps 0-8, one PR per
 step, each gated on the E19 capability suite and reporting its delta
 on the same line.
 
+> **Superseded in sequencing by the Agent Loop v1 spec**
+> (`docs/specs/agent_loop_v1.md`). Every turn becomes the agent loop;
+> determinism relocates into the tools; the spec's §9 build order
+> REPLACES Step 4's "explore.py" and re-sequences Steps 1-8 (the
+> mapping is under the step table below). Step 0 stands unchanged:
+> nothing ships against latency or navigation targets until a real
+> model has answered once, because the spec's own pins (p50 <3s
+> single-hop, <15s navigation) are only measurable against Vertex.
+
 ## Step 0a — the real-Vertex run (LAPTOP; blocks everything)
 
 Nothing past Step 0 starts until a real model has answered once. On
@@ -18,8 +27,13 @@ python scripts/ask_demo.py "acquirer net spend by day" \
        --pick 1 --then "same for Canada" \
        --report graph/runs/vertex_r1
 
-git add graph/runs/vertex_r1 && git commit -m "E21 0a: vertex run report"
+cat graph/runs/vertex_r1/report.md
 ```
+
+The laptop cannot push, so the report travels by PASTE: run the
+`cat`, copy the output into the session. Same for the resolver trace
+when a bind looks wrong:
+`grep resolve_result graph/runs/ask/events/<session>.jsonl | head -1`.
 
 `--report` wraps the model with a recorder OUTSIDE the product (the
 same seam the tests use) and writes `report.json` + `report.md`:
@@ -67,6 +81,19 @@ boundary; the full graph is expected to differentiate).
 | 6 | L4 exploratory lane | F7 demo on the real snapshot |
 | 7 | search constellation | driven by `subgraph_used`, non-blocking |
 | 8 | flywheel + sessions + hybrid recall | L0 lift on paraphrase tasks |
+
+### Where each step lives under the Agent Loop (spec §9)
+
+| E21 step | its home in the loop build order |
+|---|---|
+| 1 typecheck | INSIDE `plan_set` — runs on every call, teaching errors as tool results (§9.1, **landed**: `sahs/loop/tools.py`) |
+| 2 digest + skills | **landed** (§9.3): `sahs/loop/digest.py` generates SYNAPSE.md from the indexes; skills load per session via the Ask picker into the navigator's prompt |
+| 3 ladder + subgraph_used | stop conditions in the prompt (§9.3, landed); the sub-graph records itself and travels on `loop_done` |
+| 4 explore + scout + compaction | REPLACED: the loop IS the explore phase (§9.2, **landed**: `sahs/loop/loop.py`, behind `SYNAPSE_NAVIGATE=1` until the §9.4 numbers hold the bar); scout **landed** (§9.5: `sahs/loop/scout.py`) |
+| 5 L3 checks | the plan's `checks` slot, written via `plan_set`, read by the verifier |
+| 6 exploratory lane | **landed** (§9.5): the loop with a frozen-extract runner attached (`AskRuntime(snapshot_runner=…)`); without one, `run_sql` snapshot says so honestly |
+| 7 constellation | unchanged, non-blocking, still driven by subgraph_used |
+| 8 flywheel | after the §9.4 real-model baseline (landed: 30 tasks + grader + `scripts/nav_eval.py --real`; the number arrives by paste) |
 
 Standing pins: one PR per step with the E19 delta line in its body ·
 no worker beyond the scout · no live execution in L4 · no write to

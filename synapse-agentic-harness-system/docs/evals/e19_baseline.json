@@ -44,6 +44,10 @@
     "T10": {
      "passed": 3,
      "total": 3
+    },
+    "T11": {
+     "passed": 9,
+     "total": 9
     }
    },
    "results": [
@@ -54,7 +58,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 1ms"
+     "detail": "ok in 0ms"
     },
     {
      "task_id": "t1_aa_unscoped_refuses",
@@ -90,7 +94,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 20ms"
+     "detail": "ok in 14ms"
     },
     {
      "task_id": "t2_gmns_bind",
@@ -99,7 +103,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 19ms"
+     "detail": "ok in 8ms"
     },
     {
      "task_id": "t3_grain_has_evidence",
@@ -108,7 +112,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 20ms"
+     "detail": "ok in 10ms"
     },
     {
      "task_id": "t3_nothing_matches",
@@ -117,7 +121,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 11ms"
+     "detail": "ok in 9ms"
     },
     {
      "task_id": "t3_dis_consumer",
@@ -144,7 +148,7 @@
      "answered": true,
      "wrong": false,
      "expects_answer": true,
-     "detail": "ok in 60ms"
+     "detail": "ok in 48ms"
     },
     {
      "task_id": "t5_contract_before_work",
@@ -153,7 +157,7 @@
      "answered": true,
      "wrong": false,
      "expects_answer": true,
-     "detail": "ok in 27ms"
+     "detail": "ok in 23ms"
     },
     {
      "task_id": "t5_judge_fails_closed",
@@ -162,7 +166,7 @@
      "answered": true,
      "wrong": false,
      "expects_answer": true,
-     "detail": "ok in 28ms"
+     "detail": "ok in 23ms"
     },
     {
      "task_id": "t6_single_table_safe",
@@ -198,7 +202,7 @@
      "answered": true,
      "wrong": false,
      "expects_answer": true,
-     "detail": "ok in 27ms"
+     "detail": "ok in 25ms"
     },
     {
      "task_id": "t10_chargebacks",
@@ -207,7 +211,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 10ms"
+     "detail": "ok in 11ms"
     },
     {
      "task_id": "t10_loyalty",
@@ -216,11 +220,92 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 9ms"
+     "detail": "ok in 8ms"
     },
     {
      "task_id": "t10_forecast",
      "tier": "T10",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 7ms"
+    },
+    {
+     "task_id": "t11_greeting_free",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 7ms"
+    },
+    {
+     "task_id": "t11_thanks_free",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 28ms"
+    },
+    {
+     "task_id": "t11_farewell_free",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 8ms"
+    },
+    {
+     "task_id": "t11_capabilities_grounded",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 11ms"
+    },
+    {
+     "task_id": "t11_how_it_works_grounded",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 19ms"
+    },
+    {
+     "task_id": "t11_which_build_grounded",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 8ms"
+    },
+    {
+     "task_id": "t11_negative_feedback_recorded",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 7ms"
+    },
+    {
+     "task_id": "t11_off_topic_declines",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 10ms"
+    },
+    {
+     "task_id": "t11_mixed_does_both",
+     "tier": "T11",
      "passed": true,
      "answered": false,
      "wrong": false,
@@ -270,6 +355,10 @@
     "T10": {
      "passed": 3,
      "total": 3
+    },
+    "T11": {
+     "passed": 9,
+     "total": 9
     }
    },
    "results": [
@@ -325,7 +414,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 13ms"
+     "detail": "ok in 22ms"
     },
     {
      "task_id": "t3_grain_has_evidence",
@@ -334,7 +423,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 13ms"
+     "detail": "ok in 6ms"
     },
     {
      "task_id": "t3_nothing_matches",
@@ -343,7 +432,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 15ms"
+     "detail": "ok in 4ms"
     },
     {
      "task_id": "t3_dis_consumer",
@@ -370,7 +459,7 @@
      "answered": true,
      "wrong": false,
      "expects_answer": true,
-     "detail": "ok in 48ms"
+     "detail": "ok in 37ms"
     },
     {
      "task_id": "t5_contract_before_work",
@@ -379,7 +468,7 @@
      "answered": true,
      "wrong": false,
      "expects_answer": true,
-     "detail": "ok in 24ms"
+     "detail": "ok in 20ms"
     },
     {
      "task_id": "t5_judge_fails_closed",
@@ -388,7 +477,7 @@
      "answered": true,
      "wrong": false,
      "expects_answer": true,
-     "detail": "ok in 24ms"
+     "detail": "ok in 19ms"
     },
     {
      "task_id": "t6_single_table_safe",
@@ -424,7 +513,7 @@
      "answered": true,
      "wrong": false,
      "expects_answer": true,
-     "detail": "ok in 23ms"
+     "detail": "ok in 19ms"
     },
     {
      "task_id": "t10_chargebacks",
@@ -433,7 +522,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 7ms"
+     "detail": "ok in 5ms"
     },
     {
      "task_id": "t10_loyalty",
@@ -442,7 +531,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 6ms"
+     "detail": "ok in 5ms"
     },
     {
      "task_id": "t10_forecast",
@@ -451,7 +540,88 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 6ms"
+     "detail": "ok in 4ms"
+    },
+    {
+     "task_id": "t11_greeting_free",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 4ms"
+    },
+    {
+     "task_id": "t11_thanks_free",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 4ms"
+    },
+    {
+     "task_id": "t11_farewell_free",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 4ms"
+    },
+    {
+     "task_id": "t11_capabilities_grounded",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 4ms"
+    },
+    {
+     "task_id": "t11_how_it_works_grounded",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 11ms"
+    },
+    {
+     "task_id": "t11_which_build_grounded",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 4ms"
+    },
+    {
+     "task_id": "t11_negative_feedback_recorded",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 5ms"
+    },
+    {
+     "task_id": "t11_off_topic_declines",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 10ms"
+    },
+    {
+     "task_id": "t11_mixed_does_both",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 7ms"
     }
    ]
   },
@@ -496,6 +666,10 @@
     "T10": {
      "passed": 3,
      "total": 3
+    },
+    "T11": {
+     "passed": 9,
+     "total": 9
     }
    },
    "results": [
@@ -506,7 +680,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 0ms"
+     "detail": "ok in 1ms"
     },
     {
      "task_id": "t1_aa_unscoped_refuses",
@@ -542,7 +716,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 7ms"
+     "detail": "ok in 11ms"
     },
     {
      "task_id": "t2_gmns_bind",
@@ -551,7 +725,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 7ms"
+     "detail": "ok in 6ms"
     },
     {
      "task_id": "t3_grain_has_evidence",
@@ -560,7 +734,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 7ms"
+     "detail": "ok in 6ms"
     },
     {
      "task_id": "t3_nothing_matches",
@@ -569,7 +743,7 @@
      "answered": false,
      "wrong": false,
      "expects_answer": false,
-     "detail": "ok in 15ms"
+     "detail": "ok in 5ms"
     },
     {
      "task_id": "t3_dis_consumer",
@@ -596,7 +770,7 @@
      "answered": true,
      "wrong": false,
      "expects_answer": true,
-     "detail": "ok in 39ms"
+     "detail": "ok in 35ms"
     },
     {
      "task_id": "t5_contract_before_work",
@@ -605,7 +779,7 @@
      "answered": true,
      "wrong": false,
      "expects_answer": true,
-     "detail": "ok in 24ms"
+     "detail": "ok in 20ms"
     },
     {
      "task_id": "t5_judge_fails_closed",
@@ -614,7 +788,7 @@
      "answered": true,
      "wrong": false,
      "expects_answer": true,
-     "detail": "ok in 24ms"
+     "detail": "ok in 20ms"
     },
     {
      "task_id": "t6_single_table_safe",
@@ -650,7 +824,7 @@
      "answered": true,
      "wrong": false,
      "expects_answer": true,
-     "detail": "ok in 22ms"
+     "detail": "ok in 23ms"
     },
     {
      "task_id": "t10_chargebacks",
@@ -678,6 +852,87 @@
      "wrong": false,
      "expects_answer": false,
      "detail": "ok in 5ms"
+    },
+    {
+     "task_id": "t11_greeting_free",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 4ms"
+    },
+    {
+     "task_id": "t11_thanks_free",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 4ms"
+    },
+    {
+     "task_id": "t11_farewell_free",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 4ms"
+    },
+    {
+     "task_id": "t11_capabilities_grounded",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 4ms"
+    },
+    {
+     "task_id": "t11_how_it_works_grounded",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 11ms"
+    },
+    {
+     "task_id": "t11_which_build_grounded",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 4ms"
+    },
+    {
+     "task_id": "t11_negative_feedback_recorded",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 4ms"
+    },
+    {
+     "task_id": "t11_off_topic_declines",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 8ms"
+    },
+    {
+     "task_id": "t11_mixed_does_both",
+     "tier": "T11",
+     "passed": true,
+     "answered": false,
+     "wrong": false,
+     "expects_answer": false,
+     "detail": "ok in 6ms"
     }
    ]
   }

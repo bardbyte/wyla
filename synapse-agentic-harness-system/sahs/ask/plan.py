@@ -19,6 +19,7 @@ from typing import Any
 # "filters.<name>" so a mutation names one slot exactly.
 BASE_SLOTS: tuple[str, ...] = (
     "metric", "grain", "table", "time_window", "lob", "dimensions",
+    "checks",
 )
 
 
@@ -38,6 +39,11 @@ class Plan:
     time_window: str = ""
     lob: str = ""
     dimensions: tuple[str, ...] = ()
+    # what the answer must survive (Agent Loop v1): reconciliation and
+    # sanity checks the model wrote down while navigating. The verifier
+    # reads them; an empty tuple is legal and means "the contract's
+    # defaults only".
+    checks: tuple[str, ...] = ()
     filters: dict[str, str] = field(default_factory=dict)
     # filter name → the real column/expression the build binds it to.
     # Resolved evidence, not a slot: it never shows up in a diff.
@@ -54,6 +60,7 @@ class Plan:
             "metric": self.metric_id, "grain": self.grain,
             "table": self.table, "time_window": self.time_window,
             "lob": self.lob, "dimensions": list(self.dimensions),
+            "checks": list(self.checks),
         }
         for name, value in self.filters.items():
             out[f"filters.{name}"] = value
@@ -70,6 +77,7 @@ class Plan:
             "metric_sql": self.metric_sql, "grain": self.grain,
             "table": self.table, "time_window": self.time_window,
             "lob": self.lob, "dimensions": list(self.dimensions),
+            "checks": list(self.checks),
             "filters": dict(self.filters),
             "filter_bindings": dict(self.filter_bindings),
             "version": self.version,
@@ -90,6 +98,7 @@ class Plan:
             time_window=data.get("time_window", ""),
             lob=data.get("lob", ""),
             dimensions=tuple(data.get("dimensions", ())),
+            checks=tuple(data.get("checks", ())),
             filters=dict(data.get("filters", {})),
             filter_bindings=dict(data.get("filter_bindings", {})),
             version=int(data.get("version", 1)),
@@ -153,8 +162,8 @@ def apply_edit(plan: Plan, slot: str, value: Any, *,
         fields["filters"] = filters
     elif slot == "metric":
         fields["metric_id"] = value or ""
-    elif slot == "dimensions":
-        fields["dimensions"] = tuple(value or ())
+    elif slot in ("dimensions", "checks"):
+        fields[slot] = tuple(value or ())
     elif slot in BASE_SLOTS:
         fields[slot] = value or ""
     else:

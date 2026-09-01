@@ -55,7 +55,10 @@ class Budget:
     session_tokens: int = 400_000
     session_calls: int = 120
     turn_tokens: int = 60_000
-    turn_calls: int = 12
+    # sized for a navigation turn: up to 24 loop steps (each one model
+    # call) plus compose and the verifier. The fixed pipeline used ≤12;
+    # the cap still exists and still shares the abort path.
+    turn_calls: int = 40
     grace_at: float = 0.85
 
     tokens_in: int = 0

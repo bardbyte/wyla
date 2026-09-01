@@ -43,6 +43,15 @@ const STEP_COPY = {
     : `plan v${e.version} started`,
   contract_ready: (e) =>
     `${e.contract.will_verify.length} promises to verify, all unproven`,
+  loop_started: (e) =>
+    `navigating the graph (up to ${e.steps_max} looks)`,
+  loop_step: (e) => `${e.tool}: ${
+    String(e.summary || "").split("\n")[0]}`,
+  loop_done: (e) => ({
+    answered: `navigation done in ${e.steps} looks`,
+    ask: `stopped to ask after ${e.steps} looks`,
+    partial: `stopped honestly after ${e.steps} looks`,
+  }[e.outcome] || `navigation ${e.outcome}`),
 };
 
 export async function renderAsk(outlet, wanted = "") {
@@ -59,6 +68,12 @@ export async function renderAsk(outlet, wanted = "") {
     <div class="ask">
       <div class="ask-thread" id="ask-thread"></div>
       <div class="ask-composer">
+        <div class="ask-skillbar">
+          <button class="btn" id="ask-skills-btn" aria-expanded="false"
+            title="Load a skill into this session's context">⊕ skills</button>
+          <span id="ask-skill-chips"></span>
+          <div id="ask-skills-pop" class="skills-pop" hidden></div>
+        </div>
         <textarea id="ask-input" rows="1"
           placeholder="Ask about your data…"></textarea>
         <div class="ask-actions">
@@ -80,9 +95,13 @@ export async function renderAsk(outlet, wanted = "") {
   const stopBtn = outlet.querySelector("#ask-stop");
   const regenBtn = outlet.querySelector("#ask-regen");
   const meter = outlet.querySelector("#ask-meter");
+  const skillsBtn = outlet.querySelector("#ask-skills-btn");
+  const skillChips = outlet.querySelector("#ask-skill-chips");
+  const skillsPop = outlet.querySelector("#ask-skills-pop");
 
   const state = { session: null, source: null, turns: new Map(),
-                  lastText: "", running: false, seq: 0 };
+                  lastText: "", running: false, seq: 0,
+                  skillsAvailable: [], skillsLoaded: new Set() };
 
   // ── session ──────────────────────────────────────────────
   const say = (html, cls = "") => {
@@ -116,6 +135,77 @@ export async function renderAsk(outlet, wanted = "") {
   }
   state.session = boot.session;
   localStorage.setItem(SESSION_KEY, state.session.id);
+  state.skillsLoaded = new Set(boot.session.skills || []);
+
+  // ── skills: what the session carries into the loop's context ──
+  // Claude-style: an explicit picker; chips show what is loaded; the
+  // text itself only ever travels server-side into the system prompt.
+  async function refreshSkills() {
+    try {
+      const got = await api.askSkills();
+      state.skillsAvailable = got.available ? (got.skills || []) : [];
+    } catch { state.skillsAvailable = []; }
+    paintSkills();
+  }
+  function paintSkills() {
+    const loaded = [...state.skillsLoaded];
+    skillChips.innerHTML = loaded.map((name) =>
+      `<button class="skill-chip" data-skill="${esc(name)}"
+        title="click to unload">${esc(name)} ×</button>`).join(" ");
+    skillsBtn.textContent = loaded.length
+      ? `⊕ skills (${loaded.length})` : "⊕ skills";
+    for (const chip of skillChips.querySelectorAll(".skill-chip")) {
+      chip.addEventListener("click", () =>
+        toggleSkill(chip.dataset.skill));
+    }
+  }
+  function paintSkillsPop() {
+    if (!state.skillsAvailable.length) {
+      skillsPop.innerHTML = `<div class="muted" style="padding:6px">
+        No skills yet. Drop a markdown file in
+        <code>graph/skills/</code> — your own briefing on how you
+        read the data — and it appears here.</div>`;
+      return;
+    }
+    skillsPop.innerHTML = state.skillsAvailable.map((skill) => {
+      const on = state.skillsLoaded.has(skill.name);
+      return `<label class="skills-row">
+        <input type="checkbox" data-skill="${esc(skill.name)}"
+          ${on ? "checked" : ""}>
+        <span><b>${esc(skill.title || skill.name)}</b>
+          <span class="muted">${esc(skill.description || "")}</span>
+        </span></label>`;
+    }).join("") + `<div class="muted" style="padding:4px 6px">
+      Loaded skills steer the agent's navigation; they apply from
+      the next question.</div>`;
+    for (const box of skillsPop.querySelectorAll("input")) {
+      box.addEventListener("change", () =>
+        toggleSkill(box.dataset.skill));
+    }
+  }
+  async function toggleSkill(name) {
+    const next = new Set(state.skillsLoaded);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    const saved = await api.askSetSkills(state.session.id, [...next]);
+    if (saved.available && saved.ok) {
+      state.skillsLoaded = next;
+    } else {
+      say(`<b>skills:</b> ${esc(saved.reason || "could not save")}`,
+          "error");
+    }
+    paintSkills();
+    if (!skillsPop.hidden) paintSkillsPop();
+  }
+  skillsBtn.addEventListener("click", () => {
+    skillsPop.hidden = !skillsPop.hidden;
+    skillsBtn.setAttribute("aria-expanded", String(!skillsPop.hidden));
+    if (!skillsPop.hidden) paintSkillsPop();
+  });
+  document.addEventListener("click", (e) => {
+    if (!skillsPop.hidden && !skillsPop.contains(e.target)
+        && e.target !== skillsBtn) skillsPop.hidden = true;
+  });
+  refreshSkills();
   window.dispatchEvent(new CustomEvent("synapse:sessions"));
   // History comes from the STORE (durable, survives a restart); the
   // stream then starts at the bus head, so nothing renders twice.
@@ -182,6 +272,54 @@ export async function renderAsk(outlet, wanted = "") {
     state.turns.set(turnId, turn);
     scroll();
     return turn;
+  }
+
+  function sawButton(turn) {
+    if (turn.sawBtn || !turn.saw) return;
+    const btn = document.createElement("button");
+    btn.className = "btn saw-toggle";
+    btn.textContent = "what the model saw";
+    btn.addEventListener("click", () => {
+      let panel = turn.el.querySelector(".saw-panel");
+      if (panel) { panel.hidden = !panel.hidden; return; }
+      panel = buildSaw(turn);
+      turn.el.appendChild(panel);
+      scroll();
+    });
+    turn.extras.appendChild(btn);
+    turn.sawBtn = btn;
+  }
+
+  function buildSaw(turn) {
+    // rebuilt purely from the event stream: the panel can never show
+    // anything the events file does not hold, so replay == live
+    const saw = turn.saw;
+    const panel = document.createElement("div");
+    panel.className = "saw-panel";
+    const meta = saw.meta || {};
+    const skills = (meta.skills || []).join(", ") || "none";
+    let html = `<div class="muted saw-head">prompt ${
+      esc(meta.prompt_version || "?")} · skills loaded: ${
+      esc(skills)} · ${saw.steps.length} looks</div>`;
+    html += `<details><summary>system prompt (${
+      saw.system.length} chars)</summary><pre>${
+      esc(saw.system)}</pre></details>`;
+    for (const stepEv of saw.steps) {
+      const promptEv = saw.prompts.find((q) => q.n === stepEv.n);
+      const artifact = (turn.artifacts || {})[stepEv.ref];
+      html += `<details><summary>look ${stepEv.n} · ${
+        esc(stepEv.tool)} <span class="muted">${
+        esc(stepEv.think || "")}</span></summary>${
+        promptEv ? `<div class="saw-label">the model saw</div><pre>${
+          esc(promptEv.content)}</pre>` : ""}
+        <div class="saw-label">it called</div><pre>${
+          esc(stepEv.tool)}(${esc(stepEv.args || "")})</pre>
+        <div class="saw-label">the tool returned</div><pre>${
+          esc(artifact ? artifact.content
+                       : stepEv.summary || "")}</pre></details>`;
+    }
+    panel.innerHTML = html;
+    return panel;
   }
 
   function step(turn, text, mark = "·") {
@@ -413,7 +551,8 @@ export async function renderAsk(outlet, wanted = "") {
     source.onmessage = () => {};        // every event is named
     for (const name of [
       "turn_started", "classify_result", "plan_delta", "resolve_started",
-      "resolve_result", "clarify_request", "contract_ready",
+      "resolve_result", "loop_started", "loop_prompt", "loop_step",
+      "loop_artifact", "loop_done", "clarify_request", "contract_ready",
       "generate_token", "verify_progress", "verify_verdict",
       "answer_payload", "budget_tick", "budget_grace", "turn_done",
       "error"]) {
@@ -434,9 +573,41 @@ export async function renderAsk(outlet, wanted = "") {
         step(turn, "started");
         break;
       case "classify_result":
+        if (event.chat_turn) {
+          // E22: a conversation is not work. No theater strip, no
+          // plan rail change: just the reply, like a colleague.
+          turn.el.classList.add("chat-only");
+          break;
+        }
+        step(turn, STEP_COPY[event.ev](event));
+        break;
       case "resolve_started":
       case "resolve_result":
         step(turn, STEP_COPY[event.ev](event));
+        break;
+      case "loop_started":
+        turn.saw = { meta: event, system: "", prompts: [], steps: [] };
+        step(turn, STEP_COPY[event.ev](event));
+        break;
+      case "loop_prompt":
+        // the panel's ground truth: exactly what the model saw
+        if (!turn.saw) {
+          turn.saw = { meta: {}, system: "", prompts: [], steps: [] };
+        }
+        if (event.kind === "system") turn.saw.system = event.content;
+        else turn.saw.prompts.push(event);
+        break;
+      case "loop_step":
+        if (turn.saw) turn.saw.steps.push(event);
+        step(turn, STEP_COPY[event.ev](event));
+        break;
+      case "loop_done":
+        step(turn, STEP_COPY[event.ev](event));
+        sawButton(turn);
+        break;
+      case "loop_artifact":
+        // the full tool result, held for the panel
+        (turn.artifacts = turn.artifacts || {})[event.ref] = event;
         break;
       case "plan_delta":
         step(turn, STEP_COPY[event.ev](event));

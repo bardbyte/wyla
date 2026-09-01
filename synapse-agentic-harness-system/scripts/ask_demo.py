@@ -288,10 +288,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report", default="",
                         help="write the E21 Step-0a run report to this "
                              "directory (report.json + report.md)")
+    parser.add_argument("--navigate", action="store_true",
+                        help="Agent Loop v1: when the deterministic "
+                             "opening cannot complete the plan, the "
+                             "model navigates the graph (tool loop) "
+                             "instead of stopping at chips")
     args = parser.parse_args(argv)
 
     load_dotenv()
     import os
+    if args.navigate:
+        os.environ["SYNAPSE_NAVIGATE"] = "1"
     graph = Path(args.graph or os.environ.get("MERIDIAN_GRAPH_DIR")
                  or SILO / "graph")
     builds = Path(args.builds or os.environ.get("MERIDIAN_BUILDS_DIR")

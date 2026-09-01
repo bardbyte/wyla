@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   title TEXT NOT NULL DEFAULT '',
   build_id TEXT NOT NULL DEFAULT '',
   actor TEXT NOT NULL DEFAULT 'admin',
+  skills TEXT NOT NULL DEFAULT '[]',  -- JSON: loaded skill names
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -74,6 +75,14 @@ class SessionStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as conn:
             conn.executescript(SCHEMA_SQL)
+            # forward migration for stores created before skills:
+            # ALTER is idempotent-by-catch, the default keeps every
+            # old session honest ("nothing loaded")
+            try:
+                conn.execute("ALTER TABLE sessions ADD COLUMN skills "
+                             "TEXT NOT NULL DEFAULT '[]'")
+            except sqlite3.OperationalError:
+                pass                      # column already exists
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=10.0)
@@ -87,27 +96,46 @@ class SessionStore:
         if kind not in ("analyst", "steward"):
             raise ValueError("kind is analyst or steward (the two hats)")
         row = {"id": _new_id("s"), "kind": kind, "title": title,
-               "build_id": build_id, "actor": actor,
+               "build_id": build_id, "actor": actor, "skills": "[]",
                "created_at": now_iso(), "updated_at": now_iso()}
         with self._conn() as conn:
             conn.execute(
                 "INSERT INTO sessions (id,kind,title,build_id,actor,"
-                "created_at,updated_at) VALUES (:id,:kind,:title,:build_id,"
-                ":actor,:created_at,:updated_at)", row)
-        return row
+                "skills,created_at,updated_at) VALUES (:id,:kind,"
+                ":title,:build_id,:actor,:skills,:created_at,"
+                ":updated_at)", row)
+        return self._session_out(row)
+
+    @staticmethod
+    def _session_out(row: dict) -> dict:
+        out = dict(row)
+        try:
+            out["skills"] = list(json.loads(out.get("skills") or "[]"))
+        except (TypeError, ValueError):
+            out["skills"] = []
+        return out
 
     def get_session(self, session_id: str) -> dict | None:
         with self._conn() as conn:
             row = conn.execute("SELECT * FROM sessions WHERE id=?",
                                (session_id,)).fetchone()
-        return dict(row) if row else None
+        return self._session_out(dict(row)) if row else None
 
     def list_sessions(self, limit: int = 50) -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?",
                 (limit,)).fetchall()
-        return [dict(r) for r in rows]
+        return [self._session_out(dict(r)) for r in rows]
+
+    def set_skills(self, session_id: str, names: list[str]) -> None:
+        """The session's loaded skills, replaced whole: selection is
+        explicit and visible, never additive by accident."""
+        with self._conn() as conn:
+            conn.execute("UPDATE sessions SET skills=?, updated_at=? "
+                         "WHERE id=?",
+                         (json.dumps(list(names)), now_iso(),
+                          session_id))
 
     def set_title(self, session_id: str, title: str) -> None:
         with self._conn() as conn:
@@ -136,9 +164,11 @@ class SessionStore:
 
     def messages(self, session_id: str) -> list[dict]:
         with self._conn() as conn:
+            # rowid breaks same-second ties in INSERTION order; the
+            # random message id would shuffle a fast turn's transcript
             rows = conn.execute(
                 "SELECT * FROM messages WHERE session_id=? "
-                "ORDER BY created_at, id", (session_id,)).fetchall()
+                "ORDER BY created_at, rowid", (session_id,)).fetchall()
         out = []
         for r in rows:
             item = dict(r)
