@@ -18,8 +18,13 @@ python scripts/ask_demo.py "acquirer net spend by day" \
        --pick 1 --then "same for Canada" \
        --report graph/runs/vertex_r1
 
-git add graph/runs/vertex_r1 && git commit -m "E21 0a: vertex run report"
+cat graph/runs/vertex_r1/report.md
 ```
+
+The laptop cannot push, so the report travels by PASTE: run the
+`cat`, copy the output into the session. Same for the resolver trace
+when a bind looks wrong:
+`grep resolve_result graph/runs/ask/events/<session>.jsonl | head -1`.
 
 `--report` wraps the model with a recorder OUTSIDE the product (the
 same seam the tests use) and writes `report.json` + `report.md`:

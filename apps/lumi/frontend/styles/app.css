@@ -661,6 +661,9 @@ table.result tr:last-child td { border-bottom: none; }
 .error-card .card-label { color: var(--conflict); }
 .error-card p { margin: 0; font-size: var(--fs-13); }
 
+/* E22: a conversational turn shows its reply and nothing else */
+.ask-turn.chat-only .theater { display: none; }
+
 /* the composer: never disabled, even mid-turn */
 .ask-composer {
   display: flex; flex-direction: column; gap: var(--s-2);

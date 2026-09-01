@@ -434,6 +434,14 @@ export async function renderAsk(outlet, wanted = "") {
         step(turn, "started");
         break;
       case "classify_result":
+        if (event.chat_turn) {
+          // E22: a conversation is not work. No theater strip, no
+          // plan rail change: just the reply, like a colleague.
+          turn.el.classList.add("chat-only");
+          break;
+        }
+        step(turn, STEP_COPY[event.ev](event));
+        break;
       case "resolve_started":
       case "resolve_result":
         step(turn, STEP_COPY[event.ev](event));

@@ -25,6 +25,7 @@
 | T8 | composition (L3) | absent — not built, not scored |
 | T9 | exploratory (L4) | absent — not built, not scored |
 | T10 | abstention and honesty | 3/3 |
+| T11 | conversation quality (E22) | 9/9 |
 
 **Ablation note:** the three configurations produce identical lines on this build — none of these tasks sits near the margin boundary at this fixture's scale. On the full graph (3,000+ mined classes) the margin knob is expected to differentiate; a flat line there would be a finding about the knob, not the suite.
 

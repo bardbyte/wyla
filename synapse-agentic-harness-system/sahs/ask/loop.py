@@ -21,6 +21,8 @@ from sahs.tools.api import Build
 
 from .budget import Abort, Aborted, Budget
 from .classify import classify
+from .converse import (CHAT_SYSTEM, ChatTurn, chat_prompt,
+                       pre_classify, world)
 from .contract import build_contract
 from .events import EventBus
 from .generate import generate
@@ -43,6 +45,75 @@ def _error(bus: EventBus, turn_id: str, code: str, message: str,
     bus.emit("error", turn_id=turn_id, code=code, message=message,
              retryable=retryable,
              next_actions=next_actions or ["rephrase", "regenerate"])
+
+
+def _greeting_fallback(facts: dict[str, Any]) -> str:
+    return (f"Hi. I work over build {facts.get('build_id', '?')}: "
+            f"{facts.get('tables', 0)} tables, "
+            f"{facts.get('metrics', 0)} metrics.")
+
+
+def _compose_chat(model: Any, cls: Any, text: str,
+                  facts: dict[str, Any]) -> ChatTurn:
+    """A chat kind the deterministic matcher declined. One small model
+    call, JSON, no tools, no data. If it returns nothing usable the
+    turn still answers: a conversation must not dead-end on a parse."""
+    fallback = {
+        "help": "Ask for a measure and how you want it cut, like "
+                "\"spend by month for Canada\". If I cannot tell which "
+                "definition you mean, I will show you the candidates "
+                "with their evidence.",
+        "off_topic": "That one is outside the data I hold. If there is "
+                     "something in the company's numbers behind it, "
+                     "point me at that and I will dig in.",
+        "feedback": "Noted, and recorded against that answer.",
+    }.get(cls.kind, "I am here for questions about the company's data. "
+                    "What would you like to look at?")
+    try:
+        answer = model.json(chat_prompt(cls.kind, text, facts),
+                            system=CHAT_SYSTEM, temperature=0.3,
+                            max_tokens=300)
+    except Exception:
+        answer = None                 # a chat turn never breaks a turn
+    reply = ""
+    if isinstance(answer, dict):
+        reply = str(answer.get("reply") or "").strip()
+    feedback = ({"vote": "down", "subject": "answer", "note": text[:2000]}
+                if cls.kind == "feedback" else None)
+    return ChatTurn(kind=cls.kind, text=reply or fallback,
+                    model_used=isinstance(answer, dict), facts=facts,
+                    feedback=feedback)
+
+
+def _say(bus: EventBus, store: SessionStore, session: dict[str, Any],
+         turn_id: str, spoken: ChatTurn, *, close: bool = True) -> str:
+    """Stream a conversational reply. NO plan version, NO resolver, NO
+    contract, NO answer payload: a chat turn cannot emit data, and the
+    absence of those events is what the UI reads to keep the theater
+    strip hidden."""
+    for chunk in _sentences(spoken.text):
+        bus.emit("generate_token", turn_id=turn_id, delta=chunk)
+    store.add_message(session["id"], "assistant", spoken.text,
+                      turn_id=turn_id,
+                      payload={"chat": {"kind": spoken.kind}})
+    if spoken.feedback:
+        store.add_feedback(session["id"], spoken.feedback["subject"],
+                           spoken.feedback["vote"], turn_id=turn_id,
+                           note=spoken.feedback.get("note", ""))
+    return spoken.kind if close else ""
+
+
+def _sentences(text: str):
+    """Stream in readable chunks so a chat reply arrives like the rest
+    of the product rather than as one block."""
+    buffer = ""
+    for word in text.split(" "):
+        buffer += word + " "
+        if len(buffer) >= 48 or word.endswith((".", "?", "!", ":")):
+            yield buffer
+            buffer = ""
+    if buffer:
+        yield buffer
 
 
 def _autotitle(store: SessionStore, session: dict[str, Any],
@@ -72,11 +143,59 @@ def run_turn(*, build: Build, store: SessionStore, bus: EventBus,
         prior = Plan.from_dict(prior_row["plan"]) if prior_row else None
 
         # ── classify ─────────────────────────────────────────
+        # E22: the conversational half is tried in CODE first. A
+        # greeting, a thanks, or "what can you do" costs nothing and
+        # cannot drift, which is exactly why those are not prompts.
         abort.check()
-        cls = classify(model, text, prior, choice=choice)
-        bus.emit("classify_result", turn_id=turn_id, **cls.to_event())
+        facts = world(build)
+        spoken = None if choice else pre_classify(
+            text, facts, first_turn=prior is None)
+        classified_in_code = False
+        if spoken is not None and spoken.kind == "mixed":
+            # a greeting glued to a request, split in code: hello
+            # first, then the data half runs the full pipeline. One
+            # classify_result for the turn; the split cost nothing.
+            bus.emit("classify_result", turn_id=turn_id, kind="mixed",
+                     question=spoken.question, edits=[],
+                     why="split in code, no model call",
+                     degraded=False, model_used=False, chat_turn=False)
+            _say(bus, store, session, turn_id,
+                 ChatTurn(kind="chat", text=spoken.text,
+                          facts=facts), close=False)
+            text = spoken.question
+            spoken = None
+            classified_in_code = True
+        if spoken is not None:
+            bus.emit("classify_result", turn_id=turn_id,
+                     kind=spoken.kind, question="", edits=[],
+                     why="matched in code, no model call",
+                     degraded=False, model_used=False, chat_turn=True)
+            status = _say(bus, store, session, turn_id, spoken)
+            return
+
+        cls = classify(model, text, prior, choice=choice,
+                       allow_chat=not choice and not classified_in_code)
+        if not classified_in_code:
+            bus.emit("classify_result", turn_id=turn_id,
+                     **cls.to_event())
         if cls.model_used:
             bus.emit("budget_tick", turn_id=turn_id, **budget.tick())
+
+        # ── the chat kinds never plan ────────────────────────
+        if cls.is_chat:
+            status = _say(bus, store, session, turn_id,
+                          _compose_chat(model, cls, text, facts))
+            bus.emit("budget_tick", turn_id=turn_id, **budget.tick())
+            return
+        if cls.kind == "mixed":
+            # one turn, both halves, in order: the pleasantry is
+            # answered and THEN the data question runs the full
+            # pipeline. The chat half can never carry a number.
+            _say(bus, store, session, turn_id,
+                 ChatTurn(kind="chat", text=cls.chat
+                          or _greeting_fallback(facts), facts=facts),
+                 close=False)
+            text = cls.question
 
         # ── apply (deterministic, one slot per edit) ──────────
         abort.check()

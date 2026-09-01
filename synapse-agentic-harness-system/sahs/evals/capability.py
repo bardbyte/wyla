@@ -25,6 +25,9 @@ The tiers, mapped to what the built loop actually does:
   T9  exploratory (L4)  NOT BUILT — reported absent, never scored
   T10 abstention        out-of-scope questions get no answer, and the
                         refusal names itself
+  T11 conversation      greetings, thanks, meta and feedback land like
+                        a colleague, touch no plan, and (for the
+                        deterministic ones) cost no model call (E22)
 
 Two SUT levels, each task naming its own: ``resolver`` tasks call
 resolve() directly (T1, T3 disambiguation); ``loop`` tasks drive a
@@ -64,6 +67,7 @@ TIERS: dict[str, dict[str, Any]] = {
     "T8": {"title": "composition (L3)", "built": False},
     "T9": {"title": "exploratory (L4)", "built": False},
     "T10": {"title": "abstention and honesty", "built": True},
+    "T11": {"title": "conversation quality (E22)", "built": True},
 }
 
 CONFIGS: dict[str, float | None] = {
@@ -81,12 +85,28 @@ class ScriptedTransport:
     transport is replaced, the data never is). ``judge_unusable``
     exercises the fail-closed path."""
 
-    def __init__(self, judge_unusable: bool = False) -> None:
+    def __init__(self, judge_unusable: bool = False,
+                 mixed: str = "") -> None:
         self.judge_unusable = judge_unusable
+        self.mixed = mixed            # the data half of a mixed turn
+        self.calls: list[str] = []    # E22: chat turns must not add here
 
     def json(self, prompt, *, system="", temperature=0.0, max_tokens=1024):
+        if "conversational voice" in system:
+            self.calls.append("chat")
+            return {"reply": "That one is outside the data I hold, but "
+                             "point me at the numbers behind it and I "
+                             "will dig in."}
         if "You classify ONE turn" in system:
+            self.calls.append("classify")
             low = prompt.lower()
+            if self.mixed:
+                return {"kind": "mixed", "chat": "Hello.",
+                        "question": self.mixed, "edits": [],
+                        "why": "a greeting and a question"}
+            if "off_topic_probe" in low:
+                return {"kind": "off_topic", "question": "", "edits": [],
+                        "why": "outside the data world"}
             if "canada" in low:
                 return {"kind": "mutate", "why": "a filter changed",
                         "edits": [{"slot": "filters.country",
@@ -94,8 +114,10 @@ class ScriptedTransport:
             return {"kind": "new_question", "question": prompt,
                     "why": "fresh subject", "edits": []}
         if "You compose ONE BigQuery SELECT" in system:
+            self.calls.append("sql")
             return {"sql": GOOD_SQL, "why": "certified expression"}
         if "skeptical reviewer" in system:
+            self.calls.append("judge")
             if self.judge_unusable:
                 return {"nonsense": True}
             return {"grounded": True, "why": "claims trace"}
@@ -103,6 +125,7 @@ class ScriptedTransport:
 
     def stream(self, prompt, *, system="", temperature=0.3,
                max_tokens=1500):
+        self.calls.append("stream")
         yield ("Validated against the promoted build; not executed "
                "live, so no figure is stated.")
 
@@ -185,6 +208,7 @@ def _drive_loop(build: Any, tmp: Path, task: dict,
                             if current.exists() else -1.0)
     session = runtime.create_session("analyst")
     rt = runtime.runtime(session["id"])
+    runtime.session_id = session["id"]      # for the plan-count pin
     for turn in task["turns"]:
         runtime.start_turn(session["id"], turn["text"],
                            choice=turn.get("choice"))
@@ -269,6 +293,32 @@ def _grade_loop(events: list[dict], expect: dict) -> tuple[bool, str]:
     if expect.get("honest_exit") and not (clarifies or [
             e for e in events if e["ev"] == "error"]):
         problems.append("neither a question nor an error card")
+
+    # ── E22 conversation pins ────────────────────────────────
+    classifications = [e for e in events
+                       if e["ev"] == "classify_result"]
+    classified = classifications[-1] if classifications else None
+    if "classified" in expect:
+        got = classified.get("kind") if classified else None
+        if got != expect["classified"]:
+            problems.append(f"classified {got!r}, wanted "
+                            f"{expect['classified']!r}")
+    if expect.get("no_plan"):
+        if "contract_ready" in kinds or "plan_delta" in kinds:
+            problems.append("a chat turn touched the plan")
+    if expect.get("no_resolver") and "resolve_started" in kinds:
+        problems.append("a chat turn reached the resolver")
+    if expect.get("spoke"):
+        prose = "".join(e.get("delta", "") for e in events
+                        if e["ev"] == "generate_token")
+        if not prose.strip():
+            problems.append("a chat turn said nothing")
+        for banned in expect.get("must_not_say", []):
+            if banned.lower() in prose.lower():
+                problems.append(f"said {banned!r}, which it must not")
+        for wanted in expect.get("must_say", []):
+            if wanted.lower() not in prose.lower():
+                problems.append(f"did not mention {wanted!r}")
     return (not problems), "; ".join(problems)
 
 
@@ -318,8 +368,16 @@ def run_matrix(build: Any, tmp: Path, tasks: list[dict], *,
     from sahs.ask.plan import Plan
 
     configured = build_with_margin(build, margin)
-    factory = model_factory or (lambda task: ScriptedTransport(
-        judge_unusable=bool(task.get("judge_unusable"))))
+    transports: dict[str, ScriptedTransport] = {}
+
+    def default_factory(task):
+        transport = ScriptedTransport(
+            judge_unusable=bool(task.get("judge_unusable")),
+            mixed=str(task.get("mixed") or ""))
+        transports[task["id"]] = transport
+        return transport
+
+    factory = model_factory or default_factory
     out = MatrixResult(config=config, margin=margin)
 
     for task in tasks:
@@ -345,8 +403,22 @@ def run_matrix(build: Any, tmp: Path, tasks: list[dict], *,
                     f"verdict {preview['verdict']!r}")
                 answered, wrong = False, False
             else:                                   # loop
-                events, _rt = _drive_loop(configured, tmp, task, factory)
+                events, rt = _drive_loop(configured, tmp, task, factory)
                 passed, detail = _grade_loop(events, task["expect"])
+                transport = transports.get(task["id"])
+                if task["expect"].get("zero_model_calls") and transport \
+                        and transport.calls:
+                    passed = False
+                    detail = (f"{len(transport.calls)} model call(s) on a "
+                              f"turn that must cost none: "
+                              f"{transport.calls}")
+                if task["expect"].get("plans") is not None:
+                    plans = len(rt.store.plan_versions(rt.session_id)) \
+                        if hasattr(rt, "session_id") else None
+                    if plans is not None and plans != task["expect"][
+                            "plans"]:
+                        passed = False
+                        detail = f"{plans} plan versions"
                 answered = any(e["ev"] == "answer_payload"
                                for e in events)
                 wrong = answered and not passed
