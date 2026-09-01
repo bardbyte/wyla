@@ -43,6 +43,15 @@ const STEP_COPY = {
     : `plan v${e.version} started`,
   contract_ready: (e) =>
     `${e.contract.will_verify.length} promises to verify, all unproven`,
+  loop_started: (e) =>
+    `navigating the graph (up to ${e.steps_max} looks)`,
+  loop_step: (e) => `${e.tool}: ${
+    String(e.summary || "").split("\n")[0]}`,
+  loop_done: (e) => ({
+    answered: `navigation done in ${e.steps} looks`,
+    ask: `stopped to ask after ${e.steps} looks`,
+    partial: `stopped honestly after ${e.steps} looks`,
+  }[e.outcome] || `navigation ${e.outcome}`),
 };
 
 export async function renderAsk(outlet, wanted = "") {
@@ -413,7 +422,8 @@ export async function renderAsk(outlet, wanted = "") {
     source.onmessage = () => {};        // every event is named
     for (const name of [
       "turn_started", "classify_result", "plan_delta", "resolve_started",
-      "resolve_result", "clarify_request", "contract_ready",
+      "resolve_result", "loop_started", "loop_step", "loop_artifact",
+      "loop_done", "clarify_request", "contract_ready",
       "generate_token", "verify_progress", "verify_verdict",
       "answer_payload", "budget_tick", "budget_grace", "turn_done",
       "error"]) {
@@ -445,6 +455,15 @@ export async function renderAsk(outlet, wanted = "") {
       case "resolve_started":
       case "resolve_result":
         step(turn, STEP_COPY[event.ev](event));
+        break;
+      case "loop_started":
+      case "loop_step":
+      case "loop_done":
+        step(turn, STEP_COPY[event.ev](event));
+        break;
+      case "loop_artifact":
+        // the full tool result: no visual yet, held for the panel
+        (turn.artifacts = turn.artifacts || {})[event.ref] = event;
         break;
       case "plan_delta":
         step(turn, STEP_COPY[event.ev](event));

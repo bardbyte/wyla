@@ -89,7 +89,7 @@ boundary; the full graph is expected to differentiate).
 | 1 typecheck | INSIDE `plan_set` — runs on every call, teaching errors as tool results (§9.1, **landed**: `sahs/loop/tools.py`) |
 | 2 digest + skills | the system prompt's world digest + skills slot (§9.3) |
 | 3 ladder + subgraph_used | stop conditions in the prompt; the sub-graph records itself on the loop state (§9.1 records, §9.2 discloses) |
-| 4 explore + scout + compaction | REPLACED: the loop IS the explore phase (§9.2); scout is §9.5 |
+| 4 explore + scout + compaction | REPLACED: the loop IS the explore phase (§9.2, **landed**: `sahs/loop/loop.py`, behind `SYNAPSE_NAVIGATE=1` until §9.4 grades it); scout is §9.5 |
 | 5 L3 checks | the plan's `checks` slot, written via `plan_set`, read by the verifier |
 | 6 exploratory lane | the loop with `run_sql` snapshot on (§9.5) |
 | 7 constellation | unchanged, non-blocking, still driven by subgraph_used |

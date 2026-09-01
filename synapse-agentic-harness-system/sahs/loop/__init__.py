@@ -7,5 +7,6 @@ tools first (descriptions are the product), then the loop, then the
 prompt, then the navigation evals, then the scout.
 """
 
+from .loop import (LoopBudget, navigate_loop)             # noqa: F401
 from .tools import (LoopState, SnapshotRunner, ToolSpec,  # noqa: F401
                     render_tool_block, toolkit)

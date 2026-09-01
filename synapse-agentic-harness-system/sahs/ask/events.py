@@ -24,15 +24,23 @@ from typing import Any
 
 SCHEMA = "meridian.event/1"
 
-# the pinned event family for a turn (E18). Order here is the order a
-# healthy governed turn emits them; clarify_request and error are the
-# two legitimate early exits.
+# the pinned event family for a turn (E18; loop events added by Agent
+# Loop v1 §2). Order here is the order a healthy governed turn emits
+# them; clarify_request and error are the two legitimate early exits.
+# The loop_* four fire only when navigation engages: each model step
+# emits loop_step (the ≤3-line summary the model kept) and
+# loop_artifact (the full tool result), so the events file IS the
+# trajectory and the "what the model saw" panel re-reads it.
 EVENTS: tuple[str, ...] = (
     "turn_started",
     "classify_result",
     "plan_delta",
     "resolve_started",
     "resolve_result",
+    "loop_started",
+    "loop_step",
+    "loop_artifact",
+    "loop_done",
     "clarify_request",
     "contract_ready",
     "generate_token",
