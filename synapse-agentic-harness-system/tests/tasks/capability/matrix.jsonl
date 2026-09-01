@@ -1,0 +1,20 @@
+{"id": "t1_cnp_expands", "tier": "T1", "level": "resolver", "prompt": "CNP spend", "context": {}, "expect": {"expanded_min": 1}}
+{"id": "t1_aa_unscoped_refuses", "tier": "T1", "level": "resolver", "prompt": "AA volume", "context": {}, "expect": {"expanded_exact": 3, "must_not_bind": true}}
+{"id": "t1_aa_scoped_narrows", "tier": "T1", "level": "resolver", "prompt": "AA volume", "context": {"bu": "marketing", "region": "emea"}, "expect": {"expanded_exact": 1}}
+{"id": "t1_alif_gmns", "tier": "T1", "level": "resolver", "prompt": "ALIF for merchants", "context": {"bu": "gmns"}, "expect": {"expanded_min": 1}}
+{"id": "t2_certified_bind", "tier": "T2", "level": "loop", "turns": [{"text": "acquirer net spend by day"}], "expect": {"bound_label": "Acquirer Net Spend", "resolve_under_ms": 300, "no_answer": true, "clarify_slot": "grain"}}
+{"id": "t2_gmns_bind", "tier": "T2", "level": "loop", "turns": [{"text": "GMNS merchant spend"}], "expect": {"bound_label": "GMNS Merchant Spend", "resolve_under_ms": 300, "no_answer": true, "clarify_slot": "grain"}}
+{"id": "t3_grain_has_evidence", "tier": "T3", "level": "loop", "turns": [{"text": "acquirer net spend by day"}], "expect": {"clarify_slot": "grain", "options_carry_evidence": true, "no_answer": true}}
+{"id": "t3_nothing_matches", "tier": "T3", "level": "loop", "turns": [{"text": "quantum flux capacitance per moon phase"}], "expect": {"clarify_slot": "metric", "no_answer": true, "options_carry_evidence": true}}
+{"id": "t3_dis_consumer", "tier": "T3", "level": "curated", "curated_id": "dis_001", "curated_path": "tests/tasks/curated/curated.jsonl", "expect": {}}
+{"id": "t3_dis_declined", "tier": "T3", "level": "curated", "curated_id": "dis_002", "curated_path": "tests/tasks/curated/curated.jsonl", "expect": {}}
+{"id": "t4_one_slot_canada", "tier": "T4", "level": "loop", "turns": [{"text": "acquirer net spend by day"}, {"text": "transaction", "choice": {"slot": "grain", "value": "transaction", "label": "transaction"}}, {"text": "same for Canada"}], "expect": {"one_slot_moved": "filters.country", "resolve_under_ms": 300, "answered": true}}
+{"id": "t5_contract_before_work", "tier": "T5", "level": "loop", "turns": [{"text": "acquirer net spend by day"}, {"text": "transaction", "choice": {"slot": "grain", "value": "transaction", "label": "transaction"}}], "expect": {"contract_before_generate": true, "answered": true}}
+{"id": "t5_judge_fails_closed", "tier": "T5", "level": "loop", "judge_unusable": true, "turns": [{"text": "acquirer net spend by day"}, {"text": "transaction", "choice": {"slot": "grain", "value": "transaction", "label": "transaction"}}], "expect": {"grounded_fail_closed": true, "verdict": "fail", "answered": true, "receipts": true}}
+{"id": "t6_single_table_safe", "tier": "T6", "level": "preview", "base": "dw.gms_transaction", "tables": ["dw.gms_transaction"], "expect": {"verdict": "safe"}}
+{"id": "t6_no_key_unproven", "tier": "T6", "level": "preview", "base": "dw.gms_transaction", "tables": ["dw.gms_transaction", "dw.wwcas_authorization"], "expect": {"verdict": "unproven"}}
+{"id": "t6_unwitnessed_unsafe", "tier": "T6", "level": "preview", "base": "dw.gms_transaction", "tables": ["dw.gms_transaction", "dw.sbs_new_accounts"], "expect": {"verdict": "unsafe"}}
+{"id": "t7_answer_receipts", "tier": "T7", "level": "loop", "turns": [{"text": "acquirer net spend by day"}, {"text": "transaction", "choice": {"slot": "grain", "value": "transaction", "label": "transaction"}}], "expect": {"answered": true, "receipts": true}}
+{"id": "t10_chargebacks", "tier": "T10", "level": "loop", "turns": [{"text": "Which merchants had chargebacks over $10k?"}], "expect": {"no_answer": true, "honest_exit": true}}
+{"id": "t10_loyalty", "tier": "T10", "level": "loop", "turns": [{"text": "Total loyalty points redeemed by region"}], "expect": {"no_answer": true, "honest_exit": true}}
+{"id": "t10_forecast", "tier": "T10", "level": "loop", "turns": [{"text": "Forecast next quarter's fraud losses"}], "expect": {"no_answer": true, "honest_exit": true}}
