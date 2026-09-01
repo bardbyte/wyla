@@ -243,6 +243,7 @@ def run_turn(*, build: Build, store: SessionStore, bus: EventBus,
                 build=build, store=store, bus=bus, budget=budget,
                 abort=abort, model=model, session=session,
                 turn_id=turn_id, plan=prior, finish=finish,
+                skills=session.get("_skills_loaded"),
                 resume=_resume_context(store, session_id, choice))
             return
 
@@ -335,6 +336,7 @@ def run_turn(*, build: Build, store: SessionStore, bus: EventBus,
                 build=build, store=store, bus=bus, budget=budget,
                 abort=abort, model=model, session=session,
                 turn_id=turn_id, plan=plan, finish=finish,
+                skills=session.get("_skills_loaded"),
                 resolver=outcome.result, clarify=outcome.clarify)
             return
 

@@ -124,6 +124,37 @@ class AskRuntime:
         self.runtime(session["id"])
         return session
 
+    # ── skills (Agent Loop v1 §2: session.skills) ────────────
+    def skills(self) -> list[dict]:
+        """The skills available to load: markdown files the analyst
+        put in <graph>/skills. Name, title, description — the text
+        itself only travels into a session that loads it."""
+        from sahs.loop.skills import list_skills
+        return [{"name": s.name, "title": s.title,
+                 "description": s.description}
+                for s in list_skills(self.graph_root)]
+
+    def set_skills(self, session_id: str, names: list[str]) -> dict:
+        """Replace the session's loaded skills. Unknown names are
+        refused by name — a skill that does not exist cannot be
+        silently 'loaded'."""
+        from sahs.loop.skills import MAX_LOADED, load_skills
+        session = self.store.get_session(session_id)
+        if session is None:
+            raise KeyError(session_id)
+        if len(names) > MAX_LOADED:
+            return {"ok": False,
+                    "reason": f"at most {MAX_LOADED} skills load at "
+                              "once: choose what matters for this "
+                              "session"}
+        loaded, missing = load_skills(self.graph_root, list(names))
+        if missing:
+            return {"ok": False,
+                    "reason": "no such skill: " + ", ".join(missing),
+                    "missing": missing}
+        self.store.set_skills(session_id, [s.name for s in loaded])
+        return {"ok": True, "skills": [s.name for s in loaded]}
+
     def sessions(self, limit: int = 50) -> list[dict]:
         rows = self.store.list_sessions(limit)
         for row in rows:
@@ -145,6 +176,12 @@ class AskRuntime:
         turn_id = f"t_{uuid.uuid4().hex[:10]}"
         rt.abort = Abort()
         rt.current_turn = turn_id
+        # the session's loaded skills ride the session dict into the
+        # turn (Agent Loop v1 §2: Context(..., skills=session.skills))
+        from sahs.loop.skills import load_skills
+        loaded, _missing = load_skills(self.graph_root,
+                                       list(session.get("skills") or []))
+        session["_skills_loaded"] = loaded
         self.store.add_message(session_id, "user", text, turn_id=turn_id,
                                payload={"choice": choice} if choice else None)
         model = LazyModel(lambda: self.model_for(rt.budget))

@@ -77,6 +77,9 @@ export const api = {
     post(`/api/sessions/${encodeURIComponent(id)}/messages`,
       { text, choice }),
   askStop: (id) => post(`/api/sessions/${encodeURIComponent(id)}/stop`),
+  askSkills: () => get("/api/skills"),
+  askSetSkills: (id, names) =>
+    post(`/api/sessions/${encodeURIComponent(id)}/skills`, { names }),
   askFeedback: (id, payload) =>
     post(`/api/sessions/${encodeURIComponent(id)}/feedback`, payload),
   askRestorePlan: (id, version) =>

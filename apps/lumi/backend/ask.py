@@ -71,6 +71,10 @@ class NewFeedback(BaseModel):
     turn_id: str = ""
 
 
+class SetSkills(BaseModel):
+    names: list[str] = Field(default_factory=list, max_length=8)
+
+
 def _unavailable(reason: str) -> dict:
     return {"available": False, "reason": reason}
 
@@ -144,6 +148,25 @@ def restore_plan(session_id: str, req: RestorePlan) -> dict:
         return {"available": False, "reason": str(e), "busy": True}
     except KeyError as e:
         return _unavailable(str(e).strip("'"))
+
+
+@router.get("/skills")
+def list_skills() -> dict:
+    """The skills an analyst can load — markdown files they put in
+    <graph>/skills. Names and descriptions only; the text enters a
+    session's context when loaded, never before."""
+    runtime, _ = _ask()
+    return {"available": True, "skills": runtime.skills()}
+
+
+@router.post("/sessions/{session_id}/skills")
+def set_session_skills(session_id: str, req: SetSkills) -> dict:
+    runtime, _ = _ask()
+    try:
+        result = runtime.set_skills(session_id, req.names)
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+    return {"available": True, **result}
 
 
 @router.post("/sessions/{session_id}/feedback", status_code=201)

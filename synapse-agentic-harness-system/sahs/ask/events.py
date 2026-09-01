@@ -38,6 +38,7 @@ EVENTS: tuple[str, ...] = (
     "resolve_started",
     "resolve_result",
     "loop_started",
+    "loop_prompt",
     "loop_step",
     "loop_artifact",
     "loop_done",

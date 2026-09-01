@@ -42,37 +42,13 @@ from typing import Any, Callable
 
 from sahs.tools.api import Build
 
+from .prompt import PROMPT_VERSION, system_prompt
+from .skills import Skill
 from .tools import LoopState, render_tool_block, toolkit
 
 MAX_STEPS = 24                 # §2: Budget(tool_calls=24, ...)
 WALL_SECONDS = 180.0
 STRIKES = 2                    # malformed replies before failing closed
-
-LOOP_SYSTEM = """You navigate a governed data graph to complete one \
-semantic plan.
-
-You are the navigator: read evidence, decide the next look, keep the
-plan current. Determinism lives in the tools; judgement about where to
-look next lives with you. Never invent a table, column, or metric: if
-it is not in a card or an index, it does not exist for you. Numbers
-only ever come from tools.
-
-Reply with STRICT JSON, exactly one object per step, no prose around
-it:
-  {"think": "<one or two sentences>", "tool": "<name>", "args": {...}}
-  {"think": "<why the plan is complete>", "final": true}
-
-Doctrine: trust what the binder bound, investigate what it did not.
-search_semantics for meaning, grep_cards for exact tokens, read_card
-before use. sample_values before any filter literal; get_join_paths
-before any join. plan_set as you learn; note what you ruled out and
-why. Ask at most once, with evidence on every option. Finish when the
-plan has metric, table, and grain bound and its checks are written.
-Stop honestly if the budget ends.
-
-Your tools:
-
-"""
 
 
 @dataclass
@@ -238,6 +214,7 @@ def navigate_loop(*, build: Build, store: Any, bus: Any, budget: Any,
                   resolver: dict[str, Any] | None = None,
                   clarify: dict[str, Any] | None = None,
                   resume: dict[str, Any] | None = None,
+                  skills: list[Skill] | None = None,
                   substrate: Any = None, snapshot_runner: Any = None,
                   ledger_path: Path | None = None,
                   max_steps: int = MAX_STEPS,
@@ -253,7 +230,8 @@ def navigate_loop(*, build: Build, store: Any, bus: Any, budget: Any,
     kit = toolkit(build, state, substrate=substrate,
                   snapshot_runner=snapshot_runner,
                   ledger_path=ledger_path)
-    system = LOOP_SYSTEM + render_tool_block(kit)
+    system = system_prompt(build, skills,
+                           tool_block=render_tool_block(kit))
     loop_budget = LoopBudget(max_steps=max_steps,
                              wall_seconds=wall_seconds)
     opening = _opening_line(resolver, clarify, resume)
@@ -264,7 +242,13 @@ def navigate_loop(*, build: Build, store: Any, bus: Any, budget: Any,
     stop_reason = ""
 
     bus.emit("loop_started", turn_id=turn_id, reason=opening,
-             steps_max=max_steps, build_id=build.version)
+             steps_max=max_steps, build_id=build.version,
+             prompt_version=PROMPT_VERSION,
+             skills=[s.name for s in (skills or [])])
+    # the panel's ground truth: the system prompt the model will see,
+    # emitted once (it is identical for every step of this loop)
+    bus.emit("loop_prompt", turn_id=turn_id, n=0, kind="system",
+             content=system[:12000])
 
     while True:
         tripped = loop_budget.tripped()
@@ -277,6 +261,9 @@ def navigate_loop(*, build: Build, store: Any, bus: Any, budget: Any,
         prompt = _render_context(question, opening, state.plan,
                                  state.notes, history,
                                  loop_budget.left, max_steps)
+        bus.emit("loop_prompt", turn_id=turn_id,
+                 n=loop_budget.steps + 1, kind="step",
+                 content=prompt[:8000])
         step = model.json(prompt, system=system, temperature=0.0,
                           max_tokens=700)
         loop_budget.charge()
