@@ -174,3 +174,20 @@ Commit after each phase (each runbook has the exact `git add` line).
   `--fresh` restarts deliberately.
 - `--plain` for log-friendly output, `--json` for a machine summary on
   stdout; the full event stream is always in `<out>/events.jsonl`.
+
+## Synapse v2 chat (the assistant) — after main is pulled
+
+```bash
+pip install -e ".[sql,dev,assistant]"   # assistant adds python-pptx + numpy
+uvicorn apps.lumi.backend.app:app --port 8400   # from the repo root
+# → open http://127.0.0.1:8400/#/chat  (New ask in the nav)
+
+# the assistant baseline (the number this epoch is missing):
+python scripts/chat_eval.py --real              # Vertex creds in the silo .env
+# → PASTE docs/evals/assistant_baseline_vertex.md back into the session
+# short/cheap variants: --limit 4 · --kind playbook · --no-judge
+```
+
+The chat stores its sessions under `graph/runs/chat/`; artifacts,
+memory, and projects live in `sessions.sqlite3` there. PPTX export
+needs the `assistant` extra — the route says so if it is missing.
