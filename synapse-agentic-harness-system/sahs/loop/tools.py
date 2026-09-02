@@ -43,6 +43,24 @@ from sahs.tools.sandbox import execute_sandboxed
 from sahs.tools.validate_sql import validate_sql
 
 MAX_GREP_HITS = 40
+
+_BINDING_TEMPLATE = re.compile(
+    r"\bWHERE\s+(?:\w+\.)*(\w+)\s*(=|!=|>=|<=|>|<|IN)\s*(.+)$",
+    re.IGNORECASE | re.DOTALL)
+
+
+def binding_template(canonical_sql: str) -> dict[str, str] | None:
+    """column + operator from a mined binding, the witnessed literal
+    demoted to an EXAMPLE. The fix for the baked-literal defect: a
+    binding teaches WHERE to filter, never WHAT value to use — the
+    caller's own literal belongs in the query."""
+    match = _BINDING_TEMPLATE.search(canonical_sql or "")
+    if not match:
+        return None
+    return {"column": match.group(1), "op": match.group(2).upper(),
+            "example_literal": match.group(3).strip()[:80]}
+
+
 MAX_CHIPS = 4          # same ceiling as clarify chips: evidence, not a lineup
 MAX_NOTES = 100
 ROW_CAP = 1000
@@ -354,12 +372,16 @@ def toolkit(build: Build, state: LoopState, *,
                 })
         if kind in ("all", "concepts"):
             for b in search_concepts(build, query, top_k=8)["bindings"]:
-                results.append({
+                hit = {
                     "kind": "concept", "label": b["concept"],
                     "table": b["table"], "sql": b["sql"],
                     "support": b.get("support", 0),
                     "source": b.get("source", ""),
-                })
+                }
+                template = binding_template(b["sql"])
+                if template:
+                    hit["template"] = template
+                results.append(hit)
         if kind in ("all", "vocab"):
             tokens = _tokens(query)
             raw = {(query or "").strip().lower()}

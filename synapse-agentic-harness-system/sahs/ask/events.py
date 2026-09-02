@@ -69,9 +69,13 @@ class EventBus:
     """
 
     def __init__(self, session_id: str, path: Path | None = None,
-                 keep: int = 4000) -> None:
+                 keep: int = 4000,
+                 events: tuple[str, ...] = EVENTS) -> None:
         self.session_id = session_id
         self.path = path
+        # the family this bus enforces: the ask surface's by default;
+        # the v2 assistant passes its own. Still pinned per surface.
+        self._family = events
         self._keep = keep
         self._lock = threading.Lock()
         self._events: list[dict[str, Any]] = []
@@ -82,7 +86,7 @@ class EventBus:
 
     def emit(self, ev: str, *, turn_id: str = "",
              **fields: Any) -> dict[str, Any]:
-        if ev not in EVENTS:
+        if ev not in self._family:
             raise ValueError(f"unregistered event {ev!r}: the family is "
                              "pinned so the UI can be a pure consumer")
         with self._lock:

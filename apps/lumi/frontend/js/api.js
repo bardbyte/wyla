@@ -78,6 +78,40 @@ export const api = {
       { text, choice }),
   askStop: (id) => post(`/api/sessions/${encodeURIComponent(id)}/stop`),
   askSkills: () => get("/api/skills"),
+  chatSessions: (limit = 40) => get(`/api/chat/sessions?limit=${limit}`),
+  chatNewSession: () => post("/api/chat/sessions", {}),
+  chatSession: (id) => get(`/api/chat/sessions/${encodeURIComponent(id)}`),
+  chatSend: (id, text) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/messages`, { text }),
+  chatStop: (id) => post(`/api/chat/sessions/${encodeURIComponent(id)}/stop`),
+  chatRename: (id, title) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/rename`, { title }),
+  chatSkills: () => get("/api/chat/skills"),
+  chatSetSkills: (id, names) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/skills`, { names }),
+  chatProjects: () => get("/api/chat/projects"),
+  chatNewProject: (name, instructions = "") =>
+    post("/api/chat/projects", { name, instructions }),
+  chatSetProject: (id, projectId) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/project`,
+         { project_id: projectId }),
+  chatStar: (id, on) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/star`, { on }),
+  chatArchive: (id, on) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/archive`, { on }),
+  chatMemories: (projectId = "") =>
+    get(`/api/chat/memories?project_id=${encodeURIComponent(projectId)}`),
+  chatRetireMemory: (id) =>
+    post(`/api/chat/memories/${encodeURIComponent(id)}/retire`, {}),
+  chatPptxUrl: (id) =>
+    `/api/chat/artifacts/${encodeURIComponent(id)}/export.pptx`,
+  chatArtifact: (id, version = null) =>
+    get(`/api/chat/artifacts/${encodeURIComponent(id)}`
+        + (version ? `?version=${version}` : "")),
+  chatArtifactVersions: (id) =>
+    get(`/api/chat/artifacts/${encodeURIComponent(id)}/versions`),
+  chatStreamUrl: (id, after = 0) =>
+    `/api/chat/sessions/${encodeURIComponent(id)}/stream?after=${after}`,
   askSetSkills: (id, names) =>
     post(`/api/sessions/${encodeURIComponent(id)}/skills`, { names }),
   askFeedback: (id, payload) =>

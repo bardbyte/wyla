@@ -36,15 +36,17 @@ CSS = (FRONTEND / "styles" / "app.css").read_text(encoding="utf-8")
 NOT_YET = {"notebook_artifact"}
 
 
-def test_the_shell_offers_ask_and_stops_promising_it():
-    assert 'href="#/ask" data-tab="ask"' in INDEX, "no Ask door in the nav"
-    assert "E16" not in INDEX, (
-        "the chats shelf still promises Ask as future work, but it shipped")
+def test_the_shell_keeps_ask_reachable_behind_new_ask():
+    # v2: the nav says "New ask" and the shelf below is the chats
+    # list; the v1 Ask surface stays deep-linkable at #/ask, it just
+    # no longer owns a nav entry or the shelf
+    assert 'data-tab="ask"' not in INDEX, "Ask returned to the nav"
+    assert 'href="#/chat/new"' in INDEX, "no New ask door"
     assert 'class="chats-body"' in INDEX, "the shelf has nowhere to render"
-    # the router knows the route AND the deep link into one session
+    # the router still knows the route AND the deep link into a session
     assert "ask: () => renderAsk(outlet, arg)" in MAIN_JS
     assert 'page === "ask"' in MAIN_JS, "renderAsk never receives its arg"
-    assert "#/ask/" in CHATS_JS, "the shelf cannot link to a session"
+    assert "#/chat/" in CHATS_JS, "the shelf cannot link to a chat"
 
 
 def test_every_event_the_loop_emits_reaches_the_page():
