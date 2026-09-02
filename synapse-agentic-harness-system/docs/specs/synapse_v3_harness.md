@@ -213,8 +213,54 @@ handoff, the eval suites.
 3. Memory consent: silent save with inline undo (recommended) vs
    ask first.
 4. Chips: keep model-authored, max three (recommended) vs drop.
-5. Depth dial default Standard (medium) and a Flash-tier model for
-   the memory pass and the judge.
+5. Depth dial default Standard (medium). The memory pass and the
+   judge run on the Pro model at thinking low until the org allows a
+   Flash model (§12): every Flash id is refused by the organization's
+   allowed-models constraint, not missing.
 6. Model id: the silo default is already `gemini-3.1-pro-preview`
    (`sahs/util/auth.py`), overridable by `VERTEX_MODEL`; confirm the
    laptop .env does not pin an older id.
+
+## 12 · The laptop, measured (state report of 2026-09-02)
+
+What v3 is actually built against — not the fixture.
+
+- **Vertex, confirmed for Stage 1:** project prj-d-ea-poc, location
+  global, `gemini-3.1-pro-preview` behind the proxy with truststore.
+  Native function calling works on our REST client and the
+  `functionCall` part comes back WITH a thought signature; thinking
+  level `low` is accepted (lowercase) and `includeThoughts` returns
+  thought summaries; SSE streaming works. A trivial Pro call costs
+  ~3 s and ~140 thought tokens — one more reason a turn must be one
+  interaction, not seven.
+- **No Flash model is usable:** 3.7 / 3.6 / 3.5 / 3.5-lite / 3-preview
+  / 2.5 / 2.5-lite all answer HTTP 400 "Organization Policy
+  constraint" (they exist; the project may not use them);
+  3.1-flash ids do not exist. Ask the org admin to allow one under
+  `constraints/vertexai.allowedModels`. Until then the memory pass
+  and the judge run on Pro at thinking low.
+- **The graph:** 3,146 metric nodes, 60,502 columns over 268 table
+  nodes, 8,645 concepts, 25,483 vocabulary terms, 14,886 column
+  domains; witnesses bq 55k, atlas 21k, catalog_mined 9k, snippet
+  8.6k, dmp 183, steward 100, studio 47 — and **zero jobs_30d
+  quads**: the 30-day query history has never been mined on this
+  graph, which is why the build has 2 joins (both candidate) and 0
+  cost priors. That extraction is the single biggest data gap for
+  join safety, recency, and cost gates.
+- **The build (b_d552bcfa5829, first promotion):** 45 of 46 crosswalk
+  tables, 3,074 metrics of which **34 certified and 3,040
+  unreviewed** (usage-mined), 8,666 bindings, 8 business areas with
+  tables mapped for ETS (4), Finance (22), GMNS (10), USCS (10) and
+  none for AET / CFR / EDDS / TLS; only 35 metrics carry a business
+  area on the row itself. So "all GMNS metrics" must mean *metrics
+  on GMNS tables* (area → tables → metrics), ranked certified first,
+  not the 13 rows that happen to carry the LOB string — a Stage 1
+  change to `search`.
+- **Enrichment:** five blind-gate runs climbing 56% → 76% (item tier,
+  6 leaky contexts each time); 50 metrics carry an LLM-enriched
+  question and grain; 35 have a description. The batch gate (80%)
+  is not yet met.
+- **Housekeeping the report exposed:** the checkout lives in the
+  OneDrive-synced desktop, so the SA key and `.env` must stay
+  outside it (`~/.gcp/`); 1,706 tickets and 0 reviews means the
+  steward door has never been opened on this graph.
