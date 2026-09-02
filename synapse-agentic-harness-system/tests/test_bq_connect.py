@@ -122,13 +122,29 @@ def test_from_env_full_bootstrap_from_dotenv(monkeypatch, tmp_path):
     env.write_text(
         f"GOOGLE_APPLICATION_CREDENTIALS={key}\n"
         "BQ_PROJECT_ID=prj-p-lumi-gpt\n"
+        "LUMI_BQ_DATA_PROJECT=axp-lumi\n"
         "BIGQUERY_URL=https://bigquery-prod.p.googleapis.com\n")
     monkeypatch.setenv("SAHS_ENV_FILE", str(env))
     connection = BQConnection.from_env()
     assert connection.project == "prj-p-lumi-gpt"
+    # the tables live in another project: the sandbox qualifies with it
+    assert connection.data_project == "axp-lumi"
     assert connection.endpoint == "https://bigquery-prod.p.googleapis.com"
     assert connection.key_path == key
     assert connection.ssl_verify is True
     # the bootstrap injected the direct-connection hosts
     assert "oauth2.googleapis.com" in os.environ["NO_PROXY"]
     assert "bigquery-prod.p.googleapis.com" in os.environ["NO_PROXY"]
+
+
+def test_data_project_defaults_to_the_query_project(monkeypatch, tmp_path):
+    key = tmp_path / "key.json"
+    key.write_text("{}")
+    monkeypatch.setenv("BQ_PROJECT_ID", "prj-p-lumi-gpt")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(key))
+    monkeypatch.delenv("BQ_DATA_PROJECT", raising=False)
+    monkeypatch.delenv("LUMI_BQ_DATA_PROJECT", raising=False)
+    connection = BQConnection.from_env()
+    assert connection.data_project == "prj-p-lumi-gpt"
+    monkeypatch.setenv("BQ_DATA_PROJECT", "axp-lumi")
+    assert BQConnection.from_env().data_project == "axp-lumi"

@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """BQ connectivity check — prove the laptop can dry-run BEFORE P1.
 
-    python scripts/bq_check.py [--sql "SELECT 1"]
+    python scripts/bq_check.py [--sql "SELECT 1"] [--table dw.gms_transaction]
+
+``--table`` dry-runs ONE known table the way the sandbox will — qualified
+with the data project (LUMI_BQ_DATA_PROJECT, e.g. axp-lumi) — so a
+"Not found: Table <query-project>:dw.x" surprise is caught here, not
+in a chat.
 
 Runs the exact bootstrap the substrate uses (the proven bq_connect
 contract): .env → validate key on disk → resolve endpoint → NO_PROXY
@@ -25,6 +30,9 @@ from sahs.util.console import EXIT_ENV_AUTH               # noqa: E402
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="bq_check.py")
     parser.add_argument("--sql", default="SELECT 1")
+    parser.add_argument("--table", default="",
+                        help="dataset.table that must resolve, e.g. "
+                             "dw.gms_transaction")
     args = parser.parse_args(argv)
 
     try:
@@ -41,7 +49,13 @@ def main(argv: list[str] | None = None) -> int:
 
     import os
     print("resolved configuration:")
-    print(f"  project    {connection.project}")
+    print(f"  project    {connection.project}   (runs and bills the query)")
+    print(f"  data proj  {connection.data_project}"
+          + ("   (same project hosts the tables; set "
+             "LUMI_BQ_DATA_PROJECT if they live elsewhere)"
+             if connection.data_project == connection.project
+             else "   (hosts the tables: dataset.table is qualified "
+                  "with it)"))
     print(f"  endpoint   {connection.endpoint}")
     print(f"  location   {connection.location}")
     print(f"  key file   {connection.key_path} (exists)")
@@ -65,11 +79,42 @@ def main(argv: list[str] | None = None) -> int:
         print("P1 is go: python scripts/run_evals.py --tasks "
               "graph/runs/p0_census/tasks/gold.jsonl --sut oracle "
               "--fail-under 1.0 --out graph/runs/p1_ground_oracle --json")
+        if args.table:
+            return _probe_table(connection, args.table)
         return 0
     print(f"✗ dry-run refused: {outcome.error}", file=sys.stderr)
+    _hint(outcome.error)
+    return 1
+
+
+def _hint(error: str) -> None:
+    if "Not found: Table" in (error or "") or "not found in location" \
+            in (error or ""):
+        print("  the table resolved against the wrong project or "
+              "location: set LUMI_BQ_DATA_PROJECT to the project that "
+              "HOSTS the tables (e.g. axp-lumi) and BQ_LOCATION to the "
+              "dataset's location if it is regional, then rerun with "
+              "--table", file=sys.stderr)
+        return
     print("  (an auth/transport error here usually means proxy or TLS "
           "— try BQ_DISABLE_PROXY=1, or BQ_SSL_NO_VERIFY=1 as the "
           "last resort)", file=sys.stderr)
+
+
+def _probe_table(connection, table: str) -> int:
+    """Dry-run one table exactly as the sandbox qualifies it."""
+    from sahs.evals.substrate import BQDryRun
+    name = table.strip().replace("`", "")
+    if name.count(".") == 1:
+        name = f"{connection.data_project}.{name}"
+    sql = f"SELECT 1 FROM `{name}` LIMIT 1"
+    print(f"\nresolving: {sql}")
+    outcome = BQDryRun(connection).dry_run(sql)
+    if outcome.valid:
+        print(f"✓ `{name}` resolves · bytes {outcome.bytes_processed:,}")
+        return 0
+    print(f"✗ `{name}` did not resolve: {outcome.error}", file=sys.stderr)
+    _hint(outcome.error)
     return 1
 
 

@@ -31,6 +31,7 @@ from typing import Any, Protocol
 
 from sahs.canon.canonical import try_canon
 from sahs.tools.api import Build
+from sahs.tools.qualify import qualify_tables
 from sahs.tools.validate_sql import _DML_DDL, _QUERY_KINDS
 
 DEFAULT_MAX_BYTES = 1_000_000_000
@@ -74,6 +75,8 @@ class BQJobRunner:
                f"{self.connection.project}/queries")
         body = {"query": sql, "useLegacySql": False,
                 "maxResults": limit, "timeoutMs": 60000}
+        if getattr(self.connection, "location", ""):
+            body["location"] = self.connection.location
         request = urllib.request.Request(
             url, data=json.dumps(body).encode("utf-8"),
             headers={"Authorization": f"Bearer {self._token()}",
@@ -207,7 +210,21 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
         from sahs.evals.substrate import BQDryRun
         substrate = BQDryRun()
 
-    outcome = substrate.dry_run(sql)
+    # the project that HOSTS the tables may not be the one that runs
+    # the query: qualify every table the build knows before the trip
+    # (qualify.py) — the model keeps writing the cards' dataset.table
+    data_project = (
+        env.get("BQ_DATA_PROJECT") or env.get("LUMI_BQ_DATA_PROJECT")
+        or getattr(getattr(substrate, "connection", None),
+                   "data_project", "")
+        or getattr(getattr(runner, "connection", None),
+                   "data_project", ""))
+    sent, qualified = qualify_tables(sql, build, data_project)
+    if qualified:
+        meta["sql_sent"] = sent
+        meta["qualified"] = qualified
+
+    outcome = substrate.dry_run(sent)
     if not outcome.valid:
         return _finish("error", error=f"invalid_sql: {outcome.error}")
     meta["bytes_scanned"] = outcome.bytes_processed
@@ -255,7 +272,7 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
                       "justify the outlier to a steward.")
     if runner is None:
         runner = BQJobRunner()
-    capped = _cap_limit(sql, limit)
+    capped = _cap_limit(sent, limit)
     data = runner.run(capped, limit)
     meta["bytes_scanned"] = data.get("bytes_processed",
                                      meta["bytes_scanned"])
