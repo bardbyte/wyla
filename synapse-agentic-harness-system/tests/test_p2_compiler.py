@@ -46,11 +46,15 @@ def test_reconcile_d1_to_d5_counts_and_handlers(tmp_path):
     _, build_dir, manifest = _compiled(tmp_path)
     census = json.loads((build_dir / "census.json").read_text())
     totals = census["structural"]["totals"]
+    # D1 = 2: mdm_only_col + gms cm15_hash, a column named ONLY by
+    # Atlas's table-level pii_columns declaration — the catalog says it
+    # exists and is PII, BigQuery does not serve it, so it is ticketed
+    # and kept off the card like any other catalog-only column
     # D2 = 4: gms bq_only_col + the two sbs_new_accounts columns (a
     # bq-only table — no 00 resource, no atlas/mdm plane — is honestly
     # all coverage gap) + the 03-minted nested field path (typed by BQ,
     # undocumented by any catalog plane)
-    assert totals == {"D1": 1, "D2": 4, "D3": 1, "D4": 2, "D5": 1}
+    assert totals == {"D1": 2, "D2": 4, "D3": 1, "D4": 2, "D5": 1}
     tickets = [json.loads(x) for x in
                (build_dir / "tickets.jsonl").read_text().splitlines()]
     kinds = {t["ticket"] for t in tickets}
@@ -60,7 +64,11 @@ def test_reconcile_d1_to_d5_counts_and_handlers(tmp_path):
                 / "dw__gms_transaction.md").read_text()
     assert "mdm_only_col" not in gms_card.split("## conflicts")[0].replace(
         "omitted catalog-only", "")  # D1 never renders as a column row
-    assert "omitted catalog-only columns (D1): mdm_only_col" in gms_card
+    assert ("omitted catalog-only columns (D1): cm15_hash, mdm_only_col"
+            in gms_card)
+    # …but the PII fact itself is NOT lost: it is in the graph as a
+    # policy edge on the column, where governance can see it
+    assert "cm15_hash" not in gms_card.split("## conflicts")[0]
     assert "ungoverned, no business meaning on record" in gms_card  # D2
     assert "| lumi: Signed transaction amount" in gms_card           # D4
 

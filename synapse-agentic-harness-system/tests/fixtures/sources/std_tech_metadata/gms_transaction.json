@@ -23,6 +23,10 @@
      {
       "column": "cm13",
       "pii_role_id": "R3"
+     },
+     {
+      "column": "cm15_hash",
+      "pii_role_id": "R4"
      }
     ],
     "ownership": {
@@ -31,7 +35,11 @@
      "car_id": "CAR-1"
     },
     "has_oncop": false,
-    "has_gdpr": false
+    "has_gdpr": false,
+    "table_name": "gms_transaction",
+    "type": "DERIVED",
+    "is_partitioned": "Y",
+    "target_system": "Lumi BigQuery"
    },
    "pde": [
     {
@@ -41,14 +49,23 @@
       "business_name": "Transaction USD Amount",
       "data_type_name": "FLOAT64",
       "sde_group": false,
-      "pii_role_id": null
+      "pii_role_id": null,
+      "column_name": "trans_usd_am",
+      "position": 5,
+      "column_length_number": 18,
+      "nullable_indicator": "Y",
+      "primary_key_indicator": "N",
+      "partition_indicator": "N",
+      "derived_logic": "CASE WHEN se_cr_dr_in = 'C' THEN -se_trans_usd_am ELSE se_trans_usd_am END"
      },
      "businessMetadata": [
       {
        "businessTermName": "Transaction United States Dollar Amount",
        "businessTermDescription": "USD amount of a transaction",
        "sourceName": "LumiMDM",
-       "sourceType": "Declared"
+       "sourceType": "Declared",
+       "businessTermId": "8",
+       "confidenceScore": 0.95
       }
      ]
     },
@@ -59,8 +76,24 @@
       "business_name": "Card Member 13",
       "data_type_name": "STRING",
       "pii_role_id": "R3",
-      "sde_group": "SDE1"
-     }
+      "sde_group": "SDE1",
+      "column_name": "cm13",
+      "position": 3,
+      "column_length_number": 13,
+      "nullable_indicator": "N",
+      "primary_key_indicator": "N",
+      "partition_indicator": "N"
+     },
+     "businessMetadata": [
+      {
+       "businessTermName": "Card Member 13 Digit Number",
+       "businessTermDescription": "The 13-digit number identifying a card member account.",
+       "businessTermId": "901",
+       "sourceName": "LumiMDM",
+       "sourceType": "Declared",
+       "confidenceScore": 0.88
+      }
+     ]
     }
    ],
    "datasetGroup": "data",
@@ -85,6 +118,10 @@
      {
       "column": "cm13",
       "pii_role_id": "R3"
+     },
+     {
+      "column": "cm15_hash",
+      "pii_role_id": "R4"
      }
     ],
     "ownership": {
@@ -93,7 +130,11 @@
      "car_id": "CAR-1"
     },
     "has_oncop": false,
-    "has_gdpr": false
+    "has_gdpr": false,
+    "table_name": "gms_transaction",
+    "type": "DERIVED",
+    "is_partitioned": "Y",
+    "target_system": "Lumi BigQuery"
    },
    "pde": [
     {
@@ -103,14 +144,23 @@
       "business_name": "Transaction USD Amount",
       "data_type_name": "FLOAT64",
       "sde_group": false,
-      "pii_role_id": null
+      "pii_role_id": null,
+      "column_name": "trans_usd_am",
+      "position": 5,
+      "column_length_number": 18,
+      "nullable_indicator": "Y",
+      "primary_key_indicator": "N",
+      "partition_indicator": "N",
+      "derived_logic": "CASE WHEN se_cr_dr_in = 'C' THEN -se_trans_usd_am ELSE se_trans_usd_am END"
      },
      "businessMetadata": [
       {
        "businessTermName": "Transaction United States Dollar Amount",
        "businessTermDescription": "USD amount of a transaction",
        "sourceName": "LumiMDM",
-       "sourceType": "Declared"
+       "sourceType": "Declared",
+       "businessTermId": "8",
+       "confidenceScore": 0.95
       }
      ]
     },
@@ -121,8 +171,24 @@
       "business_name": "Card Member 13",
       "data_type_name": "STRING",
       "pii_role_id": "R3",
-      "sde_group": "SDE1"
-     }
+      "sde_group": "SDE1",
+      "column_name": "cm13",
+      "position": 3,
+      "column_length_number": 13,
+      "nullable_indicator": "N",
+      "primary_key_indicator": "N",
+      "partition_indicator": "N"
+     },
+     "businessMetadata": [
+      {
+       "businessTermName": "Card Member 13 Digit Number",
+       "businessTermDescription": "The 13-digit number identifying a card member account.",
+       "businessTermId": "901",
+       "sourceName": "LumiMDM",
+       "sourceType": "Declared",
+       "confidenceScore": 0.88
+      }
+     ]
     }
    ],
    "datasetGroup": "data",

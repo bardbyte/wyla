@@ -39,11 +39,49 @@ dataset) · `dataserver` (`Lumi`) · `technology` (`BigQuery`) ·
   `business_name`, `position`, `column_length_number`,
   `nullable_indicator`, `primary_key_indicator`,
   `partition_indicator`, `pii_role_id` (null when not PII),
-  `derived_logic` (SQL if computed — unparsed today; a future
-  semantic source)
+  `derived_logic` (SQL if computed — retained whole as a doc node,
+  unparsed; a future semantic source)
 - `businessMetadata[]`: `businessTermName`, `businessTermDescription`,
   `businessTermId` (null where no formal id assigned), `sourceName`
   (`LumiMDM`), `sourceType` (`Declared`), `confidenceScore`
+
+## Field utilization (pinned)
+
+Every field above reaches the graph. `page_info` alone is excluded —
+it describes the API call, not the table. Where each lands:
+
+| field | lands as |
+|---|---|
+| `dataset` | table identity (through the E1 crosswalk) |
+| `appl_id` | `appl_id` prop |
+| `datasource` / `datasetGroup` / `dataserver` / `datasystem` / `technology` | `project_atlas` / `dataset_group_atlas` / `data_server_atlas` / `data_system_atlas` / `technology_atlas` props |
+| `isActive` / `isLatest` / `isLineageExist` | `is_active_atlas` / `is_latest_atlas` / `is_lineage_exist_atlas` props |
+| `table_name` / `description` / `business_name` | `table_name_atlas` / `description_atlas` / `business_name_atlas` props |
+| `data_category` / `data_sub_category` | props of the same name |
+| `type` / `load_type` / `is_partitioned` / `target_system` | `table_type_atlas` / `load_type_atlas` / `is_partitioned_atlas` / `target_system_atlas` props |
+| `data_type_name` (Layer 3) | `layer_type` prop |
+| `has_pii` / `has_oncop` / `has_gdpr` | `has_*_atlas` props **and** a `has_policy` edge each |
+| `ownership` | `ownership_atlas` prop **and** an `owned_by` edge per key naming an owner or a VP (an id such as `car_id` stays a prop — an identifier is not a person) |
+| `pii_columns[]` | per column: `pii_role_id` where the pde listing carried none, `pii_role_id_table_declared` where the two disagree, a `has_policy` edge, and a minted column node where the pde listing missed it entirely |
+| `pdeRelPath` | column identity |
+| `column_name` / `position` / `column_length_number` | `column_name_atlas` / `ordinal_atlas` / `column_length` props |
+| `nullable_indicator` / `primary_key_indicator` / `partition_indicator` | `nullable_atlas` / `is_primary_key_atlas` / `is_partitioning_atlas` props |
+| `description` / `business_name` / `data_type_name` (Layer 4) | `description_atlas` / `business_name_atlas` / `data_type_atlas` props |
+| `pii_role_id` / `sde_group` | props of the same name (+ `has_policy` edge) |
+| `derived_logic` | a `doc:derived_logic_<fp>` node behind a `described_by` edge — retained whole, unparsed, ready for a canon pass |
+| `businessTermId` / `businessTermName` / `businessTermDescription` | the `term:` node's identity / `name` / `description`. **The id resolves first**, the name is the fallback, and the resolution used is recorded on the edge as `matched_on` |
+| `sourceName` / `sourceType` / `confidenceScore` | `mapped_term` edge props |
+
+Two conventions hold throughout:
+
+- **`_atlas` suffix** marks a fact another witness (BQ or Lumi) also
+  asserts, so E1 can arbitrate; an Atlas-only fact carries a bare name.
+- **Absent is unknown, never false.** `isActive` unsent stays `None` and
+  the prop is omitted — a fold is last-wins per key, so writing an empty
+  value would erase what another registration did carry.
+
+Fields the feed documents but does not send are simply absent; nothing
+needs changing when they start arriving.
 
 ## Loader contract
 

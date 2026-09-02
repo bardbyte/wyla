@@ -93,9 +93,16 @@ def reconcile(graph: GraphDir) -> dict[str, TableConsensus]:
             mdm_type = str(props.get("data_type_mdm") or "")
             atlas_type = str(props.get("data_type_atlas") or "")
             present_bq = bool(bq_type) or props.get("ordinal") is not None
-            present_catalog = bool(mdm_type or atlas_type
-                                   or props.get("description_mdm")
-                                   or props.get("description_atlas"))
+            present_catalog = bool(
+                mdm_type or atlas_type
+                or props.get("description_mdm")
+                or props.get("description_atlas")
+                # a column known ONLY from Atlas's table-level
+                # pii_columns declaration is still the catalog
+                # asserting the column exists — without this it is
+                # present in NEITHER plane and falls through every
+                # handler onto the card as a typeless phantom row
+                or props.get("observed_via") == "table_pii_declaration")
             column = ColumnConsensus(
                 name=name, present_bq=present_bq,
                 present_catalog=present_catalog)

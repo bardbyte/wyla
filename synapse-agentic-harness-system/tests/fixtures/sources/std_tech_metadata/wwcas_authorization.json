@@ -17,7 +17,12 @@
      "business_owner": "own_b@corp"
     },
     "has_oncop": true,
-    "has_gdpr": false
+    "has_gdpr": false,
+    "table_name": "wwcas_authorization",
+    "type": "VIEW",
+    "load_type": "SNAPSHOT_DEDUPE_MAX",
+    "is_partitioned": "N",
+    "target_system": "Lumi BigQuery"
    },
    "pde": [
     {
@@ -25,7 +30,13 @@
      "pdeAttribute": {
       "description": "Approval decision code.",
       "business_name": "Approval Code",
-      "data_type_name": "STRING"
+      "data_type_name": "STRING",
+      "column_name": "approval_cd",
+      "position": 1,
+      "column_length_number": 2,
+      "nullable_indicator": "N",
+      "primary_key_indicator": "Y",
+      "partition_indicator": "N"
      },
      "businessMetadata": [
       {

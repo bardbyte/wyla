@@ -152,8 +152,8 @@ the card; `has_policy` reaches `build_acl` only.)
 | `bq` | BQ warehouse archive | ✅ 9 of 9 semantic artifacts | ✅ good | ⚠️ partial (§3) |
 | `jobs_30d` | 30-day query logs | ✅ | ✅ good | ⚠️ rhythm yes, cost/users no |
 | `lumi` | Atlas MDM archive | ✅ | ✅ good | ⚠️ answerability/pipeline/lineage no |
-| `std_tech_metadata` | Atlas catalog | ✅ | ❌ **~20 fields dropped** | ⚠️ partial |
-| `business_terms` | Atlas glossary | ✅ | ⚠️ definitions dropped | ❌ **never on any card** |
+| `std_tech_metadata` | Atlas catalog | ✅ | ✅ **closed — every documented field** | ⚠️ partial |
+| `business_terms` | Atlas glossary | ✅ | ✅ definitions now land via std_tech | ❌ **never on any card** |
 | `glossary` (data_cleaned) | Acropedia acronyms | ✅ | ✅ all 5 cols | ❌ **never on any card** |
 | `metrics_dmp` | certified KPIs | ✅ | ✅ all 15 keys | ✅ metric cards |
 | `extended_gmns` | pending specs | ✅ | ✅ | ✅ |
@@ -164,7 +164,19 @@ the card; `has_policy` reaches `build_acl` only.)
 | `blue_insights` | analyst snippets | ✅ | ✅ | ✅ filters section |
 | `lob_map` / org_map | steward map | ✅ | ✅ | ⚠️ one line on the table card; no card of its own |
 
-### 4.1 `std_tech_metadata` (Atlas catalog) — the worst G2 leak
+### 4.1 `std_tech_metadata` (Atlas catalog) — CLOSED
+
+> **Status: closed.** Every field below now reaches the graph; the
+> per-field destinations are pinned in
+> `docs/contracts/std_tech_metadata_layout.md` ("Field utilization")
+> and fenced by
+> `tests/test_p0_census.py::test_std_tech_parses_every_documented_field`
+> and
+> `tests/test_p2_graph.py::test_std_tech_full_utilization_reaches_the_graph`.
+> What follows is the original finding, kept as the record of what was
+> missing.
+
+#### The original finding
 
 Enumerated every key in the fixture and diffed against `vocab.py` +
 `quads_emit.emit_std_tech`:
@@ -199,6 +211,59 @@ Enumerated every key in the fixture and diffed against `vocab.py` +
 `businessTermId`. Every name-spelling mismatch becomes
 `term_links_unmatched`. Matching on the id first would raise the link
 rate for free.
+
+#### What closing it changed
+
+Beyond the props, four things the graph could not previously say:
+
+- **Ownership became edges.** Atlas `ownership` was a dict prop nothing
+  read; it now emits `owned_by` per role, so Atlas and Lumi corroborate
+  on the same owner node (`own_a@corp` carries both witnesses) and the
+  VP is a first-class endpoint. A `car_id` stays a prop — an identifier
+  is not a person.
+- **Table-level `has_pii` finally emits a policy edge.** Only `oncop`
+  and `gdpr` did before, so of the three compliance flags the ACL never
+  saw the strongest one.
+- **`pii_columns[]` is a second, independent PII witness.** It supplies
+  a role where the pde listing carried none, records a
+  `pii_role_id_table_declared` where the two Atlas declarations
+  disagree, and mints the column where the pde listing missed it
+  entirely. In the fixture that surfaced a real edge — a column present
+  in *neither* BigQuery nor the catalog's column listing, only in the
+  PII declaration. It routes through E1's pinned D1 handler: the fact
+  lives in the graph as a policy edge for governance, and the column
+  stays off the card, because the agent must never see a column the
+  runtime cannot serve.
+- **Business terms resolve on `businessTermId` first.** Name matching
+  was losing every link whose spelling had drifted; the resolution used
+  is now recorded on the edge as `matched_on`, a term Atlas declares by
+  id is minted rather than dropped, and `businessTermDescription` lands
+  on the term node — `business_terms.csv` is id + name + status only,
+  so this is the sole place the *meaning* of a term exists at all.
+
+One drift the new fields make visible: Atlas puts `trans_usd_am` at
+ordinal 5, BigQuery at ordinal 1. Both are on the column node now
+(`ordinal_atlas` vs `ordinal`), so it is a question someone can ask
+rather than a silent disagreement.
+
+#### What Atlas does NOT carry
+
+Asked directly — do we get business unit and table descriptions from
+Atlas?
+
+- **Table description: yes.** `description_atlas` ("Global merchant
+  transaction spine.") plus `business_name_atlas` ("Merchant
+  Transactions"), and a description and business name per column.
+- **Business unit: no — Atlas has no such field.** Its business axis is
+  `data_category` → `data_sub_category` ("Merchant Services" →
+  "Payments"), plus ownership and `appl_id`. The `business_unit: GMNS`
+  on a table node comes from **MDM** (`pipeline.business_unit`, the
+  `lumi` source), and line-of-business membership comes from the
+  steward's `lob_map.jsonl` corroborated by dmp/gmns declarations.
+  Three different witnesses answer three different questions — who
+  operates the pipeline (MDM), who owns the data domain (steward LOB),
+  and what business category it falls in (Atlas). None of them is a
+  substitute for the others, and the graph keeps them separate.
 
 ### 4.2 Deferrals that are semantic, not operational
 
@@ -296,10 +361,7 @@ graph.
    whose scope matches the table's BU and whose symbols appear in its
    column names. This is the "decode the jargon before you reason"
    card, and every input for it is already loaded.
-8. **G2 close-out on `std_tech_metadata`**: `data_sub_category`,
-   `pii_columns[]`, `load_type`, `datasource`/`datasetGroup`,
-   `businessTermDescription`; and match term links on `businessTermId`
-   before falling back to name.
+8. ~~**G2 close-out on `std_tech_metadata`**~~ — **done**, see §4.1.
 9. **Attach the four semantic deferrals as doc nodes** surfaced on the
    relevant table card — no parsing required, just a pointer the agent
    can read.

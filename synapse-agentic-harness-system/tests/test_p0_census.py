@@ -161,6 +161,86 @@ def test_vocab_adapters_and_degenerates():
     assert gms.columns[0].linked_terms[0]["sourceName"] == "LumiMDM"
 
 
+def test_std_tech_parses_every_documented_field():
+    """Full utilization at field grain (docs/contracts/
+    std_tech_metadata_layout.md): every documented key reaches a
+    record. A regression here is a field going quietly dark again."""
+    entries, quarantined = load_std_tech_metadata(FX / "std_tech_metadata")
+    assert not quarantined
+    gms = next(e for e in entries if e.table == "gms_transaction")
+    # Layer 1 envelope + Layer 2 tech entry
+    assert gms.appl_id == "600001868"
+    assert gms.datasource == "axp-lumi" and gms.dataset_group == "data"
+    assert gms.data_server == "Lumi" and gms.technology == "BigQuery"
+    assert gms.data_system.startswith("NGBD")
+    assert gms.is_active is True and gms.is_latest is True
+    assert gms.is_lineage_exist is True          # the feed sends "Y"
+    # Layer 3 datasetAttribute
+    assert gms.table_name == "gms_transaction"
+    assert gms.table_type == "DERIVED"
+    assert gms.load_type == "LOAD_APPEND"
+    assert gms.is_partitioned is True
+    assert gms.target_system == "Lumi BigQuery"
+    assert gms.data_sub_category == "Payments"
+    assert gms.pii_columns == [{"column": "cm13", "pii_role_id": "R3"},
+                               {"column": "cm15_hash",
+                                "pii_role_id": "R4"}]
+    # Layer 4 pdeAttribute
+    amount = next(c for c in gms.columns if c.name == "trans_usd_am")
+    assert amount.column_name == "trans_usd_am" and amount.position == 5
+    assert amount.column_length == 18
+    assert amount.nullable is True and amount.primary_key is False
+    assert amount.partition_key is False
+    assert amount.derived_logic.startswith("CASE WHEN se_cr_dr_in")
+    assert amount.linked_terms[0]["businessTermId"] == "8"
+    # ABSENT IS NOT FALSE: wwcas ships a thin Layer 2, and an unsent
+    # flag must stay unknown rather than be flattened into a denial
+    wwcas = next(e for e in entries if e.table == "wwcas_authorization")
+    assert wwcas.is_active is None and wwcas.is_latest is None
+    assert wwcas.is_partitioned is False          # "N", genuinely false
+    assert wwcas.table_type == "VIEW"
+    assert next(c for c in wwcas.columns).primary_key is True
+
+
+def test_std_tech_unmatchable_terms_keep_their_text(tmp_path: Path):
+    """A term with neither an id nor a glossary spelling cannot mint an
+    identity — slugging its name would fork the node the moment the id
+    arrives. The TEXT is still evidence, so it rides on the column, and
+    EVERY such declaration survives (a fold is last-wins per key, so
+    appending them one at a time would leave only the last)."""
+    from sahs.graph.crosswalk import Crosswalk
+    from sahs.graph.quads import GraphDir
+    from sahs.loaders.quads_emit import emit_std_tech
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "t.json").write_text(json.dumps({
+        "dataset": "gms_transaction",
+        "tech_metadata_list": [{
+            "datasetAttribute": {"description": "x"},
+            "pde": [{"pdeRelPath": "cm13",
+                     "pdeAttribute": {"data_type_name": "STRING"},
+                     "businessMetadata": [
+                         {"businessTermName": "Unknown Term A",
+                          "businessTermDescription": "definition A"},
+                         {"businessTermName": "Unknown Term B",
+                          "businessTermDescription": "definition B"}]}]}]}),
+        encoding="utf-8")
+    cw = tmp_path / "crosswalk.jsonl"
+    cw.write_text(json.dumps({"physical": "dw.gms_transaction",
+                              "verified_by": "t",
+                              "verified_on": "2026-09-02"}) + "\n",
+                  encoding="utf-8")
+    entries, _ = load_std_tech_metadata(src)
+    graph = GraphDir(tmp_path / "graph")
+    report = emit_std_tech(entries, [], graph, Crosswalk.load(cw), "r1")
+    assert report["term_links_unmatched"] == 2
+    props = graph.fold_nodes()["col:dw.gms_transaction.cm13"].props
+    assert props["declared_terms"] == [
+        {"name": "Unknown Term A", "description": "definition A"},
+        {"name": "Unknown Term B", "description": "definition B"}]
+
+
 def test_std_tech_combined_export_parity(tmp_path: Path):
     """The real Atlas feed can ship as ONE std_tech_metadata_all.json —
     a file path must load identically to the per-table directory."""

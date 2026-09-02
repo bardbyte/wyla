@@ -66,6 +66,12 @@ class TermRecord(BaseModel):
 
 
 class StdTechColumn(BaseModel):
+    """One Atlas ``pde`` element — EVERY documented pdeAttribute field
+    (docs/contracts/std_tech_metadata_layout.md, Layer 4). ``name`` is
+    the identity (``pdeRelPath``); ``column_name`` is the attribute's
+    own spelling, kept because a divergence between the two is a real
+    catalog defect the graph should be able to show."""
+
     name: str
     description: str = ""
     business_name: str = ""
@@ -73,10 +79,23 @@ class StdTechColumn(BaseModel):
     pii_role_id: str | None = None
     sde_group: str | None = None
     linked_terms: list[dict] = Field(default_factory=list)
+    column_name: str = ""
+    position: int | None = None
+    column_length: int | None = None
+    nullable: bool | None = None            # nullable_indicator
+    primary_key: bool | None = None         # primary_key_indicator
+    partition_key: bool | None = None       # partition_indicator
+    derived_logic: str = ""                 # SQL when the column is
+    #                                         computed — doc evidence
 
 
 class StdTechEntry(BaseModel):
-    """One Atlas getStdTechMetadata catalog entry."""
+    """One Atlas getStdTechMetadata catalog entry — EVERY documented
+    field across the envelope (Layer 1), the tech entry (Layer 2) and
+    ``datasetAttribute`` (Layer 3). Nothing the feed sends is dropped
+    at the record boundary; ``page_info`` alone stays out, being
+    pagination bookkeeping about the API call rather than a fact about
+    the table."""
 
     table: str
     description: str = ""
@@ -90,3 +109,24 @@ class StdTechEntry(BaseModel):
     ownership: dict = Field(default_factory=dict)
     columns: list[StdTechColumn] = Field(default_factory=list)
     evidence_ref: str = ""
+    # ── Layer 1 (envelope) ──
+    appl_id: str = ""               # MDM application registry id
+    # ── Layer 2 (the tech entry) ──
+    datasource: str = ""            # GCP project, e.g. axp-lumi
+    dataset_group: str = ""         # BQ dataset
+    data_server: str = ""           # Lumi
+    data_system: str = ""           # NGBD – Lumi Metadata Management
+    technology: str = ""            # BigQuery
+    is_active: bool | None = None
+    is_latest: bool | None = None
+    is_lineage_exist: bool | None = None
+    # ── Layer 3 (datasetAttribute) ──
+    table_name: str = ""            # the attribute's own spelling
+    table_type: str = ""            # `type`: DERIVED | …
+    load_type: str = ""             # SNAPSHOT_DEDUPE_MAX | …
+    is_partitioned: bool | None = None
+    target_system: str = ""
+    # table-level PII column declaration: [{column, pii_role_id}] — a
+    # SECOND, independent PII witness beside each column's own
+    # pdeAttribute.pii_role_id
+    pii_columns: list[dict] = Field(default_factory=list)
