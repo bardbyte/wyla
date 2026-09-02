@@ -100,9 +100,15 @@ def match_vocabulary(vocab_rows: list[dict[str, Any]],
     and to "Abandoned Property" elsewhere; an entry from a foreign BU
     is not offered, because offering it would be a guess."""
     scopes = {b.lower() for b in business_units if b} | {"all", ""}
-    tokens_by_col: dict[str, set[str]] = {
-        c["name"]: _tokens(c["name"], c.get("business_name", ""))
-        for c in column_facts}
+    # inverted index token → columns, built once per table: the real
+    # warehouse pairs ~12K acronyms with ~1.3K columns per table, and a
+    # per-symbol scan of every column would be ~20M set lookups per
+    # table — one dict lookup per symbol is the difference between a
+    # compile that finishes and one that doesn't
+    columns_by_token: dict[str, set[str]] = defaultdict(set)
+    for c in column_facts:
+        for token in _tokens(c["name"], c.get("business_name", "")):
+            columns_by_token[token].add(c["name"])
     hits: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in vocab_rows:
         if row.get("kind") not in ("acronym", "term"):
@@ -113,8 +119,7 @@ def match_vocabulary(vocab_rows: list[dict[str, Any]],
         symbol = _norm_symbol(str(row.get("text") or ""))
         if len(symbol) < 2:
             continue
-        matched = sorted(name for name, toks in tokens_by_col.items()
-                         if symbol in toks)
+        matched = sorted(columns_by_token.get(symbol, ()))
         if not matched:
             continue
         key = (str(row.get("text")), bu, str(row.get("region") or "all"))
