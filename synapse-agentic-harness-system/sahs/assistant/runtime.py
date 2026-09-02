@@ -129,11 +129,14 @@ class AssistantRuntime:
         self.store.set_flag(session_id, flag, on)
         return {"ok": True, flag: bool(on)}
 
-    # ── skills: both shelves, one picker (§13.3) ─────────────
+    # ── skills: both shelves, browsable (§13.3/V2.7) ─────────
+    # the agent loads packs itself by intent; this listing feeds the
+    # Skills page where people READ them, full text included
     def skills(self) -> list[dict]:
         from .skills_loader import all_skills
         return [{"name": p.name, "title": p.title,
-                 "description": p.description, "origin": p.origin}
+                 "description": p.description, "origin": p.origin,
+                 "text": p.text}
                 for p in all_skills(self.graph_root)]
 
     def set_skills(self, session_id: str, names: list[str]) -> dict:

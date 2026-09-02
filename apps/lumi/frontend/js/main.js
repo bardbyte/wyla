@@ -15,6 +15,7 @@ import { renderOperate } from "./pages/operate.js";
 import { renderAsk } from "./pages/ask.js";
 import { refreshChats } from "./chats.js";
 import { renderChat } from "./pages/chat.js";
+import { renderSkills } from "./pages/skills.js";
 
 const outlet = document.getElementById("outlet");
 let teardown = null;
@@ -45,6 +46,7 @@ async function route() {
     table: () => renderTable(outlet, arg),
     ask: () => renderAsk(outlet, arg),
     chat: () => renderChat(outlet, arg),
+    skills: renderSkills,
     cosmos: renderCosmos,
     artifacts: renderArtifacts,
     operate: renderOperate,

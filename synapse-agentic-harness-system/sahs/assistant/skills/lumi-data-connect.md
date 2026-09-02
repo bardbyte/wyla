@@ -1,4 +1,4 @@
-# Meridian SQL — the search doctrine
+# Lumi Data Connect — the search doctrine
 
 How to find truth in the graph before writing a line of SQL.
 

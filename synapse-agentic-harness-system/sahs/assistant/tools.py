@@ -513,7 +513,7 @@ def assistant_toolkit(build: Build, state: AssistantState, *,
                 "result IS the doctrine, follow it while it applies.\n"
                 "Load when the task matches the description: a \"why "
                 "did it change\" wants analysis-playbooks; writing "
-                "SQL against unfamiliar ground wants meridian-sql. "
+                "SQL against unfamiliar ground wants lumi-data-connect. "
                 "Packs steer where you look; they never add tables, "
                 "metrics, or numbers to the world."),
             fn=load_skill),
