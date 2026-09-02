@@ -62,13 +62,9 @@ class BQJobRunner:
     def _token(self) -> str:
         if self._token_provider is not None:
             return str(self._token_provider())
-        from google.auth.transport.requests import Request     # type: ignore
-        from google.oauth2 import service_account              # type: ignore
-        creds = service_account.Credentials.from_service_account_file(
-            str(self.connection.key_path),
-            scopes=["https://www.googleapis.com/auth/bigquery"])
-        creds.refresh(Request(session=self.connection.token_session()))
-        return creds.token
+        # cached per key file (sahs.util.auth): one token trip per
+        # session, refreshed only when it expires
+        return self.connection.token()
 
     def run(self, sql: str, limit: int) -> dict[str, Any]:
         import urllib.request

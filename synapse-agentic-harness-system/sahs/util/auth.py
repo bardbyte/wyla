@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import os
 import ssl
+from typing import Any
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -276,6 +277,32 @@ def resolve_bq_data_project() -> str | None:
     return _first_env("BQ_DATA_PROJECT", "LUMI_BQ_DATA_PROJECT")
 
 
+_BQ_CREDENTIALS: dict[str, Any] = {}
+_BQ_SCOPES = ["https://www.googleapis.com/auth/bigquery"]
+
+
+def bq_access_token(connection: "BQConnection", *,
+                    make_credentials: Any = None,
+                    refresh: Any = None) -> str:
+    key = str(connection.key_path)
+    creds = _BQ_CREDENTIALS.get(key)
+    if creds is None:
+        if make_credentials is not None:
+            creds = make_credentials()
+        else:
+            from google.oauth2 import service_account      # type: ignore
+            creds = service_account.Credentials.from_service_account_file(
+                key, scopes=_BQ_SCOPES)
+        _BQ_CREDENTIALS[key] = creds
+    if not getattr(creds, "valid", False):
+        if refresh is not None:
+            refresh(creds)
+        else:
+            from google.auth.transport.requests import Request  # type: ignore
+            creds.refresh(Request(session=connection.token_session()))
+    return str(creds.token)
+
+
 @dataclass(frozen=True)
 class BQConnection:
     """Everything the dry-run substrate / sandbox needs to reach BigQuery."""
@@ -336,6 +363,15 @@ class BQConnection:
         session.verify = (self.ca_bundle or True) if self.ssl_verify \
             else False
         return session
+
+    def token(self, *, make_credentials: Any = None,
+              refresh: Any = None) -> str:
+        """The OAuth access token, cached per key file and refreshed
+        only when expired: a turn with six dry runs makes one token
+        trip through the proxy, not six. ``make_credentials`` and
+        ``refresh`` are injection points for tests."""
+        return bq_access_token(self, make_credentials=make_credentials,
+                               refresh=refresh)
 
 
 @dataclass(frozen=True)

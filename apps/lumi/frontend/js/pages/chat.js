@@ -595,7 +595,8 @@ export async function renderChat(outlet, wanted = "") {
              prose: div.querySelector(".chat-prose"),
              extras: div.querySelector(".chat-extras"),
              buffer: "", steps: 0, rows: new Map(), verbs: [],
-             thoughts: "", done: false };
+             thoughts: "", done: false, tick: null, tickLabel: "",
+             tickStart: 0 };
     state.turns.set(turnId, turn);
     scroll();
     return turn;
@@ -676,8 +677,32 @@ export async function renderChat(outlet, wanted = "") {
     scroll();
   }
 
+  // the live line keeps a visible heartbeat: the label, then the
+  // seconds — a long model call never looks like a stuck tool, and a
+  // stuck tool never looks like thinking
+  function stopPulse(turn) {
+    if (turn.tick) { clearInterval(turn.tick); turn.tick = null; }
+  }
+
+  function pulse(turn, label) {
+    stopPulse(turn);
+    turn.tickLabel = label;
+    turn.tickStart = Date.now();
+    showThinking(turn, label);
+    turn.tick = setInterval(() => {
+      if (turn.done) { stopPulse(turn); return; }
+      const secs = Math.round((Date.now() - turn.tickStart) / 1000);
+      if (secs < 4) return;
+      const base = turn.tickLabel.replace(/…$/, "");
+      showThinking(turn, secs >= 20
+        ? `Still ${base.charAt(0).toLowerCase()}${base.slice(1)} · ${secs}s`
+        : `${base}… ${secs}s`);
+    }, 1000);
+  }
+
   function doneThinking(turn, elapsedMs) {
     turn.done = true;
+    stopPulse(turn);
     turn.thinking.hidden = true;
     if (turn.steps) {
       const secs = elapsedMs ? `Worked for ${(elapsedMs / 1000)
@@ -796,19 +821,22 @@ export async function renderChat(outlet, wanted = "") {
     switch (event.ev) {
       case "turn_started":
         setRunning(true);
-        showThinking(turn, "Thinking…");
+        pulse(turn, "Thinking…");
         break;
       case "model_prompt":
+        // each model call restarts the clock: after a tool returns
+        // the line says Thinking, never the tool's name
+        if (event.kind === "call") pulse(turn, "Thinking…");
         break;            // the transcript record lives in Operate
       case "thinking": {
         // the model's own summary of what it is thinking, live
         turn.thoughts += event.delta || "";
         const line = lastLine(turn.thoughts);
-        if (line) showThinking(turn, line);
+        if (line) { turn.tickLabel = line; showThinking(turn, line); }
         break;
       }
       case "tool_call":
-        showThinking(turn, `${friendly(event)}…`);
+        pulse(turn, `${friendly(event)}…`);
         toolStart(turn, event);
         break;
       case "tool_step":
@@ -825,6 +853,7 @@ export async function renderChat(outlet, wanted = "") {
         }
         break;
       case "say_token":
+        stopPulse(turn);
         turn.thinking.hidden = true;       // prose is the answer
         turn.buffer += event.delta || "";
         turn.prose.innerHTML = renderMarkdown(turn.buffer, "md");

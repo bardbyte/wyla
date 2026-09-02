@@ -9,7 +9,9 @@ message — never a stack trace."""
 
 from __future__ import annotations
 
+import http.client
 import json
+import socket
 import os
 import time
 import urllib.error
@@ -21,6 +23,12 @@ from sahs.util.auth import VertexConnection
 
 _RETRY_STATUSES = {429, 500, 502, 503, 504}
 _BACKOFFS = (2, 4, 8, 16)
+
+
+# how long the streamed model call may stay silent between chunks
+# before we call the transport dead (a corporate proxy's idle cut is
+# usually 60–120 s; Gemini's thought summaries arrive well inside that)
+STREAM_SILENCE_SECONDS = 120.0
 
 
 class EnrichTransportError(RuntimeError):
@@ -315,7 +323,7 @@ class VertexClient:
                  thinking_level: str = "",
                  include_thoughts: bool = True,
                  max_output_tokens: int = 8192,
-                 timeout: float = 300.0):
+                 timeout: float = STREAM_SILENCE_SECONDS):
         """One model call in Gemini's native tool protocol, streamed.
 
         Yields events as they arrive:
@@ -352,36 +360,55 @@ class VertexClient:
         parts: list[dict[str, Any]] = []
         usage: dict[str, Any] = {}
         finish = ""
-        for chunk in chunks:
-            usage = chunk.get("usageMetadata") or usage
-            for candidate in chunk.get("candidates", []):
-                finish = candidate.get("finishReason") or finish
-                for part in (candidate.get("content") or {}).get(
-                        "parts", []):
-                    if "functionCall" in part:
-                        parts.append(part)          # whole, signed
-                        call = part["functionCall"]
-                        yield {"kind": "call",
-                               "name": call.get("name", ""),
-                               "args": call.get("args") or {},
-                               "id": call.get("id", "")}
-                    elif part.get("thought"):
-                        parts.append(part)
-                        if part.get("text"):
-                            yield {"kind": "thought",
-                                   "delta": part["text"]}
-                    elif part.get("text") is not None:
-                        # merge plain text runs; a signed part stays
-                        # its own part so the echo keeps the signature
-                        if (parts and "thoughtSignature" not in part
-                                and "thoughtSignature" not in parts[-1]
-                                and set(parts[-1]) == {"text"}):
-                            parts[-1] = {"text": parts[-1]["text"]
-                                         + part["text"]}
-                        else:
-                            parts.append(dict(part))
-                        if part["text"]:
-                            yield {"kind": "text", "delta": part["text"]}
+        # a stream that goes silent or is cut mid-way (a proxy idle
+        # timeout, a reset) is a transport failure with a reason, never
+        # a bare exception the turn dies on
+        try:
+            for chunk in chunks:
+                usage = chunk.get("usageMetadata") or usage
+                for candidate in chunk.get("candidates", []):
+                    finish = candidate.get("finishReason") or finish
+                    for part in (candidate.get("content") or {}).get(
+                            "parts", []):
+                        if "functionCall" in part:
+                            parts.append(part)          # whole, signed
+                            call = part["functionCall"]
+                            yield {"kind": "call",
+                                   "name": call.get("name", ""),
+                                   "args": call.get("args") or {},
+                                   "id": call.get("id", "")}
+                        elif part.get("thought"):
+                            parts.append(part)
+                            if part.get("text"):
+                                yield {"kind": "thought",
+                                       "delta": part["text"]}
+                        elif part.get("text") is not None:
+                            # merge plain text runs; a signed part
+                            # stays its own part so the echo keeps
+                            # the signature
+                            if (parts and "thoughtSignature" not in part
+                                    and "thoughtSignature"
+                                    not in parts[-1]
+                                    and set(parts[-1]) == {"text"}):
+                                parts[-1] = {"text": parts[-1]["text"]
+                                             + part["text"]}
+                            else:
+                                parts.append(dict(part))
+                            if part["text"]:
+                                yield {"kind": "text",
+                                       "delta": part["text"]}
+        except EnrichTransportError:
+            raise
+        except (TimeoutError, socket.timeout) as e:
+            raise EnrichTransportError(
+                f"the model stream went silent for {timeout:.0f}s "
+                f"({e or 'read timed out'}) — the proxy or Vertex "
+                "stopped answering") from e
+        except (http.client.IncompleteRead, ConnectionError,
+                OSError) as e:
+            raise EnrichTransportError(
+                f"the model stream was cut off: {type(e).__name__}: "
+                f"{e}") from e
         self.usage["prompt_tokens"] = self.usage.get("prompt_tokens", 0) \
             + int(usage.get("promptTokenCount") or 0)
         self.usage["output_tokens"] = self.usage.get("output_tokens", 0) \

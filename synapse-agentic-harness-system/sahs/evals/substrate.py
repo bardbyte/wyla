@@ -56,13 +56,9 @@ class BQDryRun:
         # as a runtime import so fixture CI never needs it. The refresh
         # session honors the connection's verify/CA settings and the
         # NO_PROXY injection done at from_env (the bq_connect contract).
-        from google.auth.transport.requests import Request     # type: ignore
-        from google.oauth2 import service_account              # type: ignore
-        creds = service_account.Credentials.from_service_account_file(
-            str(self.connection.key_path),
-            scopes=["https://www.googleapis.com/auth/bigquery"])
-        creds.refresh(Request(session=self.connection.token_session()))
-        return creds.token
+        # cached per key file (sahs.util.auth): one token trip per
+        # session, refreshed only when it expires
+        return self.connection.token()
 
     def dry_run(self, sql: str) -> DryRunOutcome:
         url = (f"{self.connection.endpoint}/bigquery/v2/projects/"

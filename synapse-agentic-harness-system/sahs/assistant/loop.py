@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from sahs.ask.budget import Aborted
+from sahs.ask.model import ModelUnavailable
 from sahs.loop.digest import synapse_digest
 from sahs.loop.loop import _short, compact_result
 from sahs.loop.skills import Skill, render_skills
@@ -531,6 +532,12 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
 
     except Aborted:
         stop_reason = "you stopped me."
+    except ModelUnavailable as e:
+        if calls <= 1 and not said and steps == 0:
+            raise            # nothing happened yet: the honest error card
+        # streamed text is never discarded (§5): close in plain language
+        stop_reason = (f"I lost the connection to the model ({e}). Ask "
+                       "me to continue and I will pick it up from here.")
 
     if status != "answered" and stop_reason:
         closing = _closing(stop_reason, bool(said))

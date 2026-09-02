@@ -144,7 +144,10 @@ path.
   lives in Operate → Transcripts for the weekly reading ritual.
 - The thinking line stops the moment final text starts and never
   returns after the turn. `[hidden] { display: none !important }`
-  globally; the walk asserts visibility.
+  globally; the walk asserts visibility. The line has a heartbeat:
+  the seconds tick, and each model call restarts the clock, so a long
+  think never wears a tool's name ("Checking the query…" while the
+  model is the one working was the first laptop stall).
 - **Artifact panel is model-invoked.** It opens on an artifact in
   this interaction, never on reopening an old chat; a card in the
   transcript reopens it; closing reflows the chat to full width.

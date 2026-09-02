@@ -207,6 +207,20 @@ panel opens only when the model puts something in it; a memory save
 is disclosed inline with an undo. Set `LUMI_USER_NAME` in the silo
 `.env` so memory addresses the person by name.
 
+**If a turn looks stuck:** the live line now ticks ("Checking the
+query… 12s", then "Still thinking · 34s"), so a slow model call and a
+slow tool read differently. For the record, ask the event file:
+
+```bash
+python scripts/turn_doctor.py          # newest session: each model call
+                                       # and tool with its seconds, and the
+                                       # OPEN segment a stuck turn sits in
+```
+
+The client gives up on a model stream after 120 s of silence, retries
+once if nothing had arrived, and the turn then closes in plain language
+with what was already said. Paste the doctor's output with the transcript.
+
 **Before the first query:** the graph names tables `dw.<table>`, and
 BigQuery resolves that against the project that runs the query
 (`prj-p-lumi-gpt`), not the one that hosts the data. Set
