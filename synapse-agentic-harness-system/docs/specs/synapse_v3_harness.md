@@ -125,7 +125,11 @@ path.
   prose and stops before the first `run_sql`; "go ahead" continues.
 - Irreversible actions do not exist in a chat (read-only graph,
   sandboxed SQL, artifacts are versions). Live warehouse execution
-  stays behind its cost tiers. Memory writes disclose and undo.
+  stays behind its cost tiers and is the chat's `run` mode: a scan
+  ceiling in bytes and a row cap the model cannot lift, both disclosed
+  on every result; refused for cost, the model narrows the scan;
+  refused as disabled or restricted, it reports configuration. Memory
+  writes disclose and undo.
 - Budgets become a wall clock and a session cost ceiling, both
   generous, both visible. A limit ends the turn gracefully with what
   was already said and a "continue" that resumes the same
@@ -251,6 +255,10 @@ handoff, the eval suites.
    pin an older id.
 7. Out of scope for now, by the user's word: jobs_30d mining and
    cost priors.
+8. Rows on the laptop come from live execution under the gates
+   (`SAHS_ALLOW_LIVE=1`, `SAHS_LIVE_MAX_BYTES`, the row cap); the
+   frozen-snapshot runner stays an eval fixture. The step row shows
+   the SQL that ran.
 
 ## 12 · The laptop, measured (state report of 2026-09-02)
 

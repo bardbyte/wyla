@@ -250,6 +250,79 @@ def test_run_sql_warns_on_unobserved_literals(compiled, tmp_path,
     assert any("'ZZ'" in w for w in got.get("warnings", [])), got
 
 
+# ─── run mode: rows under the two limits, refusals taught ────
+
+
+class _Runner:
+    name = "bq_jobs_query"
+    connection = None
+
+    def __init__(self):
+        self.seen = []
+
+    def run(self, sql, limit):
+        self.seen.append((sql, limit))
+        return {"rows": [["CA", 7.0], ["US", 9.0], ["GB", 1.0]],
+                "columns": ["country_cd", "spend"],
+                "schema": [{"name": "country_cd", "type": "STRING"},
+                           {"name": "spend", "type": "FLOAT"}],
+                "bytes_processed": 1234}
+
+
+def test_run_sql_run_mode_under_the_limits(compiled, tmp_path,
+                                           monkeypatch):
+    from sahs.canon.canonical import try_canon
+    from sahs.evals.substrate import DryRunOutcome, StaticSubstrate
+    monkeypatch.setenv("SAHS_ALLOW_LIVE", "1")
+    monkeypatch.delenv("SAHS_LIVE_MAX_BYTES", raising=False)
+    # a data project left in the process by an earlier test would
+    # qualify the SQL and move it off the static substrate's key
+    monkeypatch.delenv("BQ_DATA_PROJECT", raising=False)
+    monkeypatch.delenv("LUMI_BQ_DATA_PROJECT", raising=False)
+    sql = ("SELECT country_cd, sum(trans_usd_am) AS spend FROM "
+           "dw.gms_transaction GROUP BY country_cd")
+    runner = _Runner()
+    tools, state, _store, _sid, ws = _kit(
+        compiled, tmp_path, substrate=StaticSubstrate({}), runner=runner)
+    got = tools["run_sql"].fn(sql, mode="run", limit=2)
+    assert got["mode"] == "run" and got["row_count"] == 2
+    assert got["rows"] == [{"country_cd": "CA", "spend": 7.0},
+                           {"country_cd": "US", "spend": 9.0}]
+    assert got["capped"] is True and got["limit"] == 2
+    assert got["saved_as"] == "q1" and (ws / "q1.json").exists()
+    assert "LIMIT 2" in got["note"] and got["scan_ceiling_bytes"] > 0
+    assert runner.seen[0][1] == 2 and "LIMIT 2" in runner.seen[0][0]
+    # the row cap has a ceiling of its own
+    got = tools["run_sql"].fn(sql, mode="run", limit=5000)
+    assert got["limit"] == 1000
+    # priced above the scan ceiling: refused, the model's to narrow
+    fp = try_canon(sql)[0].fp_expr
+    pricey = StaticSubstrate({fp: DryRunOutcome(valid=True,
+                                                bytes_processed=10**12)})
+    tools, *_ = _kit(compiled, tmp_path / "b", substrate=pricey,
+                     runner=runner)
+    got = tools["run_sql"].fn(sql, mode="run")
+    assert "cost_gate_budget" in got["error"]
+    assert got["kind"] == "cost" and got["yours_to_fix"] is True
+    assert "partition" in got["hint"]
+    # live off: configuration, not the model's
+    monkeypatch.delenv("SAHS_ALLOW_LIVE")
+    tools, *_ = _kit(compiled, tmp_path / "c",
+                     substrate=StaticSubstrate({}), runner=runner)
+    got = tools["run_sql"].fn(sql, mode="run")
+    assert "live_disabled" in got["error"]
+    assert got["kind"] == "access" and got["yours_to_fix"] is False
+    # dry_run is untouched, and the summary reads in bytes
+    from sahs.assistant.loop import summarize
+    got = tools["run_sql"].fn(sql, mode="dry_run")
+    assert got["mode"] == "dry_run"
+    assert summarize("run_sql", got).startswith("valid · would scan")
+    assert summarize("run_sql", {"mode": "run", "row_count": 3,
+                                 "capped": True, "limit": 3,
+                                 "bytes_processed": 82_737_261_052}) \
+        == "3 rows (LIMIT 3) · scanned 82.7 GB"
+
+
 # ─── the dashboard through the real loop ─────────────────────
 
 

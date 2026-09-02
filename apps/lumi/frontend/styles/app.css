@@ -935,6 +935,18 @@ table.result tr:last-child td { border-bottom: none; }
   padding: 2px 0 2px 8px; border-left: 2px solid var(--line, #d5d2ca);
 }
 .think-seg p { margin: 4px 0; }
+/* a step's input (the SQL, the code): under the row, on a click */
+.step-body { display: flex; flex-direction: column; min-width: 0; }
+.theater-step.has-input .step-text {
+  cursor: pointer; text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.step-input {
+  white-space: pre-wrap; word-break: break-word;
+  background: rgba(0, 0, 0, 0.045); border-radius: 6px;
+  padding: 6px 8px; margin: 4px 0 6px; font-size: 11.5px;
+  max-height: 260px; overflow-y: auto;
+}
 .think-seg strong { color: var(--ink, #222018); }
 .chat-chiprow {
   display: flex; gap: 8px; flex-wrap: wrap; padding: 4px 18px;

@@ -55,7 +55,7 @@ class AssistantRuntime:
     def __init__(self, *, builds_root: Path, graph_root: Path,
                  store_path: Path, events_dir: Path | None = None,
                  model_factory: Callable[[Budget], Any] | None = None,
-                 snapshot_runner: Any = None,
+                 snapshot_runner: Any = None, runner: Any = None,
                  user_name: str | None = None,
                  substrate: Any = None) -> None:
         self.builds_root = Path(builds_root)
@@ -72,6 +72,7 @@ class AssistantRuntime:
             self.events_dir.mkdir(parents=True, exist_ok=True)
         self.store = AssistantStore(Path(store_path))
         self.snapshot_runner = snapshot_runner
+        self.runner = runner          # live rows; None = BQ jobs.query
         self._model_factory = model_factory
         self._runtimes: dict[str, _SessionRuntime] = {}
         self._lock = threading.Lock()
@@ -227,6 +228,7 @@ class AssistantRuntime:
                     skills=loaded, graph_root=self.graph_root,
                     memories=memories, project=project,
                     snapshot_runner=self.snapshot_runner,
+                    runner=self.runner,
                     substrate=self.substrate,
                     thinking_level=level, user_name=self.user_name)
             except ModelUnavailable as e:

@@ -207,6 +207,21 @@ panel opens only when the model puts something in it; a memory save
 is disclosed inline with an undo. Set `LUMI_USER_NAME` in the silo
 `.env` so memory addresses the person by name.
 
+**Rows come from the warehouse under two limits.** Until live
+execution is on, the chat can only price a query (dry run) — it never
+sees rows, so a "how many" question ends in dry runs and a partial. Put
+in the silo `.env`:
+
+```bash
+SAHS_ALLOW_LIVE=1                 # run_sql mode run: rows, gated
+SAHS_LIVE_MAX_BYTES=10000000000   # scan ceiling, 10 GB (default 1 GB)
+```
+
+A query priced above the ceiling is refused with the partition-filter
+hint and the model narrows it; the row cap is the tool's `limit`
+(default 200, at most 1000). Every result discloses both, and the SQL
+that ran is in the step row — click it.
+
 **Switching chats or tabs never stops a turn.** The turn runs on the
 server; the page only listens. Coming back to a session mid-turn
 replays the turn from its first event and keeps following it, and the

@@ -52,8 +52,9 @@ graph — warm, brief, plain, never mystical about yourself.
 
 You are a general reasoner first: a thinking question gets thinking, \
 with no tools. A data question gets the graph: find the definition, \
-read it, compute, check, and show your receipts. A deliverable gets \
-an artifact the user keeps.
+read it, prove the query with a dry run, run it for the rows when the \
+limits allow, check, and show your receipts. A deliverable gets an \
+artifact the user keeps.
 
 Understand the intent before reaching for a tool. Business words — \
 a team, an acronym, a line of business — name areas of the business \
@@ -229,6 +230,34 @@ def _tail(contents: list[dict[str, Any]], cap: int = 8000) -> str:
 # ─── what the surface shows for one tool call (never the model) ──
 
 
+INPUT_CAP = 4000
+
+
+def _bytes(n: Any) -> str:
+    try:
+        value = float(n)
+    except (TypeError, ValueError):
+        return "an unknown amount"
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1000 or unit == "TB":
+            return f"{value:.0f} {unit}" if unit == "B" \
+                else f"{value:.1f} {unit}"
+        value /= 1000
+    return f"{value:.1f} TB"
+
+
+def tool_input(name: str, args: dict[str, Any]) -> str:
+    """What the transcript shows as the call's input — the SQL, the
+    code, the query — capped, never the whole argument dict."""
+    keys = {"run_sql": "sql", "python": "code", "search": "query",
+            "read": "id", "artifact": "title", "check": "kind",
+            "sample_values": "column", "load_skill": "name",
+            "remember": "text", "note": "text", "ask": "question"}
+    key = keys.get(name)
+    value = args.get(key) if key else None
+    return str(value)[:INPUT_CAP] if value else ""
+
+
 def summarize(tool: str, result: Any) -> str:
     """One line for the activity row. The model never sees this —
     it gets the whole result — so it can be as short as the UI
@@ -264,7 +293,20 @@ def summarize(tool: str, result: Any) -> str:
     if tool == "sample_values":
         return compact_result("sample_values", result)
     if tool == "run_sql":
-        line = compact_result("run_sql", result)
+        mode = result.get("mode")
+        scanned = _bytes(result.get("bytes_processed"))
+        if mode == "dry_run":
+            cols = [c.get("name") for c in (result.get("result_schema")
+                                            or []) if isinstance(c, dict)]
+            line = f"valid · would scan {scanned}" + (
+                f" · columns: {', '.join(cols[:6])}" if cols else "")
+        elif mode == "run":
+            line = (f"{result.get('row_count', 0)} rows"
+                    + (f" (LIMIT {result.get('limit')})"
+                       if result.get("capped") else "")
+                    + f" · scanned {scanned}")
+        else:
+            line = compact_result("run_sql", result)
         if result.get("saved_as"):
             line += f" · saved as {result['saved_as']}"
         if result.get("warnings"):
@@ -332,7 +374,7 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                        turn_id: str, text: str, workspace: Path,
                        skills: list[Skill] | None = None,
                        substrate: Any = None,
-                       snapshot_runner: Any = None,
+                       snapshot_runner: Any = None, runner: Any = None,
                        graph_root: Path | None = None,
                        memories: list[dict[str, Any]] | None = None,
                        project: dict[str, Any] | None = None,
@@ -356,7 +398,7 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
     kit = build_kit(build, state, store=store, session_id=session_id,
                     turn_id=turn_id, workspace=workspace, model=model,
                     substrate=substrate, snapshot_runner=snapshot_runner,
-                    graph_root=graph_root,
+                    runner=runner, graph_root=graph_root,
                     project_id=(project or {}).get("id", ""))
     tools = declarations(kit)
     system = system_prompt(
@@ -464,8 +506,9 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                 args = call.get("args") if isinstance(call.get("args"),
                                                       dict) else {}
                 steps += 1
+                shown = tool_input(name, args)
                 bus.emit("tool_call", turn_id=turn_id, n=steps,
-                         tool=name, args=_short(args, 160))
+                         tool=name, args=_short(args, 160), input=shown)
                 spec = kit.get(name)
                 t0 = time.perf_counter()
                 if spec is None:
@@ -487,14 +530,15 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                 ref = f"a{steps}"
                 payload, content = _response_payload(result)
                 summary = summarize(name, result)
+                elapsed_ms = round((time.perf_counter() - t0) * 1000, 1)
                 trace.append({"kind": "tool", "tool": name,
                               "args": _short(args, 160),
-                              "summary": summary})
+                              "input": shown, "summary": summary,
+                              "elapsed_ms": elapsed_ms})
                 bus.emit("tool_step", turn_id=turn_id, n=steps,
                          tool=name, args=_short(args, 120),
-                         summary=summary, ref=ref,
-                         elapsed_ms=round(
-                             (time.perf_counter() - t0) * 1000, 1))
+                         input=shown, summary=summary, ref=ref,
+                         elapsed_ms=elapsed_ms)
                 bus.emit("tool_result", turn_id=turn_id, ref=ref,
                          tool=name, content=content)
                 if isinstance(result, dict) and result.get("_artifact"):
