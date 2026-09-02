@@ -223,6 +223,52 @@ def test_sandbox_snapshot_permitted_with_disclosure(build, tmp_path):
     assert out["data"]["rows"] is None       # dry-run never moves rows
 
 
+class _Recorder:
+    """A substrate that remembers exactly what it was asked to run."""
+
+    def __init__(self):
+        self.seen = []
+
+    def dry_run(self, sql):
+        self.seen.append(sql)
+        return DryRunOutcome(valid=True, result_schema=None)
+
+
+def test_sandbox_qualifies_tables_with_the_data_project(build, tmp_path):
+    sql = f"SELECT approval_cd FROM {WWCAS} {DATED}"
+    rec = _Recorder()
+    out = execute_sandboxed(build, sql, mode="snapshot", substrate=rec,
+                            ledger_path=tmp_path / "l.jsonl",
+                            env={"BQ_DATA_PROJECT": "axp-lumi"})
+    assert out["status"] == "ok"
+    assert "`axp-lumi`.dw.wwcas_authorization" in rec.seen[0]
+    assert out["meta"]["sql_sent"] == rec.seen[0]
+    assert out["meta"]["qualified"] == [
+        {"from": WWCAS, "to": f"axp-lumi.{WWCAS}"}]
+    assert out["meta"]["tables"] == [WWCAS]      # the graph's name stays
+    # a query already written the warehouse's way resolves and passes
+    rec = _Recorder()
+    out = execute_sandboxed(
+        build, f"SELECT approval_cd FROM `axp-lumi`.{WWCAS} {DATED}",
+        mode="snapshot", substrate=rec, ledger_path=tmp_path / "l.jsonl",
+        env={"BQ_DATA_PROJECT": "axp-lumi"})
+    assert out["status"] == "ok" and "sql_sent" not in out["meta"]
+    assert out["meta"]["tables"] == [WWCAS]
+    # the connection's data project is the default source of truth
+    class _Conn:
+        data_project = "axp-lumi"
+    rec = _Recorder()
+    rec.connection = _Conn()
+    out = execute_sandboxed(build, sql, mode="snapshot", substrate=rec,
+                            ledger_path=tmp_path / "l.jsonl", env={})
+    assert "`axp-lumi`.dw.wwcas_authorization" in rec.seen[0]
+    # no data project anywhere: the SQL travels untouched
+    rec = _Recorder()
+    execute_sandboxed(build, sql, mode="snapshot", substrate=rec,
+                      ledger_path=tmp_path / "l.jsonl", env={})
+    assert rec.seen[0] == sql
+
+
 def test_sandbox_live_default_deny_and_cost_gate(build, tmp_path):
     sql = f"SELECT country_cd FROM {GMS} {DATED}"
     out = execute_sandboxed(build, sql, mode="live",

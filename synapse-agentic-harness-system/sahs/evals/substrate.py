@@ -67,9 +67,11 @@ class BQDryRun:
     def dry_run(self, sql: str) -> DryRunOutcome:
         url = (f"{self.connection.endpoint}/bigquery/v2/projects/"
                f"{self.connection.project}/jobs")
-        body = {"configuration": {
+        body: dict = {"configuration": {
             "dryRun": True,
             "query": {"query": sql, "useLegacySql": False}}}
+        if getattr(self.connection, "location", ""):
+            body["jobReference"] = {"location": self.connection.location}
         request = urllib.request.Request(
             url, data=json.dumps(body).encode("utf-8"),
             headers={"Authorization": f"Bearer {self._token()}",

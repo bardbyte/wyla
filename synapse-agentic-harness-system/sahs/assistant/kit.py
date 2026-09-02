@@ -307,7 +307,9 @@ def build_kit(build: Build, state: AssistantState, *,
             maps_to="the governed query",
             description=(
                 "Validate, then dry-run or run on the frozen snapshot "
-                "under the cost and ACL gates. Rows save as q<N> for "
+                "under the cost and ACL gates. Name tables as the "
+                "cards do (dw.table): the warehouse project and "
+                "location are added for you. Rows save as q<N> for "
                 "python and check. Errors teach: an unknown column "
                 "names the three closest real ones; an unobserved "
                 "literal comes back as a warning."),

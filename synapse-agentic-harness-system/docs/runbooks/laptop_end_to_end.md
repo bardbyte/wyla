@@ -204,6 +204,19 @@ panel opens only when the model puts something in it; a memory save
 is disclosed inline with an undo. Set `LUMI_USER_NAME` in the silo
 `.env` so memory addresses the person by name.
 
+**Before the first query:** the graph names tables `dw.<table>`, and
+BigQuery resolves that against the project that runs the query
+(`prj-p-lumi-gpt`), not the one that hosts the data. Set
+`LUMI_BQ_DATA_PROJECT=axp-lumi` in the silo `.env` (and `BQ_LOCATION`
+if the dataset is regional); the sandbox then qualifies every known
+table as `axp-lumi.dw.<table>` before any dry run or execution, and
+the run_sql result shows the SQL it sent as `sql_sent`. Prove it once:
+
+```bash
+python scripts/bq_check.py --table dw.gms_transaction
+# ✓ `axp-lumi.dw.gms_transaction` resolves · bytes …
+```
+
 The chat stores its sessions under `graph/runs/chat/`; artifacts,
 memory, and projects live in `sessions.sqlite3` there; the full
 per-turn record (what the model saw, every tool result) is the

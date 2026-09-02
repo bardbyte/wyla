@@ -13,6 +13,9 @@ Resolution order (first hit wins), matching the existing laptop setup:
     BQ project   BQ_PROJECT_ID → LUMI_BQ_PROJECT → GOOGLE_CLOUD_PROJECT
     BQ endpoint  BIGQUERY_API_BASE_URL → BIGQUERY_URL → enterprise PSC default
     BQ location  BQ_LOCATION → "US"
+    BQ data proj BQ_DATA_PROJECT → LUMI_BQ_DATA_PROJECT → the BQ project
+                 (the project that HOSTS the tables, e.g. axp-lumi, when
+                 it differs from the one that runs and bills the query)
 
 Vertex resolution honors the PROVEN laptop contract (the ADK apps and
 check_vertex_gemini.py that already ran against prj-d-ea-poc): the
@@ -264,6 +267,15 @@ def resolve_bq_location() -> str:
     return _first_env("BQ_LOCATION") or DEFAULT_BQ_LOCATION
 
 
+def resolve_bq_data_project() -> str | None:
+    """The project that HOSTS the tables (``axp-lumi.dw.<table>``),
+    when it is not the project that runs and bills the query. The
+    graph names tables ``dataset.table``; the sandbox qualifies them
+    with this project before any dry run or execution, so a query
+    written from the cards resolves where the data actually lives."""
+    return _first_env("BQ_DATA_PROJECT", "LUMI_BQ_DATA_PROJECT")
+
+
 @dataclass(frozen=True)
 class BQConnection:
     """Everything the dry-run substrate / sandbox needs to reach BigQuery."""
@@ -274,6 +286,8 @@ class BQConnection:
     key_path: Path | None
     ssl_verify: bool = True
     ca_bundle: str | None = None
+    # where the tables live; defaults to the query project
+    data_project: str = ""
 
     @classmethod
     def from_env(cls) -> "BQConnection":
@@ -299,7 +313,8 @@ class BQConnection:
         verify, bundle = resolve_ssl()
         return cls(project=project, endpoint=endpoint,
                    location=resolve_bq_location(), key_path=key,
-                   ssl_verify=verify, ca_bundle=bundle)
+                   ssl_verify=verify, ca_bundle=bundle,
+                   data_project=resolve_bq_data_project() or project)
 
     def ssl_context(self) -> ssl.SSLContext:
         """Context for urllib calls: default verified (with the custom

@@ -84,9 +84,12 @@ class Build:
                      if t.get("physical") == physical), {})
 
     def physical_of(self, name: str) -> str | None:
-        name = (name or "").strip().lower()
+        name = (name or "").strip().replace("`", "").lower()
         if name in self.schema:
             return name
+        parts = name.split(".")
+        if len(parts) >= 3 and ".".join(parts[-2:]) in self.schema:
+            return ".".join(parts[-2:])     # project.dataset.table
         hits = [t for t in self.schema if t.split(".")[-1] == name
                 or t.endswith(name)]
         return hits[0] if len(hits) == 1 else None

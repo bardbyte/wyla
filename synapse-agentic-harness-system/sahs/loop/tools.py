@@ -649,12 +649,14 @@ def toolkit(build: Build, state: LoopState, *,
                         "the sandbox's reason stands: dry_run and "
                         "snapshot never bypass the ACL")
         shape = sandboxed["data"]
+        sent = (sandboxed.get("meta") or {}).get("sql_sent")
+        extra = {"sql_sent": sent} if sent else {}
         if mode == "dry_run":
             return {"mode": "dry_run", "valid": True,
                     "result_schema": shape.get("result_schema"),
                     "bytes_processed": shape.get("bytes_processed"),
                     "rows": None,
-                    "warnings": verdict["warnings"],
+                    "warnings": verdict["warnings"], **extra,
                     "note": "dry_run: shape and cost, no rows"}
         if snapshot_runner is None:
             return _err(
@@ -669,7 +671,7 @@ def toolkit(build: Build, state: LoopState, *,
                 "result_schema": ran.get("schema")
                 or shape.get("result_schema"),
                 "bytes_processed": shape.get("bytes_processed"),
-                "warnings": verdict["warnings"],
+                "warnings": verdict["warnings"], **extra,
                 "source": getattr(snapshot_runner, "name", "snapshot")}
 
     # ── plan_set ── TodoWrite: the ONLY state the loop writes ─
