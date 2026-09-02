@@ -89,6 +89,22 @@ export const api = {
   chatSkills: () => get("/api/chat/skills"),
   chatSetSkills: (id, names) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/skills`, { names }),
+  chatProjects: () => get("/api/chat/projects"),
+  chatNewProject: (name, instructions = "") =>
+    post("/api/chat/projects", { name, instructions }),
+  chatSetProject: (id, projectId) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/project`,
+         { project_id: projectId }),
+  chatStar: (id, on) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/star`, { on }),
+  chatArchive: (id, on) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/archive`, { on }),
+  chatMemories: (projectId = "") =>
+    get(`/api/chat/memories?project_id=${encodeURIComponent(projectId)}`),
+  chatRetireMemory: (id) =>
+    post(`/api/chat/memories/${encodeURIComponent(id)}/retire`, {}),
+  chatPptxUrl: (id) =>
+    `/api/chat/artifacts/${encodeURIComponent(id)}/export.pptx`,
   chatArtifact: (id, version = null) =>
     get(`/api/chat/artifacts/${encodeURIComponent(id)}`
         + (version ? `?version=${version}` : "")),

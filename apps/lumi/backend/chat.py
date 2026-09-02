@@ -12,8 +12,15 @@ key, never calls a model.
     POST /api/chat/sessions/{id}/rename            {title}
     GET  /api/chat/skills                          → both shelves
     POST /api/chat/sessions/{id}/skills            {names}
+    GET  /api/chat/projects · POST /api/chat/projects
+    POST /api/chat/projects/{id}                   {…updates}
+    POST /api/chat/sessions/{id}/project           {project_id}
+    POST /api/chat/sessions/{id}/star|archive      {on}
+    GET  /api/chat/memories[?project_id=]
+    POST /api/chat/memories/{id}/retire
     GET  /api/chat/artifacts/{artifact_id}[?version=]
     GET  /api/chat/artifacts/{artifact_id}/versions
+    GET  /api/chat/artifacts/{artifact_id}/export.pptx
 """
 
 from __future__ import annotations
@@ -22,7 +29,7 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Header, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from apps.lumi.backend.meridian import (_builds_root, _graph_root,
@@ -60,6 +67,27 @@ class Rename(BaseModel):
 
 class SetSkills(BaseModel):
     names: list[str] = Field(default_factory=list, max_length=8)
+
+
+class NewProject(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    instructions: str = Field(default="", max_length=4000)
+    skills: list[str] = Field(default_factory=list, max_length=4)
+
+
+class UpdateProject(BaseModel):
+    name: str | None = None
+    instructions: str | None = None
+    skills: list[str] | None = None
+    archived: bool | None = None
+
+
+class SetProject(BaseModel):
+    project_id: str = Field(default="", max_length=40)
+
+
+class Flag(BaseModel):
+    on: bool = True
 
 
 def _unavailable(reason: str) -> dict:
@@ -137,6 +165,98 @@ def set_skills(session_id: str, req: SetSkills) -> dict:
                 **runtime.set_skills(session_id, req.names)}
     except KeyError:
         return _unavailable(f"no session {session_id}")
+
+
+@router.get("/projects")
+def list_projects() -> dict:
+    runtime, _ = _chat()
+    return {"available": True,
+            "projects": runtime.store.list_projects()}
+
+
+@router.post("/projects", status_code=201)
+def create_project(req: NewProject) -> dict:
+    runtime, _ = _chat()
+    return {"available": True,
+            "project": runtime.store.create_project(
+                req.name, instructions=req.instructions,
+                skills=req.skills)}
+
+
+@router.post("/projects/{project_id}")
+def update_project(project_id: str, req: UpdateProject) -> dict:
+    runtime, _ = _chat()
+    row = runtime.store.update_project(
+        project_id, name=req.name, instructions=req.instructions,
+        skills=req.skills, archived=req.archived)
+    if row is None:
+        return _unavailable(f"no project {project_id}")
+    return {"available": True, "project": row}
+
+
+@router.post("/sessions/{session_id}/project")
+def set_session_project(session_id: str, req: SetProject) -> dict:
+    runtime, _ = _chat()
+    try:
+        return {"available": True,
+                **runtime.set_session_project(session_id,
+                                              req.project_id)}
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+
+
+@router.post("/sessions/{session_id}/star")
+def star_session(session_id: str, req: Flag) -> dict:
+    runtime, _ = _chat()
+    try:
+        return {"available": True,
+                **runtime.set_session_flag(session_id, "starred",
+                                           req.on)}
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+
+
+@router.post("/sessions/{session_id}/archive")
+def archive_session(session_id: str, req: Flag) -> dict:
+    runtime, _ = _chat()
+    try:
+        return {"available": True,
+                **runtime.set_session_flag(session_id, "archived",
+                                           req.on)}
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+
+
+@router.get("/memories")
+def list_memories(project_id: str = "") -> dict:
+    runtime, _ = _chat()
+    return {"available": True,
+            "memories": runtime.store.list_memories(
+                project_id=project_id)}
+
+
+@router.post("/memories/{memory_id}/retire")
+def retire_memory(memory_id: str) -> dict:
+    runtime, _ = _chat()
+    return {"available": True,
+            "retired": runtime.store.retire_memory(memory_id)}
+
+
+@router.get("/artifacts/{artifact_id}/export.pptx")
+def export_pptx(artifact_id: str, version: int | None = None) -> Any:
+    runtime, _ = _chat()
+    row = runtime.store.get_artifact(artifact_id, version)
+    if row is None:
+        return _unavailable(f"no artifact {artifact_id}")
+    from sahs.assistant.export import artifact_pptx
+    name = (row["title"] or row["type"]).lower()
+    name = "".join(c if c.isalnum() else "-" for c in name)[:40]
+    return Response(
+        content=artifact_pptx(row),
+        media_type="application/vnd.openxmlformats-officedocument"
+                   ".presentationml.presentation",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{name}.pptx"'})
 
 
 @router.get("/artifacts/{artifact_id}")

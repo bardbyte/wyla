@@ -100,13 +100,34 @@ class AssistantRuntime:
         self.runtime(session["id"])
         return session
 
-    def sessions(self, limit: int = 50) -> list[dict]:
+    def sessions(self, limit: int = 50,
+                 include_archived: bool = False) -> list[dict]:
         rows = [r for r in self.store.list_sessions(limit * 2)
-                if r.get("kind") == "assistant"][:limit]
+                if r.get("kind") == "assistant"
+                and (include_archived or not r.get("archived"))
+                ][:limit]
         for row in rows:
             rt = self._runtimes.get(row["id"])
             row["running"] = bool(rt and rt.running)
         return rows
+
+    # ── §8 organization: projects, flags, memory panel ───────
+    def set_session_project(self, session_id: str,
+                            project_id: str) -> dict:
+        if self.store.get_session(session_id) is None:
+            raise KeyError(session_id)
+        if project_id and self.store.get_project(project_id) is None:
+            return {"ok": False,
+                    "reason": f"no project {project_id}"}
+        self.store.set_project(session_id, project_id)
+        return {"ok": True, "project_id": project_id}
+
+    def set_session_flag(self, session_id: str, flag: str,
+                         on: bool) -> dict:
+        if self.store.get_session(session_id) is None:
+            raise KeyError(session_id)
+        self.store.set_flag(session_id, flag, on)
+        return {"ok": True, flag: bool(on)}
 
     # ── skills: both shelves, one picker (§13.3) ─────────────
     def skills(self) -> list[dict]:
@@ -149,8 +170,16 @@ class AssistantRuntime:
         self.store.add_message(session_id, "user", text,
                                turn_id=turn_id)
         model = LazyModel(lambda: self.model_for(rt.budget))
-        loaded, _missing = load_packs(
-            self.graph_root, list(session.get("skills") or []))
+        project = self.store.get_project(
+            session.get("project_id") or "") \
+            if session.get("project_id") else None
+        # the project's pinned packs load with the session's own
+        names = list(dict.fromkeys(
+            ((project or {}).get("skills") or [])
+            + list(session.get("skills") or [])))
+        loaded, _missing = load_packs(self.graph_root, names)
+        memories = self.store.list_memories(
+            project_id=(project or {}).get("id", ""))
 
         def worker() -> None:
             try:
@@ -160,6 +189,7 @@ class AssistantRuntime:
                     session=session, turn_id=turn_id, text=text,
                     workspace=self.workspace(session_id),
                     skills=loaded, graph_root=self.graph_root,
+                    memories=memories, project=project,
                     snapshot_runner=self.snapshot_runner)
             except ModelUnavailable as e:
                 rt.bus.emit("error", turn_id=turn_id,

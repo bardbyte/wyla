@@ -52,9 +52,14 @@ def test_every_chat_helper_exists_and_is_served():
                   "/sessions/{session_id}/stream",
                   "/sessions/{session_id}/stop",
                   "/sessions/{session_id}/skills",
-                  '"/skills"',
+                  '"/skills"', '"/projects"',
+                  "/sessions/{session_id}/project",
+                  "/sessions/{session_id}/star",
+                  "/sessions/{session_id}/archive",
+                  '"/memories"', "/memories/{memory_id}/retire",
                   "/artifacts/{artifact_id}",
-                  "/artifacts/{artifact_id}/versions"):
+                  "/artifacts/{artifact_id}/versions",
+                  "/artifacts/{artifact_id}/export.pptx"):
         assert route in BACKEND, f"no served route {route}"
     # the picker lists the chat shelf (both origins), not ask's
     assert "api.chatSkills()" in CHAT_JS
@@ -84,6 +89,23 @@ def test_the_claude_shape_is_present():
     for cls in (".chatv2", ".chat-panel", ".chat-row",
                 ".chats-search", ".chartv2", ".artifact-footer"):
         assert cls in CSS, cls
+
+
+def test_the_organization_is_present():
+    # §8: projects + starred + archive live in the shell shelf
+    for piece in ("project-row", "data-star", "data-archive",
+                  "shelf-head", "chatProjects"):
+        assert piece in CHATS_JS, piece
+    # the chat page: project select, memory panel, handoff banner
+    for piece in ("chat-project", "chat-memory-btn",
+                  "chatRetireMemory", "handoff-note",
+                  "Where you left off", "chatPptxUrl"):
+        assert piece in CHAT_JS, piece
+    for cls in (".project-row", ".memory-row", ".handoff-note",
+                ".row-btn"):
+        assert cls in CSS, cls
+    # memory is disclosed and retirable, never silently gone
+    assert "retire" in BACKEND and "retire_memory" in BACKEND
 
 
 def test_dashboards_and_diagrams_render():

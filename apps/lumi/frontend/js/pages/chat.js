@@ -23,8 +23,12 @@ export async function renderChat(outlet, wanted = "") {
       <div class="chat-main">
         <div class="chat-masthead">
           <span class="muted" id="chat-build"></span>
+          <select id="chat-project" title="project"></select>
           <span class="spacer"></span>
           <span class="muted" id="chat-meter"></span>
+          <button class="btn" id="chat-memory-btn"
+            aria-expanded="false">⊚ memory</button>
+          <div id="chat-memory-pop" class="skills-pop" hidden></div>
           <button class="btn" id="chat-skills-btn"
             aria-expanded="false">⊕ skills</button>
           <span id="chat-skill-chips"></span>
@@ -103,6 +107,69 @@ export async function renderChat(outlet, wanted = "") {
   // this just tells the shelf something changed
   const pingShelf = () =>
     window.dispatchEvent(new CustomEvent("synapse:sessions"));
+
+  // ── §8: project select · §9: the handoff banner ──────────
+  async function paintProject() {
+    const got = await api.chatProjects().catch(() => ({}));
+    const projects = got.available ? got.projects || [] : [];
+    el("chat-project").innerHTML =
+      `<option value="">no project</option>`
+      + projects.map((p) => `<option value="${esc(p.id)}"${
+          p.id === state.session.project_id ? " selected" : ""}>${
+          esc(p.name)}</option>`).join("");
+  }
+  el("chat-project").addEventListener("change", async () => {
+    const saved = await api.chatSetProject(
+      state.session.id, el("chat-project").value);
+    if (saved.available && saved.ok) {
+      state.session.project_id = el("chat-project").value;
+      pingShelf();
+    }
+  });
+  window.addEventListener("synapse:sessions", paintProject);
+  if (boot.session.handoff && (boot.messages || []).length) {
+    const h = boot.session.handoff;
+    say(`<b>Where you left off</b> — ${esc(h.say || "")}
+      ${h.checked?.length ? `<div class="muted">checked: ${
+        esc(h.checked.join(", "))}</div>` : ""}
+      ${h.chips?.length ? `<div class="muted">next: ${
+        esc(h.chips.join(" · "))}</div>` : ""}`, "handoff-note");
+  }
+
+  // ── §8: the memory panel — disclosed, retirable ──────────
+  const memBtn = el("chat-memory-btn");
+  const memPop = el("chat-memory-pop");
+  async function paintMemories() {
+    const got = await api.chatMemories(
+      state.session.project_id || "").catch(() => ({}));
+    const rows = got.available ? got.memories || [] : [];
+    memPop.innerHTML = rows.length ? rows.map((m) => `
+      <div class="memory-row">
+        <span>${esc(m.text)}
+          ${m.scope !== "global" ? `<span class="origin-tag
+            o-unreviewed">project</span>` : ""}</span>
+        <button class="row-btn" data-mem="${esc(m.id)}"
+          title="retire">×</button>
+      </div>`).join("")
+      : `<div class="muted" style="padding:6px">Nothing remembered
+         yet. Settle a preference in chat and Synapse keeps it —
+         disclosed here, never a metric definition.</div>`;
+    for (const btn of memPop.querySelectorAll("[data-mem]")) {
+      btn.addEventListener("click", async () => {
+        await api.chatRetireMemory(btn.dataset.mem);
+        paintMemories();
+      });
+    }
+  }
+  memBtn.addEventListener("click", () => {
+    memPop.hidden = !memPop.hidden;
+    memBtn.setAttribute("aria-expanded", String(!memPop.hidden));
+    if (!memPop.hidden) paintMemories();
+  });
+  document.addEventListener("click", (e) => {
+    if (!memPop.hidden && !memPop.contains(e.target)
+        && e.target !== memBtn) memPop.hidden = true;
+  });
 
   // ── skills (same picker contract as Ask) ─────────────────
   const skillsBtn = el("chat-skills-btn");
@@ -528,6 +595,15 @@ export async function renderChat(outlet, wanted = "") {
           el("panel-body").querySelector("svg").outerHTML)]);
       }
     }
+    // every type exports a deck server-side: one panel per slide,
+    // meridian lines riding in the slide notes
+    buttons.push(["PPTX", () => {
+      const a = document.createElement("a");
+      a.href = api.chatPptxUrl(row.artifact_id)
+        + `?version=${row.version}`;
+      a.download = "";
+      a.click();
+    }]);
     box.innerHTML = "";
     for (const [label, fn] of buttons) {
       const b = document.createElement("button");
@@ -824,5 +900,9 @@ export async function renderChat(outlet, wanted = "") {
   subscribe();
   pingShelf();
   refreshSkills();
-  return () => { if (state.source) state.source.close(); };
+  paintProject();
+  return () => {
+    if (state.source) state.source.close();
+    window.removeEventListener("synapse:sessions", paintProject);
+  };
 }

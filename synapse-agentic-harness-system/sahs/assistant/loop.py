@@ -84,14 +84,43 @@ Your tools:
 _DIGEST_CACHE: dict[str, str] = {}
 
 
+def _memory_block(memories: list[dict[str, Any]] | None) -> str:
+    if not memories:
+        return ""
+    lines = ["## What you remember about this user",
+             "Preferences and disambiguations they settled — scoped, "
+             "statused, and visible to them in the memory panel. "
+             "They steer defaults; they never define metrics."]
+    for m in memories[-10:]:
+        scope = "" if m.get("scope") == "global" \
+            else " [this project]"
+        lines.append(f"- {m['text']}{scope}")
+    return "\n".join(lines)
+
+
+def _project_block(project: dict[str, Any] | None) -> str:
+    if not project or not str(project.get("instructions",
+                                          "")).strip():
+        return ""
+    return (f"## Project: {project.get('name', '')}\n"
+            "The analyst's standing instructions for every chat in "
+            "this project:\n"
+            + str(project["instructions"]).strip()[:2000])
+
+
 def system_prompt(build: Build, skills: list[Skill] | None,
                   tool_block: str,
-                  skill_index: list[Any] | None = None) -> str:
+                  skill_index: list[Any] | None = None,
+                  memories: list[dict[str, Any]] | None = None,
+                  project: dict[str, Any] | None = None) -> str:
     digest = _DIGEST_CACHE.get(build.version)
     if digest is None:
         digest = synapse_digest(build)
         _DIGEST_CACHE[build.version] = digest
     parts = [IDENTITY, "", digest, "", RULES]
+    for block in (_project_block(project), _memory_block(memories)):
+        if block:
+            parts += ["", block]
     loaded = render_skills(skills or [])
     if loaded:
         parts += ["", loaded]
@@ -189,25 +218,32 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                        substrate: Any = None,
                        snapshot_runner: Any = None,
                        graph_root: Path | None = None,
+                       memories: list[dict[str, Any]] | None = None,
+                       project: dict[str, Any] | None = None,
                        max_steps: int = MAX_STEPS,
                        wall_seconds: float = WALL_SECONDS) -> str:
     session_id = session["id"]
     started = time.perf_counter()
     bus.emit("turn_started", turn_id=turn_id, text=text,
              build_id=build.version, version=ASSISTANT_VERSION,
-             skills=[s.name for s in (skills or [])])
+             skills=[s.name for s in (skills or [])],
+             memories=len(memories or []),
+             project=(project or {}).get("name", ""))
     budget.start_turn()
     prepare_workspace(workspace, build.root)
 
     state = AssistantState()
+    state.notes = list(session.get("notes") or [])
     kit = assistant_toolkit(build, state, store=store,
                             session_id=session_id, turn_id=turn_id,
                             workspace=workspace, model=model,
                             substrate=substrate,
                             snapshot_runner=snapshot_runner,
-                            graph_root=graph_root)
+                            graph_root=graph_root,
+                            project_id=(project or {}).get("id", ""))
     system = system_prompt(build, skills, render_tool_block(kit),
-                           skill_index=all_skills(graph_root))
+                           skill_index=all_skills(graph_root),
+                           memories=memories, project=project)
     bus.emit("model_prompt", turn_id=turn_id, n=0, kind="system",
              content=system[:12000])
     history = _history_block(store, session_id)
@@ -231,6 +267,10 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
         kept = steps[-2:] if pressure else steps
         lines = ["CONVERSATION SO FAR:", history, "",
                  f"THE USER JUST SAID: {text}", ""]
+        if state.notes:
+            lines.append("YOUR WORKING NOTES (they persist across "
+                         "turns; note() updates them): "
+                         + "; ".join(state.notes[-5:]))
         if state.artifacts_touched:
             lines.append("ARTIFACTS TOUCHED THIS TURN: "
                          + ", ".join(dict.fromkeys(
@@ -367,6 +407,10 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                     payload={"clarify": result["clarify"]})
                 bus.emit("chips", turn_id=turn_id,
                          clarify=result["clarify"])
+                _persist(store, session_id, state, "clarify",
+                         result["clarify"]["question"],
+                         [str(o) for o in
+                          result["clarify"].get("options", [])])
                 _finish(bus, budget, turn_id, "clarify", started,
                         skills_loaded=list(state.skills_loaded))
                 return "clarify"
@@ -402,11 +446,28 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
         title = text.strip()[:60]
         session["title"] = title
         store.set_title(session_id, title)
+    _persist(store, session_id, state, status, prose, chips)
     _finish(bus, budget, turn_id, status, started,
             steps=loop_budget.steps,
             subgraph_used=state.subgraph,
             skills_loaded=list(state.skills_loaded))
     return status
+
+
+def _persist(store: AssistantStore, session_id: str,
+             state: AssistantState, status: str, prose: str,
+             chips: list[str]) -> None:
+    """§8/§9: the working notes survive the turn, and the handoff
+    says where you left off when the session reopens tomorrow."""
+    store.set_notes(session_id, state.notes)
+    checked = [f["kind"] for f in state.facts_log if f.get("passed")]
+    store.set_handoff(session_id, {
+        "status": status,
+        "say": prose.replace("\n", " ")[:300],
+        "chips": chips[:4],
+        "artifacts": list(dict.fromkeys(state.artifacts_touched)),
+        "checked": checked[-6:],
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
 
 
 def _finish(bus: EventBus, budget: Any, turn_id: str, status: str,

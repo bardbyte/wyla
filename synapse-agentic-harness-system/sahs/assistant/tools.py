@@ -48,7 +48,8 @@ def assistant_toolkit(build: Build, state: AssistantState, *,
                       snapshot_runner: Any = None,
                       ledger_path: Path | None = None,
                       scout: Any = None,
-                      graph_root: Path | None = None
+                      graph_root: Path | None = None,
+                      project_id: str = ""
                       ) -> dict[str, ToolSpec]:
     kit = meridian_toolkit(build, state, substrate=substrate,
                            snapshot_runner=snapshot_runner,
@@ -167,6 +168,47 @@ def assistant_toolkit(build: Build, state: AssistantState, *,
         state.skills_loaded.append(name)
         return {"ok": True, "name": pack.name, "title": pack.title,
                 "origin": pack.origin, "text": pack.text}
+
+    # ── memory: scoped, statused, disclosed (§8) ─────────────
+    def remember(text: str, scope: str = "global") -> dict[str, Any]:
+        text = str(text).strip()
+        if not text:
+            return {"error": "nothing to remember",
+                    "hint": "one preference or disambiguation, in a "
+                            "sentence"}
+        if scope == "project":
+            if not project_id:
+                return {"error": "this chat is in no project",
+                        "hint": "use scope \"global\", or move the "
+                                "chat into a project first"}
+            scope = f"project:{project_id}"
+        elif scope != "global":
+            return {"error": f"unknown scope {scope!r}",
+                    "hint": "global (every chat) or project (this "
+                            "chat's project)"}
+        row = store.add_memory(text, scope=scope)
+        return {"ok": True, "memory_id": row["id"],
+                "scope": row["scope"],
+                "note": "remembered — it appears in the memory "
+                        "panel and in every prompt it scopes to"}
+
+    def memories() -> dict[str, Any]:
+        rows = store.list_memories(project_id=project_id)
+        return {"memories": [
+            {"memory_id": r["id"], "text": r["text"],
+             "scope": r["scope"]} for r in rows],
+            "count": len(rows)}
+
+    def forget(memory_id: str) -> dict[str, Any]:
+        if store.retire_memory(str(memory_id)):
+            return {"ok": True,
+                    "note": "retired, not erased — the entry stays "
+                            "on record with status retired"}
+        known = [r["id"] for r in
+                 store.list_memories(project_id=project_id)]
+        return {"error": f"no active memory {memory_id!r}",
+                "hint": "active ids: " + (", ".join(known)
+                                          or "none")}
 
     from . import checks as _checks
 
@@ -475,6 +517,40 @@ def assistant_toolkit(build: Build, state: AssistantState, *,
                 "Packs steer where you look; they never add tables, "
                 "metrics, or numbers to the world."),
             fn=load_skill),
+        ToolSpec(
+            name="remember",
+            signature="remember(text, scope?)",
+            maps_to="user memory",
+            description=(
+                "Keep one preference or disambiguation the user "
+                "settled: \"by Canada they mean merchant country\", "
+                "\"prefers certified-only by default\". Scope "
+                "global, or project for this chat's project.\n"
+                "NEVER a metric definition, a variant, or a number "
+                "— those belong in the graph through the steward's "
+                "door. Every memory is disclosed in the prompt and "
+                "the memory panel."),
+            fn=remember, writes=True),
+        ToolSpec(
+            name="memories",
+            signature="memories()",
+            maps_to="user memory",
+            description=(
+                "The active memories scoped to this chat, with ids.\n"
+                "What you already know about how this user reads "
+                "the data; forget(id) retires an entry that stopped "
+                "being true."),
+            fn=memories),
+        ToolSpec(
+            name="forget",
+            signature="forget(memory_id)",
+            maps_to="user memory",
+            description=(
+                "Retire one memory by id (memories() lists them). "
+                "Retired, not erased — the record keeps its "
+                "history.\nUse when the user corrects a remembered "
+                "preference."),
+            fn=forget, writes=True),
     )})
     return kit
 
