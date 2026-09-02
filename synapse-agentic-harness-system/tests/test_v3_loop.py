@@ -293,6 +293,13 @@ def test_reasoning_turn_needs_no_tools(compiled):
     stored = runtime.store.messages(session["id"])[-1]
     assert stored["payload"]["chips"]
     assert stored["payload"]["artifacts"] == []
+    # the thinking travels with the message: the transcript shows it
+    # folded ("Thought for …"), expandable, after a reload
+    trace = stored["payload"]["trace"]
+    assert trace[0] == {"kind": "thought",
+                        "text": "A framing question — no data needed."}
+    assert trace[1]["kind"] == "tool" and trace[1]["tool"] == "suggest_next"
+    assert stored["payload"]["elapsed_ms"] >= 0
 
 
 def test_artifact_refusal_teaches_and_the_second_try_lands(compiled):
@@ -389,6 +396,10 @@ def test_python_turn_reads_the_build(compiled):
     step = _by(events, "tool_step")[0]
     assert f"{certified} certified" in step["summary"]
     assert _by(events, "tool_call")[0]["tool"] == "python"
+    trace = runtime.store.messages(session["id"])[-1]["payload"]["trace"]
+    assert [t["kind"] for t in trace] == ["tool"]
+    assert trace[0]["tool"] == "python" and "certified" in trace[0]["summary"]
+    assert "import meridian" in trace[0]["args"]
 
 
 def test_sql_rows_flow_into_the_sandbox(compiled, tmp_path,
@@ -522,6 +533,31 @@ def test_a_lost_connection_mid_turn_keeps_what_was_said(compiled):
     events = _turn(runtime, session["id"], "hello")
     assert _by(events, "error")[0]["code"] == "model_unavailable"
     assert _by(events, "turn_done")[-1]["status"] == "error"
+
+
+def test_turn_window_points_at_the_in_flight_turn(compiled):
+    import time
+    from sahs.assistant.agent import ScriptedAgent
+
+    def slow():
+        time.sleep(1.5)
+        return [{"text": "Done after a pause."}]
+
+    runtime = _runtime(compiled, ScriptedAgent([slow]))
+    session = runtime.create_session()
+    assert runtime.turn_window(session["id"])["running"] is False
+    runtime.start_turn(session["id"], "a slow one")
+    time.sleep(0.5)
+    window = runtime.turn_window(session["id"])
+    assert window["running"] is True and window["turn_id"].startswith("t_")
+    bus = runtime.runtime(session["id"]).bus
+    first = next(e for e in bus.since(0) if e["ev"] == "turn_started")
+    assert window["after"] == first["seq"] - 1
+    # replaying from the window starts at the turn's own first event
+    assert bus.since(window["after"])[0]["ev"] == "turn_started"
+    assert runtime.wait(session["id"], 30)
+    assert runtime.turn_window(session["id"])["running"] is False
+    assert "Done after a pause." in _prose(bus.since(0))
 
 
 def test_second_turn_sees_the_first_newest_ask_last(compiled):

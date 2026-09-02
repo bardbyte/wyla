@@ -207,6 +207,11 @@ panel opens only when the model puts something in it; a memory save
 is disclosed inline with an undo. Set `LUMI_USER_NAME` in the silo
 `.env` so memory addresses the person by name.
 
+**Switching chats or tabs never stops a turn.** The turn runs on the
+server; the page only listens. Coming back to a session mid-turn
+replays the turn from its first event and keeps following it, and the
+chats shelf marks a working chat with a pulsing dot while you are away.
+
 **If a turn looks stuck:** the live line now ticks ("Checking the
 query… 12s", then "Still thinking · 34s"), so a slow model call and a
 slow tool read differently. For the record, ask the event file:

@@ -36,8 +36,9 @@ function chatRow(row, current) {
         <button class="row-btn" data-id="${esc(row.id)}"
           data-archive="1" title="archive">⌫</button>
       </span>
-      <span class="chat-when">${row.running ? "·" : esc(when(
-        row.updated_at))}</span>
+      ${row.running
+        ? '<span class="chat-when working" title="working">●</span>'
+        : `<span class="chat-when">${esc(when(row.updated_at))}</span>`}
     </a>`;
 }
 

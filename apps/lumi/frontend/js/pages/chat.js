@@ -575,14 +575,16 @@ export async function renderChat(outlet, wanted = "") {
     const div = document.createElement("div");
     div.className = "chat-turn";
     div.innerHTML = `
-      <details class="tool-activity" hidden>
-        <summary><span class="tri">▸</span>
-          <span class="tool-title">working…</span></summary>
+      <details class="tool-activity" hidden open>
+        <summary>
+          <span class="tri">▸</span>
+          <span class="thinking-line">
+            <span class="think-orb">✳</span>
+            <span class="think-text">Thinking…</span></span>
+          <span class="tool-title" hidden></span>
+        </summary>
         <div class="tool-steps"></div>
       </details>
-      <div class="thinking-line" hidden>
-        <span class="think-orb">✳</span>
-        <span class="think-text">Thinking…</span></div>
       <div class="chat-prose md"></div>
       <div class="chat-extras"></div>`;
     thread.appendChild(div);
@@ -596,7 +598,8 @@ export async function renderChat(outlet, wanted = "") {
              extras: div.querySelector(".chat-extras"),
              buffer: "", steps: 0, rows: new Map(), verbs: [],
              thoughts: "", done: false, tick: null, tickLabel: "",
-             tickStart: 0 };
+             tickStart: 0, seg: null, segText: "", thought: false,
+             settled: false, startedAt: 0 };
     state.turns.set(turnId, turn);
     scroll();
     return turn;
@@ -684,10 +687,14 @@ export async function renderChat(outlet, wanted = "") {
     if (turn.tick) { clearInterval(turn.tick); turn.tick = null; }
   }
 
-  function pulse(turn, label) {
+  function pulse(turn, label, sinceIso = "") {
     stopPulse(turn);
     turn.tickLabel = label;
-    turn.tickStart = Date.now();
+    // the clock starts when the event happened, not when it was
+    // seen — a replayed turn shows its true seconds
+    const since = Date.parse(sinceIso || "");
+    turn.tickStart = Number.isFinite(since)
+      ? Math.min(since, Date.now()) : Date.now();
     showThinking(turn, label);
     turn.tick = setInterval(() => {
       if (turn.done) { stopPulse(turn); return; }
@@ -700,17 +707,56 @@ export async function renderChat(outlet, wanted = "") {
     }, 1000);
   }
 
-  function doneThinking(turn, elapsedMs) {
-    turn.done = true;
+  // ── the thinking block, the way Claude shows it: the model's own
+  // thought summaries in the order they happen, interleaved with the
+  // steps — open while it works, "Thought for 34s" when the answer
+  // lands, yours to expand; new work reopens it
+  function doneLabel(thought, elapsedMs, verbs) {
+    const secs = Math.max(0, (elapsedMs || 0) / 1000);
+    const head = `${thought ? "Thought" : "Worked"} for ${
+      secs >= 10 ? secs.toFixed(0) : secs.toFixed(1)}s`;
+    return verbs.length ? `${head} · ${verbs.join(", ")}` : head;
+  }
+
+  function openBlock(turn) {
+    turn.activity.hidden = false;
+    turn.activity.open = true;
+    turn.settled = false;
+    turn.toolTitle.hidden = true;
+    turn.thinking.hidden = false;
+  }
+
+  function thoughtSegment(turn) {
+    if (!turn.seg) {
+      const seg = document.createElement("div");
+      seg.className = "think-seg md";
+      turn.toolSteps.appendChild(seg);
+      turn.seg = seg;
+      turn.segText = "";
+      turn.thought = true;
+    }
+    return turn.seg;
+  }
+
+  function settleBlock(turn, elapsedMs) {
     stopPulse(turn);
     turn.thinking.hidden = true;
-    if (turn.steps) {
-      const secs = elapsedMs ? `Worked for ${(elapsedMs / 1000)
-        .toFixed(elapsedMs >= 10000 ? 0 : 1)}s` : "Worked";
-      const verbs = [...new Set(turn.verbs)];
-      turn.toolTitle.textContent = verbs.length
-        ? `${secs} · ${verbs.join(", ")}` : secs;
+    if (turn.toolSteps.children.length === 0) {
+      turn.activity.hidden = true;        // nothing to show, no block
+      return;
     }
+    turn.toolTitle.textContent = doneLabel(
+      turn.thought,
+      elapsedMs ?? (turn.startedAt ? Date.now() - turn.startedAt : 0),
+      [...new Set(turn.verbs)]);
+    turn.toolTitle.hidden = false;
+    turn.activity.open = false;
+    turn.settled = true;
+  }
+
+  function doneThinking(turn, elapsedMs) {
+    turn.done = true;
+    settleBlock(turn, elapsedMs);
   }
 
   // one row per call: announced when the call starts, settled when
@@ -726,7 +772,6 @@ export async function renderChat(outlet, wanted = "") {
     turn.toolSteps.appendChild(row);
     turn.rows.set(event.n, row);
     if (PAST[event.tool]) turn.verbs.push(PAST[event.tool]);
-    turn.toolTitle.textContent = friendly(event).slice(0, 90);
     scroll();
   }
 
@@ -821,22 +866,36 @@ export async function renderChat(outlet, wanted = "") {
     switch (event.ev) {
       case "turn_started":
         setRunning(true);
-        pulse(turn, "Thinking…");
+        turn.startedAt = Date.parse(event.ts || "") || Date.now();
+        openBlock(turn);
+        pulse(turn, "Thinking…", event.ts);
+        pingShelf();                       // the shelf marks it working
         break;
       case "model_prompt":
-        // each model call restarts the clock: after a tool returns
-        // the line says Thinking, never the tool's name
-        if (event.kind === "call") pulse(turn, "Thinking…");
+        // each model call restarts the clock and starts a new thought
+        // segment: after a tool returns the line says Thinking, never
+        // the tool's name
+        if (event.kind === "call") {
+          turn.seg = null;
+          if (turn.settled) openBlock(turn);
+          pulse(turn, "Thinking…", event.ts);
+        }
         break;            // the transcript record lives in Operate
       case "thinking": {
-        // the model's own summary of what it is thinking, live
-        turn.thoughts += event.delta || "";
-        const line = lastLine(turn.thoughts);
+        // the model's own summary of what it is thinking, live: in
+        // the block as it streams, its latest line on the header
+        if (turn.settled) openBlock(turn);
+        const seg = thoughtSegment(turn);
+        turn.segText += event.delta || "";
+        seg.innerHTML = renderMarkdown(turn.segText, "md");
+        const line = lastLine(turn.segText);
         if (line) { turn.tickLabel = line; showThinking(turn, line); }
+        scroll();
         break;
       }
       case "tool_call":
-        pulse(turn, `${friendly(event)}…`);
+        if (turn.settled) openBlock(turn);
+        pulse(turn, `${friendly(event)}…`, event.ts);
         toolStart(turn, event);
         break;
       case "tool_step":
@@ -853,8 +912,7 @@ export async function renderChat(outlet, wanted = "") {
         }
         break;
       case "say_token":
-        stopPulse(turn);
-        turn.thinking.hidden = true;       // prose is the answer
+        if (!turn.settled) settleBlock(turn);   // the answer: fold it
         turn.buffer += event.delta || "";
         turn.prose.innerHTML = renderMarkdown(turn.buffer, "md");
         scroll();
@@ -914,6 +972,40 @@ export async function renderChat(outlet, wanted = "") {
     state.source = source;
   }
 
+  // the thinking block of a past turn, from the trace kept with the
+  // message: folded, expandable, the same shape as the live one
+  function traceBlock(container, trace, elapsedMs) {
+    const entries = (trace || []).filter((t) => t.kind === "thought"
+      ? String(t.text || "").trim() : !QUIET.has(t.tool));
+    if (!entries.length) return;
+    const verbs = [...new Set(entries.filter((t) => t.kind === "tool")
+      .map((t) => PAST[t.tool]).filter(Boolean))];
+    const thought = entries.some((t) => t.kind === "thought");
+    const details = document.createElement("details");
+    details.className = "tool-activity";
+    details.innerHTML = `<summary><span class="tri">▸</span>
+      <span class="tool-title">${esc(doneLabel(thought, elapsedMs, verbs))
+      }</span></summary><div class="tool-steps"></div>`;
+    const steps = details.querySelector(".tool-steps");
+    for (const t of entries) {
+      const el = document.createElement("div");
+      if (t.kind === "thought") {
+        el.className = "think-seg md";
+        el.innerHTML = renderMarkdown(t.text || "", "md");
+      } else {
+        el.className = "theater-step";
+        const outcome = String(t.summary || "").split("\n")[0]
+          .slice(0, 120);
+        el.innerHTML = `<span class="mark">·</span>
+          <span class="step-text">${prose(friendly(t))}${outcome
+            ? ` <span class="muted">— ${prose(outcome.replace(
+                /^ERROR:\s*/, "did not work: "))}</span>` : ""}</span>`;
+      }
+      steps.appendChild(el);
+    }
+    container.prepend(details);
+  }
+
   // ── history replay from the store ────────────────────────
   for (const row of boot.artifacts || []) {
     state.artifacts.set(row.artifact_id, row);
@@ -926,6 +1018,7 @@ export async function renderChat(outlet, wanted = "") {
       div.innerHTML = `<div class="chat-prose md">${
         renderMarkdown(message.text || "", "md")}</div>
         <div class="chat-extras"></div>`;
+      traceBlock(div, message.payload?.trace, message.payload?.elapsed_ms);
       thread.appendChild(div);
       // a card in the transcript reopens the artifact; the panel
       // itself stays shut until the model puts something new in it
@@ -942,6 +1035,14 @@ export async function renderChat(outlet, wanted = "") {
     }
   }
   state.seq = boot.head || 0;
+  // a turn runs on the server, not in this tab: coming back to a
+  // session mid-turn replays the in-flight turn from its first event
+  // and keeps following it — switching chats or tabs loses nothing
+  if (boot.running && boot.turn_after !== null
+      && boot.turn_after !== undefined) {
+    state.seq = boot.turn_after;
+    setRunning(true);
+  }
   scroll();
 
   // ── sending ──────────────────────────────────────────────

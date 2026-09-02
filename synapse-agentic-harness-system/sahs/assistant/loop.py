@@ -376,6 +376,9 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
     status = "partial"
     clarify: dict[str, Any] | None = None
     offered = False        # suggest_next after prose closes the turn
+    # the thinking trace the transcript keeps (§6): the model's own
+    # thought summaries per call, interleaved with the steps
+    trace: list[dict[str, Any]] = []
 
     def _stream(prose: str) -> None:
         bus.emit("say_token", turn_id=turn_id, delta=prose)
@@ -421,6 +424,12 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                     delta = str(event.get("delta") or "")
                     if delta.strip():
                         bus.emit("thinking", turn_id=turn_id, delta=delta)
+                        if trace and trace[-1].get("kind") == "thought" \
+                                and trace[-1].get("call") == calls:
+                            trace[-1]["text"] += delta
+                        else:
+                            trace.append({"kind": "thought",
+                                          "call": calls, "text": delta})
                 elif kind == "call":
                     pending.append(event)
                 elif kind == "done":
@@ -477,9 +486,13 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                                   "hint": "try a different call"}
                 ref = f"a{steps}"
                 payload, content = _response_payload(result)
+                summary = summarize(name, result)
+                trace.append({"kind": "tool", "tool": name,
+                              "args": _short(args, 160),
+                              "summary": summary})
                 bus.emit("tool_step", turn_id=turn_id, n=steps,
                          tool=name, args=_short(args, 120),
-                         summary=summarize(name, result), ref=ref,
+                         summary=summary, ref=ref,
                          elapsed_ms=round(
                              (time.perf_counter() - t0) * 1000, 1))
                 bus.emit("tool_result", turn_id=turn_id, ref=ref,
@@ -511,7 +524,11 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                     prose or clarify["question"], turn_id=turn_id,
                     payload={"clarify": clarify,
                              "artifacts": list(dict.fromkeys(
-                                 state.artifacts_touched))})
+                                 state.artifacts_touched)),
+                             "trace": _trim_trace(trace),
+                             "elapsed_ms": round(
+                                 (time.perf_counter() - started) * 1000,
+                                 1)})
                 bus.emit("chips", turn_id=turn_id, clarify=clarify)
                 _persist(store, session_id, state, "clarify",
                          clarify["question"],
@@ -555,7 +572,10 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
             session_id, "assistant", prose, turn_id=turn_id,
             payload={"chips": chips,
                      "artifacts": list(dict.fromkeys(
-                         state.artifacts_touched))})
+                         state.artifacts_touched)),
+                     "trace": _trim_trace(trace),
+                     "elapsed_ms": round(
+                         (time.perf_counter() - started) * 1000, 1)})
     if chips:
         bus.emit("chips", turn_id=turn_id, suggestions=chips)
     if not (session.get("title") or "").strip() and prose:
@@ -568,6 +588,19 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
             subgraph_used=state.subgraph,
             skills_loaded=list(state.skills_loaded))
     return status
+
+
+def _trim_trace(trace: list[dict[str, Any]], *, max_entries: int = 60,
+                max_chars: int = 2000) -> list[dict[str, Any]]:
+    """What the transcript keeps of the thinking: bounded, the call
+    index dropped, the thought text capped."""
+    out = []
+    for entry in trace[-max_entries:]:
+        item = {k: v for k, v in entry.items() if k != "call"}
+        if item.get("kind") == "thought":
+            item["text"] = str(item.get("text", ""))[:max_chars]
+        out.append(item)
+    return out
 
 
 def _persist(store: AssistantStore, session_id: str,

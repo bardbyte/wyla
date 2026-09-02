@@ -136,18 +136,29 @@ path.
 - Text streams as it arrives. Function-call arguments stream too, so
   the activity line can say "Reading the Submitter Active Locations
   card…" before the call returns.
-- **One live line** under the user's message, replaced in place, in
-  the model's own words when it narrates, a plain verb otherwise.
-  On completion it collapses to one sentence: "Worked for 35s ·
-  searched the graph, read the metric card, ran the check." Verbs
-  deduplicated; no tool names, no ids, no raw output. The full trace
-  lives in Operate → Transcripts for the weekly reading ritual.
+- **The thinking block, the way Claude shows it.** Under the user's
+  message, one block streams the model's own thought summaries in
+  the order they happen, interleaved with the steps ("Searching the
+  graph for enrolments — 16 results"); its header is the live line
+  (the latest thought, or a plain verb, with the seconds ticking).
+  When the answer starts it folds to "Thought for 34s · searched the
+  graph, read the cards" and stays expandable; new work reopens it.
+  The trace is kept with the message, so a reload shows every turn's
+  thinking folded, and a turn that used no tools and thought nothing
+  shows no block. Verbs deduplicated; no tool names, no ids, no raw
+  output. The prompts and full results still live in Operate →
+  Transcripts for the weekly reading ritual.
 - The thinking line stops the moment final text starts and never
   returns after the turn. `[hidden] { display: none !important }`
   globally; the walk asserts visibility. The line has a heartbeat:
   the seconds tick, and each model call restarts the clock, so a long
   think never wears a tool's name ("Checking the query…" while the
   model is the one working was the first laptop stall).
+- **A turn belongs to the server, not the tab.** Leaving the page
+  closes only the listener; coming back to a session mid-turn
+  reattaches from the turn's first event (`turn_after` on the session
+  GET) and replays it whole, so switching chats or tabs never stops or
+  loses a turn. The shelf marks a working chat.
 - **Artifact panel is model-invoked.** It opens on an artifact in
   this interaction, never on reopening an old chat; a card in the
   transcript reopens it; closing reflows the chat to full width.

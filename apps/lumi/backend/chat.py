@@ -5,7 +5,7 @@ key, never calls a model.
 
     POST /api/chat/sessions                        → session
     GET  /api/chat/sessions                        → the sidebar
-    GET  /api/chat/sessions/{id}                   → transcript + artifacts
+    GET  /api/chat/sessions/{id}                   → transcript + artifacts (+ turn_after when a turn is running)
     POST /api/chat/sessions/{id}/messages          {text, depth?} → turn_id
     GET  /api/chat/sessions/{id}/stream            → SSE (meridian.event/1)
     POST /api/chat/sessions/{id}/stop
@@ -115,10 +115,13 @@ def get_session(session_id: str) -> dict:
     if session is None:
         return _unavailable(f"no session {session_id}")
     rt = runtime.runtime(session_id)
+    window = runtime.turn_window(session_id)
     return {"available": True, "session": session,
             "messages": runtime.store.messages(session_id),
             "artifacts": runtime.store.list_artifacts(session_id),
             "running": rt.running, "head": rt.bus.head(),
+            # an in-flight turn: the page replays it from here
+            "turn_id": window["turn_id"], "turn_after": window["after"],
             "budget": rt.budget.tick()}
 
 
