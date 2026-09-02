@@ -72,10 +72,17 @@ description repeats what another tool does.
 
 ## 3 · Layer 2 — context management
 
-- Transport: the Vertex **Interactions API**, stateful, streaming,
-  with `thinking_level` set per turn. Thought signatures ride
-  automatically. Our store stays the system of record (messages,
-  tool parts, artifacts) and mirrors the interaction ids.
+- Transport: our proven REST client (`sahs/enrich/client.py`: urllib,
+  SA token, corporate-TLS trust, no SDK) extended to speak native
+  function calling on `streamGenerateContent`: `tools` with function
+  declarations, `functionCall` parts in, `functionResponse` parts
+  back, `thoughtSignature` carried opaquely on every part we echo,
+  `thinking_level` set per turn. Client-managed history, so our store
+  stays the single system of record and the same transport serves the
+  scripted test double. The Interactions API is a Stage 2 option if
+  background execution or server-side history earns its place; it
+  would need the google-genai SDK and a second pass at the laptop's
+  TLS trust, which is why it is not Stage 1.
 - Tool results go back **whole**, capped at ~20K characters per
   result with an explicit "truncated: read(section=…) for the rest".
 - Compaction only under pressure: at ~150K tokens (well under the
@@ -199,12 +206,15 @@ handoff, the eval suites.
 
 ## 11 · Open decisions
 
-1. Interactions API (recommended) vs client-managed history with
-   explicit caching.
+1. Stage 1 transport: native function calling on our REST client
+   with client-managed history (recommended: smallest change, proven
+   auth path, portable) vs the Interactions API via the SDK now.
 2. Approve the tool consolidation and deletions in §2.
 3. Memory consent: silent save with inline undo (recommended) vs
    ask first.
 4. Chips: keep model-authored, max three (recommended) vs drop.
 5. Depth dial default Standard (medium) and a Flash-tier model for
    the memory pass and the judge.
-6. Confirm the Vertex model id in the .env is gemini-3.1-pro-preview.
+6. Model id: the silo default is already `gemini-3.1-pro-preview`
+   (`sahs/util/auth.py`), overridable by `VERTEX_MODEL`; confirm the
+   laptop .env does not pin an older id.
