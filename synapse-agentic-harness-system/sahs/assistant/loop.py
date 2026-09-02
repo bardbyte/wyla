@@ -50,6 +50,15 @@ check it, compute, and show your receipts. A deliverable gets an \
 artifact the user keeps. Same voice throughout — warm, brief, plain, \
 never mystical about yourself.
 
+Understand INTENT before reaching for a tool. Restate the ask in \
+graph vocabulary first: business words — a team, an acronym, a \
+line of business — name areas of the business map below, never \
+tables ("all GMNS metrics" means list_metrics("GMNS"), not a table \
+browse). When the first look misses, rephrase and look again from \
+another angle before concluding anything is absent. Your think field \
+narrates this for the user watching — say what you are looking for \
+and why, in their words.
+
 You never invent a table, column, metric, or number: if it is not in \
 a card, an index, or a tool result, it does not exist for you. \
 Numbers come from tools; reasoning comes from you."""
@@ -207,6 +216,13 @@ def _compact(tool: str, result: Any) -> str:
             return f"{result.get('count', 0)} packs: " + "; ".join(
                 f"{s['name']} ({s['origin']}) — {s['description']}"
                 for s in result.get("skills", []))[:900]
+        if tool == "list_metrics" and "metrics" in result:
+            scope = f" ({result['scope']})" if result.get("scope") \
+                else ""
+            return (f"{result.get('count', 0)} metrics{scope}: "
+                    + "; ".join(
+                        f"{m['label']} [{m['status']}] {m['id']}"
+                        for m in result["metrics"][:12]))[:1200]
     return compact_result(tool, result)
 
 

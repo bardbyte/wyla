@@ -23,16 +23,11 @@ export async function renderChat(outlet, wanted = "") {
       <div class="chat-main">
         <div class="chat-masthead">
           <span class="muted" id="chat-build"></span>
-          <select id="chat-project" title="project"></select>
           <span class="spacer"></span>
           <span class="muted" id="chat-meter"></span>
           <button class="btn" id="chat-memory-btn"
             aria-expanded="false">⊚ memory</button>
           <div id="chat-memory-pop" class="skills-pop" hidden></div>
-          <button class="btn" id="chat-skills-btn"
-            aria-expanded="false">⊕ skills</button>
-          <span id="chat-skill-chips"></span>
-          <div id="chat-skills-pop" class="skills-pop" hidden></div>
         </div>
         <div class="chat-thread" id="chat-thread"></div>
         <div class="chat-chiprow" id="chat-chiprow"></div>
@@ -64,8 +59,7 @@ export async function renderChat(outlet, wanted = "") {
   const input = el("chat-input");
   const state = { session: null, source: null, turns: new Map(),
                   running: false, seq: 0, artifacts: new Map(),
-                  panelId: "", skillsAvailable: [],
-                  skillsLoaded: new Set() };
+                  panelId: "" };
 
   const scroll = () => { thread.scrollTop = thread.scrollHeight; };
   const say = (html, cls = "") => {
@@ -101,32 +95,13 @@ export async function renderChat(outlet, wanted = "") {
   }
   el("chat-build").textContent =
     `build ${state.session.build_id || "?"}`;
-  state.skillsLoaded = new Set(boot.session.skills || []);
 
   // the chat list lives in the shell nav now — one nav, not two;
   // this just tells the shelf something changed
   const pingShelf = () =>
     window.dispatchEvent(new CustomEvent("synapse:sessions"));
 
-  // ── §8: project select · §9: the handoff banner ──────────
-  async function paintProject() {
-    const got = await api.chatProjects().catch(() => ({}));
-    const projects = got.available ? got.projects || [] : [];
-    el("chat-project").innerHTML =
-      `<option value="">no project</option>`
-      + projects.map((p) => `<option value="${esc(p.id)}"${
-          p.id === state.session.project_id ? " selected" : ""}>${
-          esc(p.name)}</option>`).join("");
-  }
-  el("chat-project").addEventListener("change", async () => {
-    const saved = await api.chatSetProject(
-      state.session.id, el("chat-project").value);
-    if (saved.available && saved.ok) {
-      state.session.project_id = el("chat-project").value;
-      pingShelf();
-    }
-  });
-  window.addEventListener("synapse:sessions", paintProject);
+  // ── §9: the handoff banner ───────────────────────────────
   if (boot.session.handoff && (boot.messages || []).length) {
     const h = boot.session.handoff;
     say(`<b>Where you left off</b> — ${esc(h.say || "")}
@@ -171,67 +146,8 @@ export async function renderChat(outlet, wanted = "") {
         && e.target !== memBtn) memPop.hidden = true;
   });
 
-  // ── skills (same picker contract as Ask) ─────────────────
-  const skillsBtn = el("chat-skills-btn");
-  const skillsPop = el("chat-skills-pop");
-  const skillChips = el("chat-skill-chips");
-  async function refreshSkills() {
-    try {
-      const got = await api.chatSkills();
-      state.skillsAvailable = got.available ? (got.skills || []) : [];
-    } catch { state.skillsAvailable = []; }
-    paintSkillChips();
-  }
-  function paintSkillChips() {
-    const loaded = [...state.skillsLoaded];
-    skillChips.innerHTML = loaded.map((n) =>
-      `<button class="skill-chip" data-skill="${esc(n)}"
-        title="click to unload">${esc(n)} ×</button>`).join(" ");
-    skillsBtn.textContent = loaded.length
-      ? `⊕ skills (${loaded.length})` : "⊕ skills";
-    for (const chip of skillChips.querySelectorAll(".skill-chip")) {
-      chip.addEventListener("click", () =>
-        toggleSkill(chip.dataset.skill));
-    }
-  }
-  function paintSkillsPop() {
-    skillsPop.innerHTML = (state.skillsAvailable.length
-      ? state.skillsAvailable.map((s) => `
-        <label class="skills-row">
-          <input type="checkbox" data-skill="${esc(s.name)}"
-            ${state.skillsLoaded.has(s.name) ? "checked" : ""}>
-          <span><b>${esc(s.title || s.name)}</b>
-            ${s.origin ? `<span class="origin-tag o-${esc(s.origin
-              .replace(/[^a-z]/g, ""))}">${esc(s.origin)}</span>` : ""}
-            <span class="muted">${esc(s.description || "")}</span>
-          </span></label>`).join("")
-      : `<div class="muted" style="padding:6px">No skills yet:
-         drop a markdown briefing in <code>graph/skills/</code>.
-         </div>`);
-    for (const box of skillsPop.querySelectorAll("input")) {
-      box.addEventListener("change", () =>
-        toggleSkill(box.dataset.skill));
-    }
-  }
-  async function toggleSkill(name) {
-    const next = new Set(state.skillsLoaded);
-    if (next.has(name)) next.delete(name); else next.add(name);
-    const saved = await api.chatSetSkills(state.session.id, [...next]);
-    if (saved.available && saved.ok) state.skillsLoaded = next;
-    else say(`<b>skills:</b> ${esc(saved.reason || "not saved")}`,
-             "error");
-    paintSkillChips();
-    if (!skillsPop.hidden) paintSkillsPop();
-  }
-  skillsBtn.addEventListener("click", () => {
-    skillsPop.hidden = !skillsPop.hidden;
-    skillsBtn.setAttribute("aria-expanded", String(!skillsPop.hidden));
-    if (!skillsPop.hidden) paintSkillsPop();
-  });
-  document.addEventListener("click", (e) => {
-    if (!skillsPop.hidden && !skillsPop.contains(e.target)
-        && e.target !== skillsBtn) skillsPop.hidden = true;
-  });
+  // skills need no picker: the agent loads packs itself by intent;
+  // the Skills tab in the nav is where people browse them
 
   // ── the artifact panel ───────────────────────────────────
   function statusChip(prov) {
@@ -652,6 +568,9 @@ export async function renderChat(outlet, wanted = "") {
           <span class="tool-title">working…</span></summary>
         <div class="tool-steps"></div>
       </details>
+      <div class="thinking-line" hidden>
+        <span class="think-orb">✳</span>
+        <span class="think-text">Thinking…</span></div>
       <div class="chat-prose md"></div>
       <div class="chat-extras"></div>`;
     thread.appendChild(div);
@@ -659,6 +578,8 @@ export async function renderChat(outlet, wanted = "") {
              activity: div.querySelector(".tool-activity"),
              toolTitle: div.querySelector(".tool-title"),
              toolSteps: div.querySelector(".tool-steps"),
+             thinking: div.querySelector(".thinking-line"),
+             thinkText: div.querySelector(".think-text"),
              prose: div.querySelector(".chat-prose"),
              extras: div.querySelector(".chat-extras"),
              buffer: "", steps: 0, saw: null };
@@ -667,16 +588,86 @@ export async function renderChat(outlet, wanted = "") {
     return turn;
   }
 
-  function toolRow(turn, text) {
+  // what the model is doing, in the user's words — the think field
+  // when it narrates, a friendly verb for the tool otherwise
+  const VERBS = {
+    search_semantics: (a) => `Searching the graph for ${a}`,
+    list_metrics: (a) => a ? `Listing ${a} metrics`
+                           : "Listing the governed metrics",
+    grep_cards: (a) => `Scanning the cards for ${a}`,
+    read_card: (a) => `Reading ${a || "a card"}`,
+    list_tables: () => "Browsing the tables",
+    resolve: (a) => `Binding “${a}” to a governed definition`,
+    sample_values: (a) => `Sampling real values${a ? ` of ${a}` : ""}`,
+    get_join_paths: () => "Checking the join paths",
+    get_definition_line: () => "Fetching the disclosure line",
+    run_sql: () => "Running the query",
+    whatif: () => "Re-running with one slot changed",
+    compare: () => "Lining the results up side by side",
+    python: () => "Computing",
+    check_part_whole: () => "Checking the parts add up",
+    check_crosscheck: () => "Cross-checking two routes",
+    check_coverage: () => "Checking coverage",
+    check_fanout: () => "Checking the join is safe",
+    check_reconcile: () => "Reconciling against the certified "
+                           + "definition",
+    verify_answer: () => "Verifying the answer",
+    artifact: () => "Building the artifact",
+    artifact_update: () => "Updating the artifact",
+    constellation: () => "Drawing what was used",
+    list_artifacts: () => "Reviewing the panel",
+    load_skill: (a) => `Loading the ${a || "matching"} skill`,
+    list_skills: () => "Browsing the skill shelf",
+    remember: () => "Keeping a preference",
+    memories: () => "Reading what is remembered",
+    forget: () => "Retiring a memory",
+    plan_set: () => "Updating the working plan",
+    note: () => "Noting the thread",
+    ask_user: () => "Preparing a question",
+    delegate_scout: () => "Sending a scout ahead",
+    subgraph: () => "Collecting the receipts",
+  };
+
+  function friendly(event) {
+    const think = String(event.think || "").trim();
+    if (think) {
+      return think.length > 96 ? think.slice(0, 94) + "…" : think;
+    }
+    const quoted = String(event.args || "")
+      .match(/'([^']{1,42})'|"([^"]{1,42})"/);
+    const arg = quoted ? (quoted[1] || quoted[2]) : "";
+    const verb = VERBS[event.tool];
+    return verb ? verb(arg) : `Using ${event.tool}`;
+  }
+
+  function showThinking(turn, text) {
+    turn.thinkText.textContent = text;
+    turn.thinking.hidden = false;
+    scroll();
+  }
+
+  function doneThinking(turn, elapsedMs) {
+    turn.thinking.hidden = true;
+    if (turn.steps) {
+      const secs = elapsedMs ? ` · ${(elapsedMs / 1000).toFixed(1)}s`
+                             : "";
+      turn.toolTitle.textContent =
+        `Worked through ${turn.steps} step${turn.steps > 1 ? "s" : ""
+        }${secs}`;
+    }
+  }
+
+  function toolRow(turn, label, detail) {
     turn.activity.hidden = false;
     turn.steps += 1;
     const row = document.createElement("div");
     row.className = "theater-step";
     row.innerHTML = `<span class="mark">·</span>
-      <span>${prose(text)}</span>`;
+      <span>${prose(label)}${detail
+        ? ` <span class="muted">— ${prose(detail)}</span>` : ""}</span>`;
     turn.toolSteps.appendChild(row);
     turn.toolTitle.textContent =
-      `${turn.steps} look${turn.steps > 1 ? "s" : ""} · ${text}`
+      `${turn.steps} step${turn.steps > 1 ? "s" : ""} · ${label}`
       .slice(0, 90);
     scroll();
   }
@@ -767,23 +758,30 @@ export async function renderChat(outlet, wanted = "") {
     switch (event.ev) {
       case "turn_started":
         setRunning(true);
+        showThinking(turn, "Thinking…");
         turn.saw = { system: "", prompts: [], steps: [],
                      results: {} };
         break;
       case "model_prompt":
+        if (event.kind === "step" && !turn.buffer) {
+          showThinking(turn, turn.steps ? "Thinking it over…"
+                                        : "Thinking…");
+        }
         if (!turn.saw) break;
         if (event.kind === "system") turn.saw.system = event.content;
         else turn.saw.prompts.push(event);
         break;
       case "tool_step":
         if (turn.saw) turn.saw.steps.push(event);
-        toolRow(turn, `${event.tool}: ${
-          String(event.summary || "").split("\n")[0]}`);
+        showThinking(turn, friendly(event));
+        toolRow(turn, friendly(event), `${event.tool}: ${
+          String(event.summary || "").split("\n")[0]}`.slice(0, 110));
         break;
       case "tool_result":
         if (turn.saw) turn.saw.results[event.ref] = event;
         break;
       case "say_token":
+        turn.thinking.hidden = true;
         turn.buffer += event.delta || "";
         turn.prose.innerHTML = renderMarkdown(turn.buffer, "md");
         scroll();
@@ -802,6 +800,7 @@ export async function renderChat(outlet, wanted = "") {
         break;
       case "turn_done":
         setRunning(false);
+        doneThinking(turn, event.elapsed_ms);
         sawButton(turn);
         if (event.status === "partial"
             || event.status === "stopped") {
@@ -810,6 +809,7 @@ export async function renderChat(outlet, wanted = "") {
         pingShelf();
         break;
       case "error":
+        turn.thinking.hidden = true;
         if (event.code !== "trace") {
           say(`<b>${esc(event.code || "error")}</b> ${
             prose(event.message || "")}
@@ -899,10 +899,5 @@ export async function renderChat(outlet, wanted = "") {
 
   subscribe();
   pingShelf();
-  refreshSkills();
-  paintProject();
-  return () => {
-    if (state.source) state.source.close();
-    window.removeEventListener("synapse:sessions", paintProject);
-  };
+  return () => { if (state.source) state.source.close(); };
 }

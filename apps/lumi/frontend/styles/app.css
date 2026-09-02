@@ -1009,6 +1009,52 @@ table.result tr:last-child td { border-bottom: none; }
   color: var(--muted, #7a756a);
 }
 
+/* the thinking line: what Synapse is doing, alive (V2.7) */
+.thinking-line {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13.5px; color: var(--ink-2); padding: 2px 0 4px;
+}
+.think-orb {
+  display: inline-block; color: var(--accent, #2f6feb);
+  animation: think-orb 1.5s ease-in-out infinite;
+}
+@keyframes think-orb {
+  0%   { transform: rotate(0deg) scale(1); opacity: 0.65; }
+  50%  { transform: rotate(180deg) scale(1.25); opacity: 1; }
+  100% { transform: rotate(360deg) scale(1); opacity: 0.65; }
+}
+.think-text {
+  background: linear-gradient(90deg, var(--ink-3, #8a857a) 20%,
+    var(--ink, #222018) 50%, var(--ink-3, #8a857a) 80%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent; animation: think-shimmer 2.2s linear infinite;
+}
+@keyframes think-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .think-orb, .think-text { animation: none; }
+  .think-text { color: var(--ink-2); background: none; }
+}
+
+/* the Skills page: the doctrine shelf, browsable (V2.7) */
+.skills-page { max-width: 880px; margin: 0 auto; padding: 18px; }
+.skills-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+.skill-card {
+  border: 1px solid var(--line, #d5d2ca); border-radius: 12px;
+  padding: 14px 16px; min-width: 0;
+}
+.skill-card-head {
+  display: flex; align-items: center; gap: 8px; font-size: 15px;
+}
+.skill-snippet { font-size: 13px; color: var(--ink-2); margin: 6px 0; }
+.skill-card details summary {
+  cursor: pointer; font-size: 12.5px; color: var(--accent, #2f6feb);
+}
+.skill-doc { font-size: 13px; margin-top: 8px; }
+
 /* diagrams: the receipts, drawn (§13.4) */
 .diagramv2 { width: 100%; height: auto; }
 .diagramv2 .dg-node rect {

@@ -44,6 +44,26 @@ def synapse_digest(build: Build) -> str:
         f"{len(build.vocab)} vocabulary entries.")
     lines.append("")
 
+    # ── the business map: intent resolves here first ─────────
+    lob_rows = list(getattr(build, "lob", []) or [])
+    if lob_rows:
+        from sahs.loop.tools import _metric_in_lob
+        lines.append("## the business map")
+        lines.append("Business words name these areas, never "
+                     "tables. \"All GMNS metrics\" means "
+                     "list_metrics(\"GMNS\").")
+        for row in lob_rows:
+            members = sum(1 for m in build.metrics
+                          if _metric_in_lob(m, row))
+            domains = ", ".join(row.get("domains") or [])
+            lines.append(
+                f"- {row.get('code')} — {row.get('name')}"
+                + (f" ({domains})" if domains else "")
+                + f" · {members} metrics"
+                + (f" · tables {', '.join(row.get('tables') or [])}"
+                   if row.get("tables") else ""))
+        lines.append("")
+
     # ── top metrics, certified first, by support ─────────────
     lines.append("## top metrics")
     ranked = sorted(build.metrics,

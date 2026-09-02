@@ -79,7 +79,9 @@ def test_descriptions_match_the_spec_verbatim(kit):
             "columns; read a metric card before using it.",
         "search_semantics":
             "Ranked metrics/concepts/joins/vocab with status, "
-            "support, agreement, aliases.\nUse for meaning "
+            "support, agreement, aliases — and business areas: a "
+            "query naming a line of business comes back as the area "
+            "itself, not its furniture.\nUse for meaning "
             "(\"spend\", \"SMB\"); use grep_cards for exact tokens.",
         "resolve":
             "Binds words to governed metrics/concepts with "

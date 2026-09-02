@@ -248,7 +248,12 @@ def export_pptx(artifact_id: str, version: int | None = None) -> Any:
     row = runtime.store.get_artifact(artifact_id, version)
     if row is None:
         return _unavailable(f"no artifact {artifact_id}")
-    from sahs.assistant.export import artifact_pptx
+    try:
+        from sahs.assistant.export import artifact_pptx
+    except ImportError:
+        return _unavailable(
+            "python-pptx is not installed: "
+            "pip install -e '.[assistant]' in the silo")
     name = (row["title"] or row["type"]).lower()
     name = "".join(c if c.isalnum() else "-" for c in name)[:40]
     return Response(

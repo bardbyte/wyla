@@ -23,6 +23,9 @@ adk = ["google-adk", "google-genai>=0.5"]
 # B1 enrichment: SA token refresh + the OS-keychain trust source that
 # makes corporate-MITM TLS work cleanly (proven on the laptop)
 enrich = ["google-auth", "truststore"]
+# Synapse v2 assistant: the PPTX deck export (§13.5) and the numpy the
+# python sandbox advertises as importable
+assistant = ["python-pptx>=0.6.23", "numpy>=1.26"]
 dev = ["pytest>=8"]
 
 [tool.pytest.ini_options]

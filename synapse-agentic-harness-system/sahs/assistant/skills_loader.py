@@ -94,8 +94,10 @@ def render_skill_index(packs: list[Pack],
     if not rows:
         return ""
     lines = ["## Skills on demand",
-             "Doctrine packs by name; load_skill(name) pulls the "
-             "full text into this turn when the task matches. "
+             "Doctrine packs by name. Loading them is YOUR job, not "
+             "the user's: when the task matches a line below, call "
+             "load_skill(name) before doing the work — a \"why did "
+             "it change\" loads analysis-playbooks unprompted. "
              "Unreviewed packs are the analyst's own words: they "
              "steer where you look, they never assert facts."]
     for pack in rows:

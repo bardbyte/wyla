@@ -23,7 +23,7 @@ SILO = Path(__file__).resolve().parents[1]
 FX = SILO / "tests" / "fixtures"
 KEY = "You are Synapse, an analytical colleague"
 PACKS = ("analysis-playbooks", "dashboard-design",
-         "executive-summary", "meridian-sql")
+         "executive-summary", "lumi-data-connect")
 
 
 @pytest.fixture(scope="module")
@@ -101,7 +101,7 @@ def _user_shelf(tmp_path: Path) -> Path:
     (graph_root / "skills" / "fiscal-notes.md").write_text(
         "# Fiscal notes\n\nOur fiscal year starts in February; "
         "January belongs to the prior year.\n", encoding="utf-8")
-    (graph_root / "skills" / "meridian-sql.md").write_text(
+    (graph_root / "skills" / "lumi-data-connect.md").write_text(
         "# Impostor\n\nA user file wearing a built-in name.\n",
         encoding="utf-8")
     return graph_root
@@ -138,8 +138,8 @@ def test_shelves_merge_and_builtin_wins(tmp_path):
     packs = {p.name: p for p in all_skills(graph_root)}
     assert packs["fiscal-notes"].origin == "unreviewed"
     # the impostor never shadows the shipped doctrine
-    assert packs["meridian-sql"].origin == "built-in"
-    assert "Impostor" not in packs["meridian-sql"].text
+    assert packs["lumi-data-connect"].origin == "built-in"
+    assert "Impostor" not in packs["lumi-data-connect"].text
     loaded, missing = load_packs(
         graph_root, ["executive-summary", "fiscal-notes", "ghost"])
     assert [p.name for p in loaded] == ["executive-summary",
@@ -158,14 +158,14 @@ def test_list_and_load_skill_teach_and_record(compiled, tmp_path):
     origins = {s["name"]: s["origin"] for s in shelf["skills"]}
     assert origins["fiscal-notes"] == "unreviewed"
 
-    got = tools["load_skill"].fn("meridian-sql")
+    got = tools["load_skill"].fn("lumi-data-connect")
     assert got["ok"] and got["origin"] == "built-in"
     assert "resolve first" in got["text"]
-    assert state.skills_loaded == ["meridian-sql"]
+    assert state.skills_loaded == ["lumi-data-connect"]
 
-    again = tools["load_skill"].fn("meridian-sql")
+    again = tools["load_skill"].fn("lumi-data-connect")
     assert again.get("note") and "already loaded" in again["note"]
-    assert state.skills_loaded == ["meridian-sql"]
+    assert state.skills_loaded == ["lumi-data-connect"]
 
     miss = tools["load_skill"].fn("ghost")
     assert "no skill named" in miss["error"]
@@ -210,10 +210,10 @@ def test_preloaded_skill_leaves_the_shelf_index(compiled):
     index = all_skills(None)
     offered = system_prompt(build, [], "", skill_index=index)
     preloaded = system_prompt(
-        build, [p for p in index if p.name == "meridian-sql"], "",
+        build, [p for p in index if p.name == "lumi-data-connect"], "",
         skill_index=index)
-    assert "- meridian-sql" in offered
-    assert "- meridian-sql" not in preloaded     # already in full
+    assert "- lumi-data-connect" in offered
+    assert "- lumi-data-connect" not in preloaded     # already in full
     assert "resolve first" in preloaded          # …as loaded text
     # no shelf, no skills → the §13.1 prompt, byte-identical
     assert system_prompt(build, [], "") \

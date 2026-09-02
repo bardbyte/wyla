@@ -61,9 +61,9 @@ def test_every_chat_helper_exists_and_is_served():
                   "/artifacts/{artifact_id}/versions",
                   "/artifacts/{artifact_id}/export.pptx"):
         assert route in BACKEND, f"no served route {route}"
-    # the picker lists the chat shelf (both origins), not ask's
-    assert "api.chatSkills()" in CHAT_JS
-    assert "origin-tag" in CHAT_JS and ".origin-tag" in CSS
+    # the shelf is served for the Skills page (no picker anywhere)
+    assert '"/skills"' in BACKEND
+    assert ".origin-tag" in CSS
 
 
 def test_the_shell_offers_the_door():
@@ -92,20 +92,45 @@ def test_the_claude_shape_is_present():
 
 
 def test_the_organization_is_present():
-    # §8: projects + starred + archive live in the shell shelf
-    for piece in ("project-row", "data-star", "data-archive",
-                  "shelf-head", "chatProjects"):
+    # §8: starred + archive live in the shell shelf; projects stay
+    # implemented (store, API) but deliberately OFF the surface
+    for piece in ("data-star", "data-archive", "shelf-head"):
         assert piece in CHATS_JS, piece
-    # the chat page: project select, memory panel, handoff banner
-    for piece in ("chat-project", "chat-memory-btn",
-                  "chatRetireMemory", "handoff-note",
-                  "Where you left off", "chatPptxUrl"):
+    assert "project-row" not in CHATS_JS
+    assert "chat-project" not in CHAT_JS
+    assert '"/projects"' in BACKEND          # the door stays served
+    # the chat page: memory panel, handoff banner, deck export
+    for piece in ("chat-memory-btn", "chatRetireMemory",
+                  "handoff-note", "Where you left off",
+                  "chatPptxUrl"):
         assert piece in CHAT_JS, piece
-    for cls in (".project-row", ".memory-row", ".handoff-note",
-                ".row-btn"):
+    for cls in (".memory-row", ".handoff-note", ".row-btn"):
         assert cls in CSS, cls
     # memory is disclosed and retirable, never silently gone
     assert "retire" in BACKEND and "retire_memory" in BACKEND
+
+
+def test_thinking_is_alive_and_skills_are_browsable():
+    # the thinking line: animated, narrated from think/tool events,
+    # collapsed into a worked-summary when the turn lands
+    for piece in ("thinking-line", "think-orb", "showThinking",
+                  "doneThinking", "friendly", "VERBS",
+                  "Worked through"):
+        assert piece in CHAT_JS, piece
+    for cls in (".thinking-line", "@keyframes think-orb",
+                "@keyframes think-shimmer", "prefers-reduced-motion"):
+        assert cls in CSS, cls
+    # no picker anywhere: the agent loads packs itself; people browse
+    # the shelf on the Skills tab
+    assert "chat-skills-btn" not in CHAT_JS
+    assert "chatSetSkills" not in CHAT_JS
+    assert 'href="#/skills" data-tab="skills"' in INDEX
+    assert "skills: renderSkills" in MAIN_JS
+    skills_js = (FRONTEND / "js" / "pages" / "skills.js").read_text(
+        encoding="utf-8")
+    assert "api.chatSkills" in skills_js
+    assert "read the doctrine" in skills_js
+    assert "origin-tag" in skills_js
 
 
 def test_dashboards_and_diagrams_render():

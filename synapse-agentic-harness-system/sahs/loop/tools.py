@@ -184,6 +184,45 @@ def _metric_row(build: Build, ref: str) -> tuple[dict[str, Any] | None,
     return (hits[0], hits[1:]) if hits else (None, [])
 
 
+def _lob_hit(row: dict[str, Any], query: str) -> bool:
+    """Does a query name this business area? Codes and short names
+    match as tokens ('GMNS', '…all gmns metrics'); long names match
+    on ≥2 shared tokens ('global merchant services'). Both sides go
+    through _tokens so stemming stays consistent."""
+    tokens = _tokens(query)
+    raw = (query or "").strip().lower()
+    names = {str(row.get("code", "")).lower(),
+             str(row.get("lob", "")).lower()} - {""}
+    if raw in names or raw == str(row.get("name", "")).lower():
+        return True
+    name_keys: set[str] = set()
+    for name in names:
+        name_keys |= _tokens(name)
+    if tokens & name_keys:
+        return True
+    return len(tokens & _tokens(str(row.get("name", "")))) >= 2
+
+
+def _metric_in_lob(metric: dict[str, Any],
+                   lob_row: dict[str, Any]) -> bool:
+    """A metric belongs to a business area by its recorded
+    line_of_business (code, name, or a close spelling) or by the
+    area's witness family attesting it."""
+    code = str(lob_row.get("code", "")).lower()
+    family = str(lob_row.get("lob", "")).lower()
+    raw = str(metric.get("line_of_business", "")).strip().lower()
+    if raw:
+        if raw in (code, family, str(lob_row.get("name",
+                                                 "")).lower()):
+            return True
+        if len(_tokens(raw)
+               & _tokens(str(lob_row.get("name", "")))) >= 2:
+            return True
+    families = set(metric.get("support_by_witness") or {}) \
+        | set(metric.get("seen_by_witness") or [])
+    return bool(family) and family in families
+
+
 def _tier(row: dict[str, Any]) -> str:
     """A join edge's evidence tier. Declared constraints certify; a
     measured ON clause witnesses; togetherness (co-query) or an
@@ -358,6 +397,25 @@ def toolkit(build: Build, state: LoopState, *,
                         "kind is one of: all | metrics | concepts | "
                         "joins | vocab")
         results: list[dict[str, Any]] = []
+        if kind == "all":
+            # intent first: a business word resolves to the business
+            # map before anything table-shaped gets a look-in
+            for row in getattr(build, "lob", []) or []:
+                if _lob_hit(row, query):
+                    members = [m for m in build.metrics
+                               if _metric_in_lob(m, row)]
+                    results.append({
+                        "kind": "line_of_business",
+                        "code": row.get("code", ""),
+                        "name": row.get("name", ""),
+                        "domains": row.get("domains", []),
+                        "metrics": len(members),
+                        "tables": row.get("tables", []),
+                        "hint": f"{row.get('code')} is a business "
+                                "area, not a table: "
+                                f"list_metrics({row.get('code')!r}) "
+                                f"returns its {len(members)} "
+                                "governed metrics"})
         if kind in ("all", "metrics"):
             for c in search_metrics(build, query,
                                     top_k=8)["candidates"]:
@@ -416,6 +474,57 @@ def toolkit(build: Build, state: LoopState, *,
                 "exact tokens; list_tables browses what exists")
         return {"results": results[:16], "count": len(results[:16]),
                 "hint": hint}
+
+    # ── list_metrics ── the catalog, intent-shaped ───────────
+    def list_metrics(filter: str = "") -> dict[str, Any]:
+        raw = (filter or "").strip()
+        rows = list(build.metrics)
+        scope = ""
+        if raw:
+            lob_row = next((r for r in getattr(build, "lob", []) or []
+                            if _lob_hit(r, raw)), None)
+            lowered = raw.lower()
+            if lob_row is not None:
+                rows = [m for m in rows
+                        if _metric_in_lob(m, lob_row)]
+                scope = (f"{lob_row.get('code')} — "
+                         f"{lob_row.get('name')}")
+            elif lowered in ("certified", "pending", "composed",
+                             "team_candidate"):
+                rows = [m for m in rows
+                        if (m.get("status_served")
+                            or m.get("status")) == lowered]
+                scope = f"status {lowered}"
+            else:
+                tokens = _tokens(raw)
+                rows = [m for m in rows if tokens & (
+                    _tokens(str(m.get("label", "")))
+                    | _tokens(str(m.get("domain", "")))
+                    | _tokens(str(m.get("line_of_business", ""))))]
+                scope = f"matching {raw!r}"
+            if not rows:
+                areas = ", ".join(
+                    f"{r.get('code')} ({r.get('name')})"
+                    for r in getattr(build, "lob", []) or []) \
+                    or "none on file"
+                return _err(
+                    f"no metrics match {raw!r}",
+                    "filter by a business area, a status, or label "
+                    f"words; business areas on file: {areas}")
+        rows = sorted(rows, key=lambda m: (
+            -(m.get("authority") or 0), -(m.get("support") or 0),
+            m["id"]))[:40]
+        return {"metrics": [{
+            "id": m["id"], "label": m.get("label") or m["id"],
+            "status": m.get("status_served") or m.get("status"),
+            "table": m.get("table", ""),
+            "lob": m.get("line_of_business", ""),
+            "domain": m.get("domain", ""),
+            "support": m.get("support", 0)} for m in rows],
+            "count": len(rows),
+            **({"scope": scope} if scope else {}),
+            "hint": "read_card before using any of them; "
+                    "get_definition_line writes the disclosure"}
 
     # ── resolve ── the deterministic binder, mid-loop ────────
     def resolve(text: str, table: str = "") -> dict[str, Any]:
@@ -861,10 +970,25 @@ def toolkit(build: Build, state: LoopState, *,
             maps_to="ranked, fuzzy — the index, not the text",
             description=(
                 "Ranked metrics/concepts/joins/vocab with status, "
-                "support, agreement, aliases.\n"
+                "support, agreement, aliases — and business areas: "
+                "a query naming a line of business comes back as "
+                "the area itself, not its furniture.\n"
                 "Use for meaning (\"spend\", \"SMB\"); use "
                 "grep_cards for exact tokens."),
             fn=search_semantics),
+        ToolSpec(
+            name="list_metrics",
+            signature="list_metrics(filter?)",
+            maps_to="the governed catalog",
+            description=(
+                "Every governed metric — id, label, status, table, "
+                "business area, domain, support — filterable by a "
+                "business area (\"GMNS\"), a status (\"certified\"), "
+                "or label words.\n"
+                "\"Give me all X metrics\" starts HERE, not at "
+                "tables: business words name areas of the map, not "
+                "furniture."),
+            fn=list_metrics),
         ToolSpec(
             name="resolve",
             signature="resolve(text, table?)",
