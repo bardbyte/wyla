@@ -144,3 +144,36 @@ sahs.tools.api.Build.
 5. Lumi Components is the component contract; new components register there + here.
 6. Carry doctrines: no numeric confidence in UI; labeled previews never unlabeled fakes;
    accumulation surfaces (pins/reviews/feedback); crimson = conflict only ever.
+
+## Table facts + business units (G3 of the card sourcing audit, 2026-09-02)
+Compiled row `indexes/tables.jsonl` (meridian.table_facts/1, `sahs/compiler/facts.py`) is
+the ONE source both the served card and the console render; `indexes/lobs.jsonl` likewise
+for units; `indexes/coverage.json` is the prop-grain utilization ledger (CI holds
+`unaccounted` at empty). Map: `synapse-agentic-harness-system/docs/audits/fact_to_surface_map.md`.
+- Semantics › Table Profile (Semantics.tsx) — new cards: IDENTITY & GRAIN (unit, category,
+  layer/type, PK, partition column, load, size, schema) · TRUST & OPERATIONS (answerability
+  chips, freshness, feed, cost prior, rhythm, atlas flags) · WHO (owner chain with roles +
+  witnesses, LOBs → unit profile, usage, top users) · ACCESS (row policy crimson when
+  unknown, PII/GDPR/ONCOP chips, policy witnesses, sensitive columns with role/group) ·
+  COLUMNS as rows (`m-colrow`: name/type, business name, PK/PARTITION/⊘ chips, meaning +
+  source, lumi supplement, value domain, terms with definitions, FK, computed logic,
+  lineage; right rail texture + agreement + D-flags) · JOINS & LINEAGE (● declared
+  constraints first) · VOCABULARY (BU-scoped acronyms/terms → columns) · THE SERVED CARD.
+  Empty states: every card has one ("no purpose on record — ask…", "usage only", "no
+  compliance flags from Atlas"). Feedback affordance kept.
+- Semantics › tables list — TABLE cell carries tier glyph, business name, ⊘ PII; UNIT · LOB
+  column (MDM unit + LOB links); LIFECYCLE column (amber when unknown_*).
+- Semantics › business units (new mode) — LobList (`m-row-lobs`: unit, kind, tables,
+  witnessed %, usage, vocab) → LobProfile (readiness/domains/usage/vocab KV, TABLES shelf
+  with tier/lifecycle/PII/MDM-unit chips, QUERIES THESE TABLES, OWNERS, THE SERVED CARD).
+- Cosmos rail — table pick shows business name, description, MDM unit, lifecycle, ⊘ PII
+  (graph_map.json table nodes carry them).
+- New CSS (meridian.css, tokens only): `m-kv`, `m-chips`, `m-colrow`/`m-col-*`,
+  `m-chip-pii` (ink + the ⊘ glyph — shape carries sensitivity; crimson stays
+  conflict-only, so the unknown-row-policy notice is amber `m-warn`, not `m-conflict`),
+  `m-chip-key`, `m-chip-soft`, `m-vocab`, `m-row-lobs`.
+- Agent side: `read_card("lob:<code>")`, `grep_cards(scope="lob")`, `list_tables(lob=)`
+  resolves through the steward map (+ org-unit usage), SYNAPSE.md gains `## business
+  units` with read_card addresses.
+- Deltas still open: Products tab re-point (delta #2) — the Build-backed unit shelf now
+  exists in Semantics › business units to re-point it at.

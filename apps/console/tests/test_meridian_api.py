@@ -96,6 +96,47 @@ def test_explorer_and_profiles(client):
     assert table["metrics_here"]
 
 
+def test_table_profile_serves_the_facts_row(client):
+    """The profile renders the compiled facts row — the same row the
+    served card is a rendering of — so the screen and the agent never
+    disagree on a number."""
+    table = client.get(
+        "/api/meridian/table/dw.gms_transaction").json()
+    facts = table["facts"]
+    assert facts["schema"] == "meridian.table_facts/1"
+    assert facts["identity"]["business_name"] == "Merchant Transactions"
+    assert facts["business"]["business_unit"] == "GMNS"
+    assert facts["primary_key"] == ["se_no", "txn_uid"]
+    assert facts["trust"]["answerability"]["governance"] == "strong"
+    assert facts["access"]["has_pii_atlas"] is True
+    cols = {c["name"]: c for c in facts["column_facts"]}
+    assert cols["country_cd"]["domain"]["n_values"] == 3
+    assert facts["joins"]["declared"][0]["ref_table"] == \
+        "dw.wwcas_authorization"
+    assert facts["vocabulary"][0]["symbol"]
+    # and the card carries the same facts, as text
+    assert "primary key: se_no, txn_uid" in table["card"]
+    rows = client.get("/api/meridian/explorer/tables").json()["rows"]
+    gms = next(r for r in rows if r["physical"] == "dw.gms_transaction")
+    assert gms["business_name"] == "Merchant Transactions"
+    assert gms["business_unit"] == "GMNS" and gms["pii"] is True
+    assert gms["tier"] in ("ha", "gr", "in", "gu")
+
+
+def test_business_units_shelf_and_profile(client):
+    shelf = client.get("/api/meridian/explorer/lobs").json()
+    assert shelf["available"]
+    by_code = {r["code"]: r for r in shelf["rows"]}
+    assert by_code["GMNS"]["readiness"]["pct"] == 100
+    assert by_code["GMNS"]["tables"][0]["business_name"]
+    assert by_code["CRO"]["kind"] == "org_unit"
+    detail = client.get("/api/meridian/lob/gmns").json()
+    assert detail["found"] and detail["lob"]["code"] == "GMNS"
+    assert detail["card"].startswith("# business unit GMNS")
+    missing = client.get("/api/meridian/lob/submarines").json()
+    assert missing["available"] and missing["found"] is False
+
+
 def test_graph_map_builds_and_feedback(client, compiled):
     cosmos = client.get("/api/meridian/graph_map").json()
     assert cosmos["available"] and cosmos["nodes"]

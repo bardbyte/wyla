@@ -350,3 +350,171 @@ def test_studio_texture_and_mined_joins_serve(tmp_path):
     # the same-id-different-SQL witness is a VISIBLE census conflict
     census = json.loads((build_dir / "census.json").read_text())
     assert census["summary"]["metric_conflicts"] >= 1
+
+
+def test_table_facts_row_carries_every_fact_family(tmp_path):
+    """G3 of the card sourcing audit: indexes/tables.jsonl is the
+    serving-facing projection of everything the graph holds about a
+    table, and the card + the console render THIS row. A fact family
+    missing here is a fact the agent cannot reason from."""
+    _, build_dir, manifest = _compiled(tmp_path)
+    rows = {r["physical"]: r for r in (
+        json.loads(x) for x in (build_dir / "indexes" / "tables.jsonl"
+                                ).read_text().splitlines())}
+    gms = rows["dw.gms_transaction"]
+    assert gms["schema"] == "meridian.table_facts/1"
+    # E18/C compatibility stays flat
+    assert gms["primary_key"] == ["se_no", "txn_uid"]
+    assert gms["total_rows"] == 1020 and gms["lifecycle"] == "certified"
+    # identity: where it lives and what it is
+    assert gms["identity"]["business_name"] == "Merchant Transactions"
+    assert gms["identity"]["project"] == "axp-lumi"
+    assert gms["identity"]["data_sub_category"] == "Payments"
+    assert gms["identity"]["load_type"] == "LOAD_APPEND"
+    # business: MDM unit, steward LOB with witnesses, owners with
+    # witnesses (atlas AND lumi on the business owner), top users
+    assert gms["business"]["business_unit"] == "GMNS"
+    assert gms["business"]["lobs"][0]["code"] == "GMNS"
+    owners = {o["owner"]: o for o in gms["business"]["owners"]}
+    assert owners["own_a@corp"]["witnesses"] == ["atlas", "lumi"]
+    assert "vp" in owners["vp_a@corp"]["roles"]
+    assert gms["business"]["top_users"][0]["user"] == "analyst1@corp"
+    # operations + trust
+    assert gms["operations"]["last_modified"] == "2026-08-01"
+    assert gms["operations"]["partition_columns"] == ["part_dt"]
+    assert gms["operations"]["cost_prior"]["p95_bytes"] == 9000000000
+    assert gms["trust"]["answerability"]["lineage"] == "strong"
+    assert gms["trust"]["is_active_atlas"] is True
+    assert gms["trust"]["tier"] in ("ha", "gr", "in", "gu")
+    # access: table flags + policy witnesses + sensitive roles
+    assert gms["access"]["has_pii_atlas"] is True
+    assert gms["access"]["policies"]["pii"] == ["atlas"]
+    assert gms["access"]["sensitive_columns"][0] == {
+        "name": "cm13", "pii_role": "R3", "sde_group": "SDE1",
+        "sources": ["lumi", "atlas"]}
+    # columns: business name, domain marker, term with DEFINITION,
+    # FK, computed logic, lineage, both ordinals
+    cols = {c["name"]: c for c in gms["column_facts"]}
+    assert cols["se_no"]["business_name"] == \
+        "Service Establishment Number"
+    assert cols["se_no"]["primary_key"] is True
+    assert cols["country_cd"]["domain"]["n_values"] == 3
+    assert cols["country_cd"]["domain"]["top"][0]["value"] == "US"
+    amount = cols["trans_usd_am"]
+    assert amount["terms"][0]["description"] == \
+        "USD amount of a transaction"
+    assert amount["derived_logic"].startswith("CASE WHEN")
+    assert amount["derived_from"][0]["source"] == "data.raw_gms_feed.amt"
+    assert (amount["ordinal"], amount["ordinal_atlas"]) == (1, 5)
+    assert cols["cm13"]["fk_references"] == [
+        {"table": "dw.wwcas_authorization", "column": "card_no"}]
+    # a nested field path keeps its BQ description (no catalog plane)
+    assert cols["payment_detail.card.network"]["description"]
+    # the D1 phantom column is NOT a column fact
+    assert "cm15_hash" not in cols
+    assert "cm15_hash" in gms["omitted_catalog_only"]
+    # joins + lineage + vocabulary (BU-scoped context)
+    assert gms["joins"]["declared"] == [{
+        "column": "cm13", "ref_table": "dw.wwcas_authorization",
+        "ref_column": "card_no"}]
+    assert gms["joins"]["observed"][0]["other"] == \
+        "dw.wwcas_authorization"
+    assert gms["lineage"]["upstream"] == ["data.raw_gms_feed"]
+    symbols = {v["symbol"]: v for v in gms["vocabulary"]}
+    assert symbols["CM13"]["columns"] == ["cm13"]
+    assert symbols["CM13"]["definition"] == "Card Member 13 Digit Number"
+    # scope discipline: a foreign-BU acronym is never offered
+    assert all(str(v["bu"]).lower() in ("all", "gmns")
+               for v in gms["vocabulary"])
+    assert manifest["counts"]["lob_cards"] >= 2
+
+
+def test_table_card_renders_the_facts(tmp_path):
+    """The card is a RENDERING of the facts row — every family the
+    audit found missing has a line, in a pinned section, with its
+    provenance; grain/access/conflicts are never budget-dropped."""
+    _, build_dir, _ = _compiled(tmp_path)
+    card = (build_dir / "cards" / "tables"
+            / "dw__gms_transaction.md").read_text()
+    head = card.split("## grain")[0]
+    assert "# table dw.gms_transaction — Merchant Transactions" in head
+    assert "own_a@corp (business_owner; atlas+lumi)" in head
+    assert "vp_a@corp (vp; atlas)" in head
+    assert "business unit: GMNS (MDM pipeline)" in head
+    assert "category: Merchant Services › Payments" in head
+    assert "lives at: axp-lumi.data.gms_transaction" in head
+    grain = card.split("## grain")[1].split("## ")[0]
+    assert "primary key: se_no, txn_uid [prov:bq:constraints]" in grain
+    assert "partitioned by part_dt" in grain and "LOAD_APPEND" in grain
+    trust = card.split("## trust & operations")[1].split("## ")[0]
+    assert "answerability: governance strong" in trust
+    assert "last modified 2026-08-01" in trust
+    assert "cost prior: p50 400.0 MB · p95 9.0 GB" in trust
+    assert "top users: analyst1@corp ×48" in trust
+    columns = card.split("## columns")[1].split("## ")[0]
+    assert "se_no string (PK) · “Service Establishment Number”" in columns
+    assert "part_dt date (PARTITION)" in columns
+    assert "cm13 string (SENSITIVE R3/SDE1" in columns
+    assert "3 known values (US 72.0%" in columns and "sample_values" in columns
+    assert "term: Transaction United States Dollar Amount [Approved] — " \
+        "USD amount of a transaction" in columns
+    assert "FK → dw.wwcas_authorization.card_no" in columns
+    assert "computed: `CASE WHEN se_cr_dr_in" in columns
+    assert "ordinal bq 1 vs atlas 5" in columns
+    joins = card.split("## joins")[1].split("## ")[0]
+    assert joins.splitlines()[1].startswith(
+        "- declared: cm13 → dw.wwcas_authorization.card_no")
+    assert "## lineage" in card and "upstream: data.raw_gms_feed" in card
+    access = card.split("## access")[1].split("## ")[0]
+    assert "table flags: PII yes · GDPR no · ONCOP no" in access
+    assert "sensitive columns: cm13 (R3/SDE1)" in access
+    vocab = card.split("## vocabulary")[1].split("## ")[0]
+    assert "CM13 = Card Member 13 Digit Number" in vocab
+    assert "Rejected" not in vocab.split("Country Code")[0]  # status ≠ meaning
+
+
+def test_lob_card_is_the_shelf_above_the_tables(tmp_path):
+    _, build_dir, _ = _compiled(tmp_path)
+    lob_dir = build_dir / "cards" / "lob"
+    assert (lob_dir / "gmns.md").exists() and (lob_dir / "sbs.md").exists()
+    assert (lob_dir / "cro.md").exists()          # the org unit too
+    gmns = (lob_dir / "gmns.md").read_text()
+    assert gmns.startswith(
+        "# business unit GMNS — Global Merchant & Network Services")
+    assert "readiness: 2 of 2 tables carry a witnessed metric (100%)" in gmns
+    assert "usage: 117 mined patterns" in gmns
+    assert "dw.gms_transaction — Merchant Transactions" in gmns
+    assert 'read_card("table:dw.gms_transaction")' in gmns
+    assert "own_a@corp (business_owner)" in gmns
+    cro = (lob_dir / "cro.md").read_text()
+    assert cro.startswith("# org unit CRO — Credit Risk Ops")
+    assert "parent LOB: SBS" in cro
+    assert "## queries these tables" in cro
+    lobs = [json.loads(x) for x in
+            (build_dir / "indexes" / "lobs.jsonl").read_text().splitlines()]
+    assert {r["code"] for r in lobs} == {"GMNS", "SBS", "CRO"}
+
+
+def test_coverage_ledger_accounts_for_every_prop_and_edge(tmp_path):
+    """The G2/G3 instrument: every table/column prop and edge predicate
+    in the graph is rendered or deferred-with-reason. A new loader prop
+    lands here as UNACCOUNTED and fails this test until someone either
+    serves it or names why it stays dark."""
+    _, build_dir, manifest = _compiled(tmp_path)
+    coverage = json.loads(
+        (build_dir / "indexes" / "coverage.json").read_text())
+    assert coverage["unaccounted"] == [], coverage["unaccounted"]
+    assert manifest["counts"]["coverage_unaccounted"] == 0
+    rendered_table = {r["key"]: r["where"]
+                      for r in coverage["table_props"]["rows"]
+                      if r["status"] == "rendered"}
+    # the audit's headline misses are now on record as rendered
+    for key in ("answerability", "cost_prior", "top_users",
+                "table_meta_logical", "has_gdpr_atlas", "project",
+                "business_name_atlas", "data_sub_category"):
+        assert key in rendered_table, key
+    rendered_edges = {r["key"] for r in
+                      coverage["edge_predicates"]["rows"]
+                      if r["status"] == "rendered"}
+    assert {"fk_references", "has_domain", "mapped_term", "owned_by",
+            "upstream_of", "derived_from", "described_by"} <= rendered_edges

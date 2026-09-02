@@ -333,43 +333,49 @@ finds them — but:
 
 ---
 
-## 6. What I'd fix, in order
+## 6. What I'd fix, in order — status
 
-Ranked by (agent judgement improved) ÷ (work). Nothing here needs a new
-extraction — items 1–5 are rendering changes over facts already in the
-graph.
+Ranked by (agent judgement improved) ÷ (work). **Items 1–8 and 10 are
+done** (PR #108, second and third commits); every fact family below
+now has a card section, a console card, and where relevant a tool —
+the full map is `docs/audits/fact_to_surface_map.md`.
 
-1. **Put the grain on the grain line.** Primary key + partitioning
-   column + row count. `grain` is already a protected, never-dropped
-   section; today it holds a partition date and a schema hash. This is
-   the highest-value line on the card and it is currently the emptiest.
-2. **Render `fk_references` in the joins section**, tiered above
-   co-queries. A declared FK outranks every mined witness we have.
-3. **Column line: add `business_name`, and mark columns that have a
-   value domain** (`country_cd string [3 known values — sample_values]`).
-   Both are one-line changes; the second is what makes `sample_values`
-   discoverable.
-4. **Add a `## trust` or `## operations` line**: `answerability`,
-   `last_modified`, `feed_type`, `cost_prior` p50/p95. This is the
-   "should I trust and can I afford this" block that doesn't exist today.
-5. **Complete the access section**: table-level `has_pii` / `has_gdpr` /
-   `has_oncop`, the `pii_role_id`/`sde_group` per sensitive column, and
-   the full ownership chain (business owner, tech owner, VP).
-6. **Emit a `cards/lob/<code>.md`** from `lob.jsonl` + readiness, and fix
-   `list_tables(lob=…)` to filter on `in_lob` edges.
-7. **Emit a context card per table** — the acronyms and business terms
-   whose scope matches the table's BU and whose symbols appear in its
-   column names. This is the "decode the jargon before you reason"
-   card, and every input for it is already loaded.
-8. ~~**G2 close-out on `std_tech_metadata`**~~ — **done**, see §4.1.
-9. **Attach the four semantic deferrals as doc nodes** surfaced on the
-   relevant table card — no parsing required, just a pointer the agent
-   can read.
-10. **Add a field-level utilization instrument** (a G2/G3 ledger) so
-    "are we using everything?" is answered by CI, the way G1 already is,
-    instead of by an audit like this one.
+1. ~~Put the grain on the grain line.~~ **done** — `## grain`: primary
+   key (constraints, with the Atlas view when it differs), partition
+   column(s), latest partition, partition count, load type, rows,
+   bytes, schema fingerprint.
+2. ~~Render `fk_references` in the joins section.~~ **done** — declared
+   constraints lead `## joins`; the profile shows them ● first.
+3. ~~Column line: business name + value-domain marker.~~ **done** —
+   plus PK/PARTITION/NOT NULL markers, sensitivity role/group, term
+   with definition, FK, computed logic, lineage, ordinal divergence.
+4. ~~`## trust & operations`~~ **done** — answerability, freshness,
+   feed/pipeline/source, environment, cost prior, rhythm, top users,
+   Atlas active/latest/lineage flags.
+5. ~~Complete the access section.~~ **done** — table PII/GDPR/ONCOP,
+   policy witnesses, per-column role/group, full owner chain with
+   witnesses on the header.
+6. ~~`cards/lob/<code>.md` + fix `list_tables(lob=…)`.~~ **done** —
+   lob cards for LOBs and org units, `read_card("lob:…")`,
+   `list_tables(lob=)` resolves through the steward map, SYNAPSE.md
+   `## business units`, Explorer › business units + unit profile.
+7. ~~Context card per table.~~ **done as a section** —
+   `## vocabulary (scoped to <units>, All)`: exact-token matches of
+   acronyms/terms against column and business names, restricted to
+   the table's own business units (the ABP disambiguation is the
+   scope rule itself). Also the VOCABULARY card on the profile.
+8. ~~G2 close-out on `std_tech_metadata`.~~ **done**, see §4.1.
+9. Attach the four semantic deferrals as doc nodes — **left open by
+   decision** (skip the four deferrals).
+10. ~~Field-level utilization instrument.~~ **done** —
+    `sahs/compiler/coverage.py` writes `indexes/coverage.json` on
+    every compile; CI holds `unaccounted` at empty. 42 table props,
+    25 column props and 20 edge predicates rendered; 5 deferred with
+    reasons; 0 unaccounted on the fixture build.
 
----
+Token budget: raised to 3K with drop order vocabulary → column
+long-tail → joins → filters → metrics; grain, access, conflicts stay
+protected. The fixture card renders at ~1.8K.
 
 ## 7. Summary in one paragraph
 

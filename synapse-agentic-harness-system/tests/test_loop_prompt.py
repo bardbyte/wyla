@@ -65,6 +65,21 @@ def test_digest_is_real_bounded_and_deterministic(compiled):
     assert "## known gaps" in once
 
 
+def test_digest_lists_business_units_with_their_cards(compiled):
+    """The shelf above the tables rides in the briefing: every mapped
+    unit with what it holds, how much is witnessed, and the exact
+    read_card address — bounded, and still under the cap."""
+    from sahs.loop.digest import MAX_CHARS, synapse_digest
+    build, _tmp = compiled
+    text = synapse_digest(build)
+    assert len(text) <= MAX_CHARS
+    units = text.split("## business units")[1].split("## ")[0]
+    assert "GMNS: Global Merchant & Network Services" in units
+    assert "2 tables, 2 witnessed" in units
+    assert 'read_card("lob:gmns")' in units
+    assert "CRO" in units and "org unit under SBS" in units
+
+
 def test_digest_reports_grainless_metrics_as_a_gap(compiled):
     from sahs.loop.digest import synapse_digest
     build, _ = compiled
