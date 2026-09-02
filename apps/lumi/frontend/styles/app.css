@@ -867,6 +867,22 @@ table.result tr:last-child td { border-bottom: none; }
 }
 .saw-head { padding-bottom: 4px; }
 
+/* ── Synapse v3: the conversational surface (synapse_v3_harness §6) ── */
+/* the hidden attribute always wins: no display rule may override it —
+   the thinking line and the artifact panel once stayed visible because
+   their display:flex outranked [hidden] */
+[hidden] { display: none !important; }
+.chat-depth {
+  font: inherit; font-size: 12px; padding: 3px 6px; border-radius: 8px;
+  border: 1px solid var(--line, #d5d2ca); background: transparent;
+  color: inherit; margin-right: 8px;
+}
+.theater-step.pending .mark { color: var(--accent, #2f6feb); }
+.memory-note {
+  font-size: 12.5px; color: var(--muted, #7a756a); margin-top: 6px;
+  display: flex; gap: 8px; align-items: center;
+}
+.memory-note.retired span { text-decoration: line-through; opacity: 0.6; }
 /* ── Synapse v2: the Claude-shaped chat (spec §10) ── */
 .chatv2 {
   display: grid;

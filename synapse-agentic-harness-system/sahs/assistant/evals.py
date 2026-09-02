@@ -40,11 +40,13 @@ from sahs.tools.api import Build
 TASKS_ROOT = (Path(__file__).resolve().parents[2] / "tests" / "tasks"
               / "assistant")
 KINDS = ("artifact", "reasoning", "playbook")
-CHECK_TOOLS = ("check_part_whole", "check_crosscheck",
-               "check_coverage", "check_fanout", "check_reconcile",
-               "verify_answer")
-LOOK_TOOLS = ("read_card", "search_semantics", "grep_cards",
-              "resolve", "list_tables", "get_definition_line")
+# v3: one check tool, six kinds — task files name the KINDS
+CHECK_KINDS = ("part_whole", "crosscheck", "coverage", "fanout",
+               "reconcile", "answer")
+CHECK_TOOLS = CHECK_KINDS
+LOOK_TOOLS = ("search", "read", "sample_values")
+# calls that are not work: they never count as "tools used"
+QUIET_TOOLS = ("suggest_next", "note", "remember")
 
 
 def load_tasks(kind: str | None = None) -> list[dict[str, Any]]:
@@ -119,19 +121,22 @@ def _statuses(type: str, spec: dict[str, Any]) -> set[str]:
             for p in _numeric_parts(type, spec)} - {""}
 
 
+def _work_steps(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [e for e in _by(events, "tool_step")
+            if e.get("tool") not in QUIET_TOOLS]
+
+
 def _hygiene(events: list[dict[str, Any]]) -> dict[str, Any]:
-    steps = _by(events, "tool_step")
+    steps = _work_steps(events)
     tools = [e["tool"] for e in steps]
     first_query = next((i for i, e in enumerate(steps)
-                        if e["tool"] in ("run_sql", "whatif")), None)
+                        if e["tool"] == "run_sql"), None)
     filtered = any("'" in str(e.get("args", ""))
-                   for e in steps if e["tool"] in ("run_sql",
-                                                   "whatif"))
+                   for e in steps if e["tool"] == "run_sql")
     refusals = sum(1 for e in steps
-                   if e["tool"] in ("artifact", "artifact_update")
+                   if e["tool"] == "artifact"
                    and "refused" in str(e.get("summary", "")))
-    landed = any(e["tool"] in ("artifact", "artifact_update",
-                               "constellation")
+    landed = any(e["tool"] == "artifact"
                  and "refused" not in str(e.get("summary", ""))
                  and "ERROR" not in str(e.get("summary", ""))
                  for e in steps)
@@ -200,7 +205,7 @@ def grade_reasoning(task: dict[str, Any],
     expect = task.get("expect", {})
     prose = _prose(events)
     words = len(prose.split())
-    tools = len(_by(events, "tool_step"))
+    tools = len(_work_steps(events))
     done = _by(events, "turn_done")
     answered = bool(done) and done[-1]["status"] == "answered"
     leak = tools > int(expect.get("max_tools", 0))
@@ -224,14 +229,17 @@ def grade_playbook(task: dict[str, Any],
     steps = _by(events, "tool_step")
     done = _by(events, "turn_done")
     answered = bool(done) and done[-1]["status"] == "answered"
-    queries = sum(1 for e in steps
-                  if e["tool"] in ("run_sql", "whatif"))
-    wanted = expect.get("checks_any") or list(CHECK_TOOLS)
+    queries = sum(1 for e in steps if e["tool"] == "run_sql")
+    wanted = expect.get("checks_any") or list(CHECK_KINDS)
     passing: set[str] = set()
     for event in _by(events, "tool_result"):
-        if event.get("tool") in wanted \
-                and '"passed": true' in str(event.get("content", "")):
-            passing.add(event["tool"])
+        content = str(event.get("content", ""))
+        if event.get("tool") != "check" \
+                or '"passed": true' not in content:
+            continue
+        for kind in wanted:
+            if f'"kind": "{kind}"' in content:
+                passing.add(kind)
     checked = bool(passing)
     skill_ok = True
     if expect.get("skill"):

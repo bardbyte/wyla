@@ -45,6 +45,9 @@ class LazyModel:
     def stream(self, *args: Any, **kwargs: Any) -> Any:
         return self._resolve().stream(*args, **kwargs)
 
+    def converse(self, *args: Any, **kwargs: Any) -> Any:
+        return self._resolve().converse(*args, **kwargs)
+
 
 class BuildUnavailable(RuntimeError):
     """No promoted build on this machine: every surface says so."""

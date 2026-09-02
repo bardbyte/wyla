@@ -30,6 +30,11 @@ def test_classify_tells_the_laptop_failures_apart():
     assert flash_check.classify(_http_error(429))[0] == "quota"
     assert flash_check.classify(_http_error(400, "thinking"))[0] \
         == "rejected"
+    policy = flash_check.classify(_http_error(
+        400, '{"error": {"message": "Organization Policy constraint '
+             'vertexai.allowedModels\n denies gemini-3.5-flash"}}'))
+    assert policy[0] == "org_policy"
+    assert "\n" not in policy[1]              # one line in the table
     assert flash_check.classify(RuntimeError("dead"))[0] == "error"
 
 
@@ -83,6 +88,14 @@ def test_report_recommends_the_fastest_answering_flash():
     assert "| gemini-3.7-flash | not_found | not_found |" in report
     none = flash_check.render_markdown(rows[:2], label="test")
     assert "no Flash model answered" in none
+    blocked = flash_check.render_markdown(rows[:2] + [
+        {"model": "gemini-3.5-flash", "listed": "not_found",
+         "verdict": "org_policy", "latency_ms": 300,
+         "detail": "HTTP 400 Organization Policy constraint"}],
+        label="test")
+    assert "blocked by organization policy" in blocked
+    assert "constraints/vertexai.allowedModels" in blocked
+    assert "gemini-3.5-flash first" in blocked
 
 
 def test_probe_all_swaps_the_model_id_per_candidate():

@@ -1,12 +1,12 @@
-"""Synapse v2 chat (docs/specs/synapse_v2.md) mounted on the app: the
-assistant loop, in-process, with the same contract shape as Ask —
+"""Synapse chat (docs/specs/synapse_v3_harness.md) mounted on the app:
+the assistant loop, in-process, with the same contract shape as Ask —
 the frontend is a pure consumer of the event stream, never holds a
 key, never calls a model.
 
     POST /api/chat/sessions                        → session
     GET  /api/chat/sessions                        → the sidebar
     GET  /api/chat/sessions/{id}                   → transcript + artifacts
-    POST /api/chat/sessions/{id}/messages          {text} → turn_id
+    POST /api/chat/sessions/{id}/messages          {text, depth?} → turn_id
     GET  /api/chat/sessions/{id}/stream            → SSE (meridian.event/1)
     POST /api/chat/sessions/{id}/stop
     POST /api/chat/sessions/{id}/rename            {title}
@@ -59,6 +59,8 @@ def _chat():
 
 class NewMessage(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
+    # the depth dial (v3 §5): quick | standard | deep — thinking level
+    depth: str = Field(default="", max_length=12)
 
 
 class Rename(BaseModel):
@@ -127,7 +129,8 @@ def post_message(session_id: str, req: NewMessage) -> dict:
     from sahs.ask.runtime import BuildUnavailable, TurnBusy
     try:
         return {"available": True,
-                **runtime.start_turn(session_id, req.text)}
+                **runtime.start_turn(session_id, req.text,
+                                     depth=req.depth)}
     except KeyError:
         return _unavailable(f"no session {session_id}")
     except TurnBusy as e:

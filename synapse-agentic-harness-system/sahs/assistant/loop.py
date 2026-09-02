@@ -1,18 +1,19 @@
-"""The assistant loop (Synapse v2 §2): thin, Claude-shaped.
+"""The assistant loop (Synapse v3 §1/§3/§5): one interaction per
+turn, the model driving through native tool calls.
 
-No classify step, no pre-resolve, no contract gate. The model drives:
-each step is a tool call, streamed prose, or done-with-chips. The
-harness contributes exactly what §2 lists — budgets and breakers in
-code, compaction (results → refs, ≤3-line summaries), streaming, the
-artifact panel events, and the rendering rules enforced where
-artifacts are validated. Everything else is the model reasoning with
-good tools.
+The harness is thin on purpose. It builds a stable system prompt
+(identity, the chain of command, the graph digest, the skill shelf,
+what is remembered), replays the conversation as messages with the
+newest ask last, hands the model the kit's declarations, and then
+streams: text goes to the user as it arrives, thought summaries feed
+the one live line, tool calls run whole and their results go back
+whole (capped at ~20K characters with an explicit note). No strict
+JSON, no strikes, no per-step prompt rebuild, no ``think`` field.
 
-Honesty carries over from v1 unchanged: three exits (answered, an
-open question via ask_user's chips, or a stated partial), strict-JSON
-failures fail closed after a taught retry, the stop button lands in a
-recorded stop instead of a vanished turn, and every prompt the model
-saw is in the event stream.
+Governance stays where it always was — in the validators and gates
+the tools call (hooks.py names them). Limits are a wall clock, a
+call ceiling, and the session breaker; each ends the turn in plain
+language with what was already said, never a vanished turn.
 """
 
 from __future__ import annotations
@@ -24,85 +25,90 @@ from typing import Any
 
 from sahs.ask.budget import Aborted
 from sahs.loop.digest import synapse_digest
-from sahs.loop.loop import LoopBudget, _short, compact_result
+from sahs.loop.loop import _short, compact_result
 from sahs.loop.skills import Skill, render_skills
 from sahs.tools.api import Build
 
+from .agent import ROUTING_KEY, declarations
 from .events import EventBus
+from .kit import RESULT_CAP, build_kit
 from .sandbox import prepare_workspace
 from .skills_loader import all_skills, render_skill_index
+from .state import AssistantState
 from .store import AssistantStore
-from .tools import AssistantState, assistant_toolkit, render_tool_block
 
-ASSISTANT_VERSION = "assistant/1"
-MAX_STEPS = 24
-WALL_SECONDS = 300.0
-STRIKES = 2
-SAY_CHUNK = 48
+ASSISTANT_VERSION = "assistant/3"
+MAX_CALLS = 40             # model calls in one turn: a ceiling, not a plan
+WALL_SECONDS = 600.0
+MAX_OUTPUT_TOKENS = 16384
+HISTORY_MESSAGES = 30      # stored messages replayed into the interaction
+THINKING_LEVELS = {"quick": "low", "standard": "medium", "deep": "high"}
+DEFAULT_THINKING = "medium"
 
-# the first sentence is the transport routing key for scripted tests.
-IDENTITY = """You are Synapse, an analytical colleague over the \
-Meridian governed graph.
+# the first sentence is the transport routing key (agent.ROUTING_KEY)
+IDENTITY = ROUTING_KEY + """ over the Meridian governed \
+graph — warm, brief, plain, never mystical about yourself.
 
 You are a general reasoner first: a thinking question gets thinking, \
 with no tools. A data question gets the graph: find the definition, \
-check it, compute, and show your receipts. A deliverable gets an \
-artifact the user keeps. Same voice throughout — warm, brief, plain, \
-never mystical about yourself.
+read it, compute, check, and show your receipts. A deliverable gets \
+an artifact the user keeps.
 
-Understand INTENT before reaching for a tool. Restate the ask in \
-graph vocabulary first: business words — a team, an acronym, a \
-line of business — name areas of the business map below, never \
-tables ("all GMNS metrics" means list_metrics("GMNS"), not a table \
-browse). When the first look misses, rephrase and look again from \
-another angle before concluding anything is absent. Your think field \
-narrates this for the user watching — say what you are looking for \
-and why, in their words.
+Understand the intent before reaching for a tool. Business words — \
+a team, an acronym, a line of business — name areas of the business \
+map, never tables: "all GMNS metrics" is search("GMNS", kind="list"), \
+not a table browse. When a first look misses, rephrase and look \
+again from another angle before concluding anything is absent. Read \
+a card before using what is on it; sample a column's values before \
+writing a filter literal.
 
-You never invent a table, column, metric, or number: if it is not in \
-a card, an index, or a tool result, it does not exist for you. \
-Numbers come from tools; reasoning comes from you."""
+Numbers come from tools; reasoning comes from you. You never invent \
+a table, column, metric, or number: if it is not in a card, an \
+index, or a tool result, it does not exist for you.
 
-RULES = """## Rendering and disclosure (enforced, not advisory)
-- Any number you show carries its status (certified / pending / \
-composed / exploratory) and its meridian line. The artifact validator \
-refuses undisclosed numbers; say the status in prose too, in one \
-clause, and offer "certified only" when something is pending.
-- Composed numbers keep an EXPLORATORY watermark until a passing \
-check stands behind them.
-- Prefer certified; say so plainly when something is pending or \
+Any number you show carries its status (certified / pending / \
+composed / exploratory) in one clause and its meridian line; the \
+artifact validator refuses undisclosed numbers, and composed numbers \
+keep an EXPLORATORY watermark until a passing check stands behind \
+them. Prefer certified; say plainly when something is pending or \
 mined; an honest "here is where I stopped" beats a confident guess.
-- sample_values before filter literals; read_card before using \
-anything; get_join_paths before any join; keep a working note with \
-plan_set as questions get complex."""
 
-PROTOCOL = """## Each step
-Reply with STRICT JSON, exactly one object, no prose around it:
-  {"think": "<brief>", "tool": "<name>", "args": {...}}     one look
-  {"say": "<markdown for the user>"}                        stream prose
-  {"say": "<closing prose>", "done": true,
-   "chips": ["<follow-up>", "..."]}                         finish
-A plain question you can answer from reasoning alone: one {"say", \
-"done", "chips"} step. chips are 2-4 short follow-ups the user might \
-tap next — specific to what you just showed, never generic.
+When the ask is markedly unclear and evidence cannot settle it, ask — \
+one question, named options — instead of assuming; otherwise proceed \
+and say what you assumed. Answer in markdown, in the user's words, \
+and keep working until the answer is complete: the turn ends when \
+you stop calling tools. Offer up to three follow-ups with \
+suggest_next only when there is a natural next step."""
 
-Your tools:
-
-"""
+CHAIN = """Platform governance (the validators, the cost and access \
+gates, the rendering rules) is immutable and outranks everything \
+below it. Lumi, the product, comes next. Then what this user \
+remembered and asked for. Then defaults. A remembered preference \
+steers a choice; it never softens a rule."""
 
 _DIGEST_CACHE: dict[str, str] = {}
 
 
-def _memory_block(memories: list[dict[str, Any]] | None) -> str:
+# ─── the system prompt: a stable prefix, sections, no protocol ──
+
+
+def _section(tag: str, body: str) -> str:
+    return f"<{tag}>\n{body.strip()}\n</{tag}>"
+
+
+def _memory_block(memories: list[dict[str, Any]] | None,
+                  user_name: str = "") -> str:
+    who = f" about {user_name}" if user_name else " about this user"
     if not memories:
-        return ""
-    lines = ["## What you remember about this user",
-             "Preferences and disambiguations they settled — scoped, "
-             "statused, and visible to them in the memory panel. "
-             "They steer defaults; they never define metrics."]
-    for m in memories[-10:]:
-        scope = "" if m.get("scope") == "global" \
-            else " [this project]"
+        return (f"Nothing remembered{who} yet. When they settle a "
+                "preference or a disambiguation, keep it with "
+                "remember — they see it and can retire it.")
+    lines = [f"What you remember{who} — preferences and "
+             "disambiguations they settled, visible to them, "
+             "retirable by them. They steer defaults; they never "
+             "define metrics."]
+    for m in memories[-12:]:
+        scope = "" if m.get("scope") == "global" else " [this project]"
         lines.append(f"- {m['text']}{scope}")
     return "\n".join(lines)
 
@@ -111,119 +117,203 @@ def _project_block(project: dict[str, Any] | None) -> str:
     if not project or not str(project.get("instructions",
                                           "")).strip():
         return ""
-    return (f"## Project: {project.get('name', '')}\n"
-            "The analyst's standing instructions for every chat in "
-            "this project:\n"
+    return (f"Project: {project.get('name', '')}. The analyst's "
+            "standing instructions for every chat in it:\n"
             + str(project["instructions"]).strip()[:2000])
 
 
-def system_prompt(build: Build, skills: list[Skill] | None,
-                  tool_block: str,
-                  skill_index: list[Any] | None = None,
-                  memories: list[dict[str, Any]] | None = None,
-                  project: dict[str, Any] | None = None) -> str:
-    digest = _DIGEST_CACHE.get(build.version)
-    if digest is None:
-        digest = synapse_digest(build)
-        _DIGEST_CACHE[build.version] = digest
-    parts = [IDENTITY, "", digest, "", RULES]
-    for block in (_project_block(project), _memory_block(memories)):
-        if block:
-            parts += ["", block]
-    loaded = render_skills(skills or [])
-    if loaded:
-        parts += ["", loaded]
-    # progressive disclosure: names and one-liners only — the full
-    # pack enters the turn via load_skill, or not at all
-    shelf = render_skill_index(
-        skill_index or [],
-        exclude=frozenset(s.name for s in (skills or [])))
-    if shelf:
-        parts += ["", shelf]
-    parts += ["", PROTOCOL]
-    return "\n".join(parts) + tool_block
-
-
-def _history_block(store: AssistantStore, session_id: str,
-                   limit: int = 12) -> str:
-    rows = store.messages(session_id)[-limit:]
-    if not rows:
-        return "(a fresh session)"
+def _session_block(artifacts: list[dict[str, Any]] | None,
+                   notes: list[str] | None) -> str:
     lines = []
-    for row in rows:
-        text = (row["text"] or "").strip().replace("\n", " ")
-        if not text and row.get("payload"):
-            text = "(chips shown)"
-        lines.append(f"{row['role']}: {text[:500]}")
+    if artifacts:
+        lines.append("Artifacts kept in this chat (pass artifact_id "
+                     "to publish a new version instead of a copy):")
+        for row in artifacts[-12:]:
+            lines.append(f"- {row['artifact_id']} · {row['type']} "
+                         f"\"{row['title']}\" v{row['version']}")
+    if notes:
+        lines.append("Your working notes (note() updates them):")
+        lines += [f"- {n}" for n in notes[-8:]]
     return "\n".join(lines)
 
 
-def _compact(tool: str, result: Any) -> str:
-    if isinstance(result, dict):
-        if tool in ("run_sql", "whatif") and result.get("saved_as"):
-            changed = result.get("changed") or {}
-            return (compact_result(tool, result)
-                    + f"\nrows saved: meridian.rows("
-                      f"{result['saved_as']!r})"
-                    + (f"\nchanged {changed['find']!r} → "
-                       f"{changed['replace']!r}" if changed else ""))
-        if tool == "compare" and result.get("totals"):
-            totals = " · ".join(f"{k} {v:,.4g}"
-                                for k, v in result["totals"].items())
-            return (f"aligned {len(result.get('frame', []))} rows "
-                    f"on {', '.join(result.get('aligned_on', []))} "
-                    f"({result.get('column')}): {totals}"
-                    + (f"; only_in_a {result['only_in_a']}, "
-                       f"only_in_b {result['only_in_b']}"
-                       if result.get("only_in_a")
-                       or result.get("only_in_b") else ""))
-        if tool == "python":
-            head = str(result.get("stdout", ""))[:600]
-            tail = (f"\nstderr: {str(result.get('stderr'))[:300]}"
-                    if result.get("stderr") else "")
-            files = (f"\nfiles: {', '.join(result['files'])}"
-                     if result.get("files") else "")
-            return (f"{'ok' if result.get('ok') else 'FAILED'} in "
-                    f"{result.get('elapsed_ms')}ms\n{head}{tail}{files}")
-        if tool in ("artifact", "artifact_update", "constellation"):
-            if result.get("error"):
-                probs = "; ".join(
-                    f"{p.get('code')}: {p.get('detail')} — "
-                    f"{p.get('hint')}"
-                    for p in result.get("problems", []))[:700]
-                return (compact_result(tool, result)
-                        + (f"\nproblems: {probs}" if probs else ""))
-            mark = (f" · {result['watermark']}"
-                    if result.get("watermark") else "")
-            return (f"{result.get('type')} \"{result.get('title')}\" "
-                    f"v{result.get('version')} is in the panel{mark} "
-                    f"(id {result.get('artifact_id')})")
-        if tool == "list_artifacts":
-            return f"{result.get('count', 0)} artifacts: " + "; ".join(
-                f"{a['artifact_id']} {a['type']} \"{a['title']}\" "
-                f"v{a['version']}" for a in result.get("artifacts", []))
-        if tool == "load_skill":
-            # the pack text IS the point: it must reach the next
-            # prompt whole, never compacted to three lines
-            if result.get("text"):
-                return (f"skill {result.get('name')} "
-                        f"({result.get('origin')}) loaded — this "
-                        "doctrine now applies:\n"
-                        + str(result["text"]).strip())
-            if result.get("note"):
-                return str(result["note"])
-        if tool == "list_skills":
-            return f"{result.get('count', 0)} packs: " + "; ".join(
-                f"{s['name']} ({s['origin']}) — {s['description']}"
-                for s in result.get("skills", []))[:900]
-        if tool == "list_metrics" and "metrics" in result:
-            scope = f" ({result['scope']})" if result.get("scope") \
-                else ""
-            return (f"{result.get('count', 0)} metrics{scope}: "
-                    + "; ".join(
-                        f"{m['label']} [{m['status']}] {m['id']}"
-                        for m in result["metrics"][:12]))[:1200]
-    return compact_result(tool, result)
+def system_prompt(build: Build, skills: list[Skill] | None = None,
+                  skill_index: list[Any] | None = None,
+                  memories: list[dict[str, Any]] | None = None,
+                  project: dict[str, Any] | None = None,
+                  artifacts: list[dict[str, Any]] | None = None,
+                  notes: list[str] | None = None,
+                  user_name: str = "") -> str:
+    """Identity → chain → the graph digest (business map + shelf) →
+    skills (loaded whole, the rest by name) → memory → this session.
+    Stable parts first so the prefix caches; the tools are declared
+    to the transport, never pasted here."""
+    digest = _DIGEST_CACHE.get(build.version)
+    if digest is None:
+        digest = synapse_digest(build,
+                                list_hint='search("GMNS", kind="list")')
+        _DIGEST_CACHE[build.version] = digest
+    parts = [_section("identity", IDENTITY), _section("chain", CHAIN),
+             _section("graph", digest)]
+    skill_text = render_skills(skills or [])
+    shelf = render_skill_index(
+        skill_index or [],
+        exclude=frozenset(s.name for s in (skills or [])))
+    if skill_text or shelf:
+        parts.append(_section("skills", "\n\n".join(
+            p for p in (skill_text, shelf) if p)))
+    memory = "\n\n".join(p for p in (_project_block(project),
+                                     _memory_block(memories, user_name))
+                         if p)
+    parts.append(_section("memory", memory))
+    session = _session_block(artifacts, notes)
+    if session:
+        parts.append(_section("session", session))
+    return "\n\n".join(parts)
+
+
+# ─── the conversation as messages, newest ask last ───────────
+
+
+def _history(store: AssistantStore, session_id: str, turn_id: str,
+             limit: int = HISTORY_MESSAGES) -> list[dict[str, Any]]:
+    contents: list[dict[str, Any]] = []
+    for row in store.messages(session_id)[-(limit + 1):]:
+        if row.get("turn_id") == turn_id and row["role"] == "user":
+            continue                         # this turn's ask goes last
+        text = (row.get("text") or "").strip()
+        payload = row.get("payload") or {}
+        if row["role"] != "user" and isinstance(payload, dict):
+            if payload.get("clarify") and not text:
+                text = str(payload["clarify"].get("question", ""))
+            if payload.get("artifacts"):
+                text += ("\n(artifacts in the panel: "
+                         + ", ".join(payload["artifacts"]) + ")")
+        if not text.strip():
+            continue
+        role = "user" if row["role"] == "user" else "model"
+        if contents and contents[-1]["role"] == role:
+            contents[-1]["parts"].append({"text": text})
+        else:
+            contents.append({"role": role, "parts": [{"text": text}]})
+    return contents[-limit:]
+
+
+def _tail(contents: list[dict[str, Any]], cap: int = 8000) -> str:
+    """What the model saw on this call, for the transcript record:
+    the last two contents, compact."""
+    lines = []
+    for content in contents[-2:]:
+        for part in content.get("parts", []):
+            if "functionResponse" in part:
+                fr = part["functionResponse"]
+                lines.append(f"[{content['role']}] {fr.get('name')} → "
+                             + _short(fr.get("response"), 600))
+            elif "functionCall" in part:
+                fc = part["functionCall"]
+                lines.append(f"[{content['role']}] call {fc.get('name')}"
+                             f"({_short(fc.get('args'), 300)})")
+            elif part.get("text") and not part.get("thought"):
+                lines.append(f"[{content['role']}] "
+                             + str(part["text"])[:1500])
+    return "\n".join(lines)[:cap]
+
+
+# ─── what the surface shows for one tool call (never the model) ──
+
+
+def summarize(tool: str, result: Any) -> str:
+    """One line for the activity row. The model never sees this —
+    it gets the whole result — so it can be as short as the UI
+    wants."""
+    if not isinstance(result, dict):
+        return _short(result, 160)
+    if result.get("error"):
+        problems = "; ".join(
+            f"{p.get('code')}: {p.get('detail')}"
+            for p in result.get("problems", []))[:300]
+        return (f"ERROR: {_short(result['error'], 160)}"
+                + (f" — {problems}" if problems else ""))
+    if tool == "search":
+        rows = result.get("results") or result.get("metrics") \
+            or result.get("hits") or []
+        names = "; ".join(
+            _short(r.get("label") or r.get("name") or r.get("text")
+                   or r.get("card") or "", 40)
+            for r in rows[:5] if isinstance(r, dict))
+        scope = f" ({result['scope']})" if result.get("scope") else ""
+        return f"{result.get('count', len(rows))} results{scope}: {names}"
+    if tool == "read":
+        if result.get("card"):
+            return (f"{result['card']} · "
+                    f"{len(str(result.get('text', '')))} chars, "
+                    f"sections: "
+                    f"{', '.join(result.get('sections', []))[:120]}")
+        return (f"subgraph: {len(result.get('nodes', []))} nodes, "
+                f"{len(result.get('edges', []))} edges")
+    if tool == "sample_values":
+        return compact_result("sample_values", result)
+    if tool == "run_sql":
+        line = compact_result("run_sql", result)
+        if result.get("saved_as"):
+            line += f" · saved as {result['saved_as']}"
+        if result.get("warnings"):
+            line += f" · {len(result['warnings'])} warning(s)"
+        return line[:240]
+    if tool == "python":
+        head = str(result.get("stdout", "")).strip().splitlines()
+        return (f"{'ok' if result.get('ok') else 'FAILED'} in "
+                f"{result.get('elapsed_ms')}ms"
+                + (f": {head[0][:140]}" if head else ""))
+    if tool == "check":
+        return (f"{result.get('kind')} "
+                f"{'passed' if result.get('passed') else 'did not pass'}"
+                f" · {result.get('fact_id', '')} · "
+                f"{_short(result.get('detail', ''), 120)}")
+    if tool == "artifact":
+        mark = f" · {result['watermark']}" if result.get("watermark") \
+            else ""
+        return (f"{result.get('type')} \"{result.get('title')}\" "
+                f"v{result.get('version')} is in the panel{mark}")
+    if tool == "ask":
+        return "asked: " + _short(
+            (result.get("clarify") or {}).get("question", ""), 140)
+    if tool == "load_skill":
+        return (f"skill {result.get('name')} loaded"
+                if result.get("text") else str(result.get("note", "")))
+    if tool == "remember":
+        return "remembered"
+    if tool == "note":
+        return f"noted ({result.get('notes')})"
+    if tool == "suggest_next":
+        return f"offered {len(result.get('chips', []))} follow-ups"
+    return _short(result, 200)
+
+
+def _response_payload(result: Any) -> tuple[dict[str, Any], str]:
+    """The functionResponse body: the result whole, as an object,
+    capped with an explicit note. Returns (object, event text)."""
+    payload = {k: v for k, v in result.items() if k != "_artifact"} \
+        if isinstance(result, dict) else {"result": result}
+    text = json.dumps(payload, default=str)
+    if len(text) <= RESULT_CAP:
+        return payload, text
+    kept = text[:RESULT_CAP]
+    note = (f"truncated at {RESULT_CAP:,} characters "
+            f"({len(text) - RESULT_CAP:,} more): narrow the call — "
+            "read(section=…), a tighter query, a smaller limit — "
+            "for the rest")
+    return {"truncated": True, "note": note, "text": kept}, \
+        kept + f"\n…[{note}]"
+
+
+def _closing(reason: str, said: bool) -> str:
+    if said:
+        return f"\n\n— I stopped there: {reason}"
+    return f"I stopped before I could answer: {reason}"
+
+
+# ─── the turn ────────────────────────────────────────────────
 
 
 def run_assistant_turn(*, build: Build, store: AssistantStore,
@@ -236,7 +326,9 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                        graph_root: Path | None = None,
                        memories: list[dict[str, Any]] | None = None,
                        project: dict[str, Any] | None = None,
-                       max_steps: int = MAX_STEPS,
+                       thinking_level: str = DEFAULT_THINKING,
+                       user_name: str = "",
+                       max_calls: int = MAX_CALLS,
                        wall_seconds: float = WALL_SECONDS) -> str:
     session_id = session["id"]
     started = time.perf_counter()
@@ -244,212 +336,204 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
              build_id=build.version, version=ASSISTANT_VERSION,
              skills=[s.name for s in (skills or [])],
              memories=len(memories or []),
-             project=(project or {}).get("name", ""))
+             project=(project or {}).get("name", ""),
+             thinking_level=thinking_level)
     budget.start_turn()
     prepare_workspace(workspace, build.root)
 
     state = AssistantState()
     state.notes = list(session.get("notes") or [])
-    kit = assistant_toolkit(build, state, store=store,
-                            session_id=session_id, turn_id=turn_id,
-                            workspace=workspace, model=model,
-                            substrate=substrate,
-                            snapshot_runner=snapshot_runner,
-                            graph_root=graph_root,
-                            project_id=(project or {}).get("id", ""))
-    system = system_prompt(build, skills, render_tool_block(kit),
-                           skill_index=all_skills(graph_root),
-                           memories=memories, project=project)
+    kit = build_kit(build, state, store=store, session_id=session_id,
+                    turn_id=turn_id, workspace=workspace, model=model,
+                    substrate=substrate, snapshot_runner=snapshot_runner,
+                    graph_root=graph_root,
+                    project_id=(project or {}).get("id", ""))
+    tools = declarations(kit)
+    system = system_prompt(
+        build, skills, skill_index=all_skills(graph_root),
+        memories=memories, project=project,
+        artifacts=store.list_artifacts(session_id), notes=state.notes,
+        user_name=user_name)
     bus.emit("model_prompt", turn_id=turn_id, n=0, kind="system",
              content=system[:12000])
-    history = _history_block(store, session_id)
+    contents = _history(store, session_id, turn_id)
+    contents.append({"role": "user", "parts": [{"text": text}]})
 
-    loop_budget = LoopBudget(max_steps=max_steps,
-                             wall_seconds=wall_seconds)
-    steps: list[dict[str, Any]] = []
     said: list[str] = []
-    chips: list[str] = []
-    strikes = 0
+    calls = 0
+    steps = 0
     stop_reason = ""
     status = "partial"
+    clarify: dict[str, Any] | None = None
+    offered = False        # suggest_next after prose closes the turn
 
     def _stream(prose: str) -> None:
-        for start in range(0, len(prose), SAY_CHUNK):
-            bus.emit("say_token", turn_id=turn_id,
-                     delta=prose[start:start + SAY_CHUNK])
-
-    def _prompt() -> str:
-        pressure = loop_budget.left <= 2
-        kept = steps[-2:] if pressure else steps
-        lines = ["CONVERSATION SO FAR:", history, "",
-                 f"THE USER JUST SAID: {text}", ""]
-        if state.notes:
-            lines.append("YOUR WORKING NOTES (they persist across "
-                         "turns; note() updates them): "
-                         + "; ".join(state.notes[-5:]))
-        if state.artifacts_touched:
-            lines.append("ARTIFACTS TOUCHED THIS TURN: "
-                         + ", ".join(dict.fromkeys(
-                             state.artifacts_touched)))
-        if said:
-            lines.append("YOU HAVE SAID SO FAR THIS TURN: "
-                         + " ".join(said)[-600:])
-        if kept:
-            lines.append("STEPS THIS TURN:"
-                         + (" (earlier steps compacted away)"
-                            if pressure and len(steps) > 2 else ""))
-            for entry in kept:
-                if "note" in entry:
-                    lines.append(f"  [harness] {entry['note']}")
-                else:
-                    lines.append(
-                        f"  {entry['n']}. {entry['tool']}"
-                        f"({_short(entry['args'], 80)}) → "
-                        + entry["summary"].replace("\n", "\n     "))
-        else:
-            lines.append("STEPS THIS TURN: none yet.")
-        lines.append("")
-        lines.append(f"BUDGET: {loop_budget.left} of {max_steps} "
-                     "steps left.")
-        lines.append("Next step:")
-        return "\n".join(lines)
+        bus.emit("say_token", turn_id=turn_id, delta=prose)
 
     try:
         while True:
-            tripped = loop_budget.tripped()
-            session_tripped = budget.exceeded()
-            if tripped or session_tripped:
-                stop_reason = tripped or (
-                    f"the session breaker ({session_tripped})")
+            if calls >= max_calls:
+                stop_reason = (f"I hit my ceiling of {max_calls} model "
+                               "calls for one turn. Ask me to continue "
+                               "and I will pick it up from here.")
+                break
+            if time.perf_counter() - started >= wall_seconds:
+                stop_reason = ("this took longer than I allow for one "
+                               "turn. Ask me to continue and I will "
+                               "pick it up from here.")
+                break
+            tripped = budget.exceeded()
+            if tripped:
+                stop_reason = (f"the {tripped} is used up for this "
+                               "session. Start a new chat to keep "
+                               "going.")
                 break
             abort.check()
 
-            prompt = _prompt()
-            bus.emit("model_prompt", turn_id=turn_id,
-                     n=loop_budget.steps + 1, kind="step",
-                     content=prompt[:8000])
-            step = model.json(prompt, system=system, temperature=0.0,
-                              max_tokens=1200)
-            loop_budget.charge()
+            calls += 1
+            bus.emit("model_prompt", turn_id=turn_id, n=calls,
+                     kind="call", content=_tail(contents))
+            pending: list[dict[str, Any]] = []
+            spoken: list[str] = []
+            done: dict[str, Any] = {}
+            for event in model.converse(contents, system=system,
+                                        tools=tools,
+                                        thinking_level=thinking_level,
+                                        max_output_tokens=
+                                        MAX_OUTPUT_TOKENS):
+                kind = event.get("kind")
+                if kind == "text":
+                    delta = str(event.get("delta") or "")
+                    if delta:
+                        spoken.append(delta)
+                        _stream(delta)
+                elif kind == "thought":
+                    delta = str(event.get("delta") or "")
+                    if delta.strip():
+                        bus.emit("thinking", turn_id=turn_id, delta=delta)
+                elif kind == "call":
+                    pending.append(event)
+                elif kind == "done":
+                    done = event
+                abort.check()
             bus.emit("budget_tick", turn_id=turn_id, **budget.tick())
+            if spoken:
+                said.append("".join(spoken))
 
-            if not isinstance(step, dict) or not (
-                    step.get("tool") or step.get("say")
-                    or step.get("done")):
-                strikes += 1
-                steps.append({"note": "that reply was not one strict "
-                                      "JSON step: {\"think\",\"tool\","
-                                      "\"args\"} or {\"say\": …} or "
-                                      "{\"say\",\"done\":true,"
-                                      "\"chips\":[…]}"})
-                if strikes >= STRIKES:
-                    stop_reason = ("the model stopped speaking "
-                                   "strict JSON")
-                    break
-                continue
-
-            if step.get("say"):
-                prose = str(step["say"])
-                said.append(prose)
-                _stream(prose)
-
-            if step.get("done"):
-                chips = [str(c)[:80] for c in
-                         (step.get("chips") or [])][:4]
-                status = "answered" if (said or
-                                        state.artifacts_touched) \
-                    else "partial"
-                if status == "partial":
-                    fallback = ("I finished without saying anything "
-                                "usable — ask again and I will do "
-                                "better.")
-                    said.append(fallback)
-                    _stream(fallback)
+            if not pending:
+                if said or state.artifacts_touched:
+                    status = "answered"
+                else:
+                    finish = str(done.get("finish") or "")
+                    stop_reason = (
+                        "I came back with nothing usable"
+                        + (f" (the model finished with {finish})"
+                           if finish and finish != "STOP" else "")
+                        + ". Ask again, maybe with a little more "
+                        "detail, and I will do better.")
                 break
 
-            if not step.get("tool"):
-                continue                      # a bare say: keep going
+            contents.append({"role": "model",
+                             "parts": done.get("parts") or [
+                                 {"functionCall": {
+                                     "name": c["name"],
+                                     "args": c.get("args") or {}}}
+                                 for c in pending]})
+            responses: list[dict[str, Any]] = []
+            for call in pending:
+                name = str(call.get("name", ""))
+                args = call.get("args") if isinstance(call.get("args"),
+                                                      dict) else {}
+                steps += 1
+                bus.emit("tool_call", turn_id=turn_id, n=steps,
+                         tool=name, args=_short(args, 160))
+                spec = kit.get(name)
+                t0 = time.perf_counter()
+                if spec is None:
+                    result: Any = {"error": f"unknown tool {name!r}",
+                                   "hint": "the tools are "
+                                           + ", ".join(kit)}
+                else:
+                    try:
+                        result = spec.fn(**args)
+                    except TypeError as e:
+                        result = {"error": "the arguments did not "
+                                           f"match: {e}",
+                                  "hint": spec.signature}
+                    except Aborted:
+                        raise
+                    except Exception as e:      # noqa: BLE001
+                        result = {"error": f"{type(e).__name__}: {e}",
+                                  "hint": "try a different call"}
+                ref = f"a{steps}"
+                payload, content = _response_payload(result)
+                bus.emit("tool_step", turn_id=turn_id, n=steps,
+                         tool=name, args=_short(args, 120),
+                         summary=summarize(name, result), ref=ref,
+                         elapsed_ms=round(
+                             (time.perf_counter() - t0) * 1000, 1))
+                bus.emit("tool_result", turn_id=turn_id, ref=ref,
+                         tool=name, content=content)
+                if isinstance(result, dict) and result.get("_artifact"):
+                    row = result["_artifact"]
+                    bus.emit("artifact", turn_id=turn_id,
+                             artifact_id=row["artifact_id"],
+                             version=row["version"], type=row["type"],
+                             title=row["title"], spec=row["spec"])
+                if name == "ask" and isinstance(result, dict) \
+                        and result.get("ok"):
+                    clarify = result["clarify"]
+                if name == "suggest_next" and isinstance(result, dict) \
+                        and result.get("ok") and said:
+                    offered = True
+                response = {"name": name, "response": payload}
+                if call.get("id"):
+                    response["id"] = call["id"]
+                responses.append({"functionResponse": response})
+            contents.append({"role": "user", "parts": responses})
 
-            name = str(step.get("tool", ""))
-            args = step.get("args") if isinstance(step.get("args"),
-                                                  dict) else {}
-            spec = kit.get(name)
-            think = str(step.get("think", ""))[:400]
-            if spec is None:
-                summary = (f"ERROR: unknown tool {name!r}. hint: the "
-                           f"tools are {', '.join(kit)}")
-                bus.emit("tool_step", turn_id=turn_id,
-                         n=loop_budget.steps, tool=name,
-                         args=_short(args, 120), think=think,
-                         summary=summary, ref="")
-                steps.append({"n": loop_budget.steps, "tool": name,
-                              "args": args, "summary": summary})
-                continue
-            try:
-                result = spec.fn(**args)
-            except TypeError:
-                result = {"error": "the args did not match the "
-                                   "signature",
-                          "hint": spec.signature}
-            except Exception as e:
-                result = {"error": f"{type(e).__name__}: {e}",
-                          "hint": "try a different call"}
-
-            ref = f"a{loop_budget.steps}"
-            summary = _compact(name, result)
-            bus.emit("tool_step", turn_id=turn_id, n=loop_budget.steps,
-                     tool=name, args=_short(args, 120), think=think,
-                     summary=summary, ref=ref)
-            payload = {k: v for k, v in result.items()
-                       if k != "_artifact"} \
-                if isinstance(result, dict) else result
-            bus.emit("tool_result", turn_id=turn_id, ref=ref,
-                     tool=name,
-                     content=json.dumps(payload, default=str)[:6000])
-            if isinstance(result, dict) and result.get("_artifact"):
-                row = result["_artifact"]
-                bus.emit("artifact", turn_id=turn_id,
-                         artifact_id=row["artifact_id"],
-                         version=row["version"], type=row["type"],
-                         title=row["title"], spec=row["spec"])
-            if name == "ask_user" and isinstance(result, dict) \
-                    and result.get("ok"):
-                # the turn ends on a question, v1-style: chips carry
-                # evidence, the answer arrives as the next message
+            if clarify is not None:
+                # the turn ends on the question; the answer arrives as
+                # the next message, chips carrying the evidence
+                prose = "\n\n".join(said)
                 store.add_message(
                     session_id, "assistant",
-                    " ".join(said) or result["clarify"]["question"],
-                    turn_id=turn_id,
-                    payload={"clarify": result["clarify"]})
-                bus.emit("chips", turn_id=turn_id,
-                         clarify=result["clarify"])
+                    prose or clarify["question"], turn_id=turn_id,
+                    payload={"clarify": clarify,
+                             "artifacts": list(dict.fromkeys(
+                                 state.artifacts_touched))})
+                bus.emit("chips", turn_id=turn_id, clarify=clarify)
                 _persist(store, session_id, state, "clarify",
-                         result["clarify"]["question"],
-                         [str(o) for o in
-                          result["clarify"].get("options", [])])
+                         clarify["question"],
+                         [str(o.get("label", o))
+                          if isinstance(o, dict) else str(o)
+                          for o in clarify.get("options", [])])
                 _finish(bus, budget, turn_id, "clarify", started,
+                        model_calls=calls, steps=steps,
+                        thinking_level=thinking_level,
                         skills_loaded=list(state.skills_loaded))
                 return "clarify"
-            steps.append({"n": loop_budget.steps, "tool": name,
-                          "args": args, "summary": summary,
-                          "ref": ref})
+
+            if offered:
+                # the follow-ups came after the answer: that is the
+                # end of the turn, no extra model call to say so
+                status = "answered"
+                break
 
     except Aborted:
-        stop_reason = "stopped by the analyst"
+        stop_reason = "you stopped me."
 
     if status != "answered" and stop_reason:
-        closing = f"I stopped before finishing: {stop_reason}."
-        if said:
-            closing = (" ".join(said)[:300]
-                       + f"\n\n— I stopped there: {stop_reason}.")
-        elif state.notes:
-            closing += (" What I had: "
+        closing = _closing(stop_reason, bool(said))
+        if not said and state.notes:
+            closing += (" What I had so far: "
                         + "; ".join(state.notes[-3:]) + ".")
         _stream(closing)
-        said = [closing]
-        status = "stopped" if "analyst" in stop_reason else "partial"
+        said.append(closing)
+        status = "stopped" if "you stopped" in stop_reason else "partial"
 
-    prose = "\n\n".join(dict.fromkeys(said)) if said else ""
+    prose = "\n\n".join(s for s in said if s.strip())
+    chips = list(state.chips)
     if prose or state.artifacts_touched:
         store.add_message(
             session_id, "assistant", prose, turn_id=turn_id,
@@ -463,8 +547,8 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
         session["title"] = title
         store.set_title(session_id, title)
     _persist(store, session_id, state, status, prose, chips)
-    _finish(bus, budget, turn_id, status, started,
-            steps=loop_budget.steps,
+    _finish(bus, budget, turn_id, status, started, model_calls=calls,
+            steps=steps, thinking_level=thinking_level,
             subgraph_used=state.subgraph,
             skills_loaded=list(state.skills_loaded))
     return status
@@ -473,14 +557,14 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
 def _persist(store: AssistantStore, session_id: str,
              state: AssistantState, status: str, prose: str,
              chips: list[str]) -> None:
-    """§8/§9: the working notes survive the turn, and the handoff
-    says where you left off when the session reopens tomorrow."""
+    """The working notes survive the turn, and the handoff says where
+    you left off when the session reopens tomorrow."""
     store.set_notes(session_id, state.notes)
     checked = [f["kind"] for f in state.facts_log if f.get("passed")]
     store.set_handoff(session_id, {
         "status": status,
         "say": prose.replace("\n", " ")[:300],
-        "chips": chips[:4],
+        "chips": chips[:3],
         "artifacts": list(dict.fromkeys(state.artifacts_touched)),
         "checked": checked[-6:],
         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
@@ -492,3 +576,8 @@ def _finish(bus: EventBus, budget: Any, turn_id: str, status: str,
              elapsed_ms=round((time.perf_counter() - started) * 1000,
                               1),
              **extra, **budget.tick())
+
+
+__all__ = ["ASSISTANT_VERSION", "IDENTITY", "THINKING_LEVELS",
+           "DEFAULT_THINKING", "system_prompt", "summarize",
+           "run_assistant_turn"]

@@ -9,7 +9,8 @@ A ratio moved. Split numerator and denominator first: did the top
 move, the bottom, or the mix of segments underneath?
 1. Pull the ratio's parts by period (run_sql snapshot → q1).
 2. Pull the same parts by segment (→ q2).
-3. check_part_whole(q2, q1) — the segments must add to the whole.
+3. check(kind=part_whole, breakdown=q2, total=q1) — the segments
+   must add to the whole.
 4. Attribute: rate effect (each segment's rate change at old mix) vs
    mix effect (mix change at old rates). python does the arithmetic;
    print both effects and their sum vs the actual delta.
@@ -18,8 +19,8 @@ effect-sum vs actual delta.
 
 ## Variance bridge
 Actual vs expected. Order the drivers, largest first, signed;
-python computes; the bridge must sum: check_crosscheck(bridge
-total, actual delta).
+python computes; the bridge must sum: check(kind=crosscheck) of the
+bridge total against the actual delta.
 
 ## Cohort / retention
 Group by first-seen period, follow each cohort forward. Coverage
@@ -33,7 +34,7 @@ are not nested — that is the finding. Coverage per stage.
 ## Seasonality and anomaly triage
 Compare against the same period last cycle before calling anything
 an anomaly. One-off spike: check the grain first (a double-count
-looks like a spike) — check_fanout on any join involved.
+looks like a spike) — check(kind=fanout) on any join involved.
 
 All playbooks: snapshot rows are the evidence. Without rows, say
 "validated, not executed" and stop short of the story.

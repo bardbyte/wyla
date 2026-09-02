@@ -18,8 +18,9 @@ candidate model id, because they fail differently:
 
 Each probe is ONE request with no retry ladder, so a 404 costs a
 second, not six minutes. The verdict per model is one of:
-  ok · not_found (404) · forbidden (403) · quota (429) · rejected (400)
-  · error. Latency and token usage ride along for the ones that answer.
+  ok · not_found (404) · forbidden (403) · quota (429) · org_policy
+  (400 naming the organization's allowed-models constraint: the model
+  exists, the project may not use it) · rejected (other 400) · error. Latency and token usage ride along for the ones that answer.
 
 Why: Synapse v3 wants a cheap, fast model for the memory pass and the
 judge (design §7/§8). The recommendation line at the end names the
@@ -71,7 +72,11 @@ def classify(exc: Exception) -> tuple[str, str]:
         code = exc.code
         verdict = {404: "not_found", 403: "forbidden",
                    429: "quota", 400: "rejected"}.get(code, "error")
-        return verdict, f"HTTP {code} {body.strip()}"
+        if code == 400 and "organization policy" in body.lower():
+            # the model EXISTS; the org's allowed-models constraint
+            # refuses it for this project — an admin ask, not a typo
+            verdict = "org_policy"
+        return verdict, f"HTTP {code} " + " ".join(body.split())[:160]
     return "error", f"{type(exc).__name__}: {exc}"
 
 
@@ -164,7 +169,18 @@ def render_markdown(rows: list[dict[str, Any]], *, label: str) -> str:
                      f"{str(r.get('detail', ''))[:80]} |")
     usable = [r for r in rows if r["verdict"] == "ok"
               and "flash" in r["model"]]
+    blocked = [r["model"] for r in rows if r["verdict"] == "org_policy"]
     lines.append("")
+    if blocked:
+        lines.append("**blocked by organization policy** (the models "
+                     "exist; the project's allowed-models constraint "
+                     "refuses them): " + ", ".join(blocked))
+        lines.append("→ ask the org admin to allow one of them for "
+                     "this project under "
+                     "`constraints/vertexai.allowedModels` — "
+                     f"{blocked[0]} first; until then the memory pass "
+                     "and judge run on the Pro model at thinking low")
+        lines.append("")
     if usable:
         best = min(usable, key=lambda r: r["latency_ms"])
         lines.append(f"**recommended VERTEX_FLASH_MODEL={best['model']}** "

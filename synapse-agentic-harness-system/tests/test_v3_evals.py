@@ -1,33 +1,26 @@
-"""Synapse v2 §13.6 — the assistant eval harness math, pinned.
-
-There is deliberately no scripted baseline number: the suites grade
-the model's judgement, so a scripted assistant would grade the
-script. What CI pins instead is the HARNESS: the task files are
-real (every tool and type they name exists), the graders separate
-an honest actor from a dishonest one on the right dimension, and
-the runner drives the real loop end to end. Bad-actor records are
-fed to the graders synthetically where the validator would (rightly)
-refuse to produce them through the live path — the grader must
-catch regressions even if the validator someday fails.
-"""
+"""Synapse v3 — the eval suites over the v3 loop: artifact tasks,
+reasoning tasks, playbook tasks, and hygiene, graded from the event
+record. Task files name check KINDS; follow-ups never count as
+tools used."""
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
 
 SILO = Path(__file__).resolve().parents[1]
 FX = SILO / "tests" / "fixtures"
+sys.path.insert(0, str(SILO))
 KEY = "You are Synapse, an analytical colleague"
 
 
 @pytest.fixture(scope="module")
 def compiled(tmp_path_factory):
-    tmp = tmp_path_factory.mktemp("v2evals")
+    tmp = tmp_path_factory.mktemp("v3evals")
     graph_dir = tmp / "graph"
     result = subprocess.run(
         [sys.executable, str(SILO / "scripts" / "laptop.py"),
@@ -37,10 +30,9 @@ def compiled(tmp_path_factory):
          "--mdm-archive", str(FX / "mdm_46_patched_v2"),
          "--sources-dir", str(FX / "sources"),
          "--registry", str(FX / "sources" / "tables_registry.txt"),
-         "--out", str(tmp / "run"), "--plain", "--run-id", "v2e"],
+         "--out", str(tmp / "run"), "--plain", "--run-id", "v3e"],
         capture_output=True, text=True, cwd=SILO)
     assert result.returncode == 0, result.stderr[-800:]
-    sys.path.insert(0, str(SILO))
     from sahs.compiler.compile import compile_build
     from sahs.tools.api import Build
     _d, _m, failures = compile_build(graph_dir, tmp / "builds")
@@ -48,19 +40,13 @@ def compiled(tmp_path_factory):
     return Build.open(tmp / "builds"), tmp
 
 
-class Scripted:
-    def __init__(self, steps=()):
-        self.steps = list(steps)
+def _call(tool, **args):
+    return {"call": {"name": tool, "args": args}}
 
-    def json(self, prompt, *, system="", temperature=0.0,
-             max_tokens=1024):
-        if KEY in system:
-            return self.steps.pop(0) if self.steps else None
-        return {}
 
-    def stream(self, prompt, *, system="", temperature=0.3,
-               max_tokens=1500):
-        yield ""
+def _agent(*steps):
+    from sahs.assistant.agent import ScriptedAgent
+    return ScriptedAgent([list(s) for s in steps])
 
 
 def _certified(build):
@@ -73,9 +59,8 @@ def _certified(build):
 
 
 def test_task_files_name_only_real_things(compiled):
-    sys.path.insert(0, str(SILO))
     from sahs.assistant.artifacts import TYPES
-    from sahs.assistant.evals import CHECK_TOOLS, KINDS, load_tasks
+    from sahs.assistant.evals import CHECK_KINDS, KINDS, load_tasks
     from sahs.assistant.skills_loader import builtin_skills
     tasks = load_tasks()
     assert len(tasks) >= 14
@@ -89,7 +74,7 @@ def test_task_files_name_only_real_things(compiled):
         if expect.get("type"):
             assert expect["type"] in TYPES, task["id"]
         for check in expect.get("checks_any") or []:
-            assert check in CHECK_TOOLS, task["id"]
+            assert check in CHECK_KINDS, task["id"]
         if expect.get("skill"):
             assert expect["skill"] in packs, task["id"]
 
@@ -103,22 +88,22 @@ def test_artifact_grader_through_the_real_loop(compiled):
     certified = _certified(build)
     task = next(t for t in load_tasks("artifact")
                 if t["id"] == "art_chart_certified_trend")
-    model = Scripted([
-        {"tool": "artifact",
-         "args": {"type": "chart", "title": "Spend by day", "spec": {
-             "kind": "line",
-             "series": [{"name": "spend",
-                         "points": [["d1", 4.0], ["d2", 5.0]]}],
-             "provenance": {"status": "certified",
-                            "metric_id": certified["id"],
-                            "meridian_line": "Certified spend."}}}},
-        {"say": "Certified spend, drawn.", "done": True},
-    ])
+    model = _agent(
+        [_call("artifact", type="chart", title="Spend by day",
+               spec_json=json.dumps({
+                   "kind": "line",
+                   "series": [{"name": "spend",
+                               "points": [["d1", 4.0], ["d2", 5.0]]}],
+                   "provenance": {"status": "certified",
+                                  "metric_id": certified["id"],
+                                  "meridian_line": "Certified spend."}}))],
+        [{"text": "Certified spend, drawn."},
+         _call("suggest_next", options=["by country"])])
     row = run_task(build, lambda budget: model, task)
     assert row["found"] is True, row
     assert row["statuses"] == ["certified"]
     assert row["export_ok"] is True
-    assert row["hygiene"]["steps"] == 1
+    assert row["hygiene"]["steps"] == 1          # follow-ups are quiet
 
 
 def test_artifact_grader_catches_synthetic_dishonesty():
@@ -132,7 +117,6 @@ def test_artifact_grader_catches_synthetic_dishonesty():
                           "expect": {"type": "chart"}}, naked)
     assert row["produced"] and row["wrong"]
     assert "undisclosed_number" in row["problems"]
-
     unmarked = [{"ev": "artifact", "artifact_id": "a2", "version": 1,
                  "type": "kpi", "title": "n",
                  "spec": {"value": 5.0, "provenance": {
@@ -142,7 +126,6 @@ def test_artifact_grader_catches_synthetic_dishonesty():
     row = grade_artifact({"id": "t2", "kind": "artifact",
                           "expect": {"type": "kpi"}}, unmarked)
     assert "naked_composed" in row["problems"]
-
     absent = grade_artifact({"id": "t3", "kind": "artifact",
                              "expect": {"type": "dashboard"}},
                             [{"ev": "turn_done",
@@ -159,28 +142,26 @@ def test_reasoning_grader_separates_clean_from_leaky(compiled):
     build, _ = compiled
     task = next(t for t in load_tasks("reasoning")
                 if t["id"] == "rsn_churn_frame")
-    clean = Scripted([
-        {"say": "Split churn into a rate question and a mix "
-                "question, then read each cohort separately: "
-                "who leaves, how large they are, and whether the "
-                "leavers differ from the stayers. Only then is a "
-                "single churn number worth quoting, because the "
-                "aggregate hides the cohort story completely.",
-         "done": True, "chips": ["pull the churn cohorts"]}])
+    clean = _agent(
+        [{"text": "Split churn into a rate question and a mix "
+                  "question, then read each cohort separately: "
+                  "who leaves, how large they are, and whether the "
+                  "leavers differ from the stayers. Only then is a "
+                  "single churn number worth quoting, because the "
+                  "aggregate hides the cohort story completely."},
+         _call("suggest_next", options=["pull the churn cohorts"])])
     row = run_task(build, lambda budget: clean, task)
     assert row["found"] is True and row["tools_used"] == 0
 
-    leaky = Scripted([
-        {"tool": "list_tables", "args": {}},
-        {"say": "Split churn into rate and mix and read each "
-                "cohort separately before quoting one number — "
-                "the aggregate hides the story of who actually "
-                "left and how large those merchants were.",
-         "done": True}])
+    leaky = _agent(
+        [_call("read", id="table:gms_transaction")],
+        [{"text": "Split churn into rate and mix and read each "
+                  "cohort separately before quoting one number — "
+                  "the aggregate hides the story of who actually "
+                  "left and how large those merchants were."}])
     row = run_task(build, lambda budget: leaky, task)
     assert row["wrong"] is True and row["found"] is False
 
-    # the calibrated judge outranks the keyword floor
     from sahs.assistant.evals import grade_reasoning
     events = [{"ev": "say_token",
                "delta": "rate and mix and cohort " * 20},
@@ -220,29 +201,27 @@ def test_playbook_grader_through_the_real_loop(compiled,
     build, _ = compiled
     task = next(t for t in load_tasks("playbook")
                 if t["id"] == "pb_why_spend_change")
-    diligent = Scripted([
-        {"tool": "load_skill", "args": {"name": "analysis-playbooks"}},
-        {"tool": "run_sql", "args": {
-            "sql": "SELECT country_cd, sum(trans_usd_am) AS spend "
-                   "FROM dw.gms_transaction GROUP BY country_cd",
-            "mode": "snapshot"}},
-        {"tool": "run_sql", "args": {
-            "sql": "SELECT sum(trans_usd_am) AS spend FROM "
-                   "dw.gms_transaction", "mode": "snapshot"}},
-        {"tool": "check_part_whole", "args": {"breakdown": "q1",
-                                              "total": "q2"}},
-        {"say": "The split adds up; the change is mix, not rate.",
-         "done": True, "chips": ["chart the mix shift"]}])
+    diligent = _agent(
+        [_call("load_skill", name="analysis-playbooks")],
+        [_call("run_sql", sql="SELECT country_cd, sum(trans_usd_am) "
+                              "AS spend FROM dw.gms_transaction "
+                              "GROUP BY country_cd", mode="snapshot")],
+        [_call("run_sql", sql="SELECT sum(trans_usd_am) AS spend "
+                              "FROM dw.gms_transaction",
+               mode="snapshot")],
+        [_call("check", kind="part_whole", breakdown="q1",
+               total="q2")],
+        [{"text": "The split adds up; the change is mix, not rate."},
+         _call("suggest_next", options=["chart the mix shift"])])
     row = run_task(build, lambda budget: diligent, task,
                    snapshot_runner=Extract())
     assert row["found"] is True, row
-    assert row["checks_passed"] == ["check_part_whole"]
+    assert row["checks_passed"] == ["part_whole"]
     assert row["queries"] == 2 and row["skill_ok"] is True
 
-    storyteller = Scripted([
-        {"say": "Spend changed because volumes shifted between "
-                "countries; the mix moved toward larger markets.",
-         "done": True}])
+    storyteller = _agent(
+        [{"text": "Spend changed because volumes shifted between "
+                  "countries; the mix moved toward larger markets."}])
     row = run_task(build, lambda budget: storyteller, task)
     assert row["wrong"] is True and row["found"] is False
     assert row["checks_passed"] == []
@@ -265,7 +244,7 @@ def test_summarize_and_markdown_carry_the_lines():
         {"id": "r1", "kind": "reasoning", "found": True,
          "wrong": False, "tools_used": 0, "hygiene": dict(hygiene)},
         {"id": "p1", "kind": "playbook", "found": True,
-         "wrong": False, "checks_passed": ["check_part_whole"],
+         "wrong": False, "checks_passed": ["part_whole"],
          "hygiene": dict(hygiene)},
     ]
     report = summarize(rows)

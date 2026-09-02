@@ -1,9 +1,11 @@
 # Synapse v3 — the thin harness, the Karpathy way
 
-Status: DESIGN DRAFT for iteration (2026-09-02). Applies the Gemini
-3.1 Pro harness research (Cherny / Model Spec / Karpathy) to Synapse.
-Nothing below is built yet. v2's tools, checks, artifacts, store,
-events, and evals stay; the turn loop and the surface change.
+Status: DESIGN, Stage 1 BUILT (2026-09-02). Applies the Gemini 3.1
+Pro harness research (Cherny / Model Spec / Karpathy) to Synapse.
+Stage 1 of §10 is in the tree (`sahs/assistant/{agent,loop,kit,
+hooks,state}.py`, the surface in `apps/lumi/frontend/js/pages/chat.js`);
+Stages 2–4 are not. v2's checks, artifacts, store, events, and evals
+stay; the turn loop, the kit, and the surface changed.
 
 ## 0 · What the two real transcripts proved
 
@@ -187,12 +189,21 @@ handoff, the eval suites.
 
 ## 10 · Build order
 
-1. **Transport + loop.** Interactions API with native function
-   calling and streaming; the 11-tool kit; whole results; hooks
-   named; the two visibility bugs fixed and the walk asserting
-   visibility. Scripted test transport emits parts. Threshold: the
-   GMNS and ALIF asks complete in one interaction against Vertex and
-   a real transcript reads clean.
+1. **Transport + loop — BUILT.** Native function calling and
+   streaming on the REST client (`VertexClient.converse`, thought
+   signatures echoed verbatim, `thinkingLevel` per turn); the
+   11-tool kit plus `suggest_next` (`kit.py`, schemas declared to
+   the transport, never pasted in the prompt); results back WHOLE
+   under a 20K-character cap with an explicit note; hooks named
+   (`hooks.py`, the literal check new); the prompt as sections
+   (`<identity> <chain> <graph> <skills> <memory> <session>`), the
+   conversation as messages, newest ask last; limits are a wall
+   clock, a 40-call ceiling, and a generous session breaker, each
+   ending the turn in plain language; the two visibility bugs fixed
+   (`[hidden] { display: none !important }`) and the walk asserting
+   visibility; the scripted test transport emits parts. Still owed
+   from the threshold: the GMNS and ALIF asks completing in one
+   interaction against Vertex — the laptop paste decides.
 2. **Context.** Cached prefix, compaction under pressure, delegate.
    Threshold: a 30-turn session survives; cache hits and cost per
    turn visible in Operate.
@@ -204,17 +215,68 @@ handoff, the eval suites.
    evals gating; per-turn metrics. Threshold: evals green on
    behavior and the real transcript feels right to us.
 
-## 11 · Open decisions
+## 11 · Decisions taken at "let's get started"
 
 1. Stage 1 transport: native function calling on our REST client
-   with client-managed history (recommended: smallest change, proven
-   auth path, portable) vs the Interactions API via the SDK now.
-2. Approve the tool consolidation and deletions in §2.
-3. Memory consent: silent save with inline undo (recommended) vs
-   ask first.
-4. Chips: keep model-authored, max three (recommended) vs drop.
-5. Depth dial default Standard (medium) and a Flash-tier model for
-   the memory pass and the judge.
-6. Model id: the silo default is already `gemini-3.1-pro-preview`
-   (`sahs/util/auth.py`), overridable by `VERTEX_MODEL`; confirm the
-   laptop .env does not pin an older id.
+   with client-managed history (built). The Interactions API stays
+   a Stage 2 option.
+2. The tool consolidation and deletions in §2, as listed; `delegate`
+   waits for Stage 2. `suggest_next` is the twelfth declaration: a
+   model with no JSON wrapper needs a door for follow-ups, and
+   calling it after the answer ends the turn without another call.
+3. Memory: silent save with inline undo ("Remembered: … · undo" in
+   the transcript, the count on the memory button, retirable in the
+   panel). The memory page under the account block is Stage 4.
+4. Chips: model-authored, at most three.
+5. Depth dial default Standard (medium); Quick = low, Deep = high,
+   in the composer now, the router in Stage 3. The judge runs on
+   Pro at thinking low until the org allows a Flash model (§12).
+6. Model id: `gemini-3.1-pro-preview` by default (`sahs/util/auth.py`),
+   overridable by `VERTEX_MODEL`; confirm the laptop .env does not
+   pin an older id.
+7. Out of scope for now, by the user's word: jobs_30d mining and
+   cost priors.
+
+## 12 · The laptop, measured (state report of 2026-09-02)
+
+What v3 is actually built against — not the fixture.
+
+- **Vertex, confirmed for Stage 1:** project prj-d-ea-poc, location
+  global, `gemini-3.1-pro-preview` behind the proxy with truststore.
+  Native function calling works on our REST client and the
+  `functionCall` part comes back WITH a thought signature; thinking
+  level `low` is accepted (lowercase) and `includeThoughts` returns
+  thought summaries; SSE streaming works. A trivial Pro call costs
+  ~3 s and ~140 thought tokens — one more reason a turn must be one
+  interaction, not seven.
+- **No Flash model is usable:** 3.7 / 3.6 / 3.5 / 3.5-lite / 3-preview
+  / 2.5 / 2.5-lite all answer HTTP 400 "Organization Policy
+  constraint" (they exist; the project may not use them);
+  3.1-flash ids do not exist. Ask the org admin to allow one under
+  `constraints/vertexai.allowedModels`. Until then the memory pass
+  and the judge run on Pro at thinking low.
+- **The graph:** 3,146 metric nodes, 60,502 columns over 268 table
+  nodes, 8,645 concepts, 25,483 vocabulary terms, 14,886 column
+  domains; witnesses bq 55k, atlas 21k, catalog_mined 9k, snippet
+  8.6k, dmp 183, steward 100, studio 47 — and **zero jobs_30d
+  quads**: the 30-day query history has never been mined on this
+  graph, which is why the build has 2 joins (both candidate) and 0
+  cost priors. That extraction is the single biggest data gap for
+  join safety, recency, and cost gates.
+- **The build (b_d552bcfa5829, first promotion):** 45 of 46 crosswalk
+  tables, 3,074 metrics of which **34 certified and 3,040
+  unreviewed** (usage-mined), 8,666 bindings, 8 business areas with
+  tables mapped for ETS (4), Finance (22), GMNS (10), USCS (10) and
+  none for AET / CFR / EDDS / TLS; only 35 metrics carry a business
+  area on the row itself. So "all GMNS metrics" must mean *metrics
+  on GMNS tables* (area → tables → metrics), ranked certified first,
+  not the 13 rows that happen to carry the LOB string — a Stage 1
+  change to `search`.
+- **Enrichment:** five blind-gate runs climbing 56% → 76% (item tier,
+  6 leaky contexts each time); 50 metrics carry an LLM-enriched
+  question and grain; 35 have a description. The batch gate (80%)
+  is not yet met.
+- **Housekeeping the report exposed:** the checkout lives in the
+  OneDrive-synced desktop, so the SA key and `.env` must stay
+  outside it (`~/.gcp/`); 1,706 tickets and 0 reviews means the
+  steward door has never been opened on this graph.

@@ -1,12 +1,13 @@
-/** Synapse v2 (docs/specs/synapse_v2.md §10): the Claude-shaped
- * surface — sidebar of chats, a streamed conversation with collapsed
- * tool activity, and an artifact panel on the right for the outputs
- * the user keeps.
+/** Synapse v3 (docs/specs/synapse_v3_harness.md §6): the
+ * conversational surface — a streamed conversation with ONE live
+ * activity line that collapses into a friendly summary, and an
+ * artifact panel that opens only when the model puts something in it.
  *
  * A pure consumer of the assistant event stream: nothing here calls
  * a model, holds a key, or invents a value. Artifacts render exactly
  * what the validator stored — including the EXPLORATORY watermark —
- * and exports carry the provenance footer.
+ * and exports carry the provenance footer. No harness words reach
+ * the user: no transcript dump, no JSON, no tool ids.
  */
 
 import { api } from "../api.js";
@@ -37,6 +38,12 @@ export async function renderChat(outlet, wanted = "") {
           <div class="ask-actions">
             <span class="muted">Enter to send · Esc to stop</span>
             <span class="spacer"></span>
+            <select id="chat-depth" class="chat-depth"
+              title="How deeply Synapse thinks on this ask">
+              <option value="quick">Quick</option>
+              <option value="standard" selected>Standard</option>
+              <option value="deep">Deep</option>
+            </select>
             <button class="btn" id="chat-stop" hidden>stop</button>
             <button class="btn primary" id="chat-send">Send</button>
           </div>
@@ -118,6 +125,8 @@ export async function renderChat(outlet, wanted = "") {
     const got = await api.chatMemories(
       state.session.project_id || "").catch(() => ({}));
     const rows = got.available ? got.memories || [] : [];
+    memBtn.textContent = rows.length ? `⊚ memory · ${rows.length}`
+                                     : "⊚ memory";
     memPop.innerHTML = rows.length ? rows.map((m) => `
       <div class="memory-row">
         <span>${esc(m.text)}
@@ -127,8 +136,10 @@ export async function renderChat(outlet, wanted = "") {
           title="retire">×</button>
       </div>`).join("")
       : `<div class="muted" style="padding:6px">Nothing remembered
-         yet. Settle a preference in chat and Synapse keeps it —
-         disclosed here, never a metric definition.</div>`;
+         yet. Memory is on: when you settle a preference in chat
+         ("by spend I mean acquirer net spend"), Synapse keeps it,
+         says so inline with an undo, and lists it here — never a
+         metric definition.</div>`;
     for (const btn of memPop.querySelectorAll("[data-mem]")) {
       btn.addEventListener("click", async () => {
         await api.chatRetireMemory(btn.dataset.mem);
@@ -145,6 +156,7 @@ export async function renderChat(outlet, wanted = "") {
     if (!memPop.hidden && !memPop.contains(e.target)
         && e.target !== memBtn) memPop.hidden = true;
   });
+  paintMemories();      // the count on the button, from the start
 
   // skills need no picker: the agent loads packs itself by intent;
   // the Skills tab in the nav is where people browse them
@@ -582,93 +594,133 @@ export async function renderChat(outlet, wanted = "") {
              thinkText: div.querySelector(".think-text"),
              prose: div.querySelector(".chat-prose"),
              extras: div.querySelector(".chat-extras"),
-             buffer: "", steps: 0, saw: null };
+             buffer: "", steps: 0, rows: new Map(), verbs: [],
+             thoughts: "", done: false };
     state.turns.set(turnId, turn);
     scroll();
     return turn;
   }
 
-  // what the model is doing, in the user's words — the think field
-  // when it narrates, a friendly verb for the tool otherwise
-  const VERBS = {
-    search_semantics: (a) => `Searching the graph for ${a}`,
-    list_metrics: (a) => a ? `Listing ${a} metrics`
-                           : "Listing the governed metrics",
-    grep_cards: (a) => `Scanning the cards for ${a}`,
-    read_card: (a) => `Reading ${a || "a card"}`,
-    list_tables: () => "Browsing the tables",
-    resolve: (a) => `Binding “${a}” to a governed definition`,
-    sample_values: (a) => `Sampling real values${a ? ` of ${a}` : ""}`,
-    get_join_paths: () => "Checking the join paths",
-    get_definition_line: () => "Fetching the disclosure line",
-    run_sql: () => "Running the query",
-    whatif: () => "Re-running with one slot changed",
-    compare: () => "Lining the results up side by side",
-    python: () => "Computing",
-    check_part_whole: () => "Checking the parts add up",
-    check_crosscheck: () => "Cross-checking two routes",
-    check_coverage: () => "Checking coverage",
-    check_fanout: () => "Checking the join is safe",
-    check_reconcile: () => "Reconciling against the certified "
-                           + "definition",
-    verify_answer: () => "Verifying the answer",
-    artifact: () => "Building the artifact",
-    artifact_update: () => "Updating the artifact",
-    constellation: () => "Drawing what was used",
-    list_artifacts: () => "Reviewing the panel",
-    load_skill: (a) => `Loading the ${a || "matching"} skill`,
-    list_skills: () => "Browsing the skill shelf",
-    remember: () => "Keeping a preference",
-    memories: () => "Reading what is remembered",
-    forget: () => "Retiring a memory",
-    plan_set: () => "Updating the working plan",
-    note: () => "Noting the thread",
-    ask_user: () => "Preparing a question",
-    delegate_scout: () => "Sending a scout ahead",
-    subgraph: () => "Collecting the receipts",
+  // what Synapse is doing, in the user's words: the model's own
+  // thought summary when it narrates, a plain verb for the tool
+  // otherwise — never a tool name, an id, or raw output
+  const argOf = (event, key) => {
+    const m = String(event.args || "").match(
+      new RegExp(`"${key}":\\s*"([^"]{1,60})`));
+    return m ? m[1] : "";
   };
+  const VERBS = {
+    search: (e) => {
+      const q = argOf(e, "query");
+      const kind = argOf(e, "kind");
+      if (kind === "list") return `Listing the ${q || ""} metrics`;
+      if (kind === "exact") return `Scanning the cards for ${q}`;
+      return q ? `Searching the graph for ${q}` : "Searching the graph";
+    },
+    read: (e) => {
+      const id = argOf(e, "id");
+      if (!id) return "Collecting what was used";
+      const [kind, name] = id.split(":");
+      return name ? `Reading the ${name} ${kind} card` : `Reading ${id}`;
+    },
+    sample_values: (e) => {
+      const col = argOf(e, "column");
+      return col ? `Sampling real values of ${col}` : "Sampling real values";
+    },
+    run_sql: (e) => argOf(e, "mode") === "snapshot"
+      ? "Running the query" : "Checking the query",
+    python: () => "Computing",
+    check: (e) => ({ part_whole: "Checking the parts add up",
+                     crosscheck: "Cross-checking two routes",
+                     coverage: "Checking coverage",
+                     fanout: "Checking the join is safe",
+                     reconcile: "Reconciling against the certified "
+                                + "definition",
+                     answer: "Verifying the answer" }[argOf(e, "kind")]
+                   || "Running a check"),
+    artifact: (e) => argOf(e, "artifact_id")
+      ? "Updating the artifact" : "Building the artifact",
+    ask: () => "Preparing a question",
+    load_skill: (e) => `Loading the ${argOf(e, "name") || "matching"} skill`,
+    remember: () => "Keeping a preference",
+    note: () => "Noting the thread",
+    suggest_next: () => "Lining up next steps",
+  };
+  // the past tense for the collapsed summary, deduplicated
+  const PAST = {
+    search: "searched the graph", read: "read the cards",
+    sample_values: "sampled real values", run_sql: "ran the query",
+    python: "computed", check: "ran the checks",
+    artifact: "built the artifact", ask: "asked a question",
+    load_skill: "loaded a skill", remember: "kept a preference",
+    note: "took a note",
+  };
+  const QUIET = new Set(["suggest_next"]);     // not work: no row
 
   function friendly(event) {
-    const think = String(event.think || "").trim();
-    if (think) {
-      return think.length > 96 ? think.slice(0, 94) + "…" : think;
-    }
-    const quoted = String(event.args || "")
-      .match(/'([^']{1,42})'|"([^"]{1,42})"/);
-    const arg = quoted ? (quoted[1] || quoted[2]) : "";
     const verb = VERBS[event.tool];
-    return verb ? verb(arg) : `Using ${event.tool}`;
+    return verb ? verb(event) : "Working";
+  }
+
+  function lastLine(text) {
+    const lines = String(text).replace(/\*\*/g, "").split("\n")
+      .map((l) => l.trim()).filter((l) => l && !/^#+\s*$/.test(l));
+    const line = (lines[lines.length - 1] || "").replace(/^#+\s*/, "");
+    return line.length > 120 ? line.slice(0, 118) + "…" : line;
   }
 
   function showThinking(turn, text) {
+    if (turn.done) return;          // never after the turn landed
     turn.thinkText.textContent = text;
     turn.thinking.hidden = false;
     scroll();
   }
 
   function doneThinking(turn, elapsedMs) {
+    turn.done = true;
     turn.thinking.hidden = true;
     if (turn.steps) {
-      const secs = elapsedMs ? ` · ${(elapsedMs / 1000).toFixed(1)}s`
-                             : "";
-      turn.toolTitle.textContent =
-        `Worked through ${turn.steps} step${turn.steps > 1 ? "s" : ""
-        }${secs}`;
+      const secs = elapsedMs ? `Worked for ${(elapsedMs / 1000)
+        .toFixed(elapsedMs >= 10000 ? 0 : 1)}s` : "Worked";
+      const verbs = [...new Set(turn.verbs)];
+      turn.toolTitle.textContent = verbs.length
+        ? `${secs} · ${verbs.join(", ")}` : secs;
     }
   }
 
-  function toolRow(turn, label, detail) {
+  // one row per call: announced when the call starts, settled when
+  // it returns — the row is the receipt, the live line is the pulse
+  function toolStart(turn, event) {
+    if (QUIET.has(event.tool)) return;
     turn.activity.hidden = false;
     turn.steps += 1;
     const row = document.createElement("div");
-    row.className = "theater-step";
+    row.className = "theater-step pending";
     row.innerHTML = `<span class="mark">·</span>
-      <span>${prose(label)}${detail
-        ? ` <span class="muted">— ${prose(detail)}</span>` : ""}</span>`;
+      <span class="step-text">${prose(friendly(event))}…</span>`;
     turn.toolSteps.appendChild(row);
-    turn.toolTitle.textContent =
-      `${turn.steps} step${turn.steps > 1 ? "s" : ""} · ${label}`
-      .slice(0, 90);
+    turn.rows.set(event.n, row);
+    if (PAST[event.tool]) turn.verbs.push(PAST[event.tool]);
+    turn.toolTitle.textContent = friendly(event).slice(0, 90);
+    scroll();
+  }
+
+  function toolDone(turn, event) {
+    if (QUIET.has(event.tool)) return;
+    let row = turn.rows.get(event.n);
+    if (!row) {
+      toolStart(turn, event);
+      row = turn.rows.get(event.n);
+    }
+    row.classList.remove("pending");
+    const outcome = String(event.summary || "").split("\n")[0]
+      .slice(0, 120);
+    const failed = outcome.startsWith("ERROR");
+    row.querySelector(".step-text").innerHTML =
+      `${prose(friendly(event))}${outcome
+        ? ` <span class="muted">— ${prose(failed
+            ? outcome.replace(/^ERROR:\s*/, "did not work: ")
+            : outcome)}</span>` : ""}`;
     scroll();
   }
 
@@ -685,7 +737,7 @@ export async function renderChat(outlet, wanted = "") {
     const items = clarify
       ? (clarify.options || []).map((o) => ({
           label: o.label, hint: o.evidence || o.why || "" }))
-      : (suggestions || []).map((c) => ({ label: c, hint: "" }));
+      : (suggestions || []).slice(0, 3).map((c) => ({ label: c, hint: "" }));
     if (clarify) {
       say(`<b>${prose(clarify.question)}</b>`);
     }
@@ -703,54 +755,40 @@ export async function renderChat(outlet, wanted = "") {
     }
   }
 
-  function artifactCard(turn, event) {
+  function artifactCard(container, row, live) {
     const div = document.createElement("div");
     div.className = "card artifact-inline";
     div.innerHTML = `
       <span class="glyph">${{ chart: "📊", table: "▦",
         document: "🗎", dashboard: "▥", diagram: "✦",
-        kpi: "◉" }[event.type] || "▣"}</span>
-      <b>${esc(event.title)}</b>
-      <span class="muted">v${event.version}${
-        event.spec?.watermark
-          ? ` · ${esc(event.spec.watermark)}` : ""}</span>
+        kpi: "◉" }[row.type] || "▣"}</span>
+      <b>${esc(row.title)}</b>
+      <span class="muted">v${row.version}${
+        row.spec?.watermark
+          ? ` · ${esc(row.spec.watermark)}` : ""}</span>
       <button class="btn">open</button>`;
     div.querySelector("button").addEventListener("click", () =>
-      openArtifact(event.artifact_id));
-    turn.extras.appendChild(div);
-    openArtifact(event.artifact_id);   // fresh work opens the panel
+      openArtifact(row.artifact_id));
+    container.appendChild(div);
+    // the panel is model-invoked: it opens on an artifact in THIS
+    // interaction, never on reopening an old chat
+    if (live) openArtifact(row.artifact_id);
     scroll();
   }
 
-  function sawButton(turn) {
-    if (!turn.saw || turn.sawBtn) return;
-    const btn = document.createElement("button");
-    btn.className = "btn saw-toggle";
-    btn.textContent = "what the model saw";
-    btn.addEventListener("click", () => {
-      let panel = turn.el.querySelector(".saw-panel");
-      if (panel) { panel.hidden = !panel.hidden; return; }
-      panel = document.createElement("div");
-      panel.className = "saw-panel";
-      let html = `<details><summary>system prompt (${
-        turn.saw.system.length} chars)</summary><pre>${
-        esc(turn.saw.system)}</pre></details>`;
-      for (const s of turn.saw.steps) {
-        const promptEv = turn.saw.prompts.find((q) => q.n === s.n);
-        const res = (turn.saw.results || {})[s.ref];
-        html += `<details><summary>look ${s.n} · ${esc(s.tool)}
-          <span class="muted">${esc(s.think || "")}</span></summary>
-          ${promptEv ? `<div class="saw-label">the model saw</div>
-            <pre>${esc(promptEv.content)}</pre>` : ""}
-          <div class="saw-label">the tool returned</div>
-          <pre>${esc(res ? res.content : s.summary || "")}</pre>
-          </details>`;
-      }
-      panel.innerHTML = html;
-      turn.el.appendChild(panel);
+  function memoryNote(turn, text, memoryId) {
+    const div = document.createElement("div");
+    div.className = "memory-note";
+    div.innerHTML = `<span>Remembered: ${esc(text)}</span>
+      <button class="btn" title="retire this memory">undo</button>`;
+    div.querySelector("button").addEventListener("click", async () => {
+      if (memoryId) await api.chatRetireMemory(memoryId);
+      div.classList.add("retired");
+      div.querySelector("button").remove();
+      paintMemories();
     });
-    turn.extras.appendChild(btn);
-    turn.sawBtn = btn;
+    turn.extras.appendChild(div);
+    paintMemories();
   }
 
   function handle(event) {
@@ -759,35 +797,42 @@ export async function renderChat(outlet, wanted = "") {
       case "turn_started":
         setRunning(true);
         showThinking(turn, "Thinking…");
-        turn.saw = { system: "", prompts: [], steps: [],
-                     results: {} };
         break;
       case "model_prompt":
-        if (event.kind === "step" && !turn.buffer) {
-          showThinking(turn, turn.steps ? "Thinking it over…"
-                                        : "Thinking…");
-        }
-        if (!turn.saw) break;
-        if (event.kind === "system") turn.saw.system = event.content;
-        else turn.saw.prompts.push(event);
+        break;            // the transcript record lives in Operate
+      case "thinking": {
+        // the model's own summary of what it is thinking, live
+        turn.thoughts += event.delta || "";
+        const line = lastLine(turn.thoughts);
+        if (line) showThinking(turn, line);
+        break;
+      }
+      case "tool_call":
+        showThinking(turn, `${friendly(event)}…`);
+        toolStart(turn, event);
         break;
       case "tool_step":
-        if (turn.saw) turn.saw.steps.push(event);
-        showThinking(turn, friendly(event));
-        toolRow(turn, friendly(event), `${event.tool}: ${
-          String(event.summary || "").split("\n")[0]}`.slice(0, 110));
+        toolDone(turn, event);
         break;
       case "tool_result":
-        if (turn.saw) turn.saw.results[event.ref] = event;
+        if (event.tool === "remember") {
+          let got = {};
+          try { got = JSON.parse(event.content || "{}"); } catch {}
+          if (got.ok) {
+            memoryNote(turn, argOf({ args: event.content }, "text")
+              || "a preference", got.memory_id);
+          }
+        }
         break;
       case "say_token":
-        turn.thinking.hidden = true;
+        turn.thinking.hidden = true;       // prose is the answer
         turn.buffer += event.delta || "";
         turn.prose.innerHTML = renderMarkdown(turn.buffer, "md");
         scroll();
         break;
       case "artifact":
-        artifactCard(turn, event);
+        state.artifacts.set(event.artifact_id, event);
+        artifactCard(turn.extras, event, true);
         pingShelf();
         break;
       case "chips":
@@ -801,7 +846,6 @@ export async function renderChat(outlet, wanted = "") {
       case "turn_done":
         setRunning(false);
         doneThinking(turn, event.elapsed_ms);
-        sawButton(turn);
         if (event.status === "partial"
             || event.status === "stopped") {
           turn.el.classList.add("partial");
@@ -809,10 +853,9 @@ export async function renderChat(outlet, wanted = "") {
         pingShelf();
         break;
       case "error":
-        turn.thinking.hidden = true;
+        doneThinking(turn, 0);
         if (event.code !== "trace") {
-          say(`<b>${esc(event.code || "error")}</b> ${
-            prose(event.message || "")}
+          say(`${prose(event.message || "Something went wrong.")}
             ${(event.next_actions || []).map((a) =>
               `<div class="muted">→ ${esc(a)}</div>`).join("")}`,
             "error");
@@ -829,9 +872,9 @@ export async function renderChat(outlet, wanted = "") {
     const source = new EventSource(
       api.chatStreamUrl(state.session.id, state.seq));
     for (const name of [
-      "turn_started", "model_prompt", "tool_step", "tool_result",
-      "say_token", "artifact", "chips", "budget_tick", "turn_done",
-      "error"]) {
+      "turn_started", "model_prompt", "thinking", "tool_call",
+      "tool_step", "tool_result", "say_token", "artifact", "chips",
+      "budget_tick", "turn_done", "error"]) {
       source.addEventListener(name, (message) => {
         let event;
         try { event = JSON.parse(message.data); } catch { return; }
@@ -843,27 +886,31 @@ export async function renderChat(outlet, wanted = "") {
   }
 
   // ── history replay from the store ────────────────────────
+  for (const row of boot.artifacts || []) {
+    state.artifacts.set(row.artifact_id, row);
+  }
   for (const message of boot.messages || []) {
     if (message.role === "user") userBubble(message.text);
     else {
       const div = document.createElement("div");
       div.className = "chat-turn";
       div.innerHTML = `<div class="chat-prose md">${
-        renderMarkdown(message.text || "", "md")}</div>`;
+        renderMarkdown(message.text || "", "md")}</div>
+        <div class="chat-extras"></div>`;
       thread.appendChild(div);
+      // a card in the transcript reopens the artifact; the panel
+      // itself stays shut until the model puts something new in it
+      for (const id of message.payload?.artifacts || []) {
+        const row = state.artifacts.get(id);
+        if (row) artifactCard(div.querySelector(".chat-extras"),
+                              row, false);
+      }
       const chips = message.payload?.chips;
       if (chips?.length
           && message === boot.messages[boot.messages.length - 1]) {
         chipRow(chips);
       }
     }
-  }
-  for (const row of boot.artifacts || []) {
-    state.artifacts.set(row.artifact_id, row);
-  }
-  if (boot.artifacts?.length) {
-    openArtifact(boot.artifacts[boot.artifacts.length - 1]
-      .artifact_id);
   }
   state.seq = boot.head || 0;
   scroll();
@@ -879,7 +926,8 @@ export async function renderChat(outlet, wanted = "") {
     el("chat-chiprow").innerHTML = "";
     userBubble(text);
     input.value = "";
-    const accepted = await api.chatSend(state.session.id, text);
+    const accepted = await api.chatSend(state.session.id, text,
+                                        el("chat-depth").value);
     if (!accepted.available) {
       say(`<b>not sent.</b> ${esc(accepted.reason || "")}`, "error");
     }

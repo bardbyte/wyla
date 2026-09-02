@@ -308,6 +308,128 @@ class VertexClient:
             raise EnrichTransportError(f"vertex unreachable: {e.reason}")
 
 
+    # ── v3: the native tool protocol, streamed ───────────────
+    def converse(self, contents: list[dict[str, Any]], *,
+                 system: str = "",
+                 tools: list[dict[str, Any]] | None = None,
+                 thinking_level: str = "",
+                 include_thoughts: bool = True,
+                 max_output_tokens: int = 8192,
+                 timeout: float = 300.0):
+        """One model call in Gemini's native tool protocol, streamed.
+
+        Yields events as they arrive:
+          {"kind": "text",    "delta": str}       prose for the user
+          {"kind": "thought", "delta": str}       a thought summary
+          {"kind": "call",    "name", "args", "id"}   a tool call
+        and finally
+          {"kind": "done", "parts": [...], "usage": {...},
+           "finish": str}
+        where ``parts`` is the model's content VERBATIM — text,
+        thoughts, functionCall parts, and every thoughtSignature —
+        ready to be appended to ``contents`` as the model turn before
+        the functionResponse parts go back. Temperature is left at
+        the model default on purpose (lowering it loops a reasoning
+        model); JSON mode is never requested here.
+        """
+        body: dict[str, Any] = {
+            "contents": contents,
+            "generationConfig": {"maxOutputTokens": max_output_tokens},
+        }
+        if system:
+            body["systemInstruction"] = {"parts": [{"text": system}]}
+        if tools:
+            body["tools"] = [{"functionDeclarations": list(tools)}]
+        if thinking_level and self.thinking_ok:
+            body["generationConfig"]["thinkingConfig"] = {
+                "thinkingLevel": thinking_level,
+                "includeThoughts": bool(include_thoughts)}
+        self.usage["calls"] = self.usage.get("calls", 0) + 1
+
+        chunks = (self.stream_transport(body)
+                  if self.stream_transport is not None
+                  else self._sse(body, timeout=timeout))
+        parts: list[dict[str, Any]] = []
+        usage: dict[str, Any] = {}
+        finish = ""
+        for chunk in chunks:
+            usage = chunk.get("usageMetadata") or usage
+            for candidate in chunk.get("candidates", []):
+                finish = candidate.get("finishReason") or finish
+                for part in (candidate.get("content") or {}).get(
+                        "parts", []):
+                    if "functionCall" in part:
+                        parts.append(part)          # whole, signed
+                        call = part["functionCall"]
+                        yield {"kind": "call",
+                               "name": call.get("name", ""),
+                               "args": call.get("args") or {},
+                               "id": call.get("id", "")}
+                    elif part.get("thought"):
+                        parts.append(part)
+                        if part.get("text"):
+                            yield {"kind": "thought",
+                                   "delta": part["text"]}
+                    elif part.get("text") is not None:
+                        # merge plain text runs; a signed part stays
+                        # its own part so the echo keeps the signature
+                        if (parts and "thoughtSignature" not in part
+                                and "thoughtSignature" not in parts[-1]
+                                and set(parts[-1]) == {"text"}):
+                            parts[-1] = {"text": parts[-1]["text"]
+                                         + part["text"]}
+                        else:
+                            parts.append(dict(part))
+                        if part["text"]:
+                            yield {"kind": "text", "delta": part["text"]}
+        self.usage["prompt_tokens"] = self.usage.get("prompt_tokens", 0) \
+            + int(usage.get("promptTokenCount") or 0)
+        self.usage["output_tokens"] = self.usage.get("output_tokens", 0) \
+            + int(usage.get("candidatesTokenCount") or 0)
+        self.usage["thought_tokens"] = self.usage.get("thought_tokens", 0) \
+            + int(usage.get("thoughtsTokenCount") or 0)
+        yield {"kind": "done", "parts": parts, "finish": finish,
+               "usage": {
+                   "prompt_tokens": int(usage.get("promptTokenCount")
+                                        or 0),
+                   "output_tokens": int(usage.get("candidatesTokenCount")
+                                        or 0),
+                   "thought_tokens": int(usage.get("thoughtsTokenCount")
+                                         or 0),
+                   "cached_tokens": int(usage.get(
+                       "cachedContentTokenCount") or 0)}}
+
+    def _sse(self, body: dict[str, Any], *, timeout: float = 300.0):
+        """The raw SSE chunks of one streamGenerateContent call."""
+        request = urllib.request.Request(
+            self._url("streamGenerateContent") + "?alt=sse",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Authorization": f"Bearer {self._token()}",
+                     "Content-Type": "application/json"},
+            method="POST")
+        try:
+            with urllib.request.urlopen(
+                    request, timeout=timeout,
+                    context=self.connection.ssl_context()) as response:
+                for raw in response:
+                    line = raw.decode("utf-8").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if not payload or payload == "[DONE]":
+                        continue
+                    try:
+                        yield json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:400]
+            raise EnrichTransportError(
+                f"vertex refused the stream (HTTP {e.code}): {detail}")
+        except urllib.error.URLError as e:
+            raise EnrichTransportError(f"vertex unreachable: {e.reason}")
+
+
 def parse_json_answer(text: str) -> dict | None:
     """Model output → dict, tolerating a fenced block; None when the
     text is not a JSON object (counted upstream, never a crash)."""
