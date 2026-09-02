@@ -225,6 +225,7 @@ def test_the_prompt_is_sections_not_protocol(compiled):
     assert "the business map" in system
     assert 'search("GMNS", kind="list")' in system
     assert "list_metrics" not in system         # the v1 kit's word
+    assert "A failed tool call is information" in system
     for gone in ("STRICT JSON", "Next step:", "BUDGET:", '"think"',
                  "Your tools:"):
         assert gone not in system, gone
@@ -479,6 +480,48 @@ def test_stop_lands_in_a_recorded_stop_not_a_vanished_turn(compiled):
     assert "you stopped me" in _prose(events)
     assert runtime.store.messages(session["id"])[-1]["role"] == \
         "assistant"
+
+
+def test_a_lost_connection_mid_turn_keeps_what_was_said(compiled):
+    from sahs.ask.model import ModelUnavailable
+    from sahs.assistant.agent import ScriptedAgent
+
+    class Flaky(ScriptedAgent):
+        def converse(self, contents, **kw):
+            if len(self.calls) == 1:          # the second call dies
+                self.calls.append({"contents": contents, "system": "",
+                                   "tools": [], "thinking_level": ""})
+                raise ModelUnavailable("the model stream went silent "
+                                       "for 120s")
+            yield from super().converse(contents, **kw)
+
+    model = Flaky([[{"text": "Looking at the enrolment table first."},
+                    _call("read", id="table:gms_transaction")]])
+    runtime = _runtime(compiled, model)
+    session = runtime.create_session()
+    events = _turn(runtime, session["id"], "how many enrolled?")
+    done = _by(events, "turn_done")[-1]
+    assert done["status"] == "partial"
+    prose = _prose(events)
+    assert "Looking at the enrolment table first." in prose
+    assert "I lost the connection to the model" in prose
+    assert "continue" in prose
+    assert not _by(events, "error")
+    stored = runtime.store.messages(session["id"])[-1]
+    assert stored["role"] == "assistant" and "lost the connection" \
+        in stored["text"]
+
+    # nothing happened yet: the honest error card, not a closing line
+    class Dead(ScriptedAgent):
+        def converse(self, contents, **kw):
+            raise ModelUnavailable("no Vertex contract in .env")
+            yield  # pragma: no cover
+
+    runtime = _runtime(compiled, Dead())
+    session = runtime.create_session()
+    events = _turn(runtime, session["id"], "hello")
+    assert _by(events, "error")[0]["code"] == "model_unavailable"
+    assert _by(events, "turn_done")[-1]["status"] == "error"
 
 
 def test_second_turn_sees_the_first_newest_ask_last(compiled):

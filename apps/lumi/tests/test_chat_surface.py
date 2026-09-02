@@ -139,6 +139,12 @@ def test_thinking_is_alive_and_skills_are_browsable():
     assert "[hidden] { display: none !important; }" in CSS
     # the thinking line never returns after the turn landed
     assert "if (turn.done) return;" in CHAT_JS
+    # the live line has a heartbeat: seconds tick, each model call
+    # restarts the clock, prose or the end stops it
+    for piece in ("function pulse", "stopPulse", "Still ",
+                  'if (event.kind === "call") pulse(turn, "Thinking…")',
+                  "clearInterval(turn.tick)"):
+        assert piece in CHAT_JS, piece
     # no harness words in the user's language
     for gone in ("what the model saw", "saw-toggle", "saw-panel",
                  "strict JSON", "Worked through"):

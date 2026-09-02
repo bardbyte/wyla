@@ -227,6 +227,76 @@ def test_playbook_grader_through_the_real_loop(compiled,
     assert row["checks_passed"] == []
 
 
+# ─── recovery grading: fix what is yours, report what is not ─
+
+
+def test_recovery_grader_through_the_real_loop(compiled, monkeypatch):
+    from sahs.assistant.evals import load_tasks, run_task
+    from sahs.evals.substrate import DryRunOutcome
+
+    class NoWarehouse:
+        def dry_run(self, sql):
+            return DryRunOutcome(valid=True, result_schema=None)
+
+    import sahs.evals.substrate as substrate_module
+    monkeypatch.setattr(substrate_module, "BQDryRun", NoWarehouse)
+    build, _ = compiled
+    bare = ("SELECT country_cd, sum(trans_usd_am) AS spend FROM "
+            "dw.gms_transaction GROUP BY country_cd")
+    filtered = ("SELECT country_cd, sum(trans_usd_am) AS spend FROM "
+                "dw.gms_transaction WHERE part_dt BETWEEN '2026-08-01' "
+                "AND '2026-08-31' GROUP BY country_cd")
+
+    # the partition filter is the model's to add: read, fix, retry
+    task = next(t for t in load_tasks("recovery")
+                if t["id"] == "rec_partition_filter")
+    fixer = _agent(
+        [_call("run_sql", sql=bare)],
+        [{"thought": "The warehouse wants a partition filter on "
+                     "part_dt: add the August range."},
+         _call("run_sql", sql=filtered)],
+        [{"text": "Spend by country for August 2026 is validated; "
+                  "the query filters on part_dt as the table requires."},
+         _call("suggest_next", options=["run it on the snapshot"])])
+    row = run_task(build, lambda budget: fixer, task)
+    assert row["found"] is True, row
+    assert row["hygiene"]["sql_failures"] == 1
+    assert row["hygiene"]["recovered_from_sql_error"] is True
+    # the taught error reached the model whole, closest names included
+    first = next(p["functionResponse"]["response"]
+                 for c in fixer.calls[1]["contents"]
+                 for p in c["parts"] if "functionResponse" in p)
+    assert first["kind"] == "sql" and first["yours_to_fix"] is True
+    assert first["closest"] == ["part_dt"]
+    assert "WHERE part_dt BETWEEN" in first["hint"]
+
+    # a wrong data project is configuration: say so, stop retrying
+    task = next(t for t in load_tasks("recovery")
+                if t["id"] == "rec_wrong_project_is_configuration")
+    reporter = _agent(
+        [_call("run_sql", sql=bare)],
+        [{"text": "I could not run this: the warehouse looked for "
+                  "dw.gms_transaction in project prj-p-lumi-gpt, where "
+                  "it does not live. That is configuration, not the "
+                  "query — set LUMI_BQ_DATA_PROJECT in the silo .env "
+                  "to the project that hosts the tables and I will "
+                  "pick it up from here."}])
+    row = run_task(build, lambda budget: reporter, task)
+    assert row["found"] is True, row
+    assert row["hygiene"]["retries_after_environment"] == 0
+    first = next(p["functionResponse"]["response"]
+                 for c in reporter.calls[1]["contents"]
+                 for p in c["parts"] if "functionResponse" in p)
+    assert first["kind"] == "environment" and first["yours_to_fix"] is False
+    assert first["fix_env"]["LUMI_BQ_DATA_PROJECT"]
+
+    stubborn = _agent(*[[_call("run_sql", sql=bare)] for _ in range(4)],
+                      [{"text": "It keeps failing; here is what I have."}])
+    row = run_task(build, lambda budget: stubborn, task)
+    assert row["wrong"] is True and row["found"] is False
+    assert row["hygiene"]["retries_after_environment"] == 3
+
+
 # ─── the report: two-number lines + the rows beneath them ────
 
 
@@ -247,7 +317,15 @@ def test_summarize_and_markdown_carry_the_lines():
          "wrong": False, "checks_passed": ["part_whole"],
          "hygiene": dict(hygiene)},
     ]
+    rows.append({"id": "rc1", "kind": "recovery", "found": True,
+                 "wrong": False, "hygiene": dict(
+                     hygiene, sql_failures=1,
+                     recovered_from_sql_error=True,
+                     retries_after_environment=None)})
     report = summarize(rows)
+    assert report["suites"]["recovery"]["found_pct"] == 100.0
+    assert report["hygiene"]["sql_failures"] == 1
+    assert report["hygiene"]["sql_recovery_rate"] == 1.0
     assert report["suites"]["artifact"]["found_pct"] == 50.0
     assert report["suites"]["artifact"]["wrong"] == 1
     assert report["suites"]["reasoning"]["found_pct"] == 100.0
@@ -256,3 +334,5 @@ def test_summarize_and_markdown_carry_the_lines():
     assert "artifact: 50.0% / 1" in markdown
     assert "undisclosed_number" in markdown
     assert "| p1 | playbook | ✓ |" in markdown
+    assert "| rc1 | recovery | ✓ | recovered |" in markdown
+    assert "sql failures 1" in markdown

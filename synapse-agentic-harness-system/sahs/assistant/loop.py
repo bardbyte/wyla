@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from sahs.ask.budget import Aborted
+from sahs.ask.model import ModelUnavailable
 from sahs.loop.digest import synapse_digest
 from sahs.loop.loop import _short, compact_result
 from sahs.loop.skills import Skill, render_skills
@@ -72,6 +73,12 @@ artifact validator refuses undisclosed numbers, and composed numbers \
 keep an EXPLORATORY watermark until a passing check stands behind \
 them. Prefer certified; say plainly when something is pending or \
 mined; an honest "here is where I stopped" beats a confident guess.
+
+A failed tool call is information, not a verdict. Read the error, \
+fix what is yours — the SQL, a name, a filter — and try again. When \
+it says the failure is configuration (a project, a permission, a \
+location, the network), say exactly what to change, in the user's \
+words, and stop retrying.
 
 When the ask is markedly unclear and evidence cannot settle it, ask — \
 one question, named options — instead of assuming; otherwise proceed \
@@ -232,7 +239,10 @@ def summarize(tool: str, result: Any) -> str:
         problems = "; ".join(
             f"{p.get('code')}: {p.get('detail')}"
             for p in result.get("problems", []))[:300]
-        return (f"ERROR: {_short(result['error'], 160)}"
+        whose = ("configuration, not the query: "
+                 if result.get("kind") in ("environment", "access")
+                 else "")
+        return (f"ERROR: {whose}{_short(result['error'], 160)}"
                 + (f" — {problems}" if problems else ""))
     if tool == "search":
         rows = result.get("results") or result.get("metrics") \
@@ -522,6 +532,12 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
 
     except Aborted:
         stop_reason = "you stopped me."
+    except ModelUnavailable as e:
+        if calls <= 1 and not said and steps == 0:
+            raise            # nothing happened yet: the honest error card
+        # streamed text is never discarded (§5): close in plain language
+        stop_reason = (f"I lost the connection to the model ({e}). Ask "
+                       "me to continue and I will pick it up from here.")
 
     if status != "answered" and stop_reason:
         closing = _closing(stop_reason, bool(said))

@@ -137,3 +137,70 @@ def test_declarations_only_for_schema_bearing_tools():
     got = declarations(kit)
     assert [d["name"] for d in got] == ["a"]
     assert got[0]["parameters"]["type"] == "OBJECT"
+
+
+def test_a_silent_or_cut_stream_is_a_transport_failure_with_a_reason():
+    from sahs.enrich.client import EnrichTransportError
+    import pytest
+
+    def silent(body):
+        yield CHUNKS[0]
+        raise TimeoutError("The read operation timed out")
+    client = _client()
+    client.stream_transport = silent
+    with pytest.raises(EnrichTransportError, match="went silent"):
+        list(client.converse([{"role": "user", "parts": [{"text": "x"}]}]))
+
+    def cut(body):
+        yield CHUNKS[0]
+        raise ConnectionResetError(104, "Connection reset by peer")
+    client.stream_transport = cut
+    with pytest.raises(EnrichTransportError, match="cut off"):
+        list(client.converse([{"role": "user", "parts": [{"text": "x"}]}]))
+
+
+def test_the_agent_retries_once_only_before_anything_reached_the_user():
+    from sahs.ask.model import ModelUnavailable
+    from sahs.assistant.agent import VertexAgent
+    from sahs.enrich.client import EnrichTransportError
+    import pytest
+
+    attempts = {"n": 0}
+
+    def flaky(body):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise EnrichTransportError("vertex unreachable: proxy reset")
+        yield from CHUNKS
+    agent = VertexAgent(_client())
+    agent.client.stream_transport = flaky
+    events = list(agent.converse([{"role": "user", "parts": [{"text": "x"}]}]))
+    assert [e["kind"] for e in events] == ["thought", "text", "text",
+                                           "call", "done"]
+    assert attempts["n"] == 2                 # one retry, then success
+
+    # once text has streamed, a retry would duplicate it: surface instead
+    attempts["n"] = 0
+
+    def cut_midway(body):
+        attempts["n"] += 1
+        yield CHUNKS[1]
+        raise EnrichTransportError("the model stream was cut off")
+    agent.client.stream_transport = cut_midway
+    seen = []
+    with pytest.raises(ModelUnavailable, match="cut off"):
+        for event in agent.converse([{"role": "user",
+                                      "parts": [{"text": "x"}]}]):
+            seen.append(event)
+    assert attempts["n"] == 1 and seen[0]["delta"] == "Let me look"
+
+    # a second failure is the verdict
+    def dead(body):
+        attempts["n"] += 1
+        raise EnrichTransportError("vertex unreachable")
+        yield  # pragma: no cover
+    attempts["n"] = 0
+    agent.client.stream_transport = dead
+    with pytest.raises(ModelUnavailable):
+        list(agent.converse([{"role": "user", "parts": [{"text": "x"}]}]))
+    assert attempts["n"] == 2

@@ -223,8 +223,10 @@ def test_the_hooks_are_named(kit):
     names = {h["name"]: h for h in HOOKS}
     assert set(names) == {"artifact_schema", "sql_gates",
                           "literal_check", "rows_to_workspace",
-                          "clerk_only"}
+                          "warehouse_errors", "clerk_only"}
     assert names["clerk_only"]["kind"] == "absent"
+    assert names["warehouse_errors"]["kind"] == "post"
+    assert "configuration" in names["warehouse_errors"]["enforces"]
     tools, _state, _build, _ws = kit
     # nothing in the kit writes to the graph
     assert not any(n.startswith(("clerk", "write", "promote"))

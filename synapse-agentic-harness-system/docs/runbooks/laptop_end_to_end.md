@@ -192,6 +192,9 @@ uvicorn apps.lumi.backend.app:app --port 8400   # from the repo root
 python scripts/chat_eval.py --real              # Vertex creds in the silo .env
 # → PASTE docs/evals/assistant_baseline_vertex.md back into the session
 # short/cheap variants: --limit 4 · --kind playbook · --no-judge
+# --kind recovery injects warehouse failures (a missing partition
+# filter, a type mismatch, a wrong data project) and grades whether
+# the agent fixes what is its own and reports what is configuration
 ```
 
 What changed in v3 (Stage 1): one interaction per turn over native
@@ -203,6 +206,20 @@ line that speaks the model's own thought summaries and collapses to
 panel opens only when the model puts something in it; a memory save
 is disclosed inline with an undo. Set `LUMI_USER_NAME` in the silo
 `.env` so memory addresses the person by name.
+
+**If a turn looks stuck:** the live line now ticks ("Checking the
+query… 12s", then "Still thinking · 34s"), so a slow model call and a
+slow tool read differently. For the record, ask the event file:
+
+```bash
+python scripts/turn_doctor.py          # newest session: each model call
+                                       # and tool with its seconds, and the
+                                       # OPEN segment a stuck turn sits in
+```
+
+The client gives up on a model stream after 120 s of silence, retries
+once if nothing had arrived, and the turn then closes in plain language
+with what was already said. Paste the doctor's output with the transcript.
 
 **Before the first query:** the graph names tables `dw.<table>`, and
 BigQuery resolves that against the project that runs the query

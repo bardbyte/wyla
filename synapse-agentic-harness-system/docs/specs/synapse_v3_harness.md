@@ -107,6 +107,7 @@ What we already have becomes the hooks, named as such:
 | cost + ACL gates | PreToolUse on `run_sql` | the two cost gates, live-mode policy |
 | literal check | PreToolUse on `run_sql` (new) | a WHERE literal that is not in observed values comes back as a warning with the three closest real ones — deterministic, no prose rule needed |
 | rows to workspace | PostToolUse on `run_sql` | q<N> saved for python and check |
+| warehouse errors | PostToolUse on `run_sql` (new) | a failed dry run or execution comes back classified — `sql` or `cost` is the model's to fix (the closest real names ride along), `environment` or `access` is configuration to report with the exact `.env` change — and the recovery eval suite grades both behaviours |
 | clerk-only truth | absent tool | nothing writes to the graph from a chat |
 
 `check` is the generation-verification loop the model runs itself.
@@ -143,7 +144,10 @@ path.
   lives in Operate → Transcripts for the weekly reading ritual.
 - The thinking line stops the moment final text starts and never
   returns after the turn. `[hidden] { display: none !important }`
-  globally; the walk asserts visibility.
+  globally; the walk asserts visibility. The line has a heartbeat:
+  the seconds tick, and each model call restarts the clock, so a long
+  think never wears a tool's name ("Checking the query…" while the
+  model is the one working was the first laptop stall).
 - **Artifact panel is model-invoked.** It opens on an artifact in
   this interaction, never on reopening an old chat; a card in the
   transcript reopens it; closing reflows the chat to full width.

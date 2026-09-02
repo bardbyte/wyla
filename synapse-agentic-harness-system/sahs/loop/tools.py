@@ -645,9 +645,14 @@ def toolkit(build: Build, state: LoopState, *,
             build, sql, mode="snapshot", limit=limit,
             substrate=substrate, ledger_path=ledger_path)
         if sandboxed["status"] != "ok":
+            taught = (sandboxed.get("meta") or {}).get("taught") or {}
             return _err(sandboxed.get("error") or "sandbox refused",
-                        "the sandbox's reason stands: dry_run and "
-                        "snapshot never bypass the ACL")
+                        taught.get("hint")
+                        or "the sandbox's reason stands: dry_run and "
+                           "snapshot never bypass the ACL",
+                        **{k: v for k, v in taught.items()
+                           if k in ("kind", "yours_to_fix", "closest",
+                                    "fix_env", "smoke", "tables")})
         shape = sandboxed["data"]
         sent = (sandboxed.get("meta") or {}).get("sql_sent")
         extra = {"sql_sent": sent} if sent else {}

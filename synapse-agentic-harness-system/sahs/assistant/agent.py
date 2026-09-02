@@ -60,13 +60,25 @@ class VertexAgent:
                  thinking_level: str = "",
                  max_output_tokens: int = 8192) -> Iterator[dict[str, Any]]:
         before = dict(self.client.usage)
+        yielded = False
+        attempts = 0
         try:
-            yield from self.client.converse(
-                contents, system=system, tools=tools,
-                thinking_level=thinking_level,
-                max_output_tokens=max_output_tokens)
-        except EnrichTransportError as e:
-            raise ModelUnavailable(str(e)) from e
+            while True:
+                attempts += 1
+                try:
+                    for event in self.client.converse(
+                            contents, system=system, tools=tools,
+                            thinking_level=thinking_level,
+                            max_output_tokens=max_output_tokens):
+                        yielded = True
+                        yield event
+                    return
+                except EnrichTransportError as e:
+                    # the same contents, the same call: safe to ask
+                    # once more — but only while nothing has reached
+                    # the user, or the retry would duplicate it
+                    if yielded or attempts >= 2:
+                        raise ModelUnavailable(str(e)) from e
         finally:
             self._charge(before)
 

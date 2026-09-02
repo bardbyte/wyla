@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--builds", default="")
     parser.add_argument("--out", default=str(SILO / "docs" / "evals"))
     parser.add_argument("--kind", default="",
-                        choices=["", "artifact", "reasoning",
+                        choices=["", "artifact", "reasoning", "recovery",
                                  "playbook"])
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--real", action="store_true",

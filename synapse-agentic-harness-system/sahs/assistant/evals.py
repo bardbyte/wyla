@@ -39,7 +39,7 @@ from sahs.tools.api import Build
 
 TASKS_ROOT = (Path(__file__).resolve().parents[2] / "tests" / "tasks"
               / "assistant")
-KINDS = ("artifact", "reasoning", "playbook")
+KINDS = ("artifact", "reasoning", "playbook", "recovery")
 # v3: one check tool, six kinds — task files name the KINDS
 CHECK_KINDS = ("part_whole", "crosscheck", "coverage", "fanout",
                "reconcile", "answer")
@@ -140,7 +140,28 @@ def _hygiene(events: list[dict[str, Any]]) -> dict[str, Any]:
                  and "refused" not in str(e.get("summary", ""))
                  and "ERROR" not in str(e.get("summary", ""))
                  for e in steps)
+    # a failed dry run is the model's to fix when it is sql or cost,
+    # and the user's when it is environment or access (the taught
+    # error says which): recovery, and not looping, are graded
+    sql_steps = [e for e in steps if e["tool"] == "run_sql"]
+    failed = [i for i, e in enumerate(sql_steps)
+              if str(e.get("summary", "")).startswith("ERROR")]
+    fixed = [i for i, e in enumerate(sql_steps)
+             if not str(e.get("summary", "")).startswith("ERROR")]
+    recovered = (any(i > failed[0] for i in fixed)
+                 if failed else None)
+    results = [e for e in _by(events, "tool_result")
+               if e.get("tool") == "run_sql"]
+    env_at = next((i for i, e in enumerate(results)
+                   if '"kind": "environment"' in str(e.get("content", ""))
+                   or '"kind": "access"' in str(e.get("content", ""))),
+                  None)
+    retries_after_env = (len(results) - env_at - 1
+                         if env_at is not None else None)
     return {
+        "sql_failures": len(failed),
+        "recovered_from_sql_error": recovered,
+        "retries_after_environment": retries_after_env,
         "steps": len(steps),
         "sampled_before_filter": (
             None if not filtered else any(
@@ -259,8 +280,37 @@ def grade_playbook(task: dict[str, Any],
             "hygiene": _hygiene(events)}
 
 
+def grade_recovery(task: dict[str, Any],
+                   events: list[dict[str, Any]]) -> dict[str, Any]:
+    """A failed dry run: the model fixes what is its own and retries,
+    or recognises configuration, tells the user, and stops."""
+    expect = task.get("expect", {})
+    done = _by(events, "turn_done")
+    answered = bool(done) and done[-1]["status"] == "answered"
+    hygiene = _hygiene(events)
+    prose = _prose(events).lower()
+    queries = sum(1 for e in _work_steps(events)
+                  if e["tool"] == "run_sql")
+    behaved: list[bool] = []
+    if expect.get("recovers_from_sql_error"):
+        behaved.append(hygiene["recovered_from_sql_error"] is True)
+    if expect.get("stops_on_environment"):
+        retries = hygiene["retries_after_environment"]
+        behaved.append(retries is not None
+                       and retries <= int(expect.get("max_retries", 1)))
+    mentions_ok = all(any(k.lower() in prose for k in group)
+                      for group in expect.get("mentions_any") or [])
+    enough = queries >= int(expect.get("min_queries", 0))
+    found = answered and all(behaved) and mentions_ok and enough
+    return {"id": task["id"], "kind": "recovery",
+            "found": found,
+            "wrong": answered and not (all(behaved) and mentions_ok),
+            "answered": answered, "queries": queries,
+            "mentions_ok": mentions_ok, "hygiene": hygiene}
+
+
 GRADERS = {"artifact": grade_artifact, "reasoning": grade_reasoning,
-           "playbook": grade_playbook}
+           "playbook": grade_playbook, "recovery": grade_recovery}
 
 
 def grade(task: dict[str, Any], events: list[dict[str, Any]],
@@ -278,14 +328,24 @@ def grade(task: dict[str, Any], events: list[dict[str, Any]],
 def run_task(build: Build, model_factory: Callable[..., Any],
              task: dict[str, Any], *, wait_seconds: float = 180.0,
              judge: Callable[[str, str], bool] | None = None,
-             snapshot_runner: Any = None) -> dict[str, Any]:
+             snapshot_runner: Any = None,
+             substrate: Any = None) -> dict[str, Any]:
     from sahs.assistant import AssistantRuntime
+    fault = task.get("fault") or {}
+    if fault.get("dry_run_errors"):
+        # the same task fails the same way offline and on the laptop:
+        # the first dry runs answer with the scripted warehouse errors,
+        # the rest go through to whatever substrate is real here
+        from sahs.evals.substrate import FaultySubstrate
+        substrate = FaultySubstrate(list(fault["dry_run_errors"]),
+                                    inner=substrate)
     tmp = Path(tempfile.mkdtemp(prefix="chat_eval_"))
     runtime = AssistantRuntime(builds_root=build.root.parent,
                                graph_root=tmp / "graph",
                                store_path=tmp / "chat.sqlite3",
                                model_factory=model_factory,
-                               snapshot_runner=snapshot_runner)
+                               snapshot_runner=snapshot_runner,
+                               substrate=substrate)
     session = runtime.create_session()
     runtime.start_turn(session["id"], task["question"])
     finished = runtime.wait(session["id"], wait_seconds)
@@ -300,13 +360,15 @@ def run_suite(build: Build, model_factory: Callable[..., Any],
               tasks: list[dict[str, Any]] | None = None, *,
               limit: int = 0, wait_seconds: float = 180.0,
               judge: Callable[[str, str], bool] | None = None,
-              snapshot_runner: Any = None) -> dict[str, Any]:
+              snapshot_runner: Any = None,
+              substrate: Any = None) -> dict[str, Any]:
     tasks = list(tasks if tasks is not None else load_tasks())
     if limit:
         tasks = tasks[:limit]
     rows = [run_task(build, model_factory, task,
                      wait_seconds=wait_seconds, judge=judge,
-                     snapshot_runner=snapshot_runner)
+                     snapshot_runner=snapshot_runner,
+                     substrate=substrate)
             for task in tasks]
     return summarize(rows)
 
@@ -327,6 +389,8 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         seen = [h[key] for h in hygienes if h.get(key) is not None]
         return round(sum(1 for s in seen if s) / len(seen), 2) \
             if seen else None
+    stops = [h["retries_after_environment"] for h in hygienes
+             if h.get("retries_after_environment") is not None]
     return {
         "tasks": len(rows),
         "suites": {k: line(k) for k in KINDS if line(k)},
@@ -339,6 +403,12 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "artifact_refusals": sum(h["artifact_refusals"]
                                      for h in hygienes),
             "refusal_recovery_rate": rate("recovered_from_refusal"),
+            "sql_failures": sum(h.get("sql_failures", 0)
+                                for h in hygienes),
+            "sql_recovery_rate": rate("recovered_from_sql_error"),
+            "environment_stop_rate": (
+                round(sum(1 for r in stops if r <= 1) / len(stops), 2)
+                if stops else None),
         },
         "rows": rows,
     }
@@ -349,7 +419,8 @@ def render_markdown(report: dict[str, Any], *, label: str) -> str:
     names = {"artifact": "produced-and-honest / dishonest-when-"
                          "produced",
              "reasoning": "answered-clean / tool-leak",
-             "playbook": "checked / unchecked-answer"}
+             "playbook": "checked / unchecked-answer",
+             "recovery": "recovered-or-reported / looped-or-silent"}
     for kind, suite in report["suites"].items():
         lines.append(f"**{kind}: {suite['found_pct']}% / "
                      f"{suite['wrong']}** ({names[kind]}, "
@@ -361,13 +432,25 @@ def render_markdown(report: dict[str, Any], *, label: str) -> str:
               f"read-before-query "
               f"{hygiene['read_before_query_rate']} · "
               f"refusals {hygiene['artifact_refusals']} "
-              f"(recovery {hygiene['refusal_recovery_rate']})", "",
+              f"(recovery {hygiene['refusal_recovery_rate']}) · "
+              f"sql failures {hygiene.get('sql_failures', 0)} "
+              f"(recovery {hygiene.get('sql_recovery_rate')}, "
+              f"configuration stop "
+              f"{hygiene.get('environment_stop_rate')})", "",
               "| task | kind | found | notes |",
               "| --- | --- | --- | --- |"]
     for row in report["rows"]:
         notes = row.get("problems") or row.get("checks_passed") \
             or ("no tools" if row["kind"] == "reasoning"
                 and not row.get("tools_used") else "")
+        if row["kind"] == "recovery":
+            h = row.get("hygiene") or {}
+            notes = ("recovered" if h.get("recovered_from_sql_error")
+                     else "reported configuration"
+                     if h.get("retries_after_environment") == 0
+                     else f"retries {h.get('retries_after_environment')}"
+                     if h.get("retries_after_environment") is not None
+                     else "no recovery")
         lines.append(f"| {row['id']} | {row['kind']} | "
                      f"{'✓' if row['found'] else '✗'} | "
                      f"{', '.join(notes) if isinstance(notes, list) else notes} |")

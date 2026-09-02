@@ -56,13 +56,9 @@ class BQDryRun:
         # as a runtime import so fixture CI never needs it. The refresh
         # session honors the connection's verify/CA settings and the
         # NO_PROXY injection done at from_env (the bq_connect contract).
-        from google.auth.transport.requests import Request     # type: ignore
-        from google.oauth2 import service_account              # type: ignore
-        creds = service_account.Credentials.from_service_account_file(
-            str(self.connection.key_path),
-            scopes=["https://www.googleapis.com/auth/bigquery"])
-        creds.refresh(Request(session=self.connection.token_session()))
-        return creds.token
+        # cached per key file (sahs.util.auth): one token trip per
+        # session, refreshed only when it expires
+        return self.connection.token()
 
     def dry_run(self, sql: str) -> DryRunOutcome:
         url = (f"{self.connection.endpoint}/bigquery/v2/projects/"
@@ -118,3 +114,31 @@ class StaticSubstrate:
         if hit is None:
             return DryRunOutcome(valid=True, result_schema=None)
         return hit
+
+
+class FaultySubstrate:
+    """Fault injection around any substrate: the first dry runs fail
+    with the given messages, in order; the rest go through to the
+    inner substrate (the laptop's BigQuery when ``inner`` is None).
+    This is how a recovery eval asks the same question offline and
+    against the real warehouse."""
+
+    name = "faulty"
+
+    def __init__(self, faults: list[str], inner: Any = None) -> None:
+        self.faults = list(faults)
+        self.inner = inner
+        self.seen: list[str] = []
+
+    @property
+    def connection(self) -> Any:
+        return getattr(self.inner, "connection", None)
+
+    def dry_run(self, sql: str) -> DryRunOutcome:
+        self.seen.append(sql)
+        if self.faults:
+            return DryRunOutcome(valid=False, error=self.faults.pop(0))
+        if self.inner is None:
+            import sahs.evals.substrate as me       # late: patchable
+            self.inner = me.BQDryRun()
+        return self.inner.dry_run(sql)

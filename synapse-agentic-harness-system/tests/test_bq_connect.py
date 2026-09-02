@@ -148,3 +148,32 @@ def test_data_project_defaults_to_the_query_project(monkeypatch, tmp_path):
     assert connection.data_project == "prj-p-lumi-gpt"
     monkeypatch.setenv("BQ_DATA_PROJECT", "axp-lumi")
     assert BQConnection.from_env().data_project == "axp-lumi"
+
+
+def test_bq_token_is_cached_per_key_file(monkeypatch, tmp_path):
+    from sahs.util import auth
+    monkeypatch.setattr(auth, "_BQ_CREDENTIALS", {})
+    made = {"n": 0}
+    refreshed = {"n": 0}
+
+    class Creds:
+        valid = False
+        token = ""
+
+    def make():
+        made["n"] += 1
+        return Creds()
+
+    def refresh(creds):
+        refreshed["n"] += 1
+        creds.valid = True
+        creds.token = f"tok{refreshed['n']}"
+
+    conn = BQConnection(project="p", endpoint="https://bq", location="US",
+                        key_path=tmp_path / "k.json")
+    assert conn.token(make_credentials=make, refresh=refresh) == "tok1"
+    assert conn.token(make_credentials=make, refresh=refresh) == "tok1"
+    assert made["n"] == 1 and refreshed["n"] == 1     # one trip, cached
+    auth._BQ_CREDENTIALS[str(conn.key_path)].valid = False   # expired
+    assert conn.token(make_credentials=make, refresh=refresh) == "tok2"
+    assert made["n"] == 1 and refreshed["n"] == 2
