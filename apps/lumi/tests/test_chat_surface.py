@@ -135,9 +135,11 @@ def test_thinking_is_alive_and_skills_are_browsable():
                   # reopened by new work, replayed from the trace
                   "think-seg", "thoughtSegment", "settleBlock",
                   "openBlock", "traceBlock", "payload?.trace",
-                  "if (!turn.settled) settleBlock(turn)"):
+                  "if (!turn.settled) settleBlock(turn)",
+                  # a step's input (the SQL, the code) on a click
+                  "attachInput", "step-input", "event.input", "t.input"):
         assert piece in CHAT_JS, piece
-    assert ".think-seg" in CSS
+    assert ".think-seg" in CSS and ".step-input" in CSS
     for cls in (".thinking-line", "@keyframes think-orb",
                 "@keyframes think-shimmer", "prefers-reduced-motion"):
         assert cls in CSS, cls

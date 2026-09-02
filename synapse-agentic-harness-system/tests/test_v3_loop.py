@@ -400,6 +400,12 @@ def test_python_turn_reads_the_build(compiled):
     assert [t["kind"] for t in trace] == ["tool"]
     assert trace[0]["tool"] == "python" and "certified" in trace[0]["summary"]
     assert "import meridian" in trace[0]["args"]
+    # the call's input travels whole: the code, the SQL — what the
+    # transcript shows when a step row is clicked
+    assert trace[0]["input"].startswith("import meridian")
+    assert trace[0]["elapsed_ms"] >= 0
+    assert _by(events, "tool_call")[0]["input"].startswith("import meridian")
+    assert _by(events, "tool_step")[0]["input"].startswith("import meridian")
 
 
 def test_sql_rows_flow_into_the_sandbox(compiled, tmp_path,

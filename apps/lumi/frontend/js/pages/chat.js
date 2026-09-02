@@ -768,11 +768,29 @@ export async function renderChat(outlet, wanted = "") {
     const row = document.createElement("div");
     row.className = "theater-step pending";
     row.innerHTML = `<span class="mark">·</span>
-      <span class="step-text">${prose(friendly(event))}…</span>`;
+      <span class="step-body">
+        <span class="step-text">${prose(friendly(event))}…</span>
+      </span>`;
+    attachInput(row, event.input);
     turn.toolSteps.appendChild(row);
     turn.rows.set(event.n, row);
     if (PAST[event.tool]) turn.verbs.push(PAST[event.tool]);
     scroll();
+  }
+
+  // the call's input — the SQL, the code — sits under the row, shown
+  // on a click, the way Claude shows what a tool was given
+  function attachInput(row, input) {
+    if (!input || row.querySelector(".step-input")) return;
+    const pre = document.createElement("pre");
+    pre.className = "step-input";
+    pre.hidden = true;
+    pre.textContent = input;
+    row.querySelector(".step-body").appendChild(pre);
+    row.classList.add("has-input");
+    row.querySelector(".step-text").addEventListener("click", () => {
+      pre.hidden = !pre.hidden;
+    });
   }
 
   function toolDone(turn, event) {
@@ -783,14 +801,17 @@ export async function renderChat(outlet, wanted = "") {
       row = turn.rows.get(event.n);
     }
     row.classList.remove("pending");
+    attachInput(row, event.input);
     const outcome = String(event.summary || "").split("\n")[0]
       .slice(0, 120);
     const failed = outcome.startsWith("ERROR");
+    const secs = event.elapsed_ms >= 1000
+      ? ` · ${(event.elapsed_ms / 1000).toFixed(1)}s` : "";
     row.querySelector(".step-text").innerHTML =
       `${prose(friendly(event))}${outcome
         ? ` <span class="muted">— ${prose(failed
             ? outcome.replace(/^ERROR:\s*/, "did not work: ")
-            : outcome)}</span>` : ""}`;
+            : outcome)}${secs}</span>` : ""}`;
     scroll();
   }
 
@@ -997,9 +1018,12 @@ export async function renderChat(outlet, wanted = "") {
         const outcome = String(t.summary || "").split("\n")[0]
           .slice(0, 120);
         el.innerHTML = `<span class="mark">·</span>
-          <span class="step-text">${prose(friendly(t))}${outcome
+          <span class="step-body"><span class="step-text">${
+            prose(friendly(t))}${outcome
             ? ` <span class="muted">— ${prose(outcome.replace(
-                /^ERROR:\s*/, "did not work: "))}</span>` : ""}</span>`;
+                /^ERROR:\s*/, "did not work: "))}</span>` : ""}</span>
+          </span>`;
+        attachInput(el, t.input);
       }
       steps.appendChild(el);
     }

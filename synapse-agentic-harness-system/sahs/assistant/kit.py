@@ -14,8 +14,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sahs.loop.tools import ToolSpec, toolkit as v1_toolkit
+from sahs.loop.tools import ROW_CAP, ToolSpec, toolkit as v1_toolkit
 from sahs.tools.api import Build
+from sahs.tools.sandbox import DEFAULT_MAX_BYTES, execute_sandboxed
+from sahs.tools.validate_sql import validate_sql
 
 from . import checks as _checks
 from .artifacts import TYPES, validate_artifact
@@ -53,7 +55,7 @@ def _obj(properties: dict[str, Any], required: list[str] | None = None
 def build_kit(build: Build, state: AssistantState, *,
               store: AssistantStore, session_id: str, turn_id: str,
               workspace: Path, model: Any = None, substrate: Any = None,
-              snapshot_runner: Any = None,
+              snapshot_runner: Any = None, runner: Any = None,
               graph_root: Path | None = None,
               project_id: str = "") -> dict[str, ToolSpec]:
     v1 = v1_toolkit(build, state, substrate=substrate,
@@ -102,9 +104,72 @@ def build_kit(build: Build, state: AssistantState, *,
         return base["sample_values"](table, column, n)
 
     # ── run_sql: gates before, literal check + rows after ────
+    def _rows_as_dicts(data: dict[str, Any]) -> list[dict[str, Any]]:
+        rows = data.get("rows") or []
+        if rows and isinstance(rows[0], (list, tuple)):
+            names = data.get("columns") or [
+                c.get("name") for c in (data.get("schema") or [])
+                if isinstance(c, dict)]
+            rows = [dict(zip(names, r)) for r in rows]
+        return rows
+
+    def _run_live(sql: str, limit: int) -> dict[str, Any]:
+        """Rows from the warehouse under two limits the model cannot
+        lift: the scan ceiling (SAHS_LIVE_MAX_BYTES) and the row cap.
+        Default-deny stays (SAHS_ALLOW_LIVE=1 on the laptop); every
+        refusal comes back taught — cost is the model's to narrow,
+        access is configuration to report."""
+        import os
+        from sahs.util.auth import load_dotenv
+        load_dotenv()
+        limit = max(1, min(int(limit or 200), ROW_CAP))
+        verdict = validate_sql(build, sql)
+        if not verdict["ok"]:
+            return {"error": "sql_invalid",
+                    "hint": "each violation names its correction; fix "
+                            "and run again",
+                    "violations": verdict["violations"],
+                    "warnings": verdict["warnings"],
+                    "kind": "sql", "yours_to_fix": True}
+        sandboxed = execute_sandboxed(build, sql, mode="live",
+                                      limit=limit, substrate=substrate,
+                                      runner=runner)
+        meta = sandboxed.get("meta") or {}
+        if sandboxed["status"] != "ok":
+            taught = meta.get("taught") or {}
+            out = {"error": sandboxed.get("error") or "the sandbox "
+                                                     "refused",
+                   "hint": taught.get("hint")
+                   or "the sandbox's reason stands: run never "
+                      "bypasses the gates"}
+            out.update({k: v for k, v in taught.items()
+                        if k in ("kind", "yours_to_fix", "closest",
+                                 "fix_env")})
+            return out
+        data = sandboxed["data"] or {}
+        rows = _rows_as_dicts(data)[:limit]
+        ceiling = int(os.environ.get("SAHS_LIVE_MAX_BYTES",
+                                     DEFAULT_MAX_BYTES))
+        scanned = int(meta.get("bytes_scanned") or 0)
+        out = {"mode": "run", "rows": rows, "row_count": len(rows),
+               "result_schema": data.get("schema"),
+               "bytes_processed": scanned, "limit": limit,
+               "capped": len(rows) >= limit,
+               "scan_ceiling_bytes": ceiling,
+               "warnings": verdict["warnings"],
+               "note": f"{len(rows)} rows under LIMIT {limit}; scanned "
+                       f"{scanned:,} bytes of a {ceiling:,}-byte "
+                       "ceiling"}
+        if meta.get("sql_sent"):
+            out["sql_sent"] = meta["sql_sent"]
+        return out
+
     def run_sql(sql: str, mode: str = "dry_run",
                 limit: int = 200) -> dict[str, Any]:
-        result = base["run_sql"](sql, mode=mode, limit=limit)
+        if mode == "run":
+            result = _run_live(sql, limit)
+        else:
+            result = base["run_sql"](sql, mode=mode, limit=limit)
         if isinstance(result, dict):
             warnings = literal_warnings(build, sql)
             if warnings:
@@ -306,21 +371,25 @@ def build_kit(build: Build, state: AssistantState, *,
             name="run_sql", signature="run_sql(sql, mode?, limit?)",
             maps_to="the governed query",
             description=(
-                "Validate, then dry-run or run on the frozen snapshot "
-                "under the cost and ACL gates. Name tables as the "
-                "cards do (dw.table): the warehouse project and "
-                "location are added for you. Rows save as q<N> for "
-                "python and check. Errors teach: an unknown column "
-                "names the three closest real ones; an unobserved "
-                "literal comes back as a warning; a failed dry run "
-                "comes back classified — kind sql or cost is yours to "
-                "fix and retry, kind environment or access is "
-                "configuration to report to the user, never to retry "
-                "blindly."),
-            fn=run_sql, schema=_obj({
+                "Validate the query, then either price it (mode "
+                "dry_run, the default: shape and bytes, no rows) or "
+                "run it for rows (mode run) under two limits you "
+                "cannot lift: a scan ceiling in bytes and a row cap "
+                "(limit, default 200, at most 1000). Rows save as q<N> "
+                "for python and check. Name tables as the cards do "
+                "(dw.table): the warehouse project and location are "
+                "added for you. Refused for cost → narrow the scan (a "
+                "partition filter on the table's date column, fewer "
+                "columns) and run again; refused as disabled or "
+                "restricted → that is configuration: say so and stop. "
+                "Errors teach: an unknown column names the three "
+                "closest real ones; an unobserved literal comes back "
+                "as a warning."),
+            fn=run_sql, writes=False, schema=_obj({
                 "sql": _s("the query"),
-                "mode": _s("dry_run (default) | snapshot"),
-                "limit": _i("row cap, default 200")}, ["sql"])),
+                "mode": _s("dry_run (default) | run"),
+                "limit": _i("row cap for run, default 200, at most "
+                            "1000")}, ["sql"])),
         ToolSpec(
             name="python", signature="python(code)",
             maps_to="the analysis tool",
