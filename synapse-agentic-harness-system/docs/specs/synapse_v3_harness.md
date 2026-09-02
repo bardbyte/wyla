@@ -1,9 +1,11 @@
 # Synapse v3 — the thin harness, the Karpathy way
 
-Status: DESIGN DRAFT for iteration (2026-09-02). Applies the Gemini
-3.1 Pro harness research (Cherny / Model Spec / Karpathy) to Synapse.
-Nothing below is built yet. v2's tools, checks, artifacts, store,
-events, and evals stay; the turn loop and the surface change.
+Status: DESIGN, Stage 1 BUILT (2026-09-02). Applies the Gemini 3.1
+Pro harness research (Cherny / Model Spec / Karpathy) to Synapse.
+Stage 1 of §10 is in the tree (`sahs/assistant/{agent,loop,kit,
+hooks,state}.py`, the surface in `apps/lumi/frontend/js/pages/chat.js`);
+Stages 2–4 are not. v2's checks, artifacts, store, events, and evals
+stay; the turn loop, the kit, and the surface changed.
 
 ## 0 · What the two real transcripts proved
 
@@ -187,12 +189,21 @@ handoff, the eval suites.
 
 ## 10 · Build order
 
-1. **Transport + loop.** Interactions API with native function
-   calling and streaming; the 11-tool kit; whole results; hooks
-   named; the two visibility bugs fixed and the walk asserting
-   visibility. Scripted test transport emits parts. Threshold: the
-   GMNS and ALIF asks complete in one interaction against Vertex and
-   a real transcript reads clean.
+1. **Transport + loop — BUILT.** Native function calling and
+   streaming on the REST client (`VertexClient.converse`, thought
+   signatures echoed verbatim, `thinkingLevel` per turn); the
+   11-tool kit plus `suggest_next` (`kit.py`, schemas declared to
+   the transport, never pasted in the prompt); results back WHOLE
+   under a 20K-character cap with an explicit note; hooks named
+   (`hooks.py`, the literal check new); the prompt as sections
+   (`<identity> <chain> <graph> <skills> <memory> <session>`), the
+   conversation as messages, newest ask last; limits are a wall
+   clock, a 40-call ceiling, and a generous session breaker, each
+   ending the turn in plain language; the two visibility bugs fixed
+   (`[hidden] { display: none !important }`) and the walk asserting
+   visibility; the scripted test transport emits parts. Still owed
+   from the threshold: the GMNS and ALIF asks completing in one
+   interaction against Vertex — the laptop paste decides.
 2. **Context.** Cached prefix, compaction under pressure, delegate.
    Threshold: a 30-turn session survives; cache hits and cost per
    turn visible in Operate.
@@ -204,22 +215,27 @@ handoff, the eval suites.
    evals gating; per-turn metrics. Threshold: evals green on
    behavior and the real transcript feels right to us.
 
-## 11 · Open decisions
+## 11 · Decisions taken at "let's get started"
 
 1. Stage 1 transport: native function calling on our REST client
-   with client-managed history (recommended: smallest change, proven
-   auth path, portable) vs the Interactions API via the SDK now.
-2. Approve the tool consolidation and deletions in §2.
-3. Memory consent: silent save with inline undo (recommended) vs
-   ask first.
-4. Chips: keep model-authored, max three (recommended) vs drop.
-5. Depth dial default Standard (medium). The memory pass and the
-   judge run on the Pro model at thinking low until the org allows a
-   Flash model (§12): every Flash id is refused by the organization's
-   allowed-models constraint, not missing.
-6. Model id: the silo default is already `gemini-3.1-pro-preview`
-   (`sahs/util/auth.py`), overridable by `VERTEX_MODEL`; confirm the
-   laptop .env does not pin an older id.
+   with client-managed history (built). The Interactions API stays
+   a Stage 2 option.
+2. The tool consolidation and deletions in §2, as listed; `delegate`
+   waits for Stage 2. `suggest_next` is the twelfth declaration: a
+   model with no JSON wrapper needs a door for follow-ups, and
+   calling it after the answer ends the turn without another call.
+3. Memory: silent save with inline undo ("Remembered: … · undo" in
+   the transcript, the count on the memory button, retirable in the
+   panel). The memory page under the account block is Stage 4.
+4. Chips: model-authored, at most three.
+5. Depth dial default Standard (medium); Quick = low, Deep = high,
+   in the composer now, the router in Stage 3. The judge runs on
+   Pro at thinking low until the org allows a Flash model (§12).
+6. Model id: `gemini-3.1-pro-preview` by default (`sahs/util/auth.py`),
+   overridable by `VERTEX_MODEL`; confirm the laptop .env does not
+   pin an older id.
+7. Out of scope for now, by the user's word: jobs_30d mining and
+   cost priors.
 
 ## 12 · The laptop, measured (state report of 2026-09-02)
 

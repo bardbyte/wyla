@@ -89,6 +89,9 @@ class ToolSpec:
     fn: Callable[..., dict[str, Any]]
     writes: bool = False
     ends_turn: bool = False
+    # v3: the OpenAPI-subset parameter schema the native tool
+    # protocol declares (None = text-signature tools of the v1 loop)
+    schema: dict[str, Any] | None = None
 
 
 @dataclass
@@ -220,7 +223,13 @@ def _metric_in_lob(metric: dict[str, Any],
             return True
     families = set(metric.get("support_by_witness") or {}) \
         | set(metric.get("seen_by_witness") or [])
-    return bool(family) and family in families
+    if family and family in families:
+        return True
+    # the laptop's truth: only ~1% of metric rows carry an area, but
+    # the area's TABLES are mapped — so a metric on an area's table
+    # is that area's metric (area → tables → metrics)
+    return str(metric.get("table", "")) in set(lob_row.get("tables")
+                                                  or [])
 
 
 def _tier(row: dict[str, Any]) -> str:

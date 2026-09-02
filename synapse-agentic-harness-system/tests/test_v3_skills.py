@@ -1,13 +1,7 @@
-"""Synapse v2 §13.3 — skills on demand: the built-in doctrine packs,
-the two-shelf loader, and progressive disclosure through the loop.
-
-The headline test drives the whole idea end to end: the system prompt
-carries only names, the model calls load_skill, and the pack's full
-text is in its very next prompt — context injected by tool result,
-never by ambient magic. The E14 door is pinned too: user packs load
-immediately but wear ``unreviewed`` everywhere, and no user file can
-shadow a built-in name.
-"""
+"""Synapse v3 — skills: the built-in packs are real, bounded doctrine
+that names only tools the v3 kit has; both shelves merge with the
+built-in winning; the shelf is offered by name and a loaded pack
+reaches the model WHOLE as the tool's own result."""
 
 from __future__ import annotations
 
@@ -21,14 +15,20 @@ import pytest
 
 SILO = Path(__file__).resolve().parents[1]
 FX = SILO / "tests" / "fixtures"
+sys.path.insert(0, str(SILO))
 KEY = "You are Synapse, an analytical colleague"
-PACKS = ("analysis-playbooks", "dashboard-design",
-         "executive-summary", "lumi-data-connect")
+PACKS = ["lumi-data-connect", "analysis-playbooks",
+         "dashboard-design", "executive-summary"]
+GHOSTS = re.compile(
+    r"\b(check_\w+|verify_answer|subgraph|search_semantics|grep_cards|"
+    r"read_card|get_join_paths|get_definition_line|list_skills|"
+    r"list_metrics|plan_set|whatif|constellation|artifact_update|"
+    r"list_artifacts|ask_user|delegate_scout|resolve\()")
 
 
 @pytest.fixture(scope="module")
 def compiled(tmp_path_factory):
-    tmp = tmp_path_factory.mktemp("v2skills")
+    tmp = tmp_path_factory.mktemp("v3skills")
     graph_dir = tmp / "graph"
     result = subprocess.run(
         [sys.executable, str(SILO / "scripts" / "laptop.py"),
@@ -38,34 +38,14 @@ def compiled(tmp_path_factory):
          "--mdm-archive", str(FX / "mdm_46_patched_v2"),
          "--sources-dir", str(FX / "sources"),
          "--registry", str(FX / "sources" / "tables_registry.txt"),
-         "--out", str(tmp / "run"), "--plain", "--run-id", "v2s"],
+         "--out", str(tmp / "run"), "--plain", "--run-id", "v3s"],
         capture_output=True, text=True, cwd=SILO)
     assert result.returncode == 0, result.stderr[-800:]
-    sys.path.insert(0, str(SILO))
     from sahs.compiler.compile import compile_build
     from sahs.tools.api import Build
     _d, _m, failures = compile_build(graph_dir, tmp / "builds")
     assert not failures
     return Build.open(tmp / "builds"), tmp
-
-
-class Scripted:
-    def __init__(self, steps=()):
-        self.steps = list(steps)
-        self.prompts: list[str] = []
-        self.systems: list[str] = []
-
-    def json(self, prompt, *, system="", temperature=0.0,
-             max_tokens=1024):
-        if KEY in system:
-            self.prompts.append(prompt)
-            self.systems.append(system)
-            return self.steps.pop(0) if self.steps else None
-        return {}
-
-    def stream(self, prompt, *, system="", temperature=0.3,
-               max_tokens=1500):
-        yield ""
 
 
 def _runtime(compiled, model, tmp=None):
@@ -79,19 +59,19 @@ def _runtime(compiled, model, tmp=None):
 
 
 def _kit(compiled, tmp_path, graph_root=None):
+    from sahs.assistant.kit import build_kit
     from sahs.assistant.sandbox import prepare_workspace
+    from sahs.assistant.state import AssistantState
     from sahs.assistant.store import AssistantStore
-    from sahs.assistant.tools import AssistantState, assistant_toolkit
     build, _ = compiled
     store = AssistantStore(tmp_path / "s.sqlite3")
     session = store.create_session("assistant")
     state = AssistantState()
     workspace = tmp_path / "ws"
     prepare_workspace(workspace, build.root)
-    tools = assistant_toolkit(build, state, store=store,
-                              session_id=session["id"], turn_id="t1",
-                              workspace=workspace,
-                              graph_root=graph_root)
+    tools = build_kit(build, state, store=store,
+                      session_id=session["id"], turn_id="t1",
+                      workspace=workspace, graph_root=graph_root)
     return tools, state
 
 
@@ -110,8 +90,8 @@ def _user_shelf(tmp_path: Path) -> Path:
 # ─── the built-in packs are real, bounded doctrine ───────────
 
 
-def test_builtin_packs_are_real_and_bounded(compiled, tmp_path):
-    sys.path.insert(0, str(SILO))
+def test_builtin_packs_are_real_and_speak_the_v3_kit(compiled,
+                                                     tmp_path):
     from sahs.assistant.skills_loader import builtin_skills
     from sahs.loop.skills import MAX_SKILL_CHARS
     packs = {p.name: p for p in builtin_skills()}
@@ -123,13 +103,14 @@ def test_builtin_packs_are_real_and_bounded(compiled, tmp_path):
         assert len(pack.text) <= MAX_SKILL_CHARS
         assert "truncated" not in pack.text
         # doctrine names only tools that exist: a pack teaching a
-        # ghost tool would be worse than no pack at all
-        for name in re.findall(
-                r"\b(check_\w+|run_sql|sample_values|verify_answer|"
-                r"subgraph|resolve|search_semantics|grep_cards|"
-                r"read_card|get_join_paths|get_definition_line|"
-                r"load_skill|list_skills)\b", pack.text):
-            assert name in tools, f"{pack.name} teaches {name!r}"
+        # ghost tool (the v2 kit's names) is worse than no pack
+        ghosts = GHOSTS.findall(pack.text)
+        assert not ghosts, f"{pack.name} teaches {ghosts}"
+        for kind in re.findall(r"check\(kind=(\w+)", pack.text):
+            assert kind in ("part_whole", "crosscheck", "coverage",
+                            "fanout", "reconcile", "answer"), kind
+    assert "search" in packs["lumi-data-connect"].text
+    assert "kind=list" in packs["lumi-data-connect"].text
 
 
 def test_shelves_merge_and_builtin_wins(tmp_path):
@@ -137,7 +118,6 @@ def test_shelves_merge_and_builtin_wins(tmp_path):
     graph_root = _user_shelf(tmp_path)
     packs = {p.name: p for p in all_skills(graph_root)}
     assert packs["fiscal-notes"].origin == "unreviewed"
-    # the impostor never shadows the shipped doctrine
     assert packs["lumi-data-connect"].origin == "built-in"
     assert "Impostor" not in packs["lumi-data-connect"].text
     loaded, missing = load_packs(
@@ -147,26 +127,22 @@ def test_shelves_merge_and_builtin_wins(tmp_path):
     assert missing == ["ghost"]
 
 
-# ─── the tools: list cheaply, load whole, teach on a miss ────
+# ─── the tool: load whole, teach on a miss, record ───────────
 
 
-def test_list_and_load_skill_teach_and_record(compiled, tmp_path):
-    tools, state = _kit(compiled, tmp_path,
-                        graph_root=_user_shelf(tmp_path / "g"))
-    shelf = tools["list_skills"].fn()
-    assert shelf["count"] == 5
-    origins = {s["name"]: s["origin"] for s in shelf["skills"]}
-    assert origins["fiscal-notes"] == "unreviewed"
-
+def test_load_skill_teaches_and_records(compiled, tmp_path):
+    from sahs.assistant.skills_loader import all_skills
+    graph_root = _user_shelf(tmp_path / "g")
+    tools, state = _kit(compiled, tmp_path, graph_root=graph_root)
+    assert "list_skills" not in tools          # the shelf is in the prompt
+    assert len(all_skills(graph_root)) == 5
     got = tools["load_skill"].fn("lumi-data-connect")
     assert got["ok"] and got["origin"] == "built-in"
     assert "resolve first" in got["text"]
     assert state.skills_loaded == ["lumi-data-connect"]
-
     again = tools["load_skill"].fn("lumi-data-connect")
     assert again.get("note") and "already loaded" in again["note"]
     assert state.skills_loaded == ["lumi-data-connect"]
-
     miss = tools["load_skill"].fn("ghost")
     assert "no skill named" in miss["error"]
     assert "fiscal-notes (unreviewed)" in miss["hint"]
@@ -175,32 +151,39 @@ def test_list_and_load_skill_teach_and_record(compiled, tmp_path):
 # ─── progressive disclosure through the real loop ────────────
 
 
-def test_loaded_pack_reaches_the_next_prompt(compiled, tmp_path):
-    model = Scripted([
-        {"think": "a why-question: load the playbooks",
-         "tool": "load_skill", "args": {"name": "analysis-playbooks"}},
-        {"say": "Splitting rate from mix next.", "done": True,
-         "chips": ["Run the decomposition"]},
+def test_loaded_pack_reaches_the_model_whole(compiled, tmp_path):
+    from sahs.assistant.agent import ScriptedAgent
+    model = ScriptedAgent([
+        [{"thought": "A why-question: load the playbooks first."},
+         {"call": {"name": "load_skill",
+                   "args": {"name": "analysis-playbooks"}}}],
+        [{"text": "Splitting rate from mix next."},
+         {"call": {"name": "suggest_next",
+                   "args": {"options": ["Run the decomposition"]}}}],
     ])
     runtime = _runtime(compiled, model, tmp_path)
     session = runtime.create_session()
     runtime.start_turn(session["id"], "Why did spend change?")
     assert runtime.wait(session["id"], 60)
     events = runtime.runtime(session["id"]).bus.since(0)
-
-    # names-only in the system prompt: the shelf is offered, the
-    # doctrine is not
-    system = model.systems[0]
+    system = model.calls[0]["system"]
     assert "## Skills on demand" in system
     assert "analysis-playbooks" in system
-    assert "rate vs mix" not in system
-    # after load_skill, the model's next prompt carries the pack
-    # whole — the tool result IS the injection
-    assert "rate vs mix" in model.prompts[-1]
-    assert "doctrine now applies" in model.prompts[-1]
+    assert "rate vs mix" not in system          # names only
+    # after load_skill the pack reaches the model WHOLE, as the
+    # tool's own response — nothing compacted it to three lines
+    response = next(
+        p["functionResponse"]["response"]
+        for c in model.calls[-1]["contents"]
+        for p in c["parts"] if "functionResponse" in p)
+    assert response["name"] == "analysis-playbooks"
+    assert "rate vs mix" in response["text"]
+    assert "check(kind=part_whole" in response["text"]
     done = [e for e in events if e["ev"] == "turn_done"][-1]
     assert done["skills_loaded"] == ["analysis-playbooks"]
     assert done["status"] == "answered"
+    step = [e for e in events if e["ev"] == "tool_step"][0]
+    assert step["summary"] == "skill analysis-playbooks loaded"
 
 
 def test_preloaded_skill_leaves_the_shelf_index(compiled):
@@ -208,28 +191,29 @@ def test_preloaded_skill_leaves_the_shelf_index(compiled):
     from sahs.assistant.skills_loader import all_skills
     build, _ = compiled
     index = all_skills(None)
-    offered = system_prompt(build, [], "", skill_index=index)
+    offered = system_prompt(build, [], skill_index=index)
     preloaded = system_prompt(
-        build, [p for p in index if p.name == "lumi-data-connect"], "",
+        build, [p for p in index if p.name == "lumi-data-connect"],
         skill_index=index)
     assert "- lumi-data-connect" in offered
-    assert "- lumi-data-connect" not in preloaded     # already in full
-    assert "resolve first" in preloaded          # …as loaded text
-    # no shelf, no skills → the §13.1 prompt, byte-identical
-    assert system_prompt(build, [], "") \
-        == system_prompt(build, None, "", skill_index=[])
+    assert "- lumi-data-connect" not in preloaded
+    assert "resolve first" in preloaded
+    assert system_prompt(build, []) \
+        == system_prompt(build, None, skill_index=[])
 
 
-# ─── the runtime serves both shelves to the picker ───────────
+# ─── the runtime serves both shelves to the Skills page ──────
 
 
 def test_runtime_serves_both_shelves(compiled, tmp_path):
-    runtime = _runtime(compiled, Scripted(), tmp_path)
+    from sahs.assistant.agent import ScriptedAgent
+    runtime = _runtime(compiled, ScriptedAgent(), tmp_path)
     _user_shelf(tmp_path)
     rows = {r["name"]: r for r in runtime.skills()}
     assert set(PACKS) <= set(rows)
     assert rows["executive-summary"]["origin"] == "built-in"
     assert rows["fiscal-notes"]["origin"] == "unreviewed"
+    assert rows["lumi-data-connect"]["text"]
     session = runtime.create_session()
     saved = runtime.set_skills(session["id"],
                                ["executive-summary", "fiscal-notes"])

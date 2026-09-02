@@ -1,13 +1,15 @@
-"""The assistant runtime (Synapse v2): sessions, buses, budgets, and
+"""The assistant runtime (Synapse v3): sessions, buses, budgets, and
 the worker thread that carries one turn — the ask runtime's shape,
-reused for the v2 surface. One turn per session at a time; the model
-is built at first use (an unconfigured machine gets an honest error
-event, never a 500); the stop button and the breaker share one abort
-path.
+reused for the chat surface. One turn per session at a time; the
+model is built at first use (an unconfigured machine gets an honest
+error event, never a 500); the stop button and the breaker share one
+abort path. Budgets are generous and visible (§5): a wall clock and
+a call ceiling in the loop, a session token ceiling here.
 """
 
 from __future__ import annotations
 
+import os
 import threading
 import traceback
 import uuid
@@ -20,9 +22,18 @@ from sahs.ask.runtime import BuildUnavailable, LazyModel, TurnBusy
 from sahs.tools.api import Build
 
 from .events import ASSISTANT_EVENTS, EventBus
-from .loop import run_assistant_turn
+from .loop import (DEFAULT_THINKING, MAX_CALLS, THINKING_LEVELS,
+                   run_assistant_turn)
 from .skills_loader import load_packs
 from .store import AssistantStore
+
+# §5: generous, visible. The loop's own ceilings (MAX_CALLS, the wall
+# clock) end a turn in plain language; the session ceiling is the
+# breaker behind them. A native-tool turn re-sends its whole context
+# on every call, so the turn cap must hold forty calls of a long
+# context, not twelve of a short one.
+CHAT_BUDGET = {"session_tokens": 6_000_000, "session_calls": 800,
+               "turn_tokens": 2_500_000, "turn_calls": MAX_CALLS + 20}
 
 
 class _SessionRuntime:
@@ -30,7 +41,7 @@ class _SessionRuntime:
         path = (events_dir / f"{session_id}.jsonl") if events_dir else None
         self.bus = EventBus(session_id, path,
                             events=ASSISTANT_EVENTS)
-        self.budget = Budget()
+        self.budget = Budget(**CHAT_BUDGET)
         self.abort = Abort()
         self.thread: threading.Thread | None = None
         self.current_turn: str = ""
@@ -44,8 +55,13 @@ class AssistantRuntime:
     def __init__(self, *, builds_root: Path, graph_root: Path,
                  store_path: Path, events_dir: Path | None = None,
                  model_factory: Callable[[Budget], Any] | None = None,
-                 snapshot_runner: Any = None) -> None:
+                 snapshot_runner: Any = None,
+                 user_name: str | None = None) -> None:
         self.builds_root = Path(builds_root)
+        # memory is bound to the person (§7): the name rides into the
+        # prompt's memory section; LUMI_USER_NAME sets it on a laptop
+        self.user_name = (user_name if user_name is not None
+                          else os.environ.get("LUMI_USER_NAME", "")).strip()
         self.graph_root = Path(graph_root)
         self.events_dir = Path(events_dir) if events_dir else None
         if self.events_dir:
@@ -74,8 +90,8 @@ class AssistantRuntime:
     def model_for(self, budget: Budget) -> Any:
         if self._model_factory is not None:
             return self._model_factory(budget)
-        from sahs.ask.model import VertexModel   # env-bound, late
-        return VertexModel.from_env(budget)
+        from .agent import VertexAgent           # env-bound, late
+        return VertexAgent.from_env(budget)
 
     def workspace(self, session_id: str) -> Path:
         return (self.graph_root / "runs" / "chat" / "workspaces"
@@ -158,7 +174,19 @@ class AssistantRuntime:
         return {"ok": True, "skills": [p.name for p in loaded]}
 
     # ── turns ────────────────────────────────────────────────
-    def start_turn(self, session_id: str, text: str) -> dict:
+    @staticmethod
+    def thinking_level(depth: str = "") -> str:
+        """The depth dial (§5): quick / standard / deep, or a raw
+        level; anything else is Standard."""
+        key = (depth or "").strip().lower()
+        if key in THINKING_LEVELS:
+            return THINKING_LEVELS[key]
+        if key in THINKING_LEVELS.values():
+            return key
+        return DEFAULT_THINKING
+
+    def start_turn(self, session_id: str, text: str,
+                   depth: str = "") -> dict:
         session = self.store.get_session(session_id)
         if session is None:
             raise KeyError(session_id)
@@ -183,6 +211,7 @@ class AssistantRuntime:
         loaded, _missing = load_packs(self.graph_root, names)
         memories = self.store.list_memories(
             project_id=(project or {}).get("id", ""))
+        level = self.thinking_level(depth)
 
         def worker() -> None:
             try:
@@ -193,10 +222,13 @@ class AssistantRuntime:
                     workspace=self.workspace(session_id),
                     skills=loaded, graph_root=self.graph_root,
                     memories=memories, project=project,
-                    snapshot_runner=self.snapshot_runner)
+                    snapshot_runner=self.snapshot_runner,
+                    thinking_level=level, user_name=self.user_name)
             except ModelUnavailable as e:
                 rt.bus.emit("error", turn_id=turn_id,
-                            code="model_unavailable", message=str(e),
+                            code="model_unavailable",
+                            message="I could not reach the model: "
+                                    + str(e),
                             retryable=False,
                             next_actions=[
                                 "check the Vertex contract in the "
@@ -206,7 +238,8 @@ class AssistantRuntime:
                             status="error", **rt.budget.tick())
             except Exception as e:       # never a silent dead turn
                 rt.bus.emit("error", turn_id=turn_id, code="internal",
-                            message=f"{type(e).__name__}: {e}",
+                            message="Something broke on my side: "
+                                    f"{type(e).__name__}: {e}",
                             retryable=True,
                             next_actions=["ask again"])
                 rt.bus.emit("error", turn_id=turn_id, code="trace",

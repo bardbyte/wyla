@@ -17,6 +17,8 @@ from sahs.ask.events import EventBus, now_iso, sse_frame  # noqa: F401
 ASSISTANT_EVENTS: tuple[str, ...] = (
     "turn_started",
     "model_prompt",       # what the model saw: system once, then steps
+    "thinking",           # a thought summary delta, the model's own
+    "tool_call",          # a call announced, before it runs
     "tool_step",          # one look: tool, args, the compact summary
     "tool_result",        # the full result behind the summary
     "say_token",          # streamed assistant prose

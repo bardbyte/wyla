@@ -175,19 +175,38 @@ Commit after each phase (each runbook has the exact `git add` line).
 - `--plain` for log-friendly output, `--json` for a machine summary on
   stdout; the full event stream is always in `<out>/events.jsonl`.
 
-## Synapse v2 chat (the assistant) — after main is pulled
+## Synapse v3 chat (the assistant) — after main is pulled
 
 ```bash
 pip install -e ".[sql,dev,assistant]"   # assistant adds python-pptx + numpy
 uvicorn apps.lumi.backend.app:app --port 8400   # from the repo root
 # → open http://127.0.0.1:8400/#/chat  (New ask in the nav)
 
-# the assistant baseline (the number this epoch is missing):
+# the two asks that decide Stage 1 (docs/specs/synapse_v3_harness.md §10):
+#   "give me all GMNS metrics"     — one interaction, the area's metrics
+#   the ALIF ask with SQL in it    — a long answer that survives whole
+# then PASTE the transcript back: the chat page as you see it, plus
+#   graph/runs/chat/events/<session>.jsonl   (the record, whole)
+
+# the assistant baseline:
 python scripts/chat_eval.py --real              # Vertex creds in the silo .env
 # → PASTE docs/evals/assistant_baseline_vertex.md back into the session
 # short/cheap variants: --limit 4 · --kind playbook · --no-judge
 ```
 
+What changed in v3 (Stage 1): one interaction per turn over native
+tool calls — no strict JSON, no per-step token cap, no step cap; tool
+results reach the model whole; the depth dial in the composer
+(Quick / Standard / Deep = thinking low / medium / high); one live
+line that speaks the model's own thought summaries and collapses to
+"Worked for 12s · searched the graph, read the cards"; the artifact
+panel opens only when the model puts something in it; a memory save
+is disclosed inline with an undo. Set `LUMI_USER_NAME` in the silo
+`.env` so memory addresses the person by name.
+
 The chat stores its sessions under `graph/runs/chat/`; artifacts,
-memory, and projects live in `sessions.sqlite3` there. PPTX export
-needs the `assistant` extra — the route says so if it is missing.
+memory, and projects live in `sessions.sqlite3` there; the full
+per-turn record (what the model saw, every tool result) is the
+events file beside it — the chat itself shows none of that. PPTX
+export needs the `assistant` extra — the route says so if it is
+missing.

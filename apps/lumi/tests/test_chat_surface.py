@@ -1,4 +1,4 @@
-"""Synapse v2 §10 — the chat surface is wired to the assistant loop.
+"""Synapse v3 §6 — the conversational surface is wired to the loop.
 
 The frontend has no build step, so these are the missing compiler:
 every event the assistant emits must reach an arm on the page, every
@@ -89,6 +89,15 @@ def test_the_claude_shape_is_present():
     for cls in (".chatv2", ".chat-panel", ".chat-row",
                 ".chats-search", ".chartv2", ".artifact-footer"):
         assert cls in CSS, cls
+    # the artifact panel is model-invoked: it opens on an artifact
+    # event in this interaction, never on reopening an old chat — a
+    # card in the transcript reopens it
+    assert "openArtifact(boot.artifacts" not in CHAT_JS
+    assert "if (live) openArtifact(row.artifact_id);" in CHAT_JS
+    assert "artifactCard(turn.extras, event, true)" in CHAT_JS
+    assert "artifactCard(div.querySelector(\".chat-extras\")" in CHAT_JS
+    # chips: at most three, model-authored
+    assert ".slice(0, 3)" in CHAT_JS
 
 
 def test_the_organization_is_present():
@@ -106,20 +115,36 @@ def test_the_organization_is_present():
         assert piece in CHAT_JS, piece
     for cls in (".memory-row", ".handoff-note", ".row-btn"):
         assert cls in CSS, cls
-    # memory is disclosed and retirable, never silently gone
+    # memory is disclosed and retirable, never silently gone — and a
+    # save is disclosed inline with an undo the moment it happens
     assert "retire" in BACKEND and "retire_memory" in BACKEND
+    assert "memoryNote" in CHAT_JS and "Remembered:" in CHAT_JS
+    assert ".memory-note" in CSS
 
 
 def test_thinking_is_alive_and_skills_are_browsable():
-    # the thinking line: animated, narrated from think/tool events,
-    # collapsed into a worked-summary when the turn lands
+    # one live line: the model's own thought summaries and a friendly
+    # verb per call, replaced in place, collapsed into "Worked for …"
+    # when the turn lands — verbs deduplicated, no tool names
     for piece in ("thinking-line", "think-orb", "showThinking",
-                  "doneThinking", "friendly", "VERBS",
-                  "Worked through"):
+                  "doneThinking", "friendly", "VERBS", "PAST",
+                  "Worked for", 'case "thinking"', 'case "tool_call"',
+                  "lastLine", "new Set(turn.verbs)"):
         assert piece in CHAT_JS, piece
     for cls in (".thinking-line", "@keyframes think-orb",
                 "@keyframes think-shimmer", "prefers-reduced-motion"):
         assert cls in CSS, cls
+    # the hidden attribute always wins — the bug the real transcript
+    # exposed was display:flex outranking [hidden]
+    assert "[hidden] { display: none !important; }" in CSS
+    # the thinking line never returns after the turn landed
+    assert "if (turn.done) return;" in CHAT_JS
+    # no harness words in the user's language
+    for gone in ("what the model saw", "saw-toggle", "saw-panel",
+                 "strict JSON", "Worked through"):
+        assert gone not in CHAT_JS, gone
+    # the depth dial rides on every send
+    assert "chat-depth" in CHAT_JS and "depth" in BACKEND
     # no picker anywhere: the agent loads packs itself; people browse
     # the shelf on the Skills tab
     assert "chat-skills-btn" not in CHAT_JS

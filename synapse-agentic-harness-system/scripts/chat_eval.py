@@ -13,7 +13,7 @@ per-task rows (an aggregate without its rows is a mood).
 
 There is no scripted baseline on purpose: the suites measure the
 model's judgement, and a scripted assistant would grade the script.
-The harness math is pinned by tests/test_v2_evals.py instead.
+The harness math is pinned by tests/test_v3_evals.py instead.
 Without --real this prints the task list and exits — an honest
 nothing rather than a pretend number.
 
@@ -73,12 +73,13 @@ def main(argv: list[str] | None = None) -> int:
     load_dotenv(SILO / ".env")
     from sahs.ask.budget import Budget
     from sahs.ask.model import VertexModel
+    from sahs.assistant.agent import VertexAgent
     builds_root = Path(args.builds) if args.builds \
         else SILO / "graph" / "builds"
     build = Build.open(builds_root)
 
     def model_factory(budget: Budget):
-        return VertexModel.from_env(budget)
+        return VertexAgent.from_env(budget)
 
     judge = None
     if not args.no_judge:

@@ -30,7 +30,8 @@ def _tier(row: dict[str, Any]) -> str:
     return "candidate"
 
 
-def synapse_digest(build: Build) -> str:
+def synapse_digest(build: Build,
+                   list_hint: str = 'list_metrics("GMNS")') -> str:
     lines: list[str] = [f"# SYNAPSE.md · build {build.version}", ""]
 
     # ── the shelf ────────────────────────────────────────────
@@ -51,7 +52,7 @@ def synapse_digest(build: Build) -> str:
         lines.append("## the business map")
         lines.append("Business words name these areas, never "
                      "tables. \"All GMNS metrics\" means "
-                     "list_metrics(\"GMNS\").")
+                     + list_hint + ".")
         for row in lob_rows:
             members = sum(1 for m in build.metrics
                           if _metric_in_lob(m, row))

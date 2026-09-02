@@ -1,15 +1,10 @@
-"""Synapse v2 §13.4 — dashboards with per-tile disclosure, diagrams,
-and the magic pair (whatif / compare) plus constellation.
-
-The dashboard rules are rule 1 applied per TILE: an undisclosed panel
-is refused by name, a composed tile keeps its own watermark, and the
-dashboard wears one whenever any tile does. Filters are declared in
-schema and re-run through the conversation — whatif is the tool a
-filter pick lands on, never a hidden query path.
-"""
+"""Synapse v3 — dashboards, kpis, diagrams (the artifact validator),
+the literal hook on run_sql, and a dashboard through the real loop
+with native tool calls."""
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -19,12 +14,13 @@ import pytest
 
 SILO = Path(__file__).resolve().parents[1]
 FX = SILO / "tests" / "fixtures"
+sys.path.insert(0, str(SILO))
 KEY = "You are Synapse, an analytical colleague"
 
 
 @pytest.fixture(scope="module")
 def compiled(tmp_path_factory):
-    tmp = tmp_path_factory.mktemp("v2dash")
+    tmp = tmp_path_factory.mktemp("v3dash")
     graph_dir = tmp / "graph"
     result = subprocess.run(
         [sys.executable, str(SILO / "scripts" / "laptop.py"),
@@ -34,10 +30,9 @@ def compiled(tmp_path_factory):
          "--mdm-archive", str(FX / "mdm_46_patched_v2"),
          "--sources-dir", str(FX / "sources"),
          "--registry", str(FX / "sources" / "tables_registry.txt"),
-         "--out", str(tmp / "run"), "--plain", "--run-id", "v2d"],
+         "--out", str(tmp / "run"), "--plain", "--run-id", "v3d"],
         capture_output=True, text=True, cwd=SILO)
     assert result.returncode == 0, result.stderr[-800:]
-    sys.path.insert(0, str(SILO))
     from sahs.compiler.compile import compile_build
     from sahs.tools.api import Build
     _d, _m, failures = compile_build(graph_dir, tmp / "builds")
@@ -51,44 +46,28 @@ def _certified(build):
                 == "certified")
 
 
-class Scripted:
-    def __init__(self, steps=()):
-        self.steps = list(steps)
-        self.prompts: list[str] = []
-
-    def json(self, prompt, *, system="", temperature=0.0,
-             max_tokens=1024):
-        if KEY in system:
-            self.prompts.append(prompt)
-            return self.steps.pop(0) if self.steps else None
-        return {}
-
-    def stream(self, prompt, *, system="", temperature=0.3,
-               max_tokens=1500):
-        yield ""
-
-
 class Extract:
     name = "frozen_extract"
 
     def run(self, sql, limit):
-        return {"rows": [{"country": "CA", "spend": 7.0}],
-                "schema": [{"name": "country", "type": "string"}]}
+        return {"rows": [{"country_cd": "CA", "spend": 7.0}],
+                "schema": [{"name": "country_cd", "type": "string"}]}
 
 
 def _kit(compiled, tmp_path, **kw):
+    from sahs.assistant.kit import build_kit
     from sahs.assistant.sandbox import prepare_workspace
+    from sahs.assistant.state import AssistantState
     from sahs.assistant.store import AssistantStore
-    from sahs.assistant.tools import AssistantState, assistant_toolkit
     build, _ = compiled
     store = AssistantStore(tmp_path / "s.sqlite3")
     session = store.create_session("assistant")
     state = AssistantState()
     workspace = tmp_path / "ws"
     prepare_workspace(workspace, build.root)
-    tools = assistant_toolkit(build, state, store=store,
-                              session_id=session["id"], turn_id="t1",
-                              workspace=workspace, **kw)
+    tools = build_kit(build, state, store=store,
+                      session_id=session["id"], turn_id="t1",
+                      workspace=workspace, **kw)
     return tools, state, store, session["id"], workspace
 
 
@@ -100,7 +79,6 @@ PROV = {"status": "composed",
 
 
 def test_dashboard_refuses_undisclosed_tiles_by_name(compiled):
-    sys.path.insert(0, str(SILO))
     from sahs.assistant.artifacts import validate_artifact
     build, _ = compiled
     spec = {"panels": [
@@ -114,7 +92,7 @@ def test_dashboard_refuses_undisclosed_tiles_by_name(compiled):
                                              build=build)
     assert normalized is None
     details = " | ".join(p["detail"] for p in problems)
-    assert "panels[1] (chart)" in details      # the tile is named
+    assert "panels[1] (chart)" in details
     assert any(p["code"] == "panel_type" for p in problems)
 
 
@@ -138,11 +116,10 @@ def test_dashboard_watermarks_follow_the_tiles(compiled):
                                              build=build)
     assert problems == []
     tiles = normalized["panels"]
-    assert "watermark" not in tiles[0]["spec"]           # certified
+    assert "watermark" not in tiles[0]["spec"]
     assert tiles[1]["spec"]["watermark"] == "EXPLORATORY"
-    assert normalized["watermark"] == "EXPLORATORY"      # inherited
-    assert normalized["filters"][0]["active"] == "US"    # defaulted
-    # a cited passing fact sheds the tile AND the dashboard mark
+    assert normalized["watermark"] == "EXPLORATORY"
+    assert normalized["filters"][0]["active"] == "US"
     spec["panels"][1]["spec"]["provenance"]["facts"] = ["f1"]
     normalized, problems = validate_artifact(
         "dashboard", spec, build=build, facts=frozenset({"f1"}))
@@ -188,10 +165,58 @@ def test_kpi_is_a_first_class_artifact(compiled):
     assert problems == [] and good["delta"] == -0.4
 
 
-# ─── the magic pair ──────────────────────────────────────────
+# ─── the artifact door: spec_json, versions, subgraph diagrams ─
 
 
-def test_whatif_changes_one_slot(compiled, tmp_path, monkeypatch):
+def test_artifact_spec_json_teaches_and_versions(compiled, tmp_path):
+    build, _ = compiled
+    tools, state, store, sid, _ws = _kit(compiled, tmp_path)
+    bad = tools["artifact"].fn("chart", "Broken", "{not json")
+    assert "not valid JSON" in bad["error"]
+    certified = _certified(build)
+    spec = {"kind": "bar", "series": [{"name": "n",
+                                       "points": [["a", 1.0]]}],
+            "provenance": {"status": "certified",
+                           "metric_id": certified["id"],
+                           "meridian_line": "Certified."}}
+    first = tools["artifact"].fn("chart", "Counts", json.dumps(spec))
+    assert first["ok"] and first["version"] == 1
+    ghost = tools["artifact"].fn("chart", "", json.dumps(spec),
+                                 artifact_id="a_ghost")
+    assert "no artifact" in ghost["error"]
+    assert first["artifact_id"] in ghost["hint"]
+    second = tools["artifact"].fn("chart", "", json.dumps(spec),
+                                  artifact_id=first["artifact_id"])
+    assert second["version"] == 2
+    assert store.get_artifact(first["artifact_id"])["type"] == "chart"
+
+
+def test_diagram_from_the_subgraph_lands_an_artifact(compiled,
+                                                     tmp_path):
+    build, _ = compiled
+    tools, state, store, sid, _ws = _kit(compiled, tmp_path)
+    certified = _certified(build)
+    got = tools["artifact"].fn(
+        "diagram", "What this chat used",
+        json.dumps({"from_subgraph": [certified["id"]],
+                    "caption": "the receipts"}))
+    assert got.get("ok"), got
+    row = store.get_artifact(got["artifact_id"])
+    assert row["type"] == "diagram"
+    assert row["spec"]["kind"] == "graph"
+    assert row["spec"].get("caption") == "the receipts"
+    kinds = {n["kind"] for n in row["spec"]["nodes"]}
+    assert "metric" in kinds and "table" in kinds
+    assert any(e["rel"] == "bound_to" for e in row["spec"]["edges"])
+    assert got["artifact_id"] in state.artifacts_touched
+
+
+# ─── the literal hook: deterministic, no prose rule needed ───
+
+
+def test_run_sql_warns_on_unobserved_literals(compiled, tmp_path,
+                                              monkeypatch):
+    from sahs.assistant.hooks import literal_warnings
     from sahs.evals.substrate import DryRunOutcome
 
     class NoWarehouse:
@@ -200,54 +225,29 @@ def test_whatif_changes_one_slot(compiled, tmp_path, monkeypatch):
 
     import sahs.evals.substrate as substrate_module
     monkeypatch.setattr(substrate_module, "BQDryRun", NoWarehouse)
-    tools, state, _store, _sid, ws = _kit(
-        compiled, tmp_path, snapshot_runner=Extract())
-    sql = ("SELECT country_cd, sum(trans_usd_am) AS spend FROM "
-           "dw.gms_transaction WHERE country_cd = 'US' "
-           "GROUP BY country_cd")
-    miss = tools["whatif"].fn(sql, "'GB'", "'CA'")
-    assert "does not appear" in miss["error"]
-    got = tools["whatif"].fn(sql, "'US'", "'CA'")
-    assert got.get("saved_as") == "q1"
-    assert "'CA'" in got["sql"] and "'US'" not in got["sql"]
-    assert got["changed"]["occurrences"] == 1
-    assert (ws / "q1.json").exists()
-
-
-def test_compare_aligns_two_results(compiled, tmp_path):
-    from sahs.assistant.sandbox import save_rows
-    tools, _state, _store, _sid, ws = _kit(compiled, tmp_path)
-    missing = tools["compare"].fn("q1", "q2")
-    assert "no saved result" in missing["error"]
-    save_rows(ws, "q1", [{"country": "CA", "spend": 40.0},
-                         {"country": "US", "spend": 60.0}])
-    save_rows(ws, "q2", [{"country": "CA", "spend": 44.0},
-                         {"country": "MX", "spend": 5.0}])
-    got = tools["compare"].fn("q1", "q2", labels=["july", "august"])
-    assert got["aligned_on"] == ["country"]
-    ca = next(r for r in got["frame"] if r["country"] == "CA")
-    assert ca["july"] == 40.0 and ca["august"] == 44.0
-    assert ca["delta"] == 4.0 and ca["pct"] == 0.1
-    assert got["only_in_a"] == 1 and got["only_in_b"] == 1
-    assert got["totals"]["delta"] == -51.0
-    assert "check_crosscheck" in got["hint"]     # aligns ≠ verifies
-
-
-def test_constellation_lands_a_diagram_artifact(compiled, tmp_path):
     build, _ = compiled
-    tools, state, store, sid, _ws = _kit(compiled, tmp_path)
-    empty = tools["constellation"].fn()
-    assert "nothing to draw" in empty["error"]
-    certified = _certified(build)
-    got = tools["constellation"].fn(ids=[certified["id"]])
-    assert got.get("ok"), got
-    row = store.get_artifact(got["artifact_id"])
-    assert row["type"] == "diagram"
-    assert row["spec"]["kind"] == "graph"
-    kinds = {n["kind"] for n in row["spec"]["nodes"]}
-    assert "metric" in kinds and "table" in kinds
-    assert any(e["rel"] == "bound_to" for e in row["spec"]["edges"])
-    assert got["artifact_id"] in state.artifacts_touched
+    tools, _state, _store, _sid, _ws = _kit(compiled, tmp_path)
+    observed = tools["sample_values"].fn("gms_transaction",
+                                         "country_cd").get("values")
+    if not observed:
+        pytest.skip("the fixture records no domain for country_cd")
+    real = observed[0]["value"] if isinstance(observed[0], dict) \
+        else observed[0]
+    base = ("SELECT country_cd, sum(trans_usd_am) AS spend FROM "
+            "dw.gms_transaction WHERE country_cd = '{}' "
+            "GROUP BY country_cd")
+    assert literal_warnings(build, base.format(real)) == []
+    warned = literal_warnings(build, base.format("ZZ"))
+    assert len(warned) == 1
+    assert "'ZZ' is not among" in warned[0]
+    assert "country_cd" in warned[0] and "closest" in warned[0]
+    # no domain on record → no opinion
+    assert literal_warnings(
+        build, "SELECT 1 FROM dw.gms_transaction WHERE "
+               "no_such_column = 'x'") == []
+    # and the warning rides on the run_sql result the model sees
+    got = tools["run_sql"].fn(base.format("ZZ"), mode="dry_run")
+    assert any("'ZZ'" in w for w in got.get("warnings", [])), got
 
 
 # ─── the dashboard through the real loop ─────────────────────
@@ -255,31 +255,32 @@ def test_constellation_lands_a_diagram_artifact(compiled, tmp_path):
 
 def test_dashboard_turn_through_the_loop(compiled, tmp_path):
     from sahs.assistant import AssistantRuntime
+    from sahs.assistant.agent import ScriptedAgent
     build, _ = compiled
     certified = _certified(build)
-    model = Scripted([
-        {"think": "assemble the dashboard",
-         "tool": "artifact",
-         "args": {"type": "dashboard", "title": "Q2 spend",
-                  "spec": {"panels": [
-                      {"type": "kpi", "title": "Net spend", "spec": {
-                          "value": 812.0, "unit": "USD",
-                          "provenance": {
-                              "status": "certified",
-                              "metric_id": certified["id"],
-                              "meridian_line": "Certified spend."}}},
-                      {"type": "chart", "title": "By country",
-                       "spec": {"kind": "bar", "series": [
-                           {"name": "spend",
-                            "points": [["CA", 300.0],
-                                       ["US", 512.0]]}],
-                           "provenance": dict(PROV)}}],
-                      "filters": [{"slot": "period",
-                                   "options": ["Q1", "Q2"],
-                                   "active": "Q2"}]}}},
-        {"say": "The Q2 dashboard is in the panel; the country "
-                "split is composed and watermarked until checked.",
-         "done": True, "chips": ["Check the country split"]},
+    spec = {"panels": [
+        {"type": "kpi", "title": "Net spend", "spec": {
+            "value": 812.0, "unit": "USD",
+            "provenance": {"status": "certified",
+                           "metric_id": certified["id"],
+                           "meridian_line": "Certified spend."}}},
+        {"type": "chart", "title": "By country",
+         "spec": {"kind": "bar", "series": [
+             {"name": "spend", "points": [["CA", 300.0],
+                                          ["US", 512.0]]}],
+             "provenance": dict(PROV)}}],
+        "filters": [{"slot": "period", "options": ["Q1", "Q2"],
+                     "active": "Q2"}]}
+    model = ScriptedAgent([
+        [{"thought": "Assemble the dashboard: one certified tile, "
+                     "one composed split."},
+         {"call": {"name": "artifact",
+                   "args": {"type": "dashboard", "title": "Q2 spend",
+                            "spec_json": json.dumps(spec)}}}],
+        [{"text": "The Q2 dashboard is in the panel; the country "
+                  "split is composed and watermarked until checked."},
+         {"call": {"name": "suggest_next",
+                   "args": {"options": ["Check the country split"]}}}],
     ])
     tmp = Path(tempfile.mkdtemp())
     runtime = AssistantRuntime(builds_root=build.root.parent,
@@ -292,9 +293,10 @@ def test_dashboard_turn_through_the_loop(compiled, tmp_path):
     events = runtime.runtime(session["id"]).bus.since(0)
     landed = [e for e in events if e["ev"] == "artifact"]
     assert len(landed) == 1 and landed[0]["type"] == "dashboard"
-    spec = landed[0]["spec"]
-    assert len(spec["panels"]) == 2
-    assert spec["watermark"] == "EXPLORATORY"    # the composed tile
-    assert spec["filters"][0]["active"] == "Q2"
+    got = landed[0]["spec"]
+    assert len(got["panels"]) == 2
+    assert got["watermark"] == "EXPLORATORY"
+    assert got["filters"][0]["active"] == "Q2"
     done = [e for e in events if e["ev"] == "turn_done"][-1]
     assert done["status"] == "answered"
+    assert [e["ev"] for e in events if e["ev"] == "chips"] == ["chips"]
