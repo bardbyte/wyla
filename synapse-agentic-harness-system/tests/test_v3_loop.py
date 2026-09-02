@@ -225,6 +225,7 @@ def test_the_prompt_is_sections_not_protocol(compiled):
     assert "the business map" in system
     assert 'search("GMNS", kind="list")' in system
     assert "list_metrics" not in system         # the v1 kit's word
+    assert "A failed tool call is information" in system
     for gone in ("STRICT JSON", "Next step:", "BUDGET:", '"think"',
                  "Your tools:"):
         assert gone not in system, gone

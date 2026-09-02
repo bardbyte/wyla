@@ -312,7 +312,11 @@ def build_kit(build: Build, state: AssistantState, *,
                 "location are added for you. Rows save as q<N> for "
                 "python and check. Errors teach: an unknown column "
                 "names the three closest real ones; an unobserved "
-                "literal comes back as a warning."),
+                "literal comes back as a warning; a failed dry run "
+                "comes back classified — kind sql or cost is yours to "
+                "fix and retry, kind environment or access is "
+                "configuration to report to the user, never to retry "
+                "blindly."),
             fn=run_sql, schema=_obj({
                 "sql": _s("the query"),
                 "mode": _s("dry_run (default) | snapshot"),

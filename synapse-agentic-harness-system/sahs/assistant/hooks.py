@@ -12,6 +12,13 @@ one new check Stage 1 adds — the literal check on run_sql.
                                          back as a warning with the
                                          closest real ones
   rows_to_workspace  post  run_sql       q<N>.json for python + check
+  warehouse_errors   post  run_sql       a failed dry run or execution
+                                         comes back CLASSIFIED: sql or
+                                         cost is the model's to fix (the
+                                         closest real names ride along);
+                                         environment or access is
+                                         configuration to report, with
+                                         the exact .env change
   clerk_only         —     (no tool)     nothing in a chat writes truth
 """
 
@@ -32,6 +39,10 @@ HOOKS: tuple[dict[str, str], ...] = (
      "enforces": "filter literals against observed values"},
     {"name": "rows_to_workspace", "kind": "post", "tool": "run_sql",
      "enforces": "results saved as q<N> for python and check"},
+    {"name": "warehouse_errors", "kind": "post", "tool": "run_sql",
+     "enforces": "a failure comes back classified — yours to fix "
+                 "(sql, cost) or configuration to report (environment, "
+                 "access) — with the closest real names and the fix"},
     {"name": "clerk_only", "kind": "absent", "tool": "",
      "enforces": "no chat tool writes to the graph"},
 )

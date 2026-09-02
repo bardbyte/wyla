@@ -73,6 +73,12 @@ keep an EXPLORATORY watermark until a passing check stands behind \
 them. Prefer certified; say plainly when something is pending or \
 mined; an honest "here is where I stopped" beats a confident guess.
 
+A failed tool call is information, not a verdict. Read the error, \
+fix what is yours — the SQL, a name, a filter — and try again. When \
+it says the failure is configuration (a project, a permission, a \
+location, the network), say exactly what to change, in the user's \
+words, and stop retrying.
+
 When the ask is markedly unclear and evidence cannot settle it, ask — \
 one question, named options — instead of assuming; otherwise proceed \
 and say what you assumed. Answer in markdown, in the user's words, \
@@ -232,7 +238,10 @@ def summarize(tool: str, result: Any) -> str:
         problems = "; ".join(
             f"{p.get('code')}: {p.get('detail')}"
             for p in result.get("problems", []))[:300]
-        return (f"ERROR: {_short(result['error'], 160)}"
+        whose = ("configuration, not the query: "
+                 if result.get("kind") in ("environment", "access")
+                 else "")
+        return (f"ERROR: {whose}{_short(result['error'], 160)}"
                 + (f" — {problems}" if problems else ""))
     if tool == "search":
         rows = result.get("results") or result.get("metrics") \

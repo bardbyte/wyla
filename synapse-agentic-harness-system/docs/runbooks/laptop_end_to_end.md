@@ -192,6 +192,9 @@ uvicorn apps.lumi.backend.app:app --port 8400   # from the repo root
 python scripts/chat_eval.py --real              # Vertex creds in the silo .env
 # → PASTE docs/evals/assistant_baseline_vertex.md back into the session
 # short/cheap variants: --limit 4 · --kind playbook · --no-judge
+# --kind recovery injects warehouse failures (a missing partition
+# filter, a type mismatch, a wrong data project) and grades whether
+# the agent fixes what is its own and reports what is configuration
 ```
 
 What changed in v3 (Stage 1): one interaction per turn over native

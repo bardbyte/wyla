@@ -56,8 +56,12 @@ class AssistantRuntime:
                  store_path: Path, events_dir: Path | None = None,
                  model_factory: Callable[[Budget], Any] | None = None,
                  snapshot_runner: Any = None,
-                 user_name: str | None = None) -> None:
+                 user_name: str | None = None,
+                 substrate: Any = None) -> None:
         self.builds_root = Path(builds_root)
+        # the dry-run substrate: None = the laptop's BigQuery; the evals
+        # inject a static or fault-injecting one
+        self.substrate = substrate
         # memory is bound to the person (§7): the name rides into the
         # prompt's memory section; LUMI_USER_NAME sets it on a laptop
         self.user_name = (user_name if user_name is not None
@@ -223,6 +227,7 @@ class AssistantRuntime:
                     skills=loaded, graph_root=self.graph_root,
                     memories=memories, project=project,
                     snapshot_runner=self.snapshot_runner,
+                    substrate=self.substrate,
                     thinking_level=level, user_name=self.user_name)
             except ModelUnavailable as e:
                 rt.bus.emit("error", turn_id=turn_id,

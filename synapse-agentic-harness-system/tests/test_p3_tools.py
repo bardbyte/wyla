@@ -269,6 +269,56 @@ def test_sandbox_qualifies_tables_with_the_data_project(build, tmp_path):
     assert rec.seen[0] == sql
 
 
+class _Refuses:
+    def __init__(self, message):
+        self.message = message
+
+    def dry_run(self, sql):
+        return DryRunOutcome(valid=False, error=self.message)
+
+
+def test_sandbox_teaches_a_failed_dry_run(build, tmp_path):
+    sql = f"SELECT approval_cd FROM {WWCAS} {DATED}"
+    out = execute_sandboxed(
+        build, sql, mode="snapshot",
+        substrate=_Refuses("Unrecognized name: approval_cdx at [1:8]"),
+        ledger_path=tmp_path / "l.jsonl", env={})
+    assert out["status"] == "error" and "invalid_sql" in out["error"]
+    taught = out["meta"]["taught"]
+    assert taught["kind"] == "sql" and taught["yours_to_fix"] is True
+    assert "approval_cd" in taught["closest"]
+    out = execute_sandboxed(
+        build, sql, mode="snapshot",
+        substrate=_Refuses("Not found: Table prj-p-lumi-gpt:"
+                           "dw.wwcas_authorization was not found in "
+                           "location US"),
+        ledger_path=tmp_path / "l.jsonl",
+        env={"BQ_DATA_PROJECT": "", "BQ_LOCATION": "US"})
+    taught = out["meta"]["taught"]
+    assert taught["kind"] == "environment"
+    assert taught["yours_to_fix"] is False
+    assert "LUMI_BQ_DATA_PROJECT" in taught["hint"]
+    # a live execution that blows up is taught the same way
+    class _Explodes:
+        connection = None
+
+        def run(self, sql, limit):
+            raise RuntimeError("transport: Connection reset by peer")
+
+    out = execute_sandboxed(build, f"SELECT country_cd FROM {GMS} {DATED}",
+                            mode="live", substrate=StaticSubstrate({}),
+                            runner=_Explodes(),
+                            ledger_path=tmp_path / "l.jsonl",
+                            env={"SAHS_ALLOW_LIVE": "1"})
+    assert out["status"] == "error" and "execution_failed" in out["error"]
+    assert out["meta"]["taught"]["kind"] == "environment"
+    # the gates say whose fix it is, too
+    out = execute_sandboxed(build, f"SELECT country_cd FROM {GMS} {DATED}",
+                            mode="live", substrate=StaticSubstrate({}),
+                            ledger_path=tmp_path / "l.jsonl", env={})
+    assert out["meta"]["taught"]["kind"] == "access"
+
+
 def test_sandbox_live_default_deny_and_cost_gate(build, tmp_path):
     sql = f"SELECT country_cd FROM {GMS} {DATED}"
     out = execute_sandboxed(build, sql, mode="live",

@@ -32,6 +32,7 @@ from typing import Any, Protocol
 from sahs.canon.canonical import try_canon
 from sahs.tools.api import Build
 from sahs.tools.qualify import qualify_tables
+from sahs.tools.warehouse_errors import teach_warehouse_error
 from sahs.tools.validate_sql import _DML_DDL, _QUERY_KINDS
 
 DEFAULT_MAX_BYTES = 1_000_000_000
@@ -197,13 +198,21 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
             return _finish(
                 "denied",
                 error="restricted_table: live execution requires "
-                      "clearance for " + ", ".join(restricted))
+                      "clearance for " + ", ".join(restricted),
+                taught={"kind": "access", "yours_to_fix": False,
+                        "hint": "a restricted table: clearance is the "
+                                "steward's to grant, not your SQL; say "
+                                "which table and stop", "source": "gate"})
         if env.get("SAHS_ALLOW_LIVE") != "1":
             return _finish(
                 "denied",
                 error="live_disabled: live mode is default-deny: set "
                       "SAHS_ALLOW_LIVE=1 on the laptop to enable; "
-                      "snapshot mode answers most questions")
+                      "snapshot mode answers most questions",
+                taught={"kind": "access", "yours_to_fix": False,
+                        "hint": "live execution is switched off on this "
+                                "machine: not your SQL; dry_run and "
+                                "snapshot still work", "source": "gate"})
 
     # 4. only now may an execution object exist
     if substrate is None:
@@ -224,9 +233,18 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
         meta["sql_sent"] = sent
         meta["qualified"] = qualified
 
+    location = (getattr(getattr(substrate, "connection", None),
+                        "location", "") or env.get("BQ_LOCATION", ""))
+
+    def _taught(message: str) -> dict:
+        return teach_warehouse_error(build, sent, message,
+                                     data_project=data_project,
+                                     location=location)
+
     outcome = substrate.dry_run(sent)
     if not outcome.valid:
-        return _finish("error", error=f"invalid_sql: {outcome.error}")
+        return _finish("error", error=f"invalid_sql: {outcome.error}",
+                       taught=_taught(outcome.error or ""))
     meta["bytes_scanned"] = outcome.bytes_processed
 
     if mode == "snapshot":
@@ -254,7 +272,11 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
             error=f"cost_gate_budget: dry-run predicts {observed:,} "
                   f"bytes > the live-mode ceiling {max_bytes:,} — add "
                   "a partition filter (see the table card's grain "
-                  "line)")
+                  "line)",
+            taught={"kind": "cost", "yours_to_fix": True,
+                    "hint": "narrow the scan: a partition filter, a "
+                            "tighter range, fewer columns; then retry",
+                    "source": "gate"})
     for physical in meta["tables"]:
         prior = build.cost_priors.get(physical) or {}
         if int(prior.get("n_jobs") or 0) < MIN_PRIOR_JOBS:
@@ -273,7 +295,11 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
     if runner is None:
         runner = BQJobRunner()
     capped = _cap_limit(sent, limit)
-    data = runner.run(capped, limit)
+    try:
+        data = runner.run(capped, limit)
+    except Exception as e:                              # noqa: BLE001
+        return _finish("error", error=f"execution_failed: {e}",
+                       taught=_taught(str(e)))
     meta["bytes_scanned"] = data.get("bytes_processed",
                                      meta["bytes_scanned"])
     meta["row_cap"] = limit
