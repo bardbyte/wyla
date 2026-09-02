@@ -128,9 +128,16 @@ def test_thinking_is_alive_and_skills_are_browsable():
     # when the turn lands — verbs deduplicated, no tool names
     for piece in ("thinking-line", "think-orb", "showThinking",
                   "doneThinking", "friendly", "VERBS", "PAST",
-                  "Worked for", 'case "thinking"', 'case "tool_call"',
-                  "lastLine", "new Set(turn.verbs)"):
+                  "Thought", 'case "thinking"', 'case "tool_call"',
+                  "lastLine", "new Set(turn.verbs)",
+                  # the thinking block: thought segments interleaved
+                  # with steps, folded to "Thought for" on the answer,
+                  # reopened by new work, replayed from the trace
+                  "think-seg", "thoughtSegment", "settleBlock",
+                  "openBlock", "traceBlock", "payload?.trace",
+                  "if (!turn.settled) settleBlock(turn)"):
         assert piece in CHAT_JS, piece
+    assert ".think-seg" in CSS
     for cls in (".thinking-line", "@keyframes think-orb",
                 "@keyframes think-shimmer", "prefers-reduced-motion"):
         assert cls in CSS, cls
@@ -142,12 +149,12 @@ def test_thinking_is_alive_and_skills_are_browsable():
     # the live line has a heartbeat: seconds tick, each model call
     # restarts the clock, prose or the end stops it
     for piece in ("function pulse", "stopPulse", "Still ",
-                  'if (event.kind === "call") pulse(turn, "Thinking…", event.ts)',
+                  'pulse(turn, "Thinking…", event.ts)',
                   "clearInterval(turn.tick)"):
         assert piece in CHAT_JS, piece
     # no harness words in the user's language
     for gone in ("what the model saw", "saw-toggle", "saw-panel",
-                 "strict JSON", "Worked through"):
+                 "strict JSON", "Worked through", "working…"):
         assert gone not in CHAT_JS, gone
     # the depth dial rides on every send
     assert "chat-depth" in CHAT_JS and "depth" in BACKEND

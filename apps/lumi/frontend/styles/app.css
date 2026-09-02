@@ -921,7 +921,21 @@ table.result tr:last-child td { border-bottom: none; }
   font-size: 12.5px; margin-bottom: 4px;
   border-left: 2px solid var(--line, #d5d2ca); padding-left: 8px;
 }
-.tool-activity summary { cursor: pointer; color: var(--muted, #7a756a); }
+.tool-activity summary {
+  cursor: pointer; color: var(--muted, #7a756a);
+  display: flex; align-items: center; gap: 6px; list-style: none;
+}
+.tool-activity summary::-webkit-details-marker { display: none; }
+.tool-activity .tri { transition: transform 0.15s ease; display: inline-block; }
+.tool-activity[open] > summary .tri { transform: rotate(90deg); }
+.tool-activity .thinking-line { padding: 0; }
+/* the model's own thought summary, one segment per model call */
+.think-seg {
+  font-size: 13px; color: var(--ink-2, #4a463d); margin: 6px 0;
+  padding: 2px 0 2px 8px; border-left: 2px solid var(--line, #d5d2ca);
+}
+.think-seg p { margin: 4px 0; }
+.think-seg strong { color: var(--ink, #222018); }
 .chat-chiprow {
   display: flex; gap: 8px; flex-wrap: wrap; padding: 4px 18px;
 }
