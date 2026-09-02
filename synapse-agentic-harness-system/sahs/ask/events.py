@@ -121,6 +121,16 @@ class EventBus:
         with self._lock:
             return turn_id in self._closed_turns
 
+    def first_seq(self, turn_id: str) -> int | None:
+        """The seq of the turn's first event, or None — a page that
+        comes back to an in-flight turn replays it from just before
+        this, so nothing of the turn is lost to a tab switch."""
+        with self._lock:
+            for record in self._events:
+                if record.get("turn_id") == turn_id:
+                    return record["seq"]
+        return None
+
 
 def sse_frame(record: dict[str, Any]) -> str:
     """One server-sent event: id for resume, event for routing, data."""

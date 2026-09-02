@@ -684,10 +684,14 @@ export async function renderChat(outlet, wanted = "") {
     if (turn.tick) { clearInterval(turn.tick); turn.tick = null; }
   }
 
-  function pulse(turn, label) {
+  function pulse(turn, label, sinceIso = "") {
     stopPulse(turn);
     turn.tickLabel = label;
-    turn.tickStart = Date.now();
+    // the clock starts when the event happened, not when it was
+    // seen — a replayed turn shows its true seconds
+    const since = Date.parse(sinceIso || "");
+    turn.tickStart = Number.isFinite(since)
+      ? Math.min(since, Date.now()) : Date.now();
     showThinking(turn, label);
     turn.tick = setInterval(() => {
       if (turn.done) { stopPulse(turn); return; }
@@ -821,12 +825,13 @@ export async function renderChat(outlet, wanted = "") {
     switch (event.ev) {
       case "turn_started":
         setRunning(true);
-        pulse(turn, "Thinking…");
+        pulse(turn, "Thinking…", event.ts);
+        pingShelf();                       // the shelf marks it working
         break;
       case "model_prompt":
         // each model call restarts the clock: after a tool returns
         // the line says Thinking, never the tool's name
-        if (event.kind === "call") pulse(turn, "Thinking…");
+        if (event.kind === "call") pulse(turn, "Thinking…", event.ts);
         break;            // the transcript record lives in Operate
       case "thinking": {
         // the model's own summary of what it is thinking, live
@@ -836,7 +841,7 @@ export async function renderChat(outlet, wanted = "") {
         break;
       }
       case "tool_call":
-        pulse(turn, `${friendly(event)}…`);
+        pulse(turn, `${friendly(event)}…`, event.ts);
         toolStart(turn, event);
         break;
       case "tool_step":
@@ -942,6 +947,14 @@ export async function renderChat(outlet, wanted = "") {
     }
   }
   state.seq = boot.head || 0;
+  // a turn runs on the server, not in this tab: coming back to a
+  // session mid-turn replays the in-flight turn from its first event
+  // and keeps following it — switching chats or tabs loses nothing
+  if (boot.running && boot.turn_after !== null
+      && boot.turn_after !== undefined) {
+    state.seq = boot.turn_after;
+    setRunning(true);
+  }
   scroll();
 
   // ── sending ──────────────────────────────────────────────

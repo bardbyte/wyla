@@ -259,6 +259,18 @@ class AssistantRuntime:
         rt.thread.start()
         return {"turn_id": turn_id, "session_id": session_id}
 
+    def turn_window(self, session_id: str) -> dict:
+        """§6: a turn runs on the server, not in the tab. When the
+        page comes back to a session mid-turn, this says where the
+        in-flight turn began so the stream replays it whole —
+        switching chats or tabs never stops or loses a turn."""
+        rt = self._runtimes.get(session_id)
+        if rt is None or not rt.running:
+            return {"running": False, "turn_id": "", "after": None}
+        first = rt.bus.first_seq(rt.current_turn)
+        return {"running": True, "turn_id": rt.current_turn,
+                "after": (first - 1) if first is not None else None}
+
     def stop(self, session_id: str) -> dict:
         rt = self.runtime(session_id)
         if not rt.running:

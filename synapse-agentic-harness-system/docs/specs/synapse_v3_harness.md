@@ -148,6 +148,11 @@ path.
   the seconds tick, and each model call restarts the clock, so a long
   think never wears a tool's name ("Checking the query…" while the
   model is the one working was the first laptop stall).
+- **A turn belongs to the server, not the tab.** Leaving the page
+  closes only the listener; coming back to a session mid-turn
+  reattaches from the turn's first event (`turn_after` on the session
+  GET) and replays it whole, so switching chats or tabs never stops or
+  loses a turn. The shelf marks a working chat.
 - **Artifact panel is model-invoked.** It opens on an artifact in
   this interaction, never on reopening an old chat; a card in the
   transcript reopens it; closing reflows the chat to full width.

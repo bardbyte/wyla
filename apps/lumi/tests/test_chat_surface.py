@@ -142,7 +142,7 @@ def test_thinking_is_alive_and_skills_are_browsable():
     # the live line has a heartbeat: seconds tick, each model call
     # restarts the clock, prose or the end stops it
     for piece in ("function pulse", "stopPulse", "Still ",
-                  'if (event.kind === "call") pulse(turn, "Thinking…")',
+                  'if (event.kind === "call") pulse(turn, "Thinking…", event.ts)',
                   "clearInterval(turn.tick)"):
         assert piece in CHAT_JS, piece
     # no harness words in the user's language
@@ -151,6 +151,13 @@ def test_thinking_is_alive_and_skills_are_browsable():
         assert gone not in CHAT_JS, gone
     # the depth dial rides on every send
     assert "chat-depth" in CHAT_JS and "depth" in BACKEND
+    # a turn belongs to the server: coming back mid-turn reattaches
+    # from the turn's first event, and the shelf marks a working chat
+    assert '"turn_after": window["after"]' in BACKEND
+    assert "state.seq = boot.turn_after;" in CHAT_JS
+    assert "setRunning(true);\n  }" in CHAT_JS
+    assert "chat-when working" in CHATS_JS
+    assert ".chat-when.working" in CSS
     # no picker anywhere: the agent loads packs itself; people browse
     # the shelf on the Skills tab
     assert "chat-skills-btn" not in CHAT_JS

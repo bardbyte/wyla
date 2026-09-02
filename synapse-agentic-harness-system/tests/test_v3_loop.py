@@ -524,6 +524,31 @@ def test_a_lost_connection_mid_turn_keeps_what_was_said(compiled):
     assert _by(events, "turn_done")[-1]["status"] == "error"
 
 
+def test_turn_window_points_at_the_in_flight_turn(compiled):
+    import time
+    from sahs.assistant.agent import ScriptedAgent
+
+    def slow():
+        time.sleep(1.5)
+        return [{"text": "Done after a pause."}]
+
+    runtime = _runtime(compiled, ScriptedAgent([slow]))
+    session = runtime.create_session()
+    assert runtime.turn_window(session["id"])["running"] is False
+    runtime.start_turn(session["id"], "a slow one")
+    time.sleep(0.5)
+    window = runtime.turn_window(session["id"])
+    assert window["running"] is True and window["turn_id"].startswith("t_")
+    bus = runtime.runtime(session["id"]).bus
+    first = next(e for e in bus.since(0) if e["ev"] == "turn_started")
+    assert window["after"] == first["seq"] - 1
+    # replaying from the window starts at the turn's own first event
+    assert bus.since(window["after"])[0]["ev"] == "turn_started"
+    assert runtime.wait(session["id"], 30)
+    assert runtime.turn_window(session["id"])["running"] is False
+    assert "Done after a pause." in _prose(bus.since(0))
+
+
 def test_second_turn_sees_the_first_newest_ask_last(compiled):
     model = _agent(
         [{"text": "Certified spend means the meridian definition."}],
