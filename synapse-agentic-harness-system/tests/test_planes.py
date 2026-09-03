@@ -140,3 +140,48 @@ def test_the_doctor_reads_the_planes_without_the_network(tmp_path,
     assert "BigQuery  direct" in text
     assert "Vertex    via http://proxy.corp:8080" in text
     assert "pw" not in text                                # redacted
+
+
+def test_planes_check_proves_both_planes_in_one_process(tmp_path,
+                                                        monkeypatch,
+                                                        capsys):
+    """The laptop proof, without the network: a dry run, then a model
+    call, in one process, with the environment watched between them."""
+    sys.path.insert(0, str(SILO / "scripts"))
+    import planes_check
+    from sahs.evals.substrate import DryRunOutcome
+    empty = tmp_path / "empty.env"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setenv("SAHS_ENV_FILE", str(empty))
+    for name in ("BQ_PROJECT_ID", "LUMI_BQ_PROJECT", "GOOGLE_CLOUD_PROJECT",
+                 "VERTEX_PROJECT_ID", "LUMI_VERTEX_PROJECT",
+                 "GOOGLE_APPLICATION_CREDENTIALS", "LUMI_BQ_SA_KEY",
+                 "LUMI_VERTEX_SA_KEY", "NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    assert planes_check.main([]) == 3                # nothing configured
+    key = tmp_path / "k.json"
+    key.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(key))
+    monkeypatch.setenv("BQ_PROJECT_ID", "p")
+    monkeypatch.setenv("VERTEX_PROJECT_ID", "v")
+    monkeypatch.setenv("HTTPS_PROXY", "http://u:pw@proxy.corp:8080")
+    monkeypatch.setattr(
+        "sahs.evals.substrate.BQDryRun.dry_run",
+        lambda self, sql: DryRunOutcome(valid=True, bytes_processed=0))
+    monkeypatch.setattr("sahs.enrich.client.VertexClient._token",
+                        lambda self: "tok")
+    monkeypatch.setattr("sahs.enrich.client.VertexClient.generate",
+                        lambda self, prompt, **kw: '{"ok": true}')
+    assert planes_check.main([]) == 0
+    out = capsys.readouterr().out
+    assert "BigQuery  direct" in out
+    assert "Vertex    via http://proxy.corp:8080" in out and "pw" not in out
+    assert "both planes hold in one process" in out
+    # a plane that writes the environment is caught between the planes
+    def leaky(self, sql):
+        os.environ["NO_PROXY"] = "googleapis.com"
+        return DryRunOutcome(valid=True, bytes_processed=0)
+    monkeypatch.setattr("sahs.evals.substrate.BQDryRun.dry_run", leaky)
+    assert planes_check.main([]) == 1
+    assert "route leaked" in capsys.readouterr().err
+
