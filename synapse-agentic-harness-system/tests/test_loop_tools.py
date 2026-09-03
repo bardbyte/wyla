@@ -223,6 +223,44 @@ def test_read_card_unknown_suggests_and_names_the_finders(kit):
     assert "grep_cards" in out["hint"]
 
 
+def test_read_card_serves_the_business_unit_card(kit):
+    """A question that names a unit orients on the unit first: the
+    lob card answers to lob:<code> in any case, lists its tables as a
+    shelf with read_card addresses, and grep_cards can scope to it."""
+    tools, state, _build = kit
+    out = tools["read_card"].fn("lob:GMNS")
+    assert out["card"] == "lob/gmns"
+    assert out["text"].startswith("# business unit GMNS")
+    assert "tables" in out["sections"] and "owners" in out["sections"]
+    assert 'read_card("table:dw.gms_transaction")' in out["text"]
+    assert "lob/gmns" in state.subgraph["cards_read"]
+    hits = tools["grep_cards"].fn("witnessed metric", scope="lob")
+    assert hits["count"] >= 1 and hits["hits"][0]["card"].startswith("lob/")
+    bad = tools["grep_cards"].fn("x", scope="galaxies")
+    assert "lob" in bad["hint"]
+
+
+def test_list_tables_filters_on_the_steward_lob_map(kit):
+    """lob= resolves through in_lob membership (steward map + usage),
+    never only through a metric's declared LOB — a mapped table with no
+    LOB-tagged metric still answers under its own unit. Rows carry the
+    business name and MDM unit the shelf reader needs."""
+    tools, _state, _build = kit
+    out = tools["list_tables"].fn(lob="gmns")
+    names = {t["table"] for t in out["tables"]}
+    assert {"dw.gms_transaction", "dw.wwcas_authorization"} <= names
+    spine = next(t for t in out["tables"]
+                 if t["table"] == "dw.gms_transaction")
+    assert spine["business_name"] == "Merchant Transactions"
+    assert spine["business_unit"] == "GMNS"
+    assert spine["lobs"] == ["GMNS"] and spine["pii"] is True
+    assert "lifecycle certified" in spine["readiness"]
+    # an org unit answers through its used_tables
+    cro = tools["list_tables"].fn(lob="cro")
+    assert {t["table"] for t in cro["tables"]} == {"dw.wwcas_authorization"}
+    assert 'read_card("lob:<code>")' in out["hint"]
+
+
 # ─── search_semantics / resolve ──────────────────────────────
 
 

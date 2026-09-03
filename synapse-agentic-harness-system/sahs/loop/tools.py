@@ -119,7 +119,7 @@ def _err(message: str, hint: str, **extra: Any) -> dict[str, Any]:
 def _card_dirs(build: Build) -> dict[str, Path]:
     root = build.root / "cards"
     return {"tables": root / "tables", "metrics": root / "metrics",
-            "concepts": root / "concepts"}
+            "concepts": root / "concepts", "lob": root / "lob"}
 
 
 def _card_ids(build: Build, scope: str = "all") -> list[str]:
@@ -140,7 +140,10 @@ def _card_path(build: Build, card_id: str) -> Path | None:
     if ":" in cid:
         kind, _, rest = cid.partition(":")
         kind = {"table": "tables", "metric": "metrics",
-                "concept": "concepts"}.get(kind, kind)
+                "concept": "concepts", "lob": "lob",
+                "unit": "lob"}.get(kind, kind)
+        if kind == "lob":
+            rest = rest.strip().lower()
         if kind == "tables":
             physical = build.physical_of(rest) or rest
             rest = physical.replace(".", "__")
@@ -268,63 +271,83 @@ def toolkit(build: Build, state: LoopState, *,
         by_table: dict[str, list[dict[str, Any]]] = {}
         for m in build.metrics:
             by_table.setdefault(m.get("table", ""), []).append(m)
+        # the steward's in_lob map is the authority on membership; a
+        # metric's declared LOB only corroborates. Codes, names and
+        # org units all answer (an org unit's used_tables count too)
+        lob_tables: dict[str, set[str]] = {}
+        for row in build.lob:
+            keys = {str(row.get("code") or row.get("lob") or "").lower(),
+                    str(row.get("name") or "").lower()} - {""}
+            members = set(row.get("tables", [])) | set(
+                row.get("used_tables", []))
+            for key in keys:
+                lob_tables.setdefault(key, set()).update(members)
         rows = []
         for physical in sorted(build.schema):
             metrics = by_table.get(physical, [])
+            facts = build.table_facts(physical)
             if want_domain and not any(
                     want_domain in (m.get("domain") or "").lower()
                     for m in metrics):
                 continue
-            if want_lob and not any(
+            if want_lob:
+                mapped = any(physical in members
+                             for key, members in lob_tables.items()
+                             if want_lob in key)
+                declared = any(
                     want_lob in (m.get("line_of_business") or "").lower()
-                    for m in metrics):
-                continue
-            facts = build.table_facts(physical)
-            purpose, owner = "", ""
-            path = _card_dirs(build)["tables"] / (
-                physical.replace(".", "__") + ".md")
-            if path.exists():
-                for line in path.read_text(
-                        encoding="utf-8").splitlines()[:8]:
-                    if line.startswith("- purpose: "):
-                        purpose = line[len("- purpose: "):].split(
-                            " [prov:")[0].strip()
-                    elif line.startswith("- owner: "):
-                        owner = line[len("- owner: "):].split(
-                            " · ")[0].strip()
+                    for m in metrics)
+                if not (mapped or declared):
+                    continue
+            identity = facts.get("identity", {})
+            business = facts.get("business", {})
+            owners = business.get("owners", [])
+            owner = next((o["owner"] for o in owners
+                          if "business_owner" in o.get("roles", [])),
+                         owners[0]["owner"] if owners else "")
             certified = sum(1 for m in metrics
                             if m.get("status") == "certified")
             total = facts.get("total_rows")
+            lifecycle = facts.get("lifecycle")
             rows.append({
                 "table": physical,
-                "purpose": purpose or "(no purpose on record)",
+                "business_name": identity.get("business_name", ""),
+                "purpose": identity.get("description")
+                or "(no purpose on record)",
+                "business_unit": business.get("business_unit", ""),
+                "lobs": [e.get("code", "") for e in
+                         business.get("lobs", [])],
                 # an absent row count is never a zero — pinned
                 "rows": total if total not in (None, "") else "unknown",
                 "readiness": f"{certified} certified of "
                              f"{len(metrics)} metrics"
-                             + (f" · lifecycle {facts['lifecycle']}"
-                                if facts.get("lifecycle") else ""),
+                             + (f" · lifecycle {lifecycle}"
+                                if lifecycle else ""),
                 "owner": owner or "(unrecorded)",
+                "pii": bool(facts.get("access", {}).get("pii_table")),
             })
         hint = ""
         if not rows and (want_domain or want_lob):
-            seen = sorted({(m.get("domain") or m.get("line_of_business")
-                            or "").lower()
-                           for m in build.metrics} - {""})
+            seen = sorted(
+                {str(r.get("code") or r.get("lob") or "").lower()
+                 for r in build.lob}
+                | {(m.get("domain") or m.get("line_of_business")
+                    or "").lower() for m in build.metrics} - {""})
             hint = ("no table matches that domain/lob: this build "
                     "knows " + (", ".join(seen) if seen else "none")
                     + ". Call with no filter to see everything.")
         elif rows:
             hint = ("read_card(\"table:<name>\") before touching a "
-                    "table's columns")
+                    "table's columns; read_card(\"lob:<code>\") to "
+                    "orient on a business unit first")
         return {"tables": rows, "count": len(rows), "hint": hint}
 
     # ── grep_cards ── Grep ───────────────────────────────────
     def grep_cards(pattern: str, scope: str = "all") -> dict[str, Any]:
-        if scope not in ("all", "tables", "metrics", "concepts"):
+        if scope not in ("all", "tables", "metrics", "concepts", "lob"):
             return _err(f"unknown scope {scope!r}",
                         "scope is one of: all | tables | metrics | "
-                        "concepts")
+                        "concepts | lob")
         if not (pattern or "").strip():
             return _err("empty pattern",
                         "give a word, column, or code to find; "

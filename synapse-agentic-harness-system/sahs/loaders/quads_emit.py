@@ -5,9 +5,13 @@ metric expressions become ``metric:`` nodes (id = fp(expr ⊕ grain ⊕
 entity), pinned) grouped under ``mgroup:`` identities with initial
 governance states seeded per source (dmp → certified, gmns → pending,
 skills → team_candidate, mined → mined); vocabulary becomes ``term:`` /
-``acr:`` nodes; Atlas std_tech entries land their DECLARED column↔term
-links as ``mapped_term`` edges plus atlas-attributed props — the E1
-merge policy arbitrates against BQ/Lumi at compile time, not here.
+``acr:`` nodes; Atlas std_tech entries land EVERY documented field —
+column↔term links as ``mapped_term`` edges (resolved on
+``businessTermId`` first), ownership as ``owned_by`` edges, the three
+compliance flags and the table-level ``pii_columns`` declaration as
+``has_policy`` edges, computed-column ``derived_logic`` as doc
+evidence, and the rest as atlas-attributed props — the E1 merge policy
+arbitrates against BQ/Lumi at compile time, not here.
 
 Table identity resolves through the crosswalk; a semantic record whose
 table can't resolve is SKIPPED with a count (unlike archives, semantic
@@ -31,10 +35,12 @@ from sahs.graph.ids import (
     lob_id,
     mdom_id,
     mgroup_id,
+    owner_id,
     table_id,
     term_node_id,
 )
 from sahs.graph.quads import SOURCE_WITNESS, GraphDir, NodeRecord, Prov, Quad
+from sahs.loaders.sources.vocab import ownership_key_is_person
 from sahs.loaders.records import (
     ExpressionRecord,
     StdTechEntry,
@@ -367,6 +373,15 @@ def emit_vocab(glossary: list[VocabRecord], terms: list[TermRecord],
     return dict(report)
 
 
+def _kept(props: dict) -> dict:
+    """Empty is ABSENT, never an assertion. A fold is last-wins per
+    key, so writing ``""``/``None`` for a field this registration
+    happens not to carry would erase a value another registration (or
+    another witness) did carry. False and 0 ARE assertions and stay."""
+    return {k: v for k, v in props.items()
+            if v not in (None, "", [], {})}
+
+
 def emit_std_tech(entries: list[StdTechEntry], terms: list[TermRecord],
                   graph: GraphDir, crosswalk: Crosswalk,
                   run_id: str) -> dict:
@@ -375,11 +390,39 @@ def emit_std_tech(entries: list[StdTechEntry], terms: list[TermRecord],
     files yielded 70 entries on the first real run). A registration is
     testimony about the same facts, not new facts: nodes and edges emit
     ONCE (document order, first registration wins), repeats are counted,
-    and the dedup keeps validator check [8] meaningful."""
+    and the dedup keeps validator check [8] meaningful.
+
+    FULL UTILIZATION (E12/A2 at field grain): every field the loader
+    parses lands as a node prop or an edge here. What that buys, beyond
+    the props:
+
+    - ``ownership`` becomes ``owned_by`` edges per role (any key naming
+      an owner or a VP), so Atlas and Lumi corroborate on the same
+      owner nodes instead of Atlas ownership sitting inert in a dict;
+    - table-level ``has_pii`` finally emits its ``has_policy`` edge —
+      only oncop/gdpr did before, so the strongest of the three flags
+      was the one the ACL never saw;
+    - ``pii_columns[]`` is a SECOND, independent PII witness: it
+      corroborates a column's own ``pii_role_id``, supplies one where
+      the pde listing carried none (union-most-restrictive, E1), and
+      mints a column the pde listing missed entirely;
+    - ``derived_logic`` rides WHOLE as a doc node (the view-SQL
+      pattern) behind a ``described_by`` edge — retained for a future
+      canon pass, readable now;
+    - a business term resolves by ``businessTermId`` FIRST and by name
+      only as a fallback, and ``businessTermDescription`` lands on the
+      term node — business_terms.csv carries no definition text, so
+      this is the only place the meaning of a term exists at all.
+    """
     report: dict = defaultdict(int)
     term_by_name = {t.name.strip().lower(): t.term_id for t in terms}
+    known_term_ids = {t.term_id for t in terms}
     seen_nodes: set[str] = set()
     seen_edges: set[tuple[str, str, str]] = set()
+    # unmatched term declarations accumulate per column and emit ONCE
+    # at the end: a fold is last-wins per key, so appending them one at
+    # a time would leave only the last one standing
+    declared_terms: dict[str, list[dict]] = defaultdict(list)
 
     def put_node(node_id: str, props: dict, evidence: str) -> bool:
         if node_id in seen_nodes:
@@ -407,51 +450,186 @@ def emit_std_tech(entries: list[StdTechEntry], terms: list[TermRecord],
             report["skipped_unresolvable_table"] += 1
             continue
         tid = table_id(physical)
-        if put_node(tid, {"description_atlas": entry.description,
-                          "business_name_atlas": entry.business_name,
-                          "data_category": entry.data_category,
-                          "layer_type": entry.layer_type,
-                          "has_pii_atlas": entry.has_pii,
-                          "has_oncop_atlas": entry.has_oncop,
-                          "has_gdpr_atlas": entry.has_gdpr,
-                          "ownership_atlas": entry.ownership},
-                    entry.evidence_ref):
+        table_props = _kept({
+            "description_atlas": entry.description,
+            "business_name_atlas": entry.business_name,
+            "data_category": entry.data_category,
+            "data_sub_category": entry.data_sub_category,
+            "layer_type": entry.layer_type,
+            "has_pii_atlas": entry.has_pii,
+            "has_oncop_atlas": entry.has_oncop,
+            "has_gdpr_atlas": entry.has_gdpr,
+            "ownership_atlas": entry.ownership,
+            # ── envelope + Layer 2: where this table LIVES ──
+            "appl_id": entry.appl_id,
+            "project_atlas": entry.datasource,
+            "dataset_group_atlas": entry.dataset_group,
+            "data_server_atlas": entry.data_server,
+            "data_system_atlas": entry.data_system,
+            "technology_atlas": entry.technology,
+            "is_active_atlas": entry.is_active,
+            "is_latest_atlas": entry.is_latest,
+            "is_lineage_exist_atlas": entry.is_lineage_exist,
+            # ── Layer 3: how it is BUILT ──
+            "table_name_atlas": entry.table_name,
+            "table_type_atlas": entry.table_type,
+            "load_type_atlas": entry.load_type,
+            "is_partitioned_atlas": entry.is_partitioned,
+            "target_system_atlas": entry.target_system,
+        })
+        if put_node(tid, table_props, entry.evidence_ref):
             report["tables"] += 1
         else:
             report["repeat_registrations"] += 1
         # sensitivity is union-most-restrictive (E1): every compliance
         # flag the feed asserts becomes an explicit policy edge
-        for flag, policy in ((entry.has_oncop, "policy:oncop"),
+        for flag, policy in ((entry.has_pii, "policy:pii"),
+                             (entry.has_oncop, "policy:oncop"),
                              (entry.has_gdpr, "policy:gdpr")):
             if flag and put_edge(tid, "has_policy", policy,
                                  entry.evidence_ref):
                 report["policy_flags"] += 1
+        # ownership → owned_by edges, one per role. A key naming an
+        # owner or a VP is a person; everything else in the dict (a
+        # CAR id, a cost centre) stays a prop — an id is not an owner.
+        for role, value in sorted(entry.ownership.items()):
+            name = str(value or "").strip().lower()
+            if not name or not ownership_key_is_person(role):
+                continue
+            put_node(owner_id(name), {"role": role, "owner": name},
+                     entry.evidence_ref)
+            if put_edge(tid, "owned_by", owner_id(name),
+                        entry.evidence_ref, props={"role": role}):
+                report["ownership_edges"] += 1
+
+        # table-level PII declaration, indexed for the column pass
+        declared_pii: dict[str, str | None] = {
+            str(cell["column"]): cell.get("pii_role_id")
+            for cell in entry.pii_columns if cell.get("column")}
+
         for column in entry.columns:
             cid = col_id(physical, column.name)
-            if put_node(cid, {"description_atlas": column.description,
-                              "business_name_atlas": column.business_name,
-                              "data_type_atlas": column.data_type,
-                              "pii_role_id": column.pii_role_id,
-                              "sde_group": column.sde_group},
-                        entry.evidence_ref):
+            role = column.pii_role_id
+            table_role = declared_pii.get(column.name)
+            if table_role and not role:
+                # the pde listing carried no role and the table-level
+                # declaration does: union-most-restrictive applies
+                role = table_role
+                report["pii_from_table_declaration"] += 1
+            elif table_role and role and table_role != role:
+                # two Atlas-internal declarations disagree — keep both,
+                # visibly; E1's D5 handler arbitrates at compile time
+                report["pii_role_disagreements"] += 1
+            props = _kept({
+                "description_atlas": column.description,
+                "business_name_atlas": column.business_name,
+                "data_type_atlas": column.data_type,
+                "pii_role_id": role,
+                "sde_group": column.sde_group,
+                "column_name_atlas": column.column_name,
+                "ordinal_atlas": column.position,
+                "column_length": column.column_length,
+                "nullable_atlas": column.nullable,
+                "is_primary_key_atlas": column.primary_key,
+                "is_partitioning_atlas": column.partition_key,
+                "derived_logic": column.derived_logic,
+            })
+            if table_role and role and table_role != role:
+                props["pii_role_id_table_declared"] = table_role
+            if put_node(cid, props, entry.evidence_ref):
                 report["columns"] += 1
             else:
                 report["columns_repeated"] += 1
             put_edge(tid, "has_column", cid, entry.evidence_ref)
-            if column.pii_role_id:
+            if role:
                 put_edge(cid, "has_policy", "policy:pii",
                          entry.evidence_ref)
+            if column.derived_logic:
+                # the computed column's own SQL rides WHOLE, the way
+                # view SQL does — unparsed today, readable now, and
+                # ready for the canon pass the contract anticipates
+                doc = ("doc:derived_logic_"
+                       + fingerprint(column.derived_logic, "bigquery",
+                                     CANON_VERSION))
+                put_node(doc, {"kind": "derived_logic",
+                               "sql": column.derived_logic},
+                         entry.evidence_ref)
+                if put_edge(cid, "described_by", doc,
+                            entry.evidence_ref):
+                    report["derived_logic_docs"] += 1
             for link in column.linked_terms:
                 name = str(link.get("businessTermName") or "").strip()
-                term_id = term_by_name.get(name.lower())
-                if term_id is None:
+                description = str(
+                    link.get("businessTermDescription") or "").strip()
+                # the id is identity; the name is a spelling. Resolve
+                # on the id FIRST — matching on name alone lost every
+                # link whose spelling drifted from the glossary export
+                declared_id = str(link.get("businessTermId")
+                                  or "").strip()
+                term_id = declared_id or term_by_name.get(name.lower())
+                if not term_id:
+                    # no id and no glossary match: nothing to mint an
+                    # identity from (a slugged name would fork the node
+                    # the moment the id arrives). The declaration is
+                    # kept on the column so the text is not lost.
                     report["term_links_unmatched"] += 1
+                    cell = {"name": name, "description": description}
+                    if (name or description) and \
+                            cell not in declared_terms[cid]:
+                        declared_terms[cid].append(cell)
                     continue
+                if declared_id and declared_id not in known_term_ids:
+                    # Atlas declaring a term with an id attests it
+                    # exists — mint it, counted, so a column↔term link
+                    # is never dropped for the glossary export lagging
+                    report["terms_minted_from_link"] += 1
+                # businessTermDescription is the ONLY definition text
+                # in the whole feed: business_terms.csv is id+name+
+                # status. Write it even on a term node the glossary
+                # already minted — a fold merges by key.
+                graph.append_node(NodeRecord(
+                    id=term_node_id(term_id),
+                    props=_kept({"name": name, "term_id": term_id,
+                                 "description": description}),
+                    prov=Prov(source="atlas", run=run_id,
+                              evidence=entry.evidence_ref)))
                 if put_edge(cid, "mapped_term", term_node_id(term_id),
                             entry.evidence_ref,
-                            props={"mapping_source":
-                                   link.get("sourceName", ""),
-                                   "mapping_type":
-                                   link.get("sourceType", "")}):
+                            props=_kept({
+                                "mapping_source":
+                                    link.get("sourceName", ""),
+                                "mapping_type":
+                                    link.get("sourceType", ""),
+                                "confidence":
+                                    link.get("confidenceScore"),
+                                "matched_on": ("id" if declared_id
+                                               else "name")})):
                     report["term_links"] += 1
+
+        # a column the pde listing missed but the table-level PII
+        # declaration names: the declaration attests it exists — mint
+        # the endpoint, counted, so the 02-vs-catalog drift stays
+        # visible instead of the PII flag vanishing with the column
+        listed = {c.name for c in entry.columns}
+        for cname, cell_role in sorted(declared_pii.items()):
+            if cname in listed:
+                continue
+            cid = col_id(physical, cname)
+            if put_node(cid, _kept({"pii_role_id": cell_role,
+                                    "observed_via":
+                                        "table_pii_declaration"}),
+                        entry.evidence_ref):
+                report["columns_from_pii_declaration"] += 1
+            put_edge(tid, "has_column", cid, entry.evidence_ref)
+            put_edge(cid, "has_policy", "policy:pii", entry.evidence_ref)
+
+    # a business term Atlas names with neither an id nor a spelling the
+    # glossary knows: no identity can be minted from that without
+    # forking the node the moment the id arrives — but the TEXT is
+    # still evidence, so it rides on the column it was declared for
+    for cid, cells in sorted(declared_terms.items()):
+        graph.append_node(NodeRecord(
+            id=cid, props={"declared_terms": cells},
+            prov=Prov(source="atlas", run=run_id,
+                      evidence="std_tech_metadata")))
     return dict(report)

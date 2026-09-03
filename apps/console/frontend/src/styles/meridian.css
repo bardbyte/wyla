@@ -366,3 +366,48 @@
 }
 .m-artifact-content:focus { outline: 2px solid var(--accent);
                             outline-offset: 1px; }
+
+/* ── Table facts (G3): identity / business / operations / trust ── */
+
+.m-row-tables {
+  grid-template-columns: minmax(0, 1.8fr) 110px 90px 70px 70px 60px 70px;
+}
+.m-row-lobs {
+  grid-template-columns: minmax(0, 1.6fr) 90px 80px 110px 90px 90px;
+}
+.m-kv { display: grid; grid-template-columns: 132px 1fr;
+        gap: 4px var(--s-3); font-size: var(--fs-13);
+        align-items: baseline; }
+.m-kv dt { color: var(--ink-3); font-size: var(--fs-11);
+           font-weight: 700; letter-spacing: 0.04em;
+           text-transform: uppercase; margin: 0; }
+.m-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.m-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.m-colrow { display: grid;
+            grid-template-columns: minmax(0, 1.4fr) minmax(0, 2.2fr) 150px;
+            gap: var(--s-2) var(--s-3); align-items: start;
+            border-top: 1px solid var(--surface-2); padding: 8px 0;
+            font-size: var(--fs-13); }
+.m-colrow:first-of-type { border-top: 0; }
+.m-col-name { display: flex; flex-direction: column; gap: 3px;
+              min-width: 0; }
+.m-col-bname { color: var(--ink-2); }
+.m-col-meta { color: var(--ink-3); font-size: var(--fs-12);
+              display: flex; flex-direction: column; gap: 2px; }
+.m-col-texture { color: var(--ink-3); font-size: var(--fs-12);
+                 text-align: right; }
+/* sensitivity: the ⊘ glyph carries the meaning — crimson stays
+   reserved for definition conflict, only, ever */
+.m-chip-pii { border-color: var(--line-strong); color: var(--ink);
+              font-weight: 600; }
+.m-chip-key { border-color: var(--line-strong); color: var(--ink); }
+.m-chip-soft { background: var(--surface-2); border-color: transparent;
+               color: var(--ink-2); }
+.m-vocab { display: grid; grid-template-columns: 110px 1fr auto;
+           gap: 4px var(--s-3); font-size: var(--fs-13);
+           align-items: baseline; }
+@media (max-width: 900px) {
+  .m-colrow { grid-template-columns: 1fr; }
+  .m-col-texture { text-align: left; }
+  .m-kv { grid-template-columns: 1fr; }
+}

@@ -19,8 +19,16 @@ from typing import Any
 
 from sahs.canon.authority import SOURCE_AUTHORITY, Authority
 from sahs.graph.quads import RANKING_WITNESSES
-from sahs.compiler.cards import concept_card, metric_card, table_card
+from sahs.compiler.cards import (
+    concept_card,
+    lob_card,
+    metric_card,
+    table_card,
+)
+from sahs.compiler.coverage import build_coverage
+from sahs.compiler.facts import build_lob_facts, build_table_facts
 from sahs.compiler.diff import build_diff
+from sahs.compiler.display import tier_of_table  # noqa: E401
 from sahs.compiler.display import build_sources_index
 from sahs.compiler.graph_map import build_graph_map
 from sahs.compiler.indexes import build_indexes
@@ -130,6 +138,7 @@ def compile_build(graph_root: Path, builds_root: Path
     (build_dir / "cards" / "tables").mkdir(parents=True, exist_ok=True)
     (build_dir / "cards" / "metrics").mkdir(parents=True, exist_ok=True)
     (build_dir / "cards" / "concepts").mkdir(parents=True, exist_ok=True)
+    (build_dir / "cards" / "lob").mkdir(parents=True, exist_ok=True)
 
     consensus = reconcile(graph)
     acl = build_acl(graph, consensus)
@@ -375,10 +384,14 @@ def compile_build(graph_root: Path, builds_root: Path
                 "region": record.props.get("region", "All").lower(),
                 "definition": record.props.get("definition", "")})
         elif kind == "term":
+            # the definition is the definition (Atlas
+            # businessTermDescription, when the catalog carried one);
+            # governance status is its own axis, never the meaning
             vocab_rows.append({
                 "text": record.props.get("name", ""), "kind": "term",
                 "ref": node_id,
-                "definition": record.props.get("status", "")})
+                "definition": record.props.get("description", ""),
+                "status": record.props.get("status", "")})
         elif kind == "mgroup":
             label = record.props.get("label", "")
             if label:
@@ -486,9 +499,24 @@ def compile_build(graph_root: Path, builds_root: Path
                      "witness": quad.prov.witness or ""}
             scoped_by_table[a].append({**entry, "other": b})
             scoped_by_table[b].append({**entry, "other": a})
+    # ── the facts projection: compile once, serve twice ──
+    # every card line and every console number renders from THIS row
+    # (indexes/tables.jsonl); neither reaches back to the graph
+    metrics_count = defaultdict(int)
+    for m in metric_rows:
+        if m["table"]:
+            metrics_count[m["table"]] += 1
+    filters_count = defaultdict(int)
+    for b in binding_rows:
+        filters_count[b["table"]] += 1
+    table_facts = build_table_facts(
+        consensus, nodes, edges, acl, lob_by_table, usage_by_table,
+        {p: sorted(rows_, key=lambda x: (-x[1], x[0]))
+         for p, rows_ in co_by_table.items()},
+        scoped_by_table, dict(metrics_count), dict(filters_count),
+        vocab_rows, tier_of_table)
     for tid, table_consensus in sorted(consensus.items()):
         physical = table_consensus.physical
-        record = nodes.get(tid)
         metrics_here = [
             {"id": m["id"], "label": m["label"], "status": m["status"],
              "status_served": m.get("status_served", m["status"]),
@@ -501,20 +529,20 @@ def compile_build(graph_root: Path, builds_root: Path
              for b in binding_rows if b["table"] == physical),
             key=lambda f: (-f["authority"], -f["support"], f["label"]))
         text, card_budget = table_card(
-            table_consensus, record.props if record else {},
-            metrics_here, filters_here,
-            sorted(co_by_table.get(physical, []),
-                   key=lambda x: -x[1]),
-            acl.get(physical, {"restricted": None, "pii_columns": []}),
-            lob_info=lob_by_table.get(physical, []),
-            usage_info=usage_by_table.get(physical, []),
-            scoped_joins=scoped_by_table.get(physical, []))
+            table_facts[physical], metrics_here, filters_here)
         (build_dir / "cards" / "tables"
          / f"{physical.replace('.', '__')}.md").write_text(
             text + "\n", encoding="utf-8")
         budget["over_budget"] += int(card_budget["over_budget"])
         if card_budget["dropped"]:
             budget["dropped"][physical] = card_budget["dropped"]
+    # business-unit cards: the shelf an agent orients on before it
+    # touches a table ("GMNS spend" → read_card("lob:gmns") first)
+    lob_facts = build_lob_facts(lob_rows, table_facts, vocab_rows)
+    for lob in lob_facts:
+        (build_dir / "cards" / "lob"
+         / f"{lob['code'].lower()}.md").write_text(
+            lob_card(lob) + "\n", encoding="utf-8")
 
     children_of: dict[str, list[str]] = defaultdict(list)
     parent_of: dict[str, str] = {}
@@ -675,34 +703,24 @@ def compile_build(graph_root: Path, builds_root: Path
         json.dumps(cost_priors, indent=1, sort_keys=True) + "\n",
         encoding="utf-8")
 
-    # E18/C - the table facts a fan-out judgement needs as DATA rather
-    # than as prose on a card: row counts and declared primary keys.
-    # Whether a join can double-count is decidable from these two
-    # facts plus the join's witness, so the preview can be honest
-    # before any query runs instead of guessing after it.
-    table_rows = []
-    for tid, c in sorted(consensus.items()):
-        record = nodes.get(tid)
-        props = record.props if record is not None else {}
-        keys = sorted(
-            name for name, _col in c.columns.items()
-            if (nodes.get(f"col:{c.physical}.{name}") is not None
-                and nodes[f"col:{c.physical}.{name}"].props.get(
-                    "is_primary_key")))
-        row = {"physical": c.physical, "columns": len(c.columns),
-               "primary_key": keys}
-        total = props.get("total_rows")
-        if total not in (None, ""):
-            try:
-                row["total_rows"] = int(total)
-            except (TypeError, ValueError):
-                pass                     # unparseable count is no count
-        for key in ("object_type", "partition_latest", "lifecycle"):
-            if props.get(key):
-                row[key] = props[key]
-        table_rows.append(row)
+    # E18/C + G3 — the table facts row: the fan-out judgement's data
+    # (row counts, declared keys) AND everything else the graph holds
+    # about a table, in one serving-facing index the card and the
+    # console both render (compiler/facts.py)
+    table_rows = [table_facts[c.physical]
+                  for _tid, c in sorted(consensus.items())]
     (build_dir / "indexes" / "tables.jsonl").write_text(
         "".join(json.dumps(t, sort_keys=True) + "\n" for t in table_rows),
+        encoding="utf-8")
+    (build_dir / "indexes" / "lobs.jsonl").write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n"
+                for row in lob_facts), encoding="utf-8")
+    # the prop-grain utilization ledger (G2/G3): every table/column
+    # prop and edge predicate in the graph is rendered, deferred with
+    # a reason, or UNACCOUNTED — CI holds the last list at empty
+    coverage = build_coverage(nodes, edges)
+    (build_dir / "indexes" / "coverage.json").write_text(
+        json.dumps(coverage, indent=1, sort_keys=True) + "\n",
         encoding="utf-8")
 
     # ── E17 serving surfaces: the Sources shelf + the cosmos map ──
@@ -715,6 +733,21 @@ def compile_build(graph_root: Path, builds_root: Path
         encoding="utf-8")
     graph_map = build_graph_map(consensus, nodes, metric_rows,
                                 join_rows, lob_rows)
+    for node in graph_map["nodes"]:
+        if node.get("kind") != "table":
+            continue
+        facts = table_facts.get(node["id"].split(":", 1)[1], {})
+        for key, value in (
+                ("business_name",
+                 facts.get("identity", {}).get("business_name")),
+                ("business_unit",
+                 facts.get("business", {}).get("business_unit")),
+                ("lifecycle", facts.get("lifecycle")),
+                ("pii", facts.get("access", {}).get("pii_table")),
+                ("description",
+                 facts.get("identity", {}).get("description"))):
+            if value:
+                node[key] = value
     (build_dir / "indexes" / "graph_map.json").write_text(
         json.dumps(graph_map, indent=1, sort_keys=True) + "\n",
         encoding="utf-8")
@@ -729,6 +762,8 @@ def compile_build(graph_root: Path, builds_root: Path
                    "vocab": len(vocab_rows),
                    "tickets": len(tickets),
                    "lobs": len(lob_rows),
+                   "lob_cards": len(lob_facts),
+                   "coverage_unaccounted": len(coverage["unaccounted"]),
                    "joins": len(join_rows),
                    "sources": len(sources_index["sources"]),
                    "map_nodes": len(graph_map["nodes"]),

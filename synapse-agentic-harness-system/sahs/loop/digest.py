@@ -94,6 +94,37 @@ def synapse_digest(build: Build,
                      "search_semantics serves them)")
     lines.append("")
 
+    # ── business units: the shelf above the tables ───────────
+    # every LOB / org unit the steward mapped, with what it holds and
+    # how much of it is witnessed — so a question that names a unit
+    # reads the unit's card before it guesses a table
+    units = [row for row in build.lob
+             if row.get("tables") or row.get("used_tables")]
+    if units:
+        lines.append("## business units")
+        for row in sorted(units, key=lambda r: (
+                -len(r.get("tables", [])),
+                str(r.get("code") or r.get("lob") or "")))[:8]:
+            code = str(row.get("code") or row.get("lob") or "?")
+            held = [t for t in build.tables
+                    if t.get("physical") in row.get("tables", [])]
+            witnessed = sum(
+                1 for t in held
+                if t.get("trust", {}).get("metrics_here"))
+            bits = [f"{code}" + (f": {row['name']}"
+                                 if row.get("name") else "")]
+            if row.get("kind") == "org_unit" and row.get("parent"):
+                bits.append(f"org unit under {row['parent']}")
+            if row.get("tables"):
+                bits.append(f"{len(row['tables'])} tables, "
+                            f"{witnessed} witnessed")
+            if row.get("used_tables"):
+                bits.append(f"runs queries on "
+                            f"{len(row['used_tables'])}")
+            bits.append(f'read_card("lob:{code.lower()}")')
+            lines.append("- " + " · ".join(bits))
+        lines.append("")
+
     # ── join topology ────────────────────────────────────────
     lines.append("## join topology")
     seen: set[frozenset[str]] = set()

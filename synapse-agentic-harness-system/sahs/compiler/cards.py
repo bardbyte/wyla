@@ -1,24 +1,35 @@
 """Cards — the agent's entire world, one token-budgeted page at a time.
 
-Three templates (pinned sections; every line carries a ``[prov:…]`` ref;
+Four templates (pinned sections; every line carries a ``[prov:…]`` ref;
 conflicts are ALWAYS printed — a card that hides ambiguity is lying to
-the agent). Table cards budget to ≤2K tokens with a fixed drop order —
-column long-tail → history/usage → join detail — and NEVER drop grain,
-conflicts, or access.
+the agent). A table card is a RENDERING of the compiled facts row
+(``compiler/facts.py``) — the same row the console's Table Profile
+renders — so what the agent reasons from and what the steward sees on
+screen are one number by construction. Table cards budget to ≤3K
+tokens with a fixed drop order — vocabulary → column long-tail →
+joins → filters → metrics — and NEVER drop grain, conflicts, or
+access.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from sahs.compiler.reconcile import TableConsensus
-
-TOKEN_BUDGET_TABLE = 2000
+TOKEN_BUDGET_TABLE = 3000
 _PROTECTED = ("grain", "conflicts", "access")
 
 
 def _tokens_of(text: str) -> int:
     return max(1, len(text) // 4)          # the classic 4-chars/token bound
+
+
+def _bytes(n: int | None) -> str:
+    if n is None:
+        return "?"
+    for unit, size in (("GB", 1e9), ("MB", 1e6), ("KB", 1e3)):
+        if n >= size:
+            return f"{n / size:.1f} {unit}"
+    return f"{n} B"
 
 
 def _lob_line(lob_info: list[dict[str, Any]]) -> str:
@@ -65,73 +76,276 @@ def _usage_line(usage_info: list[dict[str, Any]]) -> str:
             + " [prov:used_by·catalog_mined]")
 
 
-def table_card(consensus: TableConsensus, node_props: dict[str, Any],
+def _owner_line(owners: list[dict[str, Any]]) -> str:
+    """The whole ownership chain with witnesses — `own_a@corp
+    (business_owner; atlas+lumi)`. The FIRST entry stays the business
+    owner so `- owner: <name> · …` keeps its shape for shelf readers."""
+    if not owners:
+        return "- owner: ? [prov:owned_by]"
+    ranked = sorted(owners, key=lambda o: (
+        0 if "business_owner" in o.get("roles", []) else
+        1 if any("owner" in r for r in o.get("roles", [])) else 2,
+        o["owner"]))
+    parts = []
+    for o in ranked[:4]:
+        roles = "/".join(o.get("roles") or ["owner"])
+        witnesses = "+".join(o.get("witnesses") or [])
+        parts.append(f"{o['owner']} ({roles}; {witnesses})"
+                     if witnesses else f"{o['owner']} ({roles})")
+    return "- owner: " + " · ".join(parts) + " [prov:owned_by]"
+
+
+def _column_line(c: dict[str, Any]) -> str:
+    """Everything the graph knows about one column, on one line, in a
+    fixed order: name, type, structural markers, business name,
+    meaning, texture, links. Nothing here is prose the agent must
+    parse twice — markers are tokens."""
+    markers = []
+    if c.get("primary_key"):
+        markers.append("PK")
+    elif c.get("primary_key_atlas"):
+        markers.append("PK(atlas)")
+    if c.get("partitioning"):
+        markers.append("PARTITION")
+    elif c.get("partitioning_atlas"):
+        markers.append("PARTITION(atlas)")
+    if c.get("sensitive"):
+        role = "/".join(x for x in (c.get("pii_role"),
+                                    c.get("sde_group")) if x)
+        markers.append(f"SENSITIVE{' ' + role if role else ''}")
+        if c.get("pii_role_table_declared"):
+            markers.append(
+                f"table-declared role {c['pii_role_table_declared']} "
+                "disagrees")
+    if c.get("ungoverned"):
+        markers.append("ungoverned, no business meaning on record")
+    if c.get("nullable_atlas") is False:
+        markers.append("NOT NULL(atlas)")
+    head = f"- {c['name']} {str(c.get('type') or '').lower()}".rstrip()
+    if markers:
+        head += " (" + "; ".join(markers) + ")"
+    parts = [head]
+    if c.get("business_name"):
+        parts.append(f"“{c['business_name']}”")
+    meaning = c.get("description", "")
+    if c.get("description_supplementary"):
+        meaning = (f"{meaning} | lumi: {c['description_supplementary']}"
+                   if meaning else f"lumi: {c['description_supplementary']}")
+    if meaning:
+        parts.append(meaning)
+    texture = []
+    if c.get("approx_distinct") is not None:
+        texture.append(f"~{c['approx_distinct']} distinct")
+    if c.get("null_count") is not None:
+        texture.append(f"{c['null_count']} null")
+    if c.get("column_length") is not None:
+        texture.append(f"len {c['column_length']}")
+    if texture:
+        parts.append(", ".join(texture))
+    domain = c.get("domain")
+    if domain:
+        top = ", ".join(
+            f"{v.get('value')} {v.get('pct')}%" if v.get("pct") is not None
+            else str(v.get("value")) for v in domain.get("top", []))
+        parts.append(f"{domain['n_values']} known values"
+                     + (f" ({top})" if top else "")
+                     + " → sample_values")
+    for term in c.get("terms", [])[:2]:
+        line = f"term: {term.get('name', '?')}"
+        if term.get("status"):
+            line += f" [{term['status']}]"
+        if term.get("description"):
+            line += f" — {term['description']}"
+        parts.append(line)
+    for ref in c.get("fk_references", []):
+        parts.append(f"FK → {ref['table']}.{ref['column']}")
+    if c.get("derived_logic"):
+        parts.append(f"computed: `{c['derived_logic'][:80]}`")
+    for src in c.get("derived_from", [])[:2]:
+        parts.append(f"derived from {src.get('source')}")
+    if c.get("column_name_atlas"):
+        parts.append(f"atlas spells it {c['column_name_atlas']}")
+    if (c.get("ordinal") is not None and c.get("ordinal_atlas") is not None
+            and c["ordinal"] != c["ordinal_atlas"]):
+        parts.append(f"ordinal bq {c['ordinal']} vs atlas "
+                     f"{c['ordinal_atlas']}")
+    prov = (f"[prov:{c.get('type_source') or 'bq'}"
+            f"·agree={c.get('agreement', 1)}]")
+    return " · ".join(parts) + " " + prov
+
+
+def table_card(facts: dict[str, Any],
                metrics_here: list[dict[str, Any]],
-               filters_here: list[dict[str, Any]],
-               co_queried: list[tuple[str, int]],
-               acl_entry: dict[str, Any],
-               lob_info: list[dict[str, Any]] | None = None,
-               usage_info: list[dict[str, Any]] | None = None,
-               scoped_joins: list[dict[str, Any]] | None = None
+               filters_here: list[dict[str, Any]]
                ) -> tuple[str, dict[str, Any]]:
-    """→ (markdown, budget_report)."""
-    physical = consensus.physical
+    """→ (markdown, budget_report). ``facts`` is the compiled row from
+    ``compiler/facts.py``; nothing here reaches back to the graph."""
+    physical = facts["physical"]
+    identity = facts.get("identity", {})
+    business = facts.get("business", {})
+    ops = facts.get("operations", {})
+    trust = facts.get("trust", {})
+    access = facts.get("access", {})
+    joins = facts.get("joins", {})
+    lineage = facts.get("lineage", {})
     prov = f"[prov:table:{physical}]"
     lines: dict[str, list[str]] = {k: [] for k in (
-        "header", "purpose", "grain", "columns", "joins", "filters",
-        "metrics", "access", "conflicts", "footer")}
+        "header", "purpose", "grain", "trust", "columns", "joins",
+        "filters", "metrics", "lineage", "access", "vocabulary",
+        "conflicts", "footer")}
 
-    lifecycle = node_props.get("lifecycle_status") or "unknown"
+    title = f"# table {physical}"
+    if identity.get("business_name"):
+        title += f" — {identity['business_name']}"
+    lifecycle = ops.get("lifecycle") or "unknown"
+    rows = ops.get("total_rows")
     lines["header"] = [
-        f"# table {physical}",
-        f"- object: {node_props.get('object_type', 'TABLE')} · "
-        f"rows ≈ {node_props.get('total_rows', '?')} · "
+        title,
+        f"- object: {identity.get('object_type', 'TABLE')} · "
+        f"rows ≈ {rows if rows is not None else '?'} · "
         f"lifecycle: {lifecycle} {prov}",
-        f"- owner: {node_props.get('ownership_atlas', {}).get('business_owner') or '?'} · "
-        f"business unit: {node_props.get('business_unit', '?')} · "
-        f"layer: {node_props.get('layer_type', '?')} {prov}",
+        _owner_line(business.get("owners", [])),
     ]
-    if lob_info:
-        lines["header"].append(_lob_line(lob_info))
-    if usage_info:
-        lines["header"].append(_usage_line(usage_info))
-    purpose = (node_props.get("description_atlas")
-               or node_props.get("description_bq") or "")
-    if purpose:
-        lines["purpose"] = [f"- purpose: {purpose} [prov:atlas]"]
-    partition = node_props.get("partition_latest")
+    category = " › ".join(x for x in (identity.get("data_category"),
+                                      identity.get("data_sub_category"))
+                          if x)
+    bu_bits = [
+        f"business unit: {business.get('business_unit') or '?'}"
+        + (" (MDM pipeline)" if business.get("business_unit") else ""),
+        f"category: {category}" if category else "",
+        f"layer: {identity.get('layer_type') or '?'}",
+        f"type: {identity['table_type']}" if identity.get("table_type")
+        else "",
+    ]
+    lines["header"].append(
+        "- " + " · ".join(b for b in bu_bits if b) + " [prov:lumi+atlas]")
+    if business.get("lobs"):
+        lines["header"].append(_lob_line(business["lobs"]))
+    if business.get("used_by"):
+        lines["header"].append(_usage_line(business["used_by"]))
+    if identity.get("description"):
+        lines["purpose"] = [
+            f"- purpose: {identity['description']} "
+            f"[prov:{identity.get('description_source') or 'atlas'}]"]
+        if identity.get("description_bq"):
+            lines["purpose"].append(
+                f"- bq describes it: {identity['description_bq']} "
+                "[prov:bq]")
+    where = ".".join(x for x in (identity.get("project"),
+                                 identity.get("dataset"),
+                                 physical.split(".")[-1]) if x)
+    where_bits = [f"lives at: {where}"]
+    if identity.get("technology") or identity.get("data_server"):
+        where_bits.append(
+            " via ".join(x for x in (identity.get("technology"),
+                                     identity.get("data_server")) if x))
+    if identity.get("appl_id"):
+        where_bits.append(f"registry appl_id {identity['appl_id']}")
+    if identity.get("target_system"):
+        where_bits.append(f"target {identity['target_system']}")
+    lines["purpose"].append("- " + " · ".join(where_bits)
+                            + " [prov:bq+atlas]")
+
+    # ── grain: protected, never dropped ──
+    pk = facts.get("primary_key") or []
+    pk_atlas = ops.get("primary_key_atlas") or []
+    grain_pk = ("- primary key: " + ", ".join(pk)
+                + " [prov:bq:constraints]") if pk else \
+        ("- primary key: none declared in BigQuery"
+         + (f" · atlas marks {', '.join(pk_atlas)}" if pk_atlas else "")
+         + " [prov:bq+atlas]")
+    if pk and pk_atlas and set(pk) != set(pk_atlas):
+        grain_pk += f" · atlas marks {', '.join(pk_atlas)} [prov:atlas]"
+    part_cols = ops.get("partition_columns") or \
+        ops.get("partition_columns_atlas") or []
+    part_bits = [
+        ("partitioned by " + ", ".join(part_cols)) if part_cols else
+        ("partitioned" if identity.get("is_partitioned_atlas")
+         else "not partitioned" if identity.get("is_partitioned_atlas")
+         is False else "partitioning unknown"),
+        f"latest {ops.get('partition_latest') or 'n/a'}",
+    ]
+    if ops.get("n_partitions") is not None:
+        part_bits.append(f"{ops['n_partitions']} partitions")
+    if identity.get("load_type"):
+        part_bits.append(f"load: {identity['load_type']}")
     lines["grain"] = [
-        f"- partitioned: latest {partition or 'n/a'} · "
-        f"schema {node_props.get('schema_fingerprint', '?')} {prov}"]
-    if node_props.get("usage_rhythm"):
-        lines["grain"].append(
-            "- usage rhythm: " + " · ".join(node_props["usage_rhythm"])
-            + " [prov:jobs_30d]")
+        "## grain", grain_pk,
+        "- " + " · ".join(part_bits) + " [prov:bq+atlas]",
+        f"- rows ≈ {rows if rows is not None else '?'} · "
+        f"{_bytes(ops.get('size_bytes'))} · schema "
+        f"{identity.get('schema_fingerprint') or '?'} {prov}",
+    ]
 
-    column_rows = []
-    for column in consensus.columns.values():
-        flags = []
-        if column.sensitive:
-            flags.append("SENSITIVE")
-        if column.ungoverned:
-            flags.append("ungoverned, no business meaning on record")
-        note = f" ({'; '.join(flags)})" if flags else ""
-        desc = column.description
-        supplementary = (f" | lumi: {column.description_supplementary}"
-                         if column.description_supplementary else "")
-        meaning = f": {desc}{supplementary}" if (desc or supplementary) \
-            else ""
-        column_rows.append(
-            f"- {column.name} {column.data_type.lower()}"
-            f"{note}{meaning} "
-            f"[prov:{column.type_source or 'bq'}"
-            f"·agree={column.agreement_count}]")
-    lines["columns"] = ["## columns"] + column_rows
+    # ── trust & operations ──
+    trust_lines = ["## trust & operations"]
+    if trust.get("answerability"):
+        trust_lines.append(
+            "- answerability: " + " · ".join(
+                f"{k} {v}" for k, v in sorted(
+                    trust["answerability"].items()))
+            + " [prov:lumi]")
+    when = [f"last modified {ops['last_modified']}"
+            if ops.get("last_modified") else "",
+            f"created {ops['created']}" if ops.get("created") else "",
+            (f"feed {ops.get('feed_type')}"
+             + (f" ({ops['pipeline_name']}" if ops.get("pipeline_name")
+                else "")
+             + (f" from {ops['source_system']}"
+                if ops.get("source_system") else "")
+             + (")" if ops.get("pipeline_name") else ""))
+            if ops.get("feed_type") or ops.get("pipeline_name") else "",
+            f"env {ops['environment']}" if ops.get("environment") else ""]
+    if any(when):
+        trust_lines.append("- " + " · ".join(w for w in when if w)
+                           + " [prov:lumi+bq]")
+    cost = ops.get("cost_prior") or {}
+    if cost:
+        trust_lines.append(
+            f"- cost prior: p50 {_bytes(cost.get('p50_bytes'))} · "
+            f"p95 {_bytes(cost.get('p95_bytes'))} per query over "
+            f"{cost.get('n_jobs', '?')} jobs [prov:jobs_30d]")
+    if ops.get("usage_rhythm"):
+        trust_lines.append("- usage rhythm: "
+                           + " · ".join(ops["usage_rhythm"])
+                           + " [prov:jobs_30d]")
+    if business.get("top_users"):
+        trust_lines.append(
+            "- top users: " + " · ".join(
+                f"{u.get('user')} ×{u.get('queries')}"
+                for u in business["top_users"][:4])
+            + " [prov:bq:history]")
+    flags = [name for key, name in (("is_active_atlas", "active"),
+                                    ("is_latest_atlas", "latest"),
+                                    ("is_lineage_exist_atlas",
+                                     "lineage declared"))
+             if trust.get(key) is True]
+    denied = [name for key, name in (("is_active_atlas", "INACTIVE"),
+                                     ("is_latest_atlas", "not latest"))
+              if trust.get(key) is False]
+    if flags or denied:
+        trust_lines.append("- atlas flags: "
+                           + " · ".join(denied + flags) + " [prov:atlas]")
+    lines["trust"] = trust_lines if len(trust_lines) > 1 else []
 
-    lines["joins"] = ["## joined with (observed)"] + [
-        f"- {other} · {support} co-queries [prov:bq:history]"
-        for other, support in co_queried[:8]]
-    for j in (scoped_joins or [])[:4]:
+    # ── columns, in schema order ──
+    ordered = sorted(facts.get("column_facts", []),
+                     key=lambda c: (c.get("ordinal")
+                                    if c.get("ordinal") is not None
+                                    else 10 ** 6, c["name"]))
+    lines["columns"] = ["## columns"] + [_column_line(c) for c in ordered]
+
+    # ── joins: declared first (fiat beats every mined witness) ──
+    join_lines = ["## joins"]
+    for fk in joins.get("declared", []):
+        join_lines.append(
+            f"- declared: {fk['column']} → {fk['ref_table']}."
+            f"{fk['ref_column']} [prov:bq:constraints]")
+    for other, support in ((o["other"], o["support"])
+                           for o in joins.get("observed", [])[:8]):
+        join_lines.append(f"- observed: {other} · {support} co-queries "
+                          "[prov:bq:history]")
+    for j in joins.get("scoped", [])[:4]:
         # a scoped_only witness means the equality was observed between
         # TRANSFORMED CTEs — the relationship exists; the raw tables do
         # NOT join safely without the stated preparation
@@ -139,10 +353,11 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
                   else " (CTE-scoped, NOT raw-safe)"
                   + (f"; requires: {'; '.join(j['preconditions'][:2])}"
                      if j.get("preconditions") else ""))
-        lines["joins"].append(
+        join_lines.append(
             f"- {j['other']} ON {' AND '.join(j.get('on') or ['?'])} · "
             f"{j.get('join_type') or 'JOIN'} · {j.get('scope')}{caveat} "
             f"[prov:{j.get('witness') or 'studio'}]")
+    lines["joins"] = join_lines
     lines["filters"] = ["## common filters"] + [
         f"- {f['label']}: `{f['sql']}` · support {f['support']} "
         f"[prov:{f['source']}]" for f in filters_here[:8]]
@@ -151,58 +366,190 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
         f"{m.get('status_served') or m['status']} [prov:{m['source']}]"
         for m in metrics_here[:10]]
 
-    access = []
-    restricted = acl_entry.get("restricted")
+    lineage_bits = []
+    if lineage.get("upstream"):
+        lineage_bits.append("upstream: " + ", ".join(lineage["upstream"]))
+    if lineage.get("downstream"):
+        lineage_bits.append("downstream: "
+                            + ", ".join(lineage["downstream"]))
+    if lineage.get("derived_columns"):
+        lineage_bits.append(
+            f"{len(lineage['derived_columns'])} computed column(s): "
+            + ", ".join(lineage["derived_columns"][:4]))
+    if lineage.get("view_sql"):
+        lineage_bits.append("view definition retained (doc)")
+    if lineage_bits:
+        lines["lineage"] = ["## lineage",
+                            "- " + " · ".join(lineage_bits)
+                            + " [prov:lumi+bq]"]
+
+    # ── access: protected ──
+    access_lines = []
+    restricted = access.get("restricted")
     if restricted == "unknown_policy":
-        access.append("- ⚠ row-access policy UNKNOWN (listing denied): "
-                      "live execution DENIED until resolved [prov:bq]")
+        access_lines.append(
+            "- ⚠ row-access policy UNKNOWN (listing denied): "
+            "live execution DENIED until resolved [prov:bq]")
     elif restricted:
-        access.append(f"- row-access policy: {restricted} [prov:bq]")
-    if acl_entry.get("pii_columns"):
-        access.append("- sensitive columns: "
-                      + ", ".join(acl_entry["pii_columns"])
-                      + " [prov:union_most_restrictive]")
-    lines["access"] = ["## access"] + (access or ["- no known restrictions"])
+        access_lines.append(f"- row-access policy: {restricted} [prov:bq]")
+    flag_bits = []
+    for key, label in (("has_pii_atlas", "PII"),
+                       ("has_gdpr_atlas", "GDPR"),
+                       ("has_oncop_atlas", "ONCOP")):
+        if access.get(key) is True:
+            flag_bits.append(f"{label} yes")
+        elif access.get(key) is False:
+            flag_bits.append(f"{label} no")
+    policies = access.get("policies") or {}
+    if flag_bits or policies:
+        pol = ", ".join(f"{p} ({'+'.join(w)})"
+                        for p, w in sorted(policies.items()))
+        access_lines.append(
+            "- table flags: " + " · ".join(flag_bits)
+            + (f" · policies: {pol}" if pol else "") + " [prov:atlas]")
+    if access.get("sensitive_columns"):
+        access_lines.append(
+            "- sensitive columns: " + ", ".join(
+                c["name"] + (" (" + "/".join(
+                    x for x in (c.get("pii_role"), c.get("sde_group"))
+                    if x) + ")" if (c.get("pii_role") or c.get("sde_group"))
+                    else "")
+                for c in access["sensitive_columns"])
+            + " [prov:union_most_restrictive]")
+    lines["access"] = ["## access"] + (access_lines
+                                       or ["- no known restrictions"])
+
+    vocab = facts.get("vocabulary") or []
+    if vocab:
+        scope = ", ".join(business.get("business_units") or []) or "All"
+        rows_v = []
+        for v in vocab:
+            meaning = v.get("definition") or "(no definition on record)"
+            if v.get("kind") == "term":
+                meaning += (f" [{v['status']}]" if v.get("status")
+                            else "") + " — Atlas business term"
+            scope_v = str(v.get("bu") or "All")
+            if v.get("region") and str(v["region"]).lower() != "all":
+                scope_v += f"/{v['region']}"
+            rows_v.append(
+                f"- {v['symbol']} = {meaning} ({scope_v}) → "
+                + ", ".join(v.get("columns", []))
+                + (" [prov:atlas]" if v.get("kind") == "term"
+                   else " [prov:glossary]"))
+        lines["vocabulary"] = [
+            f"## vocabulary (scoped to {scope}, All)"] + rows_v
 
     conflicts = []
-    for name, count in consensus.structural.items():
+    for name, count in sorted((trust.get("structural") or {}).items()):
         if count:
             conflicts.append(f"- {name}: {count}, see structural census")
-    for column in consensus.columns.values():
-        for flag in column.flags:
-            conflicts.append(f"- {column.name}: {flag}")
-    if consensus.omitted_catalog_only:
+    for c in ordered:
+        for flag in c.get("flags", []):
+            conflicts.append(f"- {c['name']}: {flag}")
+    if facts.get("omitted_catalog_only"):
         conflicts.append(
             "- omitted catalog-only columns (D1): "
-            + ", ".join(consensus.omitted_catalog_only))
+            + ", ".join(facts["omitted_catalog_only"]))
     lines["conflicts"] = ["## conflicts"] + (conflicts or ["- none"])
     lines["footer"] = [f"[prov: consensus of bq+lumi+atlas via "
                        f"merge_policy, every line traceable] {prov}"]
 
     # ── budgeter: fixed drop order, protected sections never dropped ──
-    drop_order = [("columns", 12), ("joins", 3), ("filters", 3)]
+    drop_order = [("vocabulary", 6), ("columns", 12), ("joins", 4),
+                  ("filters", 3), ("metrics", 6)]
     dropped: dict[str, int] = {}
 
     def render() -> str:
-        order = ("header", "purpose", "grain", "columns", "joins",
-                 "filters", "metrics", "access", "conflicts", "footer")
+        order = ("header", "purpose", "grain", "trust", "columns",
+                 "joins", "filters", "metrics", "lineage", "access",
+                 "vocabulary", "conflicts", "footer")
         return "\n".join(x for key in order for x in lines[key])
 
     text = render()
     for section, keep in drop_order:
         if _tokens_of(text) <= TOKEN_BUDGET_TABLE:
             break
-        header, rows = lines[section][0], lines[section][1:]
-        if len(rows) > keep:
-            dropped[section] = len(rows) - keep
-            lines[section] = [header] + rows[:keep] + [
-                f"- … {len(rows) - keep} more (budget-dropped; "
-                f"full detail in the truth graph)"]
+        if not lines[section]:
+            continue
+        header, rows_ = lines[section][0], lines[section][1:]
+        if len(rows_) > keep:
+            dropped[section] = len(rows_) - keep
+            lines[section] = [header] + rows_[:keep] + [
+                f"- … {len(rows_) - keep} more (budget-dropped; "
+                "full detail in the truth graph)"]
         text = render()
     assert all(lines[p] for p in _PROTECTED)
     return text, {"tokens": _tokens_of(text),
                   "over_budget": _tokens_of(text) > TOKEN_BUDGET_TABLE,
                   "dropped": dropped}
+
+
+def lob_card(lob: dict[str, Any]) -> str:
+    """The business-unit card — what an agent reads FIRST when a
+    question names a unit ("GMNS spend", "SBS approvals") so it can
+    orient on the unit as a thing: its tables as a shelf, who runs
+    queries on them, the ownership chain, and how much of the unit's
+    world is witnessed. Every line is a compiled fact."""
+    code = lob.get("code", "?")
+    kind = lob.get("kind", "lob")
+    title = f"# {'org unit' if kind == 'org_unit' else 'business unit'} "
+    title += code + (f" — {lob['name']}" if lob.get("name") else "")
+    lines = [title]
+    head = [f"kind: {kind}"]
+    if lob.get("parent"):
+        head.append(f"parent LOB: {lob['parent']}")
+    if lob.get("domains"):
+        head.append("metric domains: " + ", ".join(lob["domains"]))
+    lines.append("- " + " · ".join(head) + " [prov:lob_map]")
+    ready = lob.get("readiness") or {}
+    if ready:
+        lines.append(
+            f"- readiness: {ready['witnessed']} of {ready['tables']} "
+            f"tables carry a witnessed metric ({ready['pct']}%) "
+            "[prov:compiled]")
+    else:
+        lines.append("- readiness: no steward-mapped tables "
+                     "(usage-only unit) [prov:lob_map]")
+    if lob.get("usage_support"):
+        lines.append(
+            f"- usage: {lob['usage_support']} mined patterns run by this "
+            f"unit across {len(lob.get('used_tables', []))} table(s) "
+            "[prov:used_by·catalog_mined]")
+    if lob.get("vocabulary_entries"):
+        lines.append(
+            f"- vocabulary: {lob['vocabulary_entries']} Acropedia "
+            f"entries scoped to {code} → search_semantics(kind=vocab) "
+            "[prov:glossary]")
+    lines.append("## tables")
+    if not lob.get("tables"):
+        lines.append("- none steward-mapped: read the used tables below")
+    for t in lob.get("tables", []):
+        bits = [t["physical"]]
+        if t.get("business_name"):
+            bits[0] += f" — {t['business_name']}"
+        if t.get("description"):
+            bits.append(t["description"])
+        bits.append(f"{t.get('metrics_here', 0)} metrics")
+        if t.get("lifecycle"):
+            bits.append(t["lifecycle"])
+        if t.get("pii"):
+            bits.append("PII")
+        if t.get("business_unit") and t["business_unit"] != code:
+            bits.append(f"MDM unit {t['business_unit']}")
+        bits.append(f'read_card("table:{t["physical"]}")')
+        lines.append("- " + " · ".join(bits) + " [prov:in_lob]")
+    if lob.get("used_tables"):
+        lines.append("## queries these tables")
+        for physical in lob["used_tables"]:
+            lines.append(f"- {physical} [prov:used_by·catalog_mined]")
+    lines.append("## owners")
+    if lob.get("owners"):
+        for o in lob["owners"]:
+            lines.append(f"- {o['owner']} ({'/'.join(o['roles'])}) "
+                         "[prov:owned_by]")
+    else:
+        lines.append("- none on record")
+    return "\n".join(lines)
 
 
 def metric_card(metric: dict[str, Any],

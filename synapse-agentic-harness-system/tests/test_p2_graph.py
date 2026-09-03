@@ -247,6 +247,107 @@ def test_build_graph_end_to_end_fuses_three_witnesses(tmp_path):
             "schema:dw.sbs_new_accounts@v1", "bq") in edges
 
 
+def test_std_tech_full_utilization_reaches_the_graph(tmp_path):
+    """Every field the Atlas loader parses lands as a prop or an edge.
+    The audit that motivated this (docs/audits/
+    card_sourcing_audit_2026_09.md) found ~20 documented fields going
+    dark between the file and the graph; this is the fence."""
+    graph_dir, out_dir = tmp_path / "g", tmp_path / "run"
+    assert _build(graph_dir, out_dir).returncode == 0
+    graph = GraphDir(graph_dir)
+    nodes, edges = graph.fold_nodes(), graph.fold_edges()
+
+    table = nodes["table:dw.gms_transaction"].props
+    # where the table LIVES (envelope + Layer 2) — the qualified-name
+    # pieces the graph could not previously state
+    assert table["appl_id"] == "600001868"
+    assert table["project_atlas"] == "axp-lumi"
+    assert table["dataset_group_atlas"] == "data"
+    assert table["technology_atlas"] == "BigQuery"
+    assert table["is_active_atlas"] is True
+    assert table["is_lineage_exist_atlas"] is True
+    # how it is BUILT (Layer 3)
+    assert table["data_sub_category"] == "Payments"
+    assert table["table_type_atlas"] == "DERIVED"
+    assert table["load_type_atlas"] == "LOAD_APPEND"
+    assert table["is_partitioned_atlas"] is True
+    assert table["target_system_atlas"] == "Lumi BigQuery"
+    # an unsent flag stays absent rather than becoming a false denial
+    assert "is_active_atlas" not in nodes[
+        "table:dw.wwcas_authorization"].props
+
+    # ownership is EDGES now, so atlas and lumi corroborate on one
+    # owner node instead of atlas ownership sitting inert in a dict
+    assert ("table:dw.gms_transaction", "owned_by",
+            "owner:own_a@corp", "atlas") in edges
+    assert ("table:dw.gms_transaction", "owned_by",
+            "owner:own_a@corp", "lumi") in edges
+    assert ("table:dw.gms_transaction", "owned_by",
+            "owner:vp_a@corp", "atlas") in edges
+    # a CAR id is an identifier, not an owner — it stays a prop
+    assert "owner:car-1" not in nodes
+    assert nodes["table:dw.gms_transaction"].props[
+        "ownership_atlas"]["car_id"] == "CAR-1"
+
+    # table-level has_pii finally emits its policy edge (only
+    # oncop/gdpr did before — the strongest flag was the silent one)
+    assert ("table:dw.gms_transaction", "has_policy",
+            "policy:pii", "atlas") in edges
+
+    # pii_columns[] is a SECOND PII witness: it names a column the pde
+    # listing never carried, and the declaration mints the endpoint
+    hashed = nodes["col:dw.gms_transaction.cm15_hash"].props
+    assert hashed["pii_role_id"] == "R4"
+    assert hashed["observed_via"] == "table_pii_declaration"
+    assert ("col:dw.gms_transaction.cm15_hash", "has_policy",
+            "policy:pii", "atlas") in edges
+
+    # every documented pdeAttribute field on the column node
+    amount = nodes["col:dw.gms_transaction.trans_usd_am"].props
+    assert amount["column_length"] == 18
+    assert amount["nullable_atlas"] is True
+    assert amount["is_primary_key_atlas"] is False
+    assert amount["ordinal_atlas"] == 5           # bq says 1 — drift,
+    assert amount["ordinal"] == 1                 # now visible
+    assert nodes["col:dw.wwcas_authorization.approval_cd"].props[
+        "is_primary_key_atlas"] is True
+
+    # derived_logic rides WHOLE as doc evidence (the view-SQL pattern)
+    doc = [o for (s, r, o, _w) in edges
+           if r == "described_by"
+           and s == "col:dw.gms_transaction.trans_usd_am"]
+    assert len(doc) == 1
+    assert nodes[doc[0]].props["kind"] == "derived_logic"
+    assert nodes[doc[0]].props["sql"].startswith("CASE WHEN se_cr_dr_in")
+
+    # the term plane: resolve on ID first, fall back to name, and carry
+    # the DEFINITION — business_terms.csv is id+name+status only, so
+    # businessTermDescription is the sole source of meaning we have
+    assert nodes["term:atlas:8"].props["description"] == \
+        "USD amount of a transaction"
+    assert nodes["term:atlas:8"].props["status"] == "Approved"   # merged
+    link = edges[("col:dw.gms_transaction.trans_usd_am", "mapped_term",
+                  "term:atlas:8", "atlas")]
+    assert link.props["matched_on"] == "id"
+    assert link.props["confidence"] == 0.95
+    # a term Atlas declares by id that the glossary export has not
+    # shipped is minted rather than dropped
+    assert nodes["term:atlas:901"].props["name"] == \
+        "Card Member 13 Digit Number"
+    assert edges[("col:dw.wwcas_authorization.approval_cd",
+                  "mapped_term", "term:atlas:10",
+                  "atlas")].props["matched_on"] == "name"
+
+    report = json.loads((graph_dir / "runs" / "test_r1" /
+                         "manifest.json").read_text())["reports"]
+    std = report["std_tech"]
+    assert std.get("term_links_unmatched", 0) == 0   # id-first matching
+    assert std["ownership_edges"] == 3
+    assert std["derived_logic_docs"] == 1
+    assert std["columns_from_pii_declaration"] == 1
+    assert std["terms_minted_from_link"] == 2
+
+
 def test_alias_to_unknown_physical_dies_at_load(tmp_path):
     """An alias resolves an identity, it never mints one — a typo'd
     physical corrupts attribution, so the load refuses it loudly."""

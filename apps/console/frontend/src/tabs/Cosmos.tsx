@@ -15,6 +15,8 @@ interface MapNode {
   tier: "ha" | "gr" | "in" | "gu"; usage: number; well: string;
   star: boolean; pos: [number, number, number];
   columns?: number | null; metrics_here?: number; status?: string;
+  business_name?: string; business_unit?: string; lifecycle?: string;
+  pii?: boolean; description?: string;
 }
 interface MapEdge {
   a: string; b: string; kind: string; source?: string; scope?: string;
@@ -284,12 +286,21 @@ export function CosmosTab() {
               <div className="m-profile-title m-mono">
                 {picked.label}
               </div>
+              {picked.business_name && (
+                <div>{picked.business_name}</div>
+              )}
+              {picked.description && (
+                <div className="m-muted">{picked.description}</div>
+              )}
               <span className={`m-chip m-t-${picked.tier}`}>
                 {TIER_GLYPH[picked.tier].glyph}{" "}
                 {TIER_GLYPH[picked.tier].word}
               </span>
               <div className="m-muted">
                 well {picked.well}
+                {picked.business_unit && ` · MDM unit ${picked.business_unit}`}
+                {picked.lifecycle && ` · ${picked.lifecycle}`}
+                {picked.pii && " · ⊘ PII"}
                 {picked.star && " · ★ held by multiple domains"}
               </div>
               <div className="m-muted">

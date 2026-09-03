@@ -223,17 +223,60 @@ class MeridianData:
             if physical:
                 tickets_by_table[physical] = \
                     tickets_by_table.get(physical, 0) + 1
-        rows = [{"physical": physical,
-                 "short": physical.split(".")[-1],
-                 "columns": len(columns),
-                 "lob": lob_of.get(physical, ""),
-                 "metrics_here": metrics_by_table.get(physical, 0),
-                 "joins": joins_by_table.get(physical, 0),
-                 "tickets": tickets_by_table.get(physical, 0),
-                 "cost_prior": build.cost_priors.get(physical)}
-                for physical, columns in sorted(build.schema.items())]
+        rows = []
+        for physical, columns in sorted(build.schema.items()):
+            facts = build.table_facts(physical)
+            identity = facts.get("identity", {})
+            business = facts.get("business", {})
+            rows.append({
+                "physical": physical,
+                "short": physical.split(".")[-1],
+                "columns": len(columns),
+                "lob": lob_of.get(physical, ""),
+                "metrics_here": metrics_by_table.get(physical, 0),
+                "joins": joins_by_table.get(physical, 0),
+                "tickets": tickets_by_table.get(physical, 0),
+                "cost_prior": build.cost_priors.get(physical),
+                # the facts row, projected for the list (G3)
+                "business_name": identity.get("business_name", ""),
+                "business_unit": business.get("business_unit", ""),
+                "lobs": [e.get("code", "")
+                         for e in business.get("lobs", [])],
+                "lifecycle": facts.get("lifecycle") or "",
+                "tier": facts.get("trust", {}).get("tier", "gu"),
+                "pii": bool(facts.get("access", {}).get("pii_table")),
+                "description": identity.get("description", "")})
         return {"available": True, "build_id": build.version,
                 "rows": rows}
+
+    def explorer_lobs(self) -> dict:
+        """Business units and org units as a shelf: the compiled
+        lobs.jsonl rows (tables with business names, readiness,
+        usage, owners) — the same rows the lob cards render."""
+        build, reason = self._load()
+        if build is None:
+            return self._unavailable(reason)
+        rows = self._aux("indexes/lobs.jsonl")
+        if rows is None:
+            return self._unavailable(
+                "build predates business-unit cards — recompile")
+        return {"available": True, "build_id": build.version,
+                "rows": rows}
+
+    def lob(self, code: str) -> dict:
+        build, reason = self._load()
+        if build is None:
+            return self._unavailable(reason)
+        rows = self._aux("indexes/lobs.jsonl") or []
+        want = (code or "").strip().lower()
+        row = next((r for r in rows
+                    if str(r.get("code", "")).lower() == want), None)
+        if row is None:
+            return {"available": True, "found": False, "code": code}
+        card = build.root / "cards" / "lob" / f"{want}.md"
+        return {"available": True, "found": True, "lob": row,
+                "card": card.read_text(encoding="utf-8")
+                if card.exists() else ""}
 
     def metric(self, metric_id: str) -> dict:
         build, reason = self._load()
@@ -274,6 +317,9 @@ class MeridianData:
         return {"available": True, "found": True,
                 "physical": physical,
                 "columns": build.schema.get(physical, {}),
+                # the facts row: what the card is a rendering of —
+                # the profile renders the same row, never re-derives
+                "facts": build.table_facts(physical),
                 "card": card.read_text(encoding="utf-8")
                 if card.exists() else "",
                 "joins": joins,
@@ -380,6 +426,16 @@ def explorer_metrics(q: str = "", status: str = "", lob: str = "",
 @router.get("/explorer/tables")
 def explorer_tables() -> dict:
     return _DATA.explorer_tables()
+
+
+@router.get("/explorer/lobs")
+def explorer_lobs() -> dict:
+    return _DATA.explorer_lobs()
+
+
+@router.get("/lob/{code}")
+def lob(code: str) -> dict:
+    return _DATA.lob(code)
 
 
 @router.get("/metric/{metric_id:path}")

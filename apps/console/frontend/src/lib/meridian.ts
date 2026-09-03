@@ -107,6 +107,152 @@ export interface TableRow {
   joins: number;
   tickets: number;
   cost_prior: { p50?: number; p95?: number } | null;
+  business_name?: string;
+  business_unit?: string;
+  lobs?: string[];
+  lifecycle?: string;
+  tier?: MeridianTier;
+  pii?: boolean;
+  description?: string;
+}
+
+/** The compiled table facts row (meridian.table_facts/1) — the card
+ * is a rendering of this, and so is the profile. Fluid by design:
+ * the keys the UI renders are typed, the rest stay open. */
+export interface ColumnFact extends Record<string, unknown> {
+  name: string;
+  type?: string;
+  type_source?: string;
+  agreement?: number;
+  business_name?: string;
+  description?: string;
+  description_source?: string;
+  description_supplementary?: string;
+  sensitive?: boolean;
+  sensitivity_sources?: string[];
+  pii_role?: string;
+  pii_role_table_declared?: string;
+  sde_group?: string;
+  primary_key?: boolean;
+  primary_key_atlas?: boolean;
+  partitioning?: boolean;
+  partitioning_atlas?: boolean;
+  nullable_atlas?: boolean;
+  ordinal?: number;
+  ordinal_atlas?: number;
+  column_length?: number;
+  approx_distinct?: number;
+  null_count?: number;
+  domain?: { n_values: number; top: { value: unknown; pct?: number }[] };
+  terms?: { id?: string; name?: string; status?: string;
+            description?: string; matched_on?: string }[];
+  declared_terms?: { name?: string; description?: string }[];
+  derived_logic?: string;
+  derived_from?: { source: string; logic?: string }[];
+  fk_references?: { table: string; column: string }[];
+  flags?: string[];
+  ungoverned?: boolean;
+}
+
+export interface OwnerFact {
+  owner: string; roles: string[]; witnesses: string[];
+}
+
+export interface VocabFact {
+  symbol: string; definition: string; kind: string; status?: string;
+  bu: string; region: string; ref?: string; columns: string[];
+}
+
+export interface TableFacts extends Record<string, unknown> {
+  schema: string;
+  physical: string;
+  short: string;
+  columns: number;
+  primary_key: string[];
+  total_rows?: number | null;
+  lifecycle?: string | null;
+  identity: Record<string, string | boolean | undefined> & {
+    business_name?: string; description?: string;
+    description_source?: string; description_bq?: string;
+    project?: string; dataset?: string; object_type?: string;
+    table_type?: string; layer_type?: string; load_type?: string;
+    data_category?: string; data_sub_category?: string;
+    technology?: string; data_server?: string; appl_id?: string;
+    target_system?: string; schema_fingerprint?: string;
+    is_partitioned_atlas?: boolean;
+  };
+  business: {
+    business_unit?: string; business_units?: string[];
+    lobs?: { code: string; name?: string;
+             witnesses: Record<string, number> }[];
+    used_by?: { code: string; name?: string; parent?: string;
+                support: number }[];
+    owners?: OwnerFact[];
+    ownership_ids?: Record<string, string>;
+    top_users?: { user: string; queries: number }[];
+  };
+  operations: {
+    lifecycle?: string; environment?: string; feed_type?: string;
+    pipeline_name?: string; source_system?: string; created?: string;
+    last_modified?: string; total_rows?: number; size_bytes?: number;
+    n_partitions?: number; partition_latest?: string;
+    partition_columns?: string[]; partition_columns_atlas?: string[];
+    primary_key_atlas?: string[]; usage_rhythm?: string[];
+    cost_prior?: { p50_bytes?: number; p95_bytes?: number;
+                   n_jobs?: number; daily_days?: number };
+  };
+  trust: {
+    answerability?: Record<string, string>;
+    is_active_atlas?: boolean; is_latest_atlas?: boolean;
+    is_lineage_exist_atlas?: boolean;
+    tier?: MeridianTier; metrics_here?: number; filters_here?: number;
+    structural?: Record<string, number>;
+  };
+  access: {
+    restricted?: string | null; pii_table?: boolean;
+    has_pii_atlas?: boolean; has_gdpr_atlas?: boolean;
+    has_oncop_atlas?: boolean;
+    policies?: Record<string, string[]>;
+    sensitive_columns?: { name: string; pii_role?: string;
+                          sde_group?: string; sources?: string[] }[];
+  };
+  column_facts: ColumnFact[];
+  joins: {
+    declared?: { column: string; ref_table: string; ref_column: string }[];
+    observed?: { other: string; support: number }[];
+    scoped?: { other: string; on?: string[]; scope?: string;
+               join_type?: string; witness?: string;
+               preconditions?: string[] }[];
+  };
+  lineage: {
+    upstream?: string[]; downstream?: string[];
+    derived_columns?: string[]; view_sql?: boolean; docs?: string[];
+  };
+  vocabulary: VocabFact[];
+  omitted_catalog_only?: string[];
+}
+
+export interface LobTableFact {
+  physical: string; business_name?: string; description?: string;
+  tier?: MeridianTier | ""; metrics_here?: number;
+  lifecycle?: string | null; pii?: boolean; business_unit?: string;
+}
+
+export interface LobFacts {
+  code: string; name?: string; kind: string; parent?: string;
+  domains?: string[]; tables: LobTableFact[]; used_tables?: string[];
+  usage_support?: number;
+  readiness?: { tables: number; witnessed: number; pct: number };
+  owners?: { owner: string; roles: string[] }[];
+  vocabulary_entries?: number;
+}
+
+export interface LobDetail {
+  available: true;
+  found: boolean;
+  code?: string;
+  lob?: LobFacts;
+  card?: string;
 }
 
 /** The full metric row is fluid by design (props ride through) —
@@ -147,6 +293,7 @@ export interface TableDetail {
   found: boolean;
   physical: string;
   columns?: Record<string, string>;
+  facts?: TableFacts;
   card?: string;
   joins?: {
     a: string; b: string; source: string; support?: number;
@@ -185,6 +332,11 @@ export const meridian = {
   tableDetail: (physical: string) =>
     get<TableDetail>(
       `/api/meridian/table/${encodeURIComponent(physical)}`),
+  lobs: () =>
+    get<{ available: true; rows: LobFacts[] }>(
+      "/api/meridian/explorer/lobs"),
+  lobDetail: (code: string) =>
+    get<LobDetail>(`/api/meridian/lob/${encodeURIComponent(code)}`),
   builds: () => get<MeridianBuilds>("/api/meridian/builds"),
   enrichRuns: () =>
     get<{ available: true; runs: EnrichRun[] }>(
