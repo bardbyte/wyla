@@ -128,11 +128,15 @@ def synapse_digest(build: Build,
                                    -(m.get("support") or 0), m["id"]))
     for row in ranked[:12]:
         grain = (row.get("grain") or "").strip() or "grain unrecorded"
+        # the catalog's group-by patterns: what its real queries slice by
+        dims = ", ".join(str(g) for g in
+                         (row.get("group_by_patterns") or [])[:3])
         lines.append(
             f"- {row.get('label') or row['id']} "
             f"[{row.get('status_served') or row.get('status')}] on "
             f"{row['table']} · {grain} · "
-            f"`{(row.get('canonical_sql') or '')[:60]}`")
+            f"`{(row.get('canonical_sql') or '')[:60]}`"
+            + (f" · usually by {dims}" if dims else ""))
     lines.append("")
 
     # ── the concepts with the most evidence ──────────────────

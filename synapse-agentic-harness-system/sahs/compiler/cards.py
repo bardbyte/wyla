@@ -72,7 +72,8 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
                acl_entry: dict[str, Any],
                lob_info: list[dict[str, Any]] | None = None,
                usage_info: list[dict[str, Any]] | None = None,
-               scoped_joins: list[dict[str, Any]] | None = None
+               scoped_joins: list[dict[str, Any]] | None = None,
+               catalog_joins: list[dict[str, Any]] | None = None
                ) -> tuple[str, dict[str, Any]]:
     """→ (markdown, budget_report)."""
     physical = consensus.physical
@@ -143,6 +144,14 @@ def table_card(consensus: TableConsensus, node_props: dict[str, Any],
             f"- {j['other']} ON {' AND '.join(j.get('on') or ['?'])} · "
             f"{j.get('join_type') or 'JOIN'} · {j.get('scope')}{caveat} "
             f"[prov:{j.get('witness') or 'studio'}]")
+    for j in (catalog_joins or [])[:6]:
+        # the measures catalog: WHICH tables this one is joined with
+        # and FOR WHAT metrics — never HOW (no ON recorded)
+        metrics = ", ".join(j.get("metrics") or []) or "unnamed metrics"
+        lines["joins"].append(
+            f"- {j['other']} · in the queries of {metrics} · "
+            f"{j.get('support', 0)} users · ON not recorded "
+            "[prov:catalog_mined]")
     lines["filters"] = ["## common filters"] + [
         f"- {f['label']}: `{f['sql']}` · support {f['support']} "
         f"[prov:{f['source']}]" for f in filters_here[:8]]
@@ -260,6 +269,33 @@ def metric_card(metric: dict[str, Any],
         f"[prov:{metric['source']}·fp={metric['fp']}]",
         f"- table: {metric['table']} [prov:{metric['source']}]",
     ]
+    # the catalog's usage texture: what the metric's real queries did
+    if metric.get("group_by_patterns"):
+        lines.append("- usual dimensions: "
+                     + ", ".join(str(g) for g in metric["group_by_patterns"])
+                     + " (the group-by patterns of its queries) "
+                     "[prov:catalog_mined]")
+    usage = []
+    if metric.get("execution_count"):
+        usage.append(f"{metric['execution_count']} executions")
+    catalog_users = (metric.get("support_by_witness") or {}).get(
+        "catalog_mined")
+    if catalog_users:
+        usage.append(f"{catalog_users} users")
+    if metric.get("confidence"):
+        usage.append(f"miner confidence {metric['confidence']}")
+    if usage:
+        lines.append(f"- usage: {' · '.join(usage)} [prov:catalog_mined]")
+    if metric.get("joined_tables"):
+        lines.append("- joined with, in this metric's queries: "
+                     + ", ".join(str(t) for t in metric["joined_tables"])
+                     + " (ON not recorded; see the table card's joins) "
+                     "[prov:catalog_mined]")
+    about = [f"{key}: {metric[field]}" for key, field in
+             (("category", "data_category"),
+              ("business unit", "business_unit")) if metric.get(field)]
+    if about:
+        lines.append(f"- {' · '.join(about)} [prov:catalog_mined]")
     if metric.get("query_shape"):
         lines.append("- query shape: "
                      + "/".join(metric["query_shape"])

@@ -234,6 +234,8 @@ def test_search_semantics_ranks_meaning_with_receipts(kit):
     top = metric_hits[0]
     assert {"status", "support", "agreement",
             "table"} <= set(top)
+    # the catalog's group-by patterns ride the hit as `dimensions`
+    assert any(r.get("dimensions") == ["part_dt"] for r in metric_hits)
 
 
 def test_search_semantics_vocab_kind_serves_the_acronyms(kit):

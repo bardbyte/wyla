@@ -27,9 +27,9 @@ export async function renderChat(outlet, wanted = "") {
             title="Rename this chat">
             <span class="chat-title-text">New chat</span>
             <span class="chev">⌄</span></button>
-          <span class="muted chat-build" id="chat-build"></span>
+          <span class="muted chat-build" id="chat-build" hidden></span>
           <span class="spacer"></span>
-          <span class="muted" id="chat-meter"></span>
+          <span class="muted" id="chat-meter" hidden></span>
           <button class="btn" id="chat-memory-btn"
             aria-expanded="false">⊚ memory</button>
           <div id="chat-memory-pop" class="skills-pop" hidden></div>
@@ -79,11 +79,12 @@ export async function renderChat(outlet, wanted = "") {
       </div>
       <aside class="chat-panel" id="chat-panel" hidden>
         <div class="chat-panel-head">
-          <b id="panel-title"></b>
-          <span class="spacer"></span>
-          <select id="panel-version"></select>
-          <span id="panel-export"></span>
-          <button class="btn" id="panel-close">✕</button>
+          <b class="panel-title" id="panel-title"></b>
+          <select id="panel-version" title="Version"></select>
+          <button class="btn" id="panel-close" title="Close">✕</button>
+          <div class="panel-actions">
+            <span id="panel-export"></span>
+          </div>
         </div>
         <div class="chat-panel-body" id="panel-body"></div>
       </aside>
@@ -365,25 +366,27 @@ export async function renderChat(outlet, wanted = "") {
           / (n * series.length) - 4);
         s.points.forEach((p, i) => {
           const x = px(i) - (bw * series.length) / 2 + si * bw;
-          body += `<rect x="${x}" y="${Math.min(py(p[1]), py(0))}"
+          body += `<rect class="bar" x="${x}" y="${
+            Math.min(py(p[1]), py(0))}"
             width="${bw}" height="${Math.abs(py(p[1]) - py(0))}"
-            fill="${color}" opacity="0.85"/>`;
+            fill="${color}" opacity="0.85"
+            style="animation-delay:${i * 12}ms"/>`;
         });
       } else {
         const path = s.points.map((p, i) =>
           `${i ? "L" : "M"}${px(i)},${py(p[1])}`).join(" ");
         if (spec.kind === "area") {
-          body += `<path d="${path} L${px(s.points.length - 1)},${
-            py(yMin)} L${px(0)},${py(yMin)} Z" fill="${color}"
-            opacity="0.15"/>`;
+          body += `<path class="fill" d="${path} L${
+            px(s.points.length - 1)},${py(yMin)} L${px(0)},${
+            py(yMin)} Z" fill="${color}"/>`;
         }
         if (spec.kind !== "scatter") {
-          body += `<path d="${path}" fill="none" stroke="${color}"
-            stroke-width="2"/>`;
+          body += `<path class="line" d="${path}" fill="none"
+            stroke="${color}" stroke-width="2"/>`;
         }
         s.points.forEach((p, i) => {
-          body += `<circle cx="${px(i)}" cy="${py(p[1])}" r="2.6"
-            fill="${color}"><title>${esc(String(p[0]))}: ${
+          body += `<circle class="dot" cx="${px(i)}" cy="${py(p[1])}"
+            r="2.6" fill="${color}"><title>${esc(String(p[0]))}: ${
             esc(String(p[1]))}</title></circle>`;
         });
       }
@@ -411,19 +414,155 @@ export async function renderChat(outlet, wanted = "") {
       class="chartv2" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
   }
 
-  function tableHTML(spec) {
+  // numbers read as numbers: separators, two decimals at most, and a
+  // compact form for the big ones with the exact value on hover
+  const fmtNum = (n) => new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 2 }).format(n);
+  const compact = (n) => Math.abs(n) >= 1e5
+    ? new Intl.NumberFormat(undefined, { notation: "compact",
+        maximumFractionDigits: 1 }).format(n)
+    : fmtNum(n);
+  const isNum = (v) => v !== null && v !== undefined && v !== ""
+    && typeof v !== "boolean" && Number.isFinite(Number(v));
+  const isDate = (v) => typeof v === "string"
+    && /^\d{4}-\d{2}(-\d{2})?([T ].*)?$/.test(v);
+
+  function columnKinds(cols, rows) {
+    return cols.map((c) => {
+      const vals = rows.map((r) => r[c.key])
+        .filter((v) => v !== null && v !== undefined && v !== "");
+      const nums = vals.filter(isNum).length;
+      const dates = vals.filter(isDate).length;
+      const kind = vals.length && nums / vals.length >= 0.8 ? "num"
+        : vals.length && dates / vals.length >= 0.8 ? "date" : "text";
+      return { key: c.key, label: c.label, kind };
+    });
+  }
+
+  function sparkline(values, w = 140, h = 28) {
+    const nums = values.map(Number).filter(Number.isFinite);
+    if (nums.length < 2) return "";
+    const min = Math.min(...nums);
+    const span = (Math.max(...nums) - min) || 1;
+    const pts = nums.map((v, i) => [
+      (i / (nums.length - 1)) * w,
+      h - 2 - ((v - min) / span) * (h - 4)]);
+    const line = pts.map((pt) => pt.map((n) => n.toFixed(1)).join(","))
+      .join(" ");
+    return `<svg class="stat-spark" viewBox="0 0 ${w} ${h}"
+      preserveAspectRatio="none" aria-hidden="true">
+      <polygon class="area" points="0,${h} ${line} ${w},${h}"/>
+      <polyline points="${line}"/></svg>`;
+  }
+
+  // the summary strip: the rows and their span, then each numeric
+  // column's total, range and mean with its shape — every value
+  // computed from the artifact's own rows, nothing estimated
+  function reportStrip(spec, kinds) {
+    const rows = spec.rows || [];
     const cols = spec.columns || [];
-    const head = cols.map((c) =>
-      `<th data-key="${esc(c.key)}">${esc(c.label)}${
-        c.status ? ` <span class="muted">(${esc(c.status)})</span>`
-                 : ""}</th>`).join("");
-    const body = (spec.rows || []).map((r) =>
-      `<tr>${cols.map((c) =>
-        `<td>${esc(String(r[c.key] ?? ""))}</td>`).join("")}</tr>`)
-      .join("");
-    return `<div class="tablewrap"><table class="sortable">
+    const stats = [];
+    const first = { label: "rows", value: fmtNum(rows.length),
+      sub: `${cols.length} column${cols.length === 1 ? "" : "s"}` };
+    const dateCol = kinds.find((k) => k.kind === "date");
+    if (dateCol) {
+      const ds = rows.map((r) => String(r[dateCol.key] || ""))
+        .filter(Boolean).sort();
+      const today = new Date().toISOString().slice(0, 10);
+      const future = ds.filter((d) => d.slice(0, 10) > today).length;
+      if (ds.length) first.sub += ` · ${ds[0]} → ${ds[ds.length - 1]}`;
+      if (future) {
+        first.warn = true;
+        first.sub += ` · ${future} dated after today`;
+      }
+    }
+    if (spec.watermark) first.sub += ` · ${spec.watermark}`;
+    stats.push(first);
+    for (const k of kinds.filter((x) => x.kind === "num").slice(0, 4)) {
+      const nums = rows.map((r) => Number(r[k.key]))
+        .filter(Number.isFinite);
+      if (!nums.length) continue;
+      const total = nums.reduce((a, b) => a + b, 0);
+      stats.push({ label: k.label, value: compact(total), exact: total,
+        sub: `min ${compact(Math.min(...nums))} · max ${
+          compact(Math.max(...nums))} · avg ${
+          compact(total / nums.length)}`,
+        spark: sparkline(nums) });
+    }
+    return `<div class="report-strip">${stats.map((st, i) => `
+      <div class="stat${st.warn ? " warn" : ""}" style="--i:${i}">
+        <div class="stat-label" title="${esc(st.label)}">${
+          esc(st.label)}</div>
+        <div class="stat-value"${typeof st.exact === "number"
+          ? ` data-n="${st.exact}" data-fmt="compact" title="${
+              esc(fmtNum(st.exact))}"` : ""}>${esc(st.value)}</div>
+        <div class="stat-sub">${esc(st.sub)}</div>
+        ${st.spark || ""}
+      </div>`).join("")}</div>`;
+  }
+
+  function tableReport(spec, opts = {}) {
+    const { summary = true, limit = 50 } = opts;
+    const cols = spec.columns || [];
+    const rows = spec.rows || [];
+    const kinds = columnKinds(cols, rows);
+    const strip = summary && rows.length ? reportStrip(spec, kinds) : "";
+    const head = kinds.map((k) =>
+      `<th class="${k.kind}" data-key="${esc(k.key)}">${esc(k.label)}${
+        (cols.find((c) => c.key === k.key) || {}).status
+          ? ` <span class="muted">(${esc(cols.find((c) =>
+              c.key === k.key).status)})</span>` : ""}</th>`).join("");
+    const cell = (k, v) => k.kind === "num" && isNum(v)
+      ? `<td class="num">${esc(fmtNum(Number(v)))}</td>`
+      : `<td class="${k.kind}">${esc(String(v ?? ""))}</td>`;
+    const body = rows.map((r, i) =>
+      `<tr${i >= limit ? " hidden" : ""}>${
+        kinds.map((k) => cell(k, r[k.key])).join("")}</tr>`).join("");
+    const more = rows.length > limit ? `<div class="table-more">
+        <span>Showing the first ${limit} of ${fmtNum(rows.length)} rows</span>
+        <button class="btn table-all" data-limit="${limit}">Show all</button>
+      </div>` : "";
+    return `${strip}<div class="tablev3"><table class="sortable">
       <thead><tr>${head}</tr></thead>
-      <tbody>${body}</tbody></table></div>`;
+      <tbody>${body}</tbody></table></div>${more}`;
+  }
+
+  function tableHTML(spec) {
+    return tableReport(spec, { summary: false, limit: 20 });
+  }
+
+  function bindTable(container) {
+    for (const btn of container.querySelectorAll(".table-all")) {
+      btn.addEventListener("click", () => {
+        const wrap = btn.closest(".table-more").previousElementSibling;
+        const all = btn.textContent === "Show all";
+        wrap.querySelectorAll("tbody tr").forEach((tr, i) => {
+          tr.hidden = !all && i >= Number(btn.dataset.limit);
+        });
+        btn.textContent = all ? "Show fewer" : "Show all";
+      });
+    }
+  }
+
+  // numbers count up to their value once, never past it; reduced
+  // motion shows the value at once
+  function animateNumbers(container) {
+    const reduce = window.matchMedia
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    for (const node of container.querySelectorAll("[data-n]")) {
+      const target = Number(node.dataset.n);
+      const final = node.textContent;
+      if (!Number.isFinite(target) || reduce) continue;
+      const fmt = node.dataset.fmt === "compact" ? compact : fmtNum;
+      const start = performance.now();
+      const step = (now) => {
+        const t = Math.min(1, (now - start) / 700);
+        const eased = 1 - Math.pow(1 - t, 3);
+        node.textContent = t < 1 ? fmt(target * eased) : final;
+        if (t < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }
   }
 
   function kpiTile(spec) {
@@ -431,10 +570,15 @@ export async function renderChat(outlet, wanted = "") {
       ? `<span class="kpi-delta ${spec.delta >= 0 ? "up" : "down"}">${
           spec.delta >= 0 ? "▲" : "▼"} ${
           esc(String(Math.abs(spec.delta)))}</span>` : "";
+    const numeric = typeof spec.value === "number"
+      && Number.isFinite(spec.value);
     return `<div class="kpi-tile">
       ${spec.label ? `<div class="kpi-label">${esc(spec.label)}</div>`
                    : ""}
-      <div class="kpi-value">${esc(String(spec.value ?? "—"))}${
+      <div class="kpi-value"${numeric
+        ? ` data-n="${spec.value}" data-fmt="plain"` : ""}>${
+        numeric ? esc(fmtNum(spec.value))
+                : esc(String(spec.value ?? "—"))}${
         spec.unit ? `<span class="kpi-unit">${esc(spec.unit)}</span>`
                   : ""}${delta}</div>
     </div>`;
@@ -543,7 +687,8 @@ export async function renderChat(outlet, wanted = "") {
       const mark = spec.watermark
         ? `<div class="watermark-band">${esc(spec.watermark)}</div>`
         : "";
-      return mark + tableHTML(spec) + footer;
+      return mark + tableReport(spec, { summary: true, limit: 50 })
+        + footer;
     }
     if (row.type === "document") {
       const mark = spec.watermark
@@ -564,8 +709,8 @@ export async function renderChat(outlet, wanted = "") {
             esc(f.slot)}" data-value="${esc(o)}">${esc(o)}</button>`)
             .join("")}
         </span>`).join("");
-      const panels = (spec.panels || []).map((p) => `
-        <div class="dash-panel dash-${esc(p.type)}">
+      const panels = (spec.panels || []).map((p, i) => `
+        <div class="dash-panel dash-${esc(p.type)}" style="--i:${i}">
           ${p.title ? `<div class="dash-panel-title">${
             esc(p.title)}</div>` : ""}
           ${panelBody(p.type, p.spec || {})}
@@ -716,13 +861,26 @@ export async function renderChat(outlet, wanted = "") {
     const row = got.artifact;
     state.panelId = artifactId;
     state.artifacts.set(artifactId, row);
-    el("chat-panel").hidden = false;
+    const panel = el("chat-panel");
+    panel.hidden = false;
     el("panel-title").textContent = row.title;
     el("panel-body").innerHTML = renderArtifactBody(row);
+    el("panel-body").scrollTop = 0;       // the artifact, from its top
+    bindTable(el("panel-body"));
+    animateNumbers(el("panel-body"));
     if (row.type === "dashboard") {
       bindDashboardFilters(el("panel-body"), row);
     }
     exportButtons(row);
+    // the drawer slides in from the right edge and moves the chat to
+    // the middle; the card it came from lights up
+    requestAnimationFrame(() => {
+      panel.classList.add("open");
+      shell.classList.add("panel-open");
+    });
+    for (const card of thread.querySelectorAll(".artifact-inline")) {
+      card.classList.toggle("on", card.dataset.artifact === artifactId);
+    }
     const versions = await api.chatArtifactVersions(artifactId);
     const select = el("panel-version");
     select.innerHTML = (versions.versions || []).map((v) =>
@@ -732,8 +890,17 @@ export async function renderChat(outlet, wanted = "") {
       openArtifact(artifactId, Number(select.value));
   }
   el("panel-close").addEventListener("click", () => {
-    el("chat-panel").hidden = true;
+    const panel = el("chat-panel");
+    panel.classList.remove("open");
+    shell.classList.remove("panel-open");
     state.panelId = "";
+    for (const card of thread.querySelectorAll(".artifact-inline.on")) {
+      card.classList.remove("on");
+    }
+    // hidden once it has slid out, so nothing off-screen stays live
+    setTimeout(() => {
+      if (!panel.classList.contains("open")) panel.hidden = true;
+    }, 340);
   });
 
   // ── the stream ───────────────────────────────────────────
@@ -1037,12 +1204,14 @@ export async function renderChat(outlet, wanted = "") {
   function artifactCard(container, row, live) {
     const div = document.createElement("div");
     div.className = "card artifact-inline";
+    div.dataset.artifact = row.artifact_id;
     div.innerHTML = `
       <span class="glyph">${{ chart: "📊", table: "▦",
         document: "🗎", dashboard: "▥", diagram: "✦",
         kpi: "◉" }[row.type] || "▣"}</span>
-      <b>${esc(row.title)}</b>
-      <span class="muted">v${row.version}${
+      <span class="artifact-name" title="${esc(row.title)}">${
+        esc(row.title)}</span>
+      <span class="muted">${esc(row.type)} · v${row.version}${
         row.spec?.watermark
           ? ` · ${esc(row.spec.watermark)}` : ""}</span>
       <button class="btn">open</button>`;
@@ -1093,6 +1262,12 @@ export async function renderChat(outlet, wanted = "") {
         proposal.meridian_line
           ? ` · <span class="meridian">${esc(proposal.meridian_line)}</span>`
           : ""}</div>
+      ${proposal.over_ceiling
+        ? `<div class="proposal-warn">⚠ over the ${
+            esc(bytes(proposal.scan_ceiling_bytes))} ceiling for live
+            runs: Run will be refused unless the query is narrowed
+            (Edit SQL: a filter on the partition column) or the ceiling
+            is raised in the silo settings</div>` : ""}
       ${(proposal.warnings || []).length
         ? `<div class="proposal-warn">${(proposal.warnings || [])
             .slice(0, 2).map((w) => `<div>⚠ ${esc(w)}</div>`).join("")}</div>`

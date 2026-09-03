@@ -252,8 +252,14 @@ Read the build report for `vocab.common_word_acronyms`,
 `domains_minted` / `skipped_unknown_table`, and `bq.domains_with_estimate`;
 the ledger lists `15_low_cardinality_manifest.csv` and
 `low_cardinality_synonyms_index.json` as consumed and `glossary_terms.csv`
-as deferred with its reason. The new build's `DIFF_vs_prev.md` shows what
-the sources added. Restart the app so the chat serves the new build.
+as deferred with its reason. `expressions.catalog_join_edges` counts the
+`joined_tables` pairs from the measures catalog that became join edges
+(witness `catalog_mined`, `source: catalog` in `indexes/joins.jsonl`, no
+ON condition, so never above candidate) and `catalog_join_unresolved`
+counts the joined names the crosswalk could not place — a large number
+there means the alias sidecar wants those names. The new build's
+`DIFF_vs_prev.md` shows what the sources added. Restart the app so the
+chat serves the new build.
 
 **The query comes first.** In Chat mode a data question ends with the
 query on a card — the SQL, what it will scan, its status and meridian
@@ -274,8 +280,20 @@ the rows in the panel and in the workspace as q1; the "Chart these
 rows" chip draws them with no model call under the same provenance;
 "Build a dashboard from these rows" and "Run + build dashboard" are
 the model's turns, on autopilot. Autopilot mode skips the card. Run
-needs `SAHS_ALLOW_LIVE=1`; without it the card still shows the query
-and the run explains the configuration.
+needs `SAHS_ALLOW_LIVE=1` (that exact name: `SAHS_LIVE=1` does
+nothing, and the refusal now names such a near miss); put it in the
+silo `.env`, which every run reads, or export it in the shell that
+starts the app — an export in another shell never reaches a running
+server. Without it the card still shows the query and the run explains
+the configuration. The scan ceiling (`SAHS_LIVE_MAX_BYTES`, 1 GB by
+default) is enforced at handover time too: a query over it comes back
+to the model once to narrow, and if it is handed over anyway the card
+says Run will be refused unless it is narrowed or the ceiling raised.
+`python scripts/turn_doctor.py` and `planes_check.py` print the live
+switch and the ceiling with the planes. When a run's rows carry dates
+after today (a window with no upper bound over a table that holds
+future-dated rows: the dashboard whose axis ran to 2118), the run's
+receipts and the chart say so and name the bound to add.
 
 **Rows come from the warehouse under two limits.** Until live
 execution is on, the chat can only price a query (dry run) — it never

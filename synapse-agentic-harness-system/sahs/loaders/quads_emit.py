@@ -105,6 +105,8 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
             node_prov[node_id] = (record.source, int(record.authority),
                                   record.evidence_ref)
 
+    edge_props: dict[tuple, dict] = {}
+
     def merge_edge(s: str, r: str, o: str, record: ExpressionRecord
                    ) -> None:
         entry = edges.setdefault((s, r, o, witness_of(record)), {
@@ -287,6 +289,32 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                        record)
             merge_edge(metric, "member_of", mgroup, record)
             merge_edge(metric, "measured_on", tid, record)
+            # the catalog's joined_tables: which tables this metric's
+            # queries join, with the metric as context. A witnessed
+            # joins_via edge per pair, support = the measure's users;
+            # the ON condition is not recorded, so the edge says so and
+            # the row never tiers above candidate — the jobs harvest
+            # and the constraints say HOW, the catalog says WHICH and
+            # FOR WHAT
+            for raw_join in record.extra.get("joined_tables") or []:
+                other, _alias = _resolve(str(raw_join or "").strip())
+                if other is None:
+                    report["catalog_join_unresolved"] += 1
+                    continue
+                if other == physical:
+                    continue
+                a, b = sorted((physical, other))
+                key = (table_id(a), "joins_via", table_id(b),
+                       witness_of(record))
+                if key not in edges:
+                    report["catalog_join_edges"] += 1
+                merge_edge(table_id(a), "joins_via", table_id(b), record)
+                held = edge_props.setdefault(key, {
+                    "how": "unknown", "confidence": "mined",
+                    "witness_metrics": set(), "measures": set()})
+                held["witness_metrics"].add(metric)
+                if record.metric_ref:
+                    held["measures"].add(record.metric_ref)
             state = _INITIAL_STATE.get(record.authority)
             if state and _STATE_RANK[state] > _STATE_RANK.get(
                     states.get(metric, ""), 0):
@@ -304,6 +332,8 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
             ("first_seen", entry["first_seen"]),
             ("last_seen", entry["last_seen"]),
             ("run_count", entry["run_count"] or None)) if v}
+        for key, value in edge_props.get((s, r, o, witness), {}).items():
+            props[key] = sorted(value) if isinstance(value, set) else value
         graph.append_edge(Quad(s=s, r=r, o=o, props=props, prov=Prov(
             source=entry["source"], run=run_id, witness=witness,
             support=entry["support"], evidence=entry["evidence"])))

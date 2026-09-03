@@ -1224,3 +1224,124 @@ table.result tr:last-child td { border-bottom: none; }
 .proposal-meta { font-size: var(--fs-12, 0.75rem); }
 .proposal-warn { font-size: var(--fs-12, 0.75rem); color: var(--tier-mid, #b07908); }
 .proposal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ── the artifact drawer: slides in from the right edge and moves the
+   chat to the middle; the report inside is a summary of the data
+   pool first, then the rows; every motion has reduced-motion parity ── */
+:root { --panel-w: min(600px, 46vw); }
+.chatv2 { display: block; position: relative; }
+.chat-main {
+  height: 100%;
+  transition: margin-right 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.chatv2.panel-open .chat-main { margin-right: var(--panel-w); }
+.chat-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: var(--panel-w);
+  max-width: none; background: var(--surface, #fff);
+  border-left: 1px solid var(--line, #d5d2ca); box-shadow: var(--shadow-lift);
+  transform: translateX(102%);
+  transition: transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+  z-index: 40;
+}
+.chat-panel.open { transform: none; }
+.chat-panel-head {
+  flex-wrap: wrap; row-gap: 6px; padding: 12px 14px 10px;
+}
+.chat-panel-head .panel-title {
+  font-size: var(--fs-16, 1rem); font-weight: 700; flex: 1 1 60%;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.panel-actions {
+  display: flex; gap: 6px; align-items: center; flex-wrap: wrap; width: 100%;
+}
+#panel-export { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.chat-panel-body { padding: 14px 16px 28px; }
+@media (max-width: 1100px) {
+  :root { --panel-w: min(92vw, 560px); }
+  .chatv2.panel-open .chat-main { margin-right: 0; }
+}
+/* the report: a summary strip of the data pool, then the rows */
+.report-strip {
+  display: grid; gap: 10px; margin: 2px 0 14px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.stat {
+  border: 1px solid var(--line, #d5d2ca); border-radius: 12px;
+  padding: 10px 12px; background: var(--surface-2, #eef3fa); min-width: 0;
+  animation: tile-in 0.45s ease both; animation-delay: calc(var(--i, 0) * 60ms);
+}
+.stat-label {
+  font-size: var(--fs-11, 0.6875rem); text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--ink-3, #5b6b8f);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.stat-value {
+  font-size: 22px; font-weight: 800; line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+.stat-sub {
+  font-size: var(--fs-12, 0.75rem); color: var(--ink-3, #5b6b8f);
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.stat-spark { width: 100%; height: 28px; margin-top: 4px; display: block; }
+.stat-spark polyline { fill: none; stroke: var(--accent, #2f6feb); stroke-width: 1.5; }
+.stat-spark .area { fill: var(--accent-soft, #eaf2fb); stroke: none; }
+.stat.warn .stat-value { color: var(--tier-mid, #b07908); }
+.tablev3 {
+  max-height: 58vh; overflow: auto; border: 1px solid var(--line, #d5d2ca);
+  border-radius: 12px;
+}
+.tablev3 table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; }
+.tablev3 th {
+  position: sticky; top: 0; z-index: 1; background: var(--surface-2, #eef3fa);
+  text-align: left; padding: 8px 10px; font-size: var(--fs-11, 0.6875rem);
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-3, #5b6b8f);
+  border-bottom: 1px solid var(--line, #d5d2ca);
+}
+.tablev3 td { padding: 7px 10px; border-bottom: 1px solid var(--line, #d5d2ca); white-space: nowrap; }
+.tablev3 tbody tr:nth-child(even) td { background: rgba(0, 23, 90, 0.025); }
+.tablev3 tbody tr:hover td { background: var(--accent-soft, #eaf2fb); }
+.tablev3 td.num, .tablev3 th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.tablev3 td.date { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; }
+.table-more {
+  display: flex; gap: 10px; align-items: center; padding: 8px 2px 0;
+  font-size: var(--fs-12, 0.75rem); color: var(--ink-3, #5b6b8f);
+}
+.kpi-value { font-variant-numeric: tabular-nums; }
+/* charts draw themselves in; tiles arrive one after another */
+.chartv2 .line {
+  stroke-dasharray: 2400; stroke-dashoffset: 2400;
+  animation: draw 1s ease-out forwards;
+}
+.chartv2 .bar {
+  transform-box: fill-box; transform-origin: bottom;
+  animation: grow 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.chartv2 .dot { opacity: 0; animation: fade 0.4s ease 0.55s forwards; }
+.chartv2 .fill { fill-opacity: 0; animation: fillin 0.6s ease 0.4s forwards; }
+.dash-panel { animation: tile-in 0.45s ease both; animation-delay: calc(var(--i, 0) * 70ms); }
+.artifact-inline {
+  border-radius: 12px; transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.artifact-inline:hover { transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.artifact-inline.on { border-color: var(--accent, #2f6feb); }
+.artifact-inline .artifact-name {
+  font-weight: 600; flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.artifact-inline .glyph {
+  font-size: 17px; width: 34px; height: 34px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 10px; background: var(--accent-soft, #eaf2fb); color: var(--accent, #2f6feb);
+}
+@keyframes tile-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes fade { to { opacity: 1; } }
+@keyframes fillin { to { fill-opacity: 0.15; } }
+@media (prefers-reduced-motion: reduce) {
+  .chat-main, .chat-panel, .artifact-inline { transition: none; }
+  .stat, .dash-panel, .chartv2 .line, .chartv2 .bar, .chartv2 .dot,
+  .chartv2 .fill { animation: none; opacity: 1; stroke-dashoffset: 0;
+    transform: none; fill-opacity: 0.15; }
+}

@@ -120,14 +120,20 @@ def verify(build: Build, plan: Plan, contract: Contract, gen: Generation,
     if contract.get("fan_out_guard") is not None:
         tables = sorted({t for t in (envelope.get("meta") or {}).get(
             "tables", []) if t})
+        # raw-safe means HOW is on record: a measured or declared ON
+        # clause. A co-query digest or a catalog row says WHICH tables
+        # join, never how, and cannot vouch for the fan-out
         safe = [j for j in build.joins
                 if j.get("a") in tables and j.get("b") in tables
-                and j.get("scope") != "scoped_only"]
+                and j.get("scope") != "scoped_only"
+                and (j.get("on") or j.get("source") == "constraints")]
         flip("fan_out_guard", bool(safe),
              f"raw-safe join on record: {safe[0].get('on')}" if safe
              else f"no raw-safe join between {', '.join(tables)}: a "
                   "CTE-scoped witness is evidence the relationship "
-                  "exists, not that the raw tables join safely")
+                  "exists, not that the raw tables join safely; a "
+                  "catalog or co-query row says which tables join, "
+                  "never how")
 
     # ── 5. cost: UNKNOWN fails closed ────────────────────────
     meta = envelope.get("meta") or {}

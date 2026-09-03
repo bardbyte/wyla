@@ -15,7 +15,8 @@
    "first_seen": "2026-05-01",
    "last_seen": "2026-08-20",
    "joined_tables": [
-    "gms_merchant_char"
+    "gms_merchant_char",
+    "wwcas_authorization"
    ],
    "group_by_patterns": [
     "part_dt"

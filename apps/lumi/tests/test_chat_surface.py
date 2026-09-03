@@ -260,4 +260,24 @@ def test_the_first_picture_needs_no_model():
     assert "chatChart" in API_JS
     for piece in ('/chart"', "ChartRows", "chart_rows"):
         assert piece in BACKEND, piece
+    # the card says when Run would be refused for cost
+    assert "proposal.over_ceiling" in CHAT_JS
+    assert "ceiling for live" in CHAT_JS
+
+
+def test_the_artifact_drawer_and_the_report():
+    # the panel is a drawer: it slides in from the right edge and
+    # moves the chat to the middle; opening a card always brings the
+    # artifact into view; the masthead carries no tokens or build id
+    for piece in ('classList.add("open")', "panel-open", "scrollTop = 0",
+                  'id="chat-meter" hidden', 'id="chat-build" hidden',
+                  "tableReport", "animateNumbers", "sparkline",
+                  "report-strip", "tablev3", "Show all",
+                  'class="line"', 'class="bar"', "--i:"):
+        assert piece in CHAT_JS, piece
+    for cls in (".chat-panel.open", ".chatv2.panel-open .chat-main",
+                "--panel-w", ".report-strip", ".stat-spark", ".tablev3",
+                "@keyframes draw", "@keyframes grow", "@keyframes tile-in",
+                ".chartv2 .line", "prefers-reduced-motion"):
+        assert cls in CSS, cls
 

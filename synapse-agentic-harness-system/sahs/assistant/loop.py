@@ -18,6 +18,7 @@ language with what was already said, never a vanished turn.
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import re
 import time
@@ -63,7 +64,8 @@ map, never tables: "all GMNS metrics" is search("GMNS", kind="list"), \
 not a table browse. When a first look misses, rephrase and look \
 again from another angle before concluding anything is absent. Read \
 a card before using what is on it; sample a column's values before \
-writing a filter literal.
+writing a filter literal. A time window names both ends — a lower and \
+an upper bound on the date — so future-dated rows never ride in.
 
 Numbers come from tools; reasoning comes from you. You never invent \
 a table, column, metric, or number: if it is not in a card, an \
@@ -818,6 +820,7 @@ def run_proposal_turn(*, build: Build, store: AssistantStore,
         if result.get("warnings"):
             said += "\n\nNote: " + " ".join(
                 str(w) for w in result["warnings"][:2])
+        said += _future_note(rows)
         chips = []
         if result.get("saved_as"):
             # the first picture needs no model: the chart turn draws
@@ -861,6 +864,44 @@ def _read_rows(workspace: Path, saved_as: str) -> list[dict[str, Any]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     rows = data.get("rows") if isinstance(data, dict) else data
     return [r for r in (rows or []) if isinstance(r, dict)]
+
+
+def _future_dates(rows: list[dict[str, Any]],
+                  today: _dt.date | None = None) -> dict[str, Any]:
+    """Rows dated after today, per date-like column — the sign of a
+    window with no upper bound, or of future-dated rows in the table.
+    {column: {"rows": n, "latest": date}}; empty when none."""
+    today = today or _dt.date.today()
+    found: dict[str, Any] = {}
+    for row in rows:
+        for column, value in row.items():
+            text = str(value or "")
+            if not _DATE_LIKE.match(text):
+                continue
+            try:
+                day = _dt.date.fromisoformat(
+                    text[:10] if len(text) >= 10 else text[:7] + "-01")
+            except ValueError:
+                continue
+            if day > today:
+                entry = found.setdefault(column, {"rows": 0, "latest": day})
+                entry["rows"] += 1
+                if day > entry["latest"]:
+                    entry["latest"] = day
+    return found
+
+
+def _future_note(rows: list[dict[str, Any]], *, verb: str = "rows") -> str:
+    found = _future_dates(rows)
+    if not found:
+        return ""
+    column, info = max(found.items(), key=lambda kv: kv[1]["rows"])
+    n = info["rows"]
+    return (f"\n\nNote: {n} of these {verb} {'is' if n == 1 else 'are'} "
+            f"dated after today in {column} (up to "
+            f"{info['latest'].isoformat()}): the query has no upper bound "
+            "on the date, or the table holds future-dated rows. Refine it "
+            f"with {column} <= CURRENT_DATE() before trusting the tail.")
 
 
 def _number(value: Any) -> float | None:
@@ -956,7 +997,8 @@ def chart_rows_turn(*, build: Build, store: AssistantStore,
             said = (f"Drew it: a {chart_kind} chart of "
                     + ", ".join(series_cols) + f" by {axis}, {len(rows)} "
                     f"rows, under the query's own provenance. "
-                    + str((provenance or {}).get("meridian_line") or ""))
+                    + str((provenance or {}).get("meridian_line") or "")
+                    + _future_note(rows, verb="points"))
             summary = (f"{chart_kind} · {len(series_cols)} series · "
                        f"{len(rows)} points · x={axis}")
             status = "answered"

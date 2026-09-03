@@ -262,6 +262,16 @@ def compile_build(graph_root: Path, builds_root: Path
             # channel, or method it is scoped to) — serving + enricher
             # context both need them
             "common_filters": record.props.get("common_filters") or [],
+            # the catalog's usage texture: the dimensions its queries
+            # group by, how often it runs, the miner's confidence,
+            # what it joins, who runs it, what it is about
+            "group_by_patterns":
+                record.props.get("group_by_patterns") or [],
+            "joined_tables": record.props.get("joined_tables") or [],
+            "execution_count": record.props.get("execution_count"),
+            "confidence": record.props.get("confidence") or "",
+            "business_unit": record.props.get("business_unit", ""),
+            "data_category": record.props.get("data_category", ""),
             # studio-export texture (observed, serving-facing)
             "grain_observed": record.props.get("grain_observed", ""),
             "query_shape": record.props.get("query_shape") or [],
@@ -298,11 +308,15 @@ def compile_build(graph_root: Path, builds_root: Path
                     "grain_source", "label", "sign_convention",
                     "author", "description", "domain",
                     "line_of_business", "scope", "grain_observed",
-                    "join_condition"):
+                    "join_condition", "confidence", "business_unit",
+                    "data_category"):
             held[key] = held[key] or row[key]
+        if row.get("execution_count") and not held.get("execution_count"):
+            held["execution_count"] = row["execution_count"]
         for key in ("approved_dimensions", "query_shape", "data_owners",
                     "tables_associated_not_referenced",
-                    "common_filters"):
+                    "common_filters", "group_by_patterns",
+                    "joined_tables"):
             if row[key] and not held[key]:
                 held[key] = row[key]
     for row in collapsed.values():
@@ -470,6 +484,13 @@ def compile_build(graph_root: Path, builds_root: Path
     budget: dict[str, Any] = {"over_budget": 0, "dropped": {}}
     co_by_table: dict[str, list[tuple[str, int]]] = defaultdict(list)
     scoped_by_table: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    # the catalog's joined_tables render on BOTH ends too: WHICH table,
+    # FOR WHAT metrics (named, not fingerprinted), how many users —
+    # never HOW
+    catalog_by_table: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    label_of = {m["id"]: (m.get("label") or m["id"]) for m in metric_rows}
+    for m in metric_rows:
+        label_of.setdefault(f"metric:{m.get('fp', '')}", label_of[m["id"]])
     for (s, r, o, _w), quad in sorted(edges.items()):
         if r == "co_queried_with":
             co_by_table[s.split(":", 1)[1]].append(
@@ -487,6 +508,14 @@ def compile_build(graph_root: Path, builds_root: Path
                      "witness": quad.prov.witness or ""}
             scoped_by_table[a].append({**entry, "other": b})
             scoped_by_table[b].append({**entry, "other": a})
+        elif r == "joins_via" and quad.prov.witness == "catalog_mined":
+            a, b = s.split(":", 1)[1], o.split(":", 1)[1]
+            entry = {"support": quad.prov.support or 1,
+                     "metrics": sorted({
+                         label_of.get(m, m) for m in
+                         quad.props.get("witness_metrics") or []})}
+            catalog_by_table[a].append({**entry, "other": b})
+            catalog_by_table[b].append({**entry, "other": a})
     for tid, table_consensus in sorted(consensus.items()):
         physical = table_consensus.physical
         record = nodes.get(tid)
@@ -509,7 +538,9 @@ def compile_build(graph_root: Path, builds_root: Path
             acl.get(physical, {"restricted": None, "pii_columns": []}),
             lob_info=lob_by_table.get(physical, []),
             usage_info=usage_by_table.get(physical, []),
-            scoped_joins=scoped_by_table.get(physical, []))
+            scoped_joins=scoped_by_table.get(physical, []),
+            catalog_joins=sorted(catalog_by_table.get(physical, []),
+                                 key=lambda x: (-x["support"], x["other"])))
         (build_dir / "cards" / "tables"
          / f"{physical.replace('.', '__')}.md").write_text(
             text + "\n", encoding="utf-8")
@@ -617,13 +648,16 @@ def compile_build(graph_root: Path, builds_root: Path
     (build_dir / "schema.json").write_text(
         json.dumps(schema, indent=1, sort_keys=True) + "\n",
         encoding="utf-8")
-    # four join-knowledge families, each named: co-query digests say
+    # five join-knowledge families, each named: co-query digests say
     # tables appear together, jobs ON-clauses say HOW (measured),
-    # declared constraints say HOW by fiat, and studio witnesses say
-    # HOW inside certified-metric SQL — the agent reads `source`, and
-    # a studio row's `scope: scoped_only` means the equality was
-    # observed between TRANSFORMED CTEs: evidence the relationship
-    # exists, never that the raw tables join safely
+    # declared constraints say HOW by fiat, studio witnesses say HOW
+    # inside certified-metric SQL, and the measures catalog says WHICH
+    # tables a metric's real queries join and FOR WHAT metric (never
+    # HOW: no ON recorded, so a catalog row never tiers above
+    # candidate) — the agent reads `source`, and a studio row's
+    # `scope: scoped_only` means the equality was observed between
+    # TRANSFORMED CTEs: evidence the relationship exists, never that
+    # the raw tables join safely
     join_rows = []
     for (s, r, o, _w), quad in sorted(edges.items()):
         if r == "co_queried_with":
@@ -632,15 +666,25 @@ def compile_build(graph_root: Path, builds_root: Path
                  "support": quad.prov.support or 1,
                  "source": "co_query"})
         elif r == "joins_via":
+            witness = quad.prov.witness or "jobs_30d"
             row = {"a": s.split(":", 1)[1], "b": o.split(":", 1)[1],
                    "support": quad.prov.support or 1,
-                   "source": quad.prov.witness or "jobs_30d"}
+                   # the catalog is the fifth family: WHICH tables a
+                   # metric's queries join, never HOW
+                   "source": "catalog" if witness == "catalog_mined"
+                   else witness}
             if quad.props.get("on"):
                 row["on"] = quad.props["on"]
             for key in ("scope", "join_type", "witness_metrics",
-                        "confidence"):
+                        "confidence", "how", "measures"):
                 if quad.props.get(key):
                     row[key] = quad.props[key]
+            if row["source"] == "catalog":
+                row["note"] = ("joined in these metrics' queries per "
+                               "the measures catalog; the ON condition "
+                               "is not recorded — a jobs, studio or "
+                               "constraints row for the same pair says "
+                               "how")
             join_rows.append(row)
         elif r == "fk_references":
             a_col = s.split(":", 1)[1]
@@ -650,6 +694,28 @@ def compile_build(graph_root: Path, builds_root: Path
                  "b": ".".join(b_col.split(".")[:2]),
                  "support": 1, "on": f"{a_col} = {b_col}",
                  "source": "constraints"})
+    # the families annotate each other on a shared pair: a catalog row
+    # names who else saw the pair, and a measured row names the metrics
+    # the catalog saw joining it
+    by_pair: dict[tuple[str, ...], list[dict]] = {}
+    for row in join_rows:
+        # a pair is unordered: the digest rows run both ways
+        by_pair.setdefault(tuple(sorted((row["a"], row["b"]))),
+                           []).append(row)
+    for rows_here in by_pair.values():
+        catalog_rows = [r for r in rows_here if r["source"] == "catalog"]
+        others = [r for r in rows_here if r["source"] != "catalog"]
+        for row in catalog_rows:
+            if others:
+                row["also_witnessed_by"] = sorted(
+                    {o["source"] for o in others})
+        for row in others:
+            if catalog_rows:
+                row["also_in_catalog"] = {
+                    "support": sum(int(c["support"]) for c in catalog_rows),
+                    "witness_metrics": sorted({m for c in catalog_rows
+                                               for m in c.get(
+                                                   "witness_metrics", [])})}
     (build_dir / "indexes" / "joins.jsonl").write_text(
         "".join(json.dumps(j, sort_keys=True) + "\n" for j in join_rows),
         encoding="utf-8")

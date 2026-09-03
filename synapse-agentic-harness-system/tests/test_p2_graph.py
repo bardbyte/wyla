@@ -643,3 +643,35 @@ def test_csv_reader_tolerates_giant_fields(tmp_path):
     assert nodes[doc_id].props["text"] == big         # VERBATIM, whole
     assert ("table:dw.gms_transaction", "described_by", doc_id,
             "bq") in graph.fold_edges()
+
+
+def test_catalog_joined_tables_become_witnessed_join_edges(tmp_path):
+    """The measures catalog's `joined_tables` is the fifth join family:
+    one joins_via edge per (table, other) pair with witness
+    catalog_mined, support = the measure's users, the metrics it was
+    seen in as props — and `how: unknown`, because the catalog never
+    records the ON condition. A name the crosswalk cannot place is
+    counted, never guessed."""
+    graph_dir, out_dir = tmp_path / "g", tmp_path / "run"
+    result = _build(graph_dir, out_dir)
+    assert result.returncode == 0, result.stderr[-800:]
+    edges = GraphDir(graph_dir).fold_edges()
+    key = ("table:dw.gms_transaction", "joins_via",
+           "table:dw.wwcas_authorization", "catalog_mined")
+    assert key in edges
+    quad = edges[key]
+    assert quad.prov.support == 31                 # total_spend's users
+    assert quad.props["how"] == "unknown"
+    assert quad.props["confidence"] == "mined"
+    assert "on" not in quad.props
+    assert quad.props["measures"] == ["mined:gms_transaction__total_spend"]
+    assert len(quad.props["witness_metrics"]) == 1
+    assert quad.props["witness_metrics"][0].startswith("metric:")
+    expr = manifest_reports(tmp_path)["expressions"]
+    assert expr["catalog_join_edges"] == 1
+    # gms_merchant_char is named by three measures and is not in the
+    # fixture crosswalk: three counted misses, no invented table
+    assert expr["catalog_join_unresolved"] == 3
+    assert not any(o == "table:gms_merchant_char"
+                   for (_s, _r, o, _w) in edges)
+
