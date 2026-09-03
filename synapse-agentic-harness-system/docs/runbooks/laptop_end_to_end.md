@@ -207,6 +207,16 @@ panel opens only when the model puts something in it; a memory save
 is disclosed inline with an undo. Set `LUMI_USER_NAME` in the silo
 `.env` so memory addresses the person by name.
 
+**Vocabulary and values.** Drop the five files in the sources dir and
+rebuild: `data_cleaned.csv` and `business_terms.csv` (already loaded),
+`potential_common_word_acronyms.csv` (the common-word guard, a flag on
+the acronym nodes), `glossary_terms.csv` (a generated view: counted for
+drift, never loaded twice), and `low_cardinality_synonyms_index.json` (stored code → meaning,
+per table and column; `value_lookup.json` is accepted too). The build report shows the counts; the chat then
+expands acronyms with their scope, refuses to expand REST unless it is
+written as one, and turns "KYC done" into the code to filter on. The
+strategy is `docs/specs/vocabulary_and_values.md`.
+
 **Rows come from the warehouse under two limits.** Until live
 execution is on, the chat can only price a query (dry run) — it never
 sees rows, so a "how many" question ends in dry runs and a partial. Put

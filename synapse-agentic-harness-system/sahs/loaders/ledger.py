@@ -28,6 +28,10 @@ DEFERRALS: tuple[tuple[str, str], ...] = (
      "(two witnesses of the same events don't vote twice)"),
     ("tls_reference.md",
      "TLS rulebook: doc evidence node later, never parsed"),
+    ("glossary_terms.csv",
+     "generated view of data_cleaned.csv (Entry Type = Glossary Term): "
+     "drift against the corpus is counted in the vocab report, rows "
+     "are never loaded twice"),
     ("sample_codes.sql",
      "SQLite-dialect demo material, deliberately not canonicalized "
      "as BigQuery (dialect trap)"),

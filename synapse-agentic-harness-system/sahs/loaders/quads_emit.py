@@ -346,17 +346,44 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
 
 
 def emit_vocab(glossary: list[VocabRecord], terms: list[TermRecord],
-               graph: GraphDir, run_id: str) -> dict:
+               graph: GraphDir, run_id: str,
+               common_words: frozenset[str] = frozenset()) -> dict:
+    """Vocabulary → ``acr:`` nodes scoped by business unit and region
+    (the same symbol keeps every meaning it has), ``term:`` nodes for
+    the governed catalog. Two things ride along: ``common_word`` on an
+    acronym the guard list names (never a separate node — the list is
+    a flag on the vocabulary, not a vocabulary), and an ``alias_of``
+    edge when an acronym's expansion IS a governed term's name."""
     report: dict = defaultdict(int)
+    lower_common = {c.strip().lower() for c in common_words}
+    term_by_name = {t.name.strip().lower(): t.term_id for t in terms}
+    seen_alias: set[tuple[str, str]] = set()
+    seen_symbols: set[str] = set()
     for v in glossary:
+        common = v.symbol.strip().lower() in lower_common
+        seen_symbols.add(v.symbol.strip().lower())
+        node_id = acr_id(v.symbol, v.business_unit, v.region)
         graph.append_node(NodeRecord(
-            id=acr_id(v.symbol, v.business_unit, v.region),
+            id=node_id,
             props={"symbol": v.symbol, "definition": v.definition,
                    "entry_type": v.entry_type,
-                   "business_unit": v.business_unit, "region": v.region},
+                   "business_unit": v.business_unit, "region": v.region,
+                   "common_word": common},
             prov=Prov(source="glossary", run=run_id,
                       evidence=v.evidence_ref)))
         report["acronyms"] += 1
+        if common:
+            report["common_word_acronyms"] += 1
+        term_id = term_by_name.get(v.definition.strip().lower())
+        if term_id and (node_id, term_id) not in seen_alias:
+            seen_alias.add((node_id, term_id))
+            graph.append_edge(Quad(
+                s=node_id, r="alias_of", o=term_node_id(term_id),
+                prov=Prov(source="glossary", run=run_id,
+                          evidence=v.evidence_ref)))
+            report["alias_edges"] += 1
+    report["common_words_unknown"] = sum(
+        1 for c in lower_common if c not in seen_symbols)
     for t in terms:
         graph.append_node(NodeRecord(
             id=term_node_id(t.term_id),
@@ -364,6 +391,51 @@ def emit_vocab(glossary: list[VocabRecord], terms: list[TermRecord],
                    "term_id": t.term_id},
             prov=Prov(source="atlas", run=run_id, evidence=t.evidence_ref)))
         report["terms"] += 1
+    return dict(report)
+
+
+def emit_value_meanings(meanings: list, graph: GraphDir,
+                        run_id: str) -> dict:
+    """value_lookup.json → ``meanings`` on the column's domain node
+    (witness lumi): the stored code and what it means, beside the
+    observed values the profiler saw. A column the profiler never
+    domained gets its domain minted from the lookup (values unknown,
+    meanings known) with its ``has_domain`` edge; a table or column the
+    graph does not know is skipped and counted, never invented."""
+    report: dict = defaultdict(int)
+    nodes = graph.fold_nodes()
+    by_column: dict[tuple[str, str], list] = defaultdict(list)
+    for m in meanings:
+        by_column[(m.table, m.column)].append(m)
+    for (table, column), rows in sorted(by_column.items()):
+        if f"table:{table}" not in nodes:
+            report["skipped_unknown_table"] += len(rows)
+            continue
+        col = col_id(table, column)
+        if col not in nodes:
+            report["skipped_unknown_column"] += len(rows)
+            continue
+        domain = f"domain:{table}.{column}"
+        evidence = rows[0].evidence_ref.split("#", 1)[0]
+        payload = sorted(
+            ({"value": m.value, "synonym": m.synonym} for m in rows),
+            key=lambda d: (d["value"], d["synonym"]))
+        minted = domain not in nodes
+        graph.append_node(NodeRecord(
+            id=domain,
+            props={"meanings": payload, **({"values": []} if minted
+                                            else {})},
+            prov=Prov(source="value_lookup", run=run_id,
+                      evidence=evidence)))
+        if minted:
+            graph.append_edge(Quad(
+                s=col, r="has_domain", o=domain,
+                prov=Prov(source="value_lookup", run=run_id,
+                          evidence=evidence)))
+            report["domains_minted"] += 1
+        else:
+            report["domains_annotated"] += 1
+        report["meanings"] += len(payload)
     return dict(report)
 
 

@@ -265,9 +265,13 @@ def summarize(tool: str, result: Any) -> str:
     if not isinstance(result, dict):
         return _short(result, 160)
     if result.get("error"):
+        # what refused it: the validator's violations or the artifact
+        # validator's problems, so the row says WHY, not just "invalid"
+        found = (result.get("problems") or result.get("violations")
+                 or [])
         problems = "; ".join(
             f"{p.get('code')}: {p.get('detail')}"
-            for p in result.get("problems", []))[:300]
+            for p in found[:2] if isinstance(p, dict))[:300]
         whose = ("configuration, not the query: "
                  if result.get("kind") in ("environment", "access")
                  else "")

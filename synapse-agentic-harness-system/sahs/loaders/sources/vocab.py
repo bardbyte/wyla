@@ -19,6 +19,7 @@ from sahs.loaders.records import (
     StdTechColumn,
     StdTechEntry,
     TermRecord,
+    ValueMeaning,
     VocabRecord,
 )
 
@@ -57,6 +58,119 @@ def load_glossary(path: Path) -> tuple[list[VocabRecord], list[Quarantined]]:
                 entry_type=low.get("entry_type") or "Acronym",
                 evidence_ref=f"{Path(path).name}#L{i}"))
     return records, quarantined
+
+
+def load_common_words(path: Path) -> tuple[set[str], list[Quarantined]]:
+    """potential_common_word_acronyms.csv — acronyms whose symbols are
+    also ordinary words (CARE, FIRST, REST, YES). A GUARD LIST, never a
+    second vocabulary: every symbol already lives in data_cleaned.csv;
+    this only flags which of them must not be expanded unless the ask
+    writes them as acronyms."""
+    symbols: set[str] = set()
+    quarantined: list[Quarantined] = []
+    with Path(path).open(encoding="utf-8-sig", newline="") as f:
+        for i, row in enumerate(csv.DictReader(f), start=2):
+            low = {(k or "").strip().lower(): (v or "").strip()
+                   for k, v in row.items()}
+            symbol = low.get("symbol", "")
+            if not symbol:
+                quarantined.append(Quarantined(
+                    source="common_words", category="missing_field",
+                    detail="row without symbol",
+                    evidence_ref=f"{Path(path).name}#L{i}"))
+                continue
+            symbols.add(symbol)
+    return symbols, quarantined
+
+
+def load_value_lookup(path: Path) -> tuple[list[ValueMeaning],
+                                           list[Quarantined]]:
+    """value_lookup.json — ``{"value lookup": {table: {value: [{column,
+    synonym}]}}}``: the business meaning of low-cardinality stored
+    values, per table and column. One record per (table, column,
+    value); an entry without a column or a synonym is quarantined,
+    never guessed."""
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    root = payload
+    if isinstance(payload, dict):
+        for key in ("value lookup", "value_lookup", "lookup"):
+            if isinstance(payload.get(key), dict):
+                root = payload[key]
+                break
+    records: list[ValueMeaning] = []
+    quarantined: list[Quarantined] = []
+    name = Path(path).name
+    for table, by_value in (root or {}).items():
+        if not isinstance(by_value, dict):
+            quarantined.append(Quarantined(
+                source="value_lookup", category="malformed",
+                detail=f"{table}: values are not an object",
+                evidence_ref=f"{name}#{table}"))
+            continue
+        for value, entries in by_value.items():
+            for n, entry in enumerate(entries if isinstance(entries, list)
+                                      else [entries]):
+                column = str((entry or {}).get("column") or "").strip() \
+                    if isinstance(entry, dict) else ""
+                synonym = str((entry or {}).get("synonym") or "").strip() \
+                    if isinstance(entry, dict) else ""
+                ref = f"{name}#{table}/{value}/{n}"
+                if not column or not synonym:
+                    quarantined.append(Quarantined(
+                        source="value_lookup", category="missing_field",
+                        detail=f"{table} value {value!r}: entry without "
+                               "column/synonym", evidence_ref=ref))
+                    continue
+                records.append(ValueMeaning(
+                    table=str(table).strip().lower(),
+                    column=column.lower(), value=str(value),
+                    synonym=synonym, evidence_ref=ref))
+    return records, quarantined
+
+
+def _norm(text: str) -> str:
+    return " ".join((text or "").replace("\xa0", " ").split()).lower()
+
+
+def glossary_drift(view_path: Path,
+                   corpus: list[VocabRecord]) -> dict:
+    """glossary_terms.csv is a generated VIEW of the corpus (Entry Type
+    = Glossary Term). It is never loaded twice; instead the drift
+    between the two exports is counted: rows matching exactly, rows
+    matching only after normalization (non-breaking spaces, whitespace,
+    a blank business unit read as All), and names the corpus lacks."""
+    corpus_rows = [r for r in corpus if r.entry_type == "Glossary Term"]
+    exact = {(r.symbol, r.definition, r.business_unit, r.region)
+             for r in corpus_rows}
+    normalized = {(_norm(r.symbol), _norm(r.definition),
+                   _norm(r.business_unit or "All"), _norm(r.region or "All"))
+                  for r in corpus_rows}
+    names = {_norm(r.symbol) for r in corpus_rows}
+    view, _q = load_glossary(view_path)
+    report = {"view_rows": len(view), "matched_exact": 0, "drifted": 0,
+              "missing": 0, "examples": []}
+    for r in view:
+        if (r.symbol, r.definition, r.business_unit, r.region) in exact:
+            report["matched_exact"] += 1
+        elif (_norm(r.symbol), _norm(r.definition),
+              _norm(r.business_unit or "All"),
+              _norm(r.region or "All")) in normalized:
+            report["drifted"] += 1
+            if len(report["examples"]) < 5:
+                report["examples"].append(
+                    f"{r.symbol}: normalization only ({r.evidence_ref})")
+        elif _norm(r.symbol) in names:
+            report["drifted"] += 1
+            if len(report["examples"]) < 5:
+                report["examples"].append(
+                    f"{r.symbol}: definition or scope differs "
+                    f"({r.evidence_ref})")
+        else:
+            report["missing"] += 1
+            if len(report["examples"]) < 5:
+                report["examples"].append(
+                    f"{r.symbol}: not in the corpus ({r.evidence_ref})")
+    return report
 
 
 def load_business_terms(path: Path) -> tuple[list[TermRecord],

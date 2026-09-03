@@ -77,6 +77,8 @@ SOURCE_WITNESS = {
     "business_terms": "atlas",
     "std_tech_metadata": "atlas",
     "glossary": "atlas",
+    "common_words": "atlas",          # the common-word guard list
+    "value_lookup": "lumi",           # Lumi's value-meaning index
     "clerk": "steward",
     "jobs_30d": "jobs_30d",
     "lob_map": "steward",       # graph/identity/lob_map.jsonl (human)

@@ -1,0 +1,63 @@
+{
+ "value lookup": {
+  "dw.gms_transaction": {
+   "US": [
+    {
+     "column": "country_cd",
+     "synonym": "United States"
+    }
+   ],
+   "GB": [
+    {
+     "column": "country_cd",
+     "synonym": "United Kingdom"
+    }
+   ],
+   "CA": [
+    {
+     "column": "country_cd",
+     "synonym": "Canada"
+    }
+   ],
+   "1": [
+    {
+     "column": "bq_only_col",
+     "synonym": "Flag set"
+    }
+   ],
+   "ZZ": [
+    {
+     "synonym": "an entry without a column"
+    }
+   ]
+  },
+  "dw.wwcas_authorization": {
+   "A": [
+    {
+     "column": "approval_cd",
+     "synonym": "Approved"
+    }
+   ],
+   "D": [
+    {
+     "column": "approval_cd",
+     "synonym": "Declined"
+    }
+   ],
+   "9": [
+    {
+     "column": "no_such_col",
+     "synonym": "ghost column"
+    }
+   ]
+  },
+  "dw.ghost_table": {
+   "1": [
+    {
+     "column": "x",
+     "synonym": "nothing"
+    }
+   ]
+  }
+ }
+}

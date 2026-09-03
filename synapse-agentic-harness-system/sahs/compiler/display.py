@@ -60,6 +60,13 @@ SOURCE_DISPLAY: dict[str, dict[str, str]] = {
         "chip": "Acropedia",
         "blurb": "The enterprise glossary: acronyms and terms with "
                  "their meanings."},
+    "value_lookup": {
+        "family": "atlas_mdm",
+        "display": "Lumi Value Meanings",
+        "chip": "Value Meanings", "sub": "stored code → meaning",
+        "blurb": "What a low-cardinality stored value means in one "
+                 "column of one table — the index a business phrase "
+                 "resolves against."},
     "atlas": {
         "family": "atlas_catalog",
         "display": "Atlas Data Federated Catalog",
@@ -171,6 +178,10 @@ UTILIZATION_PATTERNS: tuple[tuple[str, str], ...] = (
     ("studio_results", "studio_queries"),
     ("measures_catalog", "measures_catalog"),
     ("business_terms", "business_terms"),
+    ("low_cardinality_synonyms_index", "value_lookup"),
+    ("value_lookup", "value_lookup"),
+    ("potential_common_word", "glossary"),
+    ("glossary_terms", "glossary"),
     ("data_cleaned", "glossary"),
     ("std_tech", "std_tech_metadata"),
     ("skill", "skill_contract"),

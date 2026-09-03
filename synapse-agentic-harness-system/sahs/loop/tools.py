@@ -401,10 +401,11 @@ def toolkit(build: Build, state: LoopState, *,
 
     # ── search_semantics ── the index, not the text ──────────
     def search_semantics(query: str, kind: str = "all") -> dict[str, Any]:
-        if kind not in ("all", "metrics", "concepts", "joins", "vocab"):
+        if kind not in ("all", "metrics", "concepts", "joins", "vocab",
+                        "values"):
             return _err(f"unknown kind {kind!r}",
                         "kind is one of: all | metrics | concepts | "
-                        "joins | vocab")
+                        "joins | vocab | values")
         results: list[dict[str, Any]] = []
         if kind == "all":
             # intent first: a business word resolves to the business
@@ -452,17 +453,59 @@ def toolkit(build: Build, state: LoopState, *,
         if kind in ("all", "vocab"):
             tokens = _tokens(query)
             raw = {(query or "").strip().lower()}
+            # written as an acronym: REST, CARE — the guard list's
+            # symbols expand only then (or when vocab is asked for)
+            written_upper = {t.lower() for t in re.findall(
+                r"[A-Za-z][A-Za-z0-9/\-]*", query or "") if t.isupper()}
             for v in build.vocab:
                 symbol = (v.get("text") or "").lower()
                 if symbol in raw or symbol in tokens or (
                         tokens & _tokens(v.get("definition", ""))):
-                    results.append({
+                    common = bool(v.get("common_word"))
+                    if (common and kind != "vocab"
+                            and symbol not in written_upper
+                            and symbol not in raw):
+                        continue      # "rest" is a word, not REST
+                    hit = {
                         "kind": "vocab", "text": v.get("text", ""),
                         "definition": v.get("definition", ""),
                         "bu": v.get("bu", ""),
-                        "region": v.get("region", "")})
+                        "region": v.get("region", ""),
+                        "common_word": common}
+                    if common:
+                        hit["guard"] = ("also an ordinary word: expand "
+                                        "only when the ask writes it as "
+                                        "an acronym or the scope fits")
+                    results.append(hit)
                     if sum(1 for r in results
                            if r["kind"] == "vocab") >= 6:
+                        break
+        if kind in ("all", "values"):
+            # a business phrase is a stored code somewhere: "KYC done"
+            # → kyc_check_confirmed__c = '1'. Filter on the code,
+            # never on the phrase.
+            low = (query or "").strip().lower()
+            tokens = _tokens(query)
+            cap = 6 if kind == "values" else 3
+            for m in getattr(build, "value_meanings", []) or []:
+                synonym = str(m.get("synonym", "")).strip()
+                syn_tokens = _tokens(synonym)
+                if not synonym or not syn_tokens:
+                    continue
+                if synonym.lower() in low or (
+                        len(syn_tokens) > 1 and syn_tokens <= tokens) \
+                        or (kind == "values" and syn_tokens & tokens):
+                    column = m.get("column", "")
+                    results.append({
+                        "kind": "value", "table": m.get("table", ""),
+                        "column": column, "value": m.get("value", ""),
+                        "synonym": synonym,
+                        "predicate": f"{column} = '{m.get('value', '')}'",
+                        "hint": "a stored code with this meaning: "
+                                "filter with the predicate, never the "
+                                "phrase; say the meaning in the answer"})
+                    if sum(1 for r in results
+                           if r["kind"] == "value") >= cap:
                         break
         if kind in ("all", "joins"):
             tokens = _tokens(query)
@@ -985,10 +1028,10 @@ def toolkit(build: Build, state: LoopState, *,
             signature="search_semantics(query, kind?)",
             maps_to="ranked, fuzzy — the index, not the text",
             description=(
-                "Ranked metrics/concepts/joins/vocab with status, "
-                "support, agreement, aliases — and business areas: "
-                "a query naming a line of business comes back as "
-                "the area itself, not its furniture.\n"
+                "Ranked metrics/concepts/joins/vocab/values with "
+                "status, support, agreement, aliases — and business "
+                "areas: a query naming a line of business comes back "
+                "as the area itself, not its furniture.\n"
                 "Use for meaning (\"spend\", \"SMB\"); use "
                 "grep_cards for exact tokens."),
             fn=search_semantics),

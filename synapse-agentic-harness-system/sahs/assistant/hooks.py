@@ -10,7 +10,9 @@ one new check Stage 1 adds — the literal check on run_sql.
   literal_check      post  run_sql       a WHERE literal not among the
                                          column's observed values comes
                                          back as a warning with the
-                                         closest real ones
+                                         closest real ones — and a
+                                         literal that is a MEANING on
+                                         record names the stored code
   rows_to_workspace  post  run_sql       q<N>.json for python + check
   warehouse_errors   post  run_sql       a failed dry run or execution
                                          comes back CLASSIFIED: sql or
@@ -52,16 +54,20 @@ _LITERAL = re.compile(
 _FROM = re.compile(r"\b(?:FROM|JOIN)\s+([\w.]+)", re.IGNORECASE)
 
 
-def _observed(build: Build, table: str, column: str) -> list[str]:
+def _observed(build: Build, table: str, column: str
+              ) -> tuple[list[str], list[dict[str, str]]]:
+    """→ (observed values, meanings on record) for one column."""
     try:
         got = sample_values(build, table, column)
     except Exception:                               # noqa: BLE001
-        return []
-    values = got.get("values") if isinstance(got, dict) else got
-    out = []
-    for v in values or []:
-        out.append(str(v.get("value") if isinstance(v, dict) else v))
-    return out
+        return [], []
+    if not isinstance(got, dict):
+        return [str(v) for v in (got or [])], []
+    values = [str(v.get("value") if isinstance(v, dict) else v)
+              for v in (got.get("values") or [])]
+    meanings = [m for m in (got.get("meanings") or [])
+                if isinstance(m, dict)]
+    return values, meanings
 
 
 def literal_warnings(build: Build, sql: str) -> list[str]:
@@ -75,17 +81,39 @@ def literal_warnings(build: Build, sql: str) -> list[str]:
     warnings = []
     for _alias, column, literal in _LITERAL.findall(sql):
         for table in tables:
-            observed = _observed(build, table, column)
-            if not observed:
+            observed, meanings = _observed(build, table, column)
+            if not observed and not meanings:
                 continue
-            if literal.lower() in {o.lower() for o in observed}:
+            known = {o.lower() for o in observed} | {
+                str(m.get("value", "")).lower() for m in meanings}
+            if literal.lower() in known:
                 break
+            # the phrase is a MEANING on record, not a stored code:
+            # the value lookup says which code to filter on
+            meant = [m for m in meanings
+                     if str(m.get("synonym", "")).lower()
+                     == literal.lower()]
+            if meant:
+                warnings.append(
+                    f"'{literal}' is the meaning of a stored code, not "
+                    f"a value: filter with "
+                    + " or ".join(f"{column} = '{m.get('value')}'"
+                                  for m in meant)
+                    + " (value lookup) and say the meaning in the "
+                    "answer")
+                break
+            pool = observed or [str(m.get("value", "")) for m in meanings]
             close = difflib.get_close_matches(
-                literal, observed, n=3, cutoff=0.3) or observed[:3]
-            warnings.append(
-                f"'{literal}' is not among the {len(observed)} observed "
-                f"values of {table}.{column}; closest: "
-                + ", ".join(repr(c) for c in close))
+                literal, pool, n=3, cutoff=0.3) or pool[:3]
+            line = (f"'{literal}' is not among the {len(pool)} "
+                    f"{'observed' if observed else 'known'} values of "
+                    f"{table}.{column}; closest: "
+                    + ", ".join(repr(c) for c in close))
+            if meanings:
+                line += "; meanings on record: " + ", ".join(
+                    f"'{m.get('value')}' = {m.get('synonym')}"
+                    for m in meanings[:6])
+            warnings.append(line)
             break
     return warnings
 

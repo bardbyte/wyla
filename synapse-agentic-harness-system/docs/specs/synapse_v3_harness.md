@@ -56,7 +56,7 @@ the disclosure sentence shape, when to ask.
 
 | v3 tool | absorbs from v2 | notes |
 | --- | --- | --- |
-| `search(query, kind?)` | search_semantics, grep_cards, list_metrics, resolve | one door; business areas rank first; `kind=list` for "all X metrics"; exact-token mode inside |
+| `search(query, kind?)` | search_semantics, grep_cards, list_metrics, resolve | one door; business areas rank first; `kind=list` for "all X metrics"; exact-token mode inside; `kind=vocab` expands an acronym with its scope (common-word guard); `kind=values` turns a phrase into the stored code and predicate (docs/specs/vocabulary_and_values.md) |
 | `read(id, section?)` | read_card, get_definition_line, get_join_paths, subgraph | whole card by default; joins are in the table card; `read(ids=[…], as="graph")` returns the subgraph |
 | `sample_values(table, column)` | same | unchanged |
 | `run_sql(sql, mode?)` | run_sql, whatif | the model rewrites SQL itself; rows auto-save as q<N> |

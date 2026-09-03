@@ -56,8 +56,11 @@ from sahs.loaders.sources.studio_csv import (                     # noqa: E402
     mine_join_witnesses,
 )
 from sahs.loaders.sources.vocab import (                          # noqa: E402
+    glossary_drift,
     load_business_terms,
+    load_common_words,
     load_glossary,
+    load_value_lookup,
     load_std_tech_metadata,
 )
 from sahs.util.console import (                                   # noqa: E402
@@ -133,6 +136,19 @@ def _std_tech_path(sources: Path) -> Path | None:
     return directory if directory.is_dir() else None
 
 
+# the value-meaning index under the name Lumi exports it, or the
+# generic one; the first that exists wins
+VALUE_LOOKUP_NAMES = ("low_cardinality_synonyms_index.json",
+                      "value_lookup.json")
+
+
+def _value_lookup_path(sources: Path) -> Path | None:
+    for name in VALUE_LOOKUP_NAMES:
+        if (sources / name).exists():
+            return sources / name
+    return None
+
+
 def _vocab_counts(sources: Path) -> tuple[dict[str, int],
                                           list[Quarantined]]:
     counts: dict[str, int] = {}
@@ -146,6 +162,16 @@ def _vocab_counts(sources: Path) -> tuple[dict[str, int],
     if p.exists():
         recs, quar = load_business_terms(p)
         counts["business_terms"] = len(recs)
+        quarantined.extend(quar)
+    p = sources / "potential_common_word_acronyms.csv"
+    if p.exists():
+        symbols, quar = load_common_words(p)
+        counts["common_word_acronyms"] = len(symbols)
+        quarantined.extend(quar)
+    p = _value_lookup_path(sources)
+    if p is not None:
+        recs, quar = load_value_lookup(p)
+        counts["value_meanings"] = len(recs)
         quarantined.extend(quar)
     p = _std_tech_path(sources)
     if p is not None:
@@ -295,6 +321,7 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
     from sahs.loaders.quads_emit import (
         emit_expressions,
         emit_std_tech,
+        emit_value_meanings,
         emit_vocab,
     )
 
@@ -403,7 +430,24 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
                     if glossary_path.exists() else [])
         terms = (load_business_terms(terms_path)[0]
                  if terms_path.exists() else [])
-        reports["vocab"] = emit_vocab(glossary, terms, graph, run_id)
+        common_path = sources / "potential_common_word_acronyms.csv"
+        common = (load_common_words(common_path)[0]
+                  if common_path.exists() else set())
+        reports["vocab"] = emit_vocab(glossary, terms, graph, run_id,
+                                      common_words=frozenset(common))
+        view_path = sources / "glossary_terms.csv"
+        if view_path.exists() and glossary:
+            # a generated view of the corpus: counted for drift, never
+            # loaded twice
+            reports["vocab"]["glossary_view_drift"] = glossary_drift(
+                view_path, glossary)
+        lookup_path = _value_lookup_path(sources)
+        if lookup_path is not None:
+            console.emit("phase_start", phase="load:value_lookup",
+                         detail=f"reading {lookup_path.name}")
+            meanings = load_value_lookup(lookup_path)[0]
+            reports["value_meanings"] = emit_value_meanings(
+                meanings, graph, run_id)
         std_path = _std_tech_path(sources)
         if std_path is not None:
             console.emit("phase_start", phase="load:std_tech",
@@ -441,7 +485,9 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
                      "extracted_gold_queries.json", "metrics_dmp.json",
                      "extended_gmns_semantics.json",
                      "measures_catalog.json", "data_cleaned.csv",
-                     "business_terms.csv"):
+                     "business_terms.csv",
+                     "potential_common_word_acronyms.csv",
+                     *VALUE_LOOKUP_NAMES):
             ledger.consumed(sources / name)
         for p in sorted(sources.glob("studio_results_*.csv")):
             ledger.consumed(p)

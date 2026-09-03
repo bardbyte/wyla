@@ -373,7 +373,8 @@ def compile_build(graph_root: Path, builds_root: Path
                 "kind": "acronym", "ref": node_id,
                 "bu": record.props.get("business_unit", "All").lower(),
                 "region": record.props.get("region", "All").lower(),
-                "definition": record.props.get("definition", "")})
+                "definition": record.props.get("definition", ""),
+                "common_word": bool(record.props.get("common_word"))})
         elif kind == "term":
             vocab_rows.append({
                 "text": record.props.get("name", ""), "kind": "term",
@@ -657,12 +658,26 @@ def compile_build(graph_root: Path, builds_root: Path
                 for row in lob_rows), encoding="utf-8")
     domain_rows = [
         {"key": node_id.split(":", 1)[1],
-         "values": record.props.get("values", [])}
+         "values": record.props.get("values", []),
+         "meanings": record.props.get("meanings", [])}
         for node_id, record in sorted(nodes.items())
         if node_id.startswith("domain:")]
     (build_dir / "indexes" / "domains.jsonl").write_text(
         "".join(json.dumps(d, sort_keys=True) + "\n"
                 for d in domain_rows), encoding="utf-8")
+    # the value-meaning index: one flat row per (table, column, value)
+    # so a business phrase ("KYC done") resolves to the stored code
+    meaning_rows = []
+    for d in domain_rows:
+        parts = d["key"].split(".")
+        table, column = ".".join(parts[:2]), ".".join(parts[2:])
+        for m in d.get("meanings") or []:
+            meaning_rows.append({"table": table, "column": column,
+                                 "value": m.get("value", ""),
+                                 "synonym": m.get("synonym", "")})
+    (build_dir / "indexes" / "value_meanings.jsonl").write_text(
+        "".join(json.dumps(m, sort_keys=True) + "\n"
+                for m in meaning_rows), encoding="utf-8")
 
     # E12/A3 — per-table cost priors (jobs witness) for the sandbox's
     # anomaly gate; the global budget ceiling lives in the environment

@@ -72,7 +72,7 @@ def build_kit(build: Build, state: AssistantState, *,
         if kind == "exact":
             return base["grep_cards"](query)
         lane = kind if kind in ("metrics", "concepts", "joins",
-                                "vocab") else "all"
+                                "vocab", "values") else "all"
         result = base["search_semantics"](query, lane)
         if isinstance(result, dict) and not result.get("results"):
             exact = base["grep_cards"](query)
@@ -332,12 +332,16 @@ def build_kit(build: Build, state: AssistantState, *,
                 "the catalog for a business area, a status, or label "
                 "words (\"all GMNS metrics\" → search(\"GMNS\", "
                 "kind=\"list\")); kind=exact greps card text for a "
-                "token."),
+                "token; kind=vocab expands an acronym with its business "
+                "unit and region (the same symbol can mean several "
+                "things); kind=values turns a business phrase (\"KYC "
+                "done\", \"Approved\") into the stored code and the "
+                "predicate to filter with."),
             fn=search, schema=_obj({
                 "query": _s("what you are looking for, in the user's "
                             "words or graph words"),
                 "kind": _s("all (default) | metrics | concepts | joins "
-                           "| vocab | list | exact")},
+                           "| vocab | values | list | exact")},
                 ["query"])),
         ToolSpec(
             name="read", signature="read(id, section?, graph_ids?)",

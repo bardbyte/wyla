@@ -39,6 +39,8 @@ class Build:
     cost_priors: dict[str, dict[str, Any]] = field(default_factory=dict)
     lob: list[dict[str, Any]] = field(default_factory=list)
     tables: list[dict[str, Any]] = field(default_factory=list)
+    # stored code → business meaning, per table and column
+    value_meanings: list[dict[str, Any]] = field(default_factory=list)
     _db: sqlite3.Connection | None = field(default=None, repr=False)
 
     @classmethod
@@ -67,6 +69,8 @@ class Build:
             if (path / "indexes" / "cost_priors.json").exists() else {},
             lob=_jsonl(path / "indexes" / "lob.jsonl"),
             tables=_jsonl(path / "indexes" / "tables.jsonl"),
+            value_meanings=_jsonl(path / "indexes"
+                                  / "value_meanings.jsonl"),
         )
 
     @property
@@ -185,10 +189,20 @@ def sample_values(build: Build, table: str, column: str) -> dict:
     key = f"{physical}.{column.lower()}"
     for row in domains:
         if row.get("key") == key:
-            return {"table": physical, "column": column,
-                    "values": row["values"],
-                    "coverage_note": "compiled snapshot domain: "
-                                     "not a live query"}
+            out = {"table": physical, "column": column,
+                   "values": row["values"],
+                   "coverage_note": "compiled snapshot domain: "
+                                    "not a live query"}
+            if row.get("meanings"):
+                # what the codes MEAN (value lookup): filter on the
+                # code, say the meaning
+                out["meanings"] = row["meanings"]
+                if not row["values"]:
+                    out["coverage_note"] = (
+                        "compiled snapshot domain: not a live query; "
+                        "meanings on record from the value lookup, the "
+                        "profiler observed no values for this column")
+            return out
     return {"error": f"no compiled domain for {physical}.{column}",
             "hint": "only confirmed low-cardinality columns carry "
                     "domains; check the table card's columns section"}
