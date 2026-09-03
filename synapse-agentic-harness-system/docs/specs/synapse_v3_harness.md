@@ -187,9 +187,20 @@ path.
   reattaches from the turn's first event (`turn_after` on the session
   GET) and replays it whole, so switching chats or tabs never stops or
   loses a turn. The shelf marks a working chat.
-- **Artifact panel is model-invoked.** It opens on an artifact in
-  this interaction, never on reopening an old chat; a card in the
-  transcript reopens it; closing reflows the chat to full width.
+- **Artifact panel is model-invoked, and it is a drawer.** It opens
+  on an artifact in this interaction, never on reopening an old chat;
+  a card in the transcript reopens it; closing reflows the chat to
+  full width. It slides in from the right edge and moves the chat to
+  the middle (reduced-motion parity), the artifact shows from its top
+  every time, and the card it came from lights up. A table is a
+  report: a summary strip of the data pool first — the rows and their
+  date span, each numeric column's total, range and mean with its
+  shape — then the rows with a sticky header, formatted numbers and
+  the first fifty shown; every number in the strip is computed from
+  the artifact's own rows. Tiles count up once, charts draw
+  themselves in, dashboard tiles arrive in order. The masthead
+  carries the title and Share, never tokens or a build id: the build
+  travels on every artifact's footer.
 - **Clarify vs proceed** (Model Spec): interactive=true, so `ask`
   when the ask is markedly unclear, and the prompt says so
   explicitly because models "know but don't show".
