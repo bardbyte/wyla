@@ -20,33 +20,61 @@ const PALETTE = ["#2f6feb", "#e8710a", "#1a9850", "#9970ab",
 
 export async function renderChat(outlet, wanted = "") {
   outlet.innerHTML = `
-    <div class="chatv2">
+    <div class="chatv2 empty" id="chatv2">
       <div class="chat-main">
         <div class="chat-masthead">
-          <span class="muted" id="chat-build"></span>
+          <button class="chat-title-btn" id="chat-title"
+            title="Rename this chat">
+            <span class="chat-title-text">New chat</span>
+            <span class="chev">⌄</span></button>
+          <span class="muted chat-build" id="chat-build"></span>
           <span class="spacer"></span>
           <span class="muted" id="chat-meter"></span>
           <button class="btn" id="chat-memory-btn"
             aria-expanded="false">⊚ memory</button>
           <div id="chat-memory-pop" class="skills-pop" hidden></div>
+          <button class="btn" id="chat-share"
+            title="Copy a link to this chat">Share</button>
+        </div>
+        <div class="chat-hero" id="chat-hero">
+          <span class="think-orb hero-orb" aria-hidden="true">✳</span>
+          <h1 class="chat-greet" id="chat-greet"></h1>
         </div>
         <div class="chat-thread" id="chat-thread"></div>
         <div class="chat-chiprow" id="chat-chiprow"></div>
         <div class="chat-composer">
-          <textarea id="chat-input" rows="1"
-            placeholder="Ask anything about your data…"></textarea>
-          <div class="ask-actions">
-            <span class="muted">Enter to send · Esc to stop</span>
-            <span class="spacer"></span>
-            <select id="chat-depth" class="chat-depth"
-              title="How deeply Synapse thinks on this ask">
-              <option value="quick">Quick</option>
-              <option value="standard" selected>Standard</option>
-              <option value="deep">Deep</option>
-            </select>
-            <button class="btn" id="chat-stop" hidden>stop</button>
-            <button class="btn primary" id="chat-send">Send</button>
+          <div class="chat-box">
+            <textarea id="chat-input" rows="1"
+              placeholder="Type / for skills"></textarea>
+            <div class="chat-slash" id="chat-slash" hidden></div>
+            <div class="chat-actions">
+              <button class="icon-btn chat-plus" id="chat-plus"
+                title="More" aria-expanded="false">+</button>
+              <div class="chat-plus-pop" id="chat-plus-pop" hidden></div>
+              <div class="chat-modes" role="radiogroup"
+                aria-label="How Synapse works this ask">
+                <button class="chat-mode on" data-mode="chat"
+                  role="radio" aria-checked="true"
+                  title="Synapse writes the query and hands it over; you run it">Chat</button>
+                <button class="chat-mode" data-mode="autopilot"
+                  role="radio" aria-checked="false"
+                  title="Synapse runs the query under the limits and builds the deliverable">Autopilot</button>
+              </div>
+              <span class="spacer"></span>
+              <span class="chat-model" id="chat-model"></span>
+              <select id="chat-depth" class="chat-depth"
+                title="How deeply Synapse thinks on this ask">
+                <option value="quick">Quick</option>
+                <option value="standard" selected>Standard</option>
+                <option value="deep">Deep</option>
+              </select>
+              <button class="btn" id="chat-stop" hidden>stop</button>
+              <button class="btn primary chat-send" id="chat-send"
+                title="Send · Enter">↑</button>
+            </div>
           </div>
+          <div class="chat-foot">Synapse is AI and can make mistakes.
+            Check the receipts before you act on a number.</div>
         </div>
       </div>
       <aside class="chat-panel" id="chat-panel" hidden>
@@ -102,6 +130,146 @@ export async function renderChat(outlet, wanted = "") {
   }
   el("chat-build").textContent =
     `build ${state.session.build_id || "?"}`;
+
+  // ── the empty state: a greeting and the composer, nothing else;
+  //    the first message turns it into the conversation ──────
+  const shell = el("chatv2");
+  const hour = new Date().getHours();
+  const dayPart = hour < 12 ? "Morning"
+    : hour < 17 ? "Afternoon" : "Evening";
+  const first = String(boot.user_name || "").trim().split(/\s+/)[0];
+  el("chat-greet").textContent = first
+    ? `${dayPart}, ${first}.` : `${dayPart}, how are things?`;
+  el("chat-model").textContent = boot.model || "";
+  function setEmpty(empty) {
+    shell.classList.toggle("empty", empty);
+    input.placeholder = empty ? "Type / for skills" : "Write a message…";
+  }
+  const titleText = el("chat-title").querySelector(".chat-title-text");
+  function setTitle(title) {
+    titleText.textContent = (title || "").trim() || "New chat";
+    state.session.title = title || "";
+  }
+  setTitle(boot.session.title);
+  async function refreshTitle() {
+    const got = await api.chatSession(state.session.id)
+      .catch(() => ({}));
+    if (got.available) setTitle(got.session.title);
+  }
+  // rename: the title is a button; a click makes it an input
+  el("chat-title").addEventListener("click", () => {
+    if (el("chat-title").hidden) return;
+    const box = document.createElement("input");
+    box.className = "chat-title-input";
+    box.value = titleText.textContent === "New chat"
+      ? "" : titleText.textContent;
+    box.placeholder = "Name this chat";
+    el("chat-title").hidden = true;
+    el("chat-title").after(box);
+    box.focus();
+    let settled = false;
+    const done = async (save) => {
+      if (settled) return;
+      settled = true;
+      const title = box.value.trim();
+      box.remove();
+      el("chat-title").hidden = false;
+      if (save && title && title !== state.session.title) {
+        await api.chatRename(state.session.id, title);
+        setTitle(title);
+        pingShelf();
+      }
+    };
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") done(true);
+      if (e.key === "Escape") done(false);
+    });
+    box.addEventListener("blur", () => done(true));
+  });
+  // share: a link to this chat, on the clipboard
+  el("chat-share").addEventListener("click", async () => {
+    const link = location.href;
+    try {
+      await navigator.clipboard.writeText(link);
+      el("chat-share").textContent = "Link copied";
+    } catch {
+      el("chat-share").textContent = link;
+    }
+    setTimeout(() => { el("chat-share").textContent = "Share"; }, 1800);
+  });
+  // the + menu: the real doors, never a dead control
+  const plusPop = el("chat-plus-pop");
+  plusPop.innerHTML = `
+    <a class="plus-item" href="#/skills">✦ Browse skills</a>
+    <button class="plus-item" id="plus-memory">⊚ Memory</button>
+    <a class="plus-item" href="#/chat/new">✳ New chat</a>`;
+  el("chat-plus").addEventListener("click", () => {
+    plusPop.hidden = !plusPop.hidden;
+    el("chat-plus").setAttribute("aria-expanded",
+                                 String(!plusPop.hidden));
+  });
+  plusPop.querySelector("#plus-memory").addEventListener("click", () => {
+    plusPop.hidden = true;
+    el("chat-memory-btn").click();
+  });
+  // the mode (§5): Chat hands queries over for you to run; Autopilot
+  // runs and builds without stopping. Kept per browser.
+  const MODE_KEY = "synapse-chat-mode";
+  state.mode = localStorage.getItem(MODE_KEY) === "autopilot"
+    ? "autopilot" : "chat";
+  function paintMode() {
+    for (const b of outlet.querySelectorAll(".chat-mode")) {
+      const on = b.dataset.mode === state.mode;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-checked", String(on));
+    }
+  }
+  for (const b of outlet.querySelectorAll(".chat-mode")) {
+    b.addEventListener("click", () => {
+      state.mode = b.dataset.mode;
+      localStorage.setItem(MODE_KEY, state.mode);
+      paintMode();
+    });
+  }
+  paintMode();
+  // "/" lists the skills: pick one and the turn loads that pack
+  const slash = el("chat-slash");
+  let packs = null;
+  async function loadPacks() {
+    if (packs) return packs;
+    const got = await api.chatSkills().catch(() => ({}));
+    packs = got.available ? got.skills || [] : [];
+    return packs;
+  }
+  function pickSlash(name) {
+    input.value = `/${name} `;
+    slash.hidden = true;
+    input.focus();
+  }
+  async function paintSlash() {
+    const m = input.value.match(/^\/([A-Za-z0-9_\-]*)$/);
+    if (!m) { slash.hidden = true; return; }
+    const rows = (await loadPacks()).filter((p) =>
+      String(p.name || "").toLowerCase().startsWith(m[1].toLowerCase()))
+      .slice(0, 8);
+    slash.innerHTML = rows.length ? rows.map((p) => `
+      <button class="slash-item" data-name="${esc(p.name)}">
+        <b>/${esc(p.name)}</b>
+        <span class="muted">${esc(p.title || "")}</span></button>`).join("")
+      : `<div class="muted slash-none">No skill starts with “/${
+          esc(m[1])}” — the Skills tab lists them all.</div>`;
+    slash.hidden = false;
+    for (const b of slash.querySelectorAll(".slash-item")) {
+      b.addEventListener("click", () => pickSlash(b.dataset.name));
+    }
+  }
+  input.addEventListener("input", paintSlash);
+  document.addEventListener("click", (e) => {
+    if (!plusPop.hidden && !plusPop.contains(e.target)
+        && e.target !== el("chat-plus")) plusPop.hidden = true;
+    if (!slash.hidden && !slash.contains(e.target)
+        && e.target !== input) slash.hidden = true;
+  });
 
   // the chat list lives in the shell nav now — one nav, not two;
   // this just tells the shelf something changed
@@ -631,8 +799,9 @@ export async function renderChat(outlet, wanted = "") {
       const col = argOf(e, "column");
       return col ? `Sampling real values of ${col}` : "Sampling real values";
     },
-    run_sql: (e) => argOf(e, "mode") === "snapshot"
+    run_sql: (e) => ["snapshot", "run"].includes(argOf(e, "mode"))
       ? "Running the query" : "Checking the query",
+    propose_sql: () => "Writing the query for you to run",
     python: () => "Computing",
     check: (e) => ({ part_whole: "Checking the parts add up",
                      crosscheck: "Cross-checking two routes",
@@ -654,6 +823,7 @@ export async function renderChat(outlet, wanted = "") {
   const PAST = {
     search: "searched the graph", read: "read the cards",
     sample_values: "sampled real values", run_sql: "ran the query",
+    propose_sql: "wrote the query",
     python: "computed", check: "ran the checks",
     artifact: "built the artifact", ask: "asked a question",
     load_skill: "loaded a skill", remember: "kept a preference",
@@ -815,11 +985,12 @@ export async function renderChat(outlet, wanted = "") {
     scroll();
   }
 
-  function userBubble(text) {
+  function userBubble(text, before = null) {
     const div = document.createElement("div");
     div.className = "chat-user";
     div.textContent = text;
-    thread.appendChild(div);
+    if (before) thread.insertBefore(div, before);
+    else thread.appendChild(div);
     scroll();
   }
 
@@ -867,6 +1038,84 @@ export async function renderChat(outlet, wanted = "") {
     scroll();
   }
 
+  const bytes = (n) => {
+    if (n === null || n === undefined || n === "") return "an unknown amount";
+    let v = Number(n);
+    if (!Number.isFinite(v)) return "an unknown amount";
+    for (const u of ["B", "KB", "MB", "GB", "TB"]) {
+      if (v < 1000 || u === "TB") {
+        return u === "B" ? `${v.toFixed(0)} B` : `${v.toFixed(1)} ${u}`;
+      }
+      v /= 1000;
+    }
+    return "";
+  };
+
+  // the handover (§5): the query first, priced and disclosed; the
+  // rows on a tap — Run query executes under the limits with no
+  // model call, Run + build dashboard chains the build after it
+  function proposalCard(container, proposal, meta) {
+    const div = document.createElement("div");
+    div.className = "card proposal-card";
+    const schema = (proposal.result_schema || [])
+      .map((c) => c && c.name).filter(Boolean);
+    const written = String(proposal.sql_written || proposal.sql || "");
+    div.innerHTML = `
+      <div class="proposal-head">
+        <span class="glyph">⌘</span>
+        <b>${esc(proposal.title || "Proposed query")}</b>
+        ${statusChip({ status: proposal.status })}
+      </div>
+      ${proposal.why
+        ? `<div class="proposal-why">${prose(proposal.why)}</div>` : ""}
+      <pre class="proposal-sql" spellcheck="false">${esc(written)}</pre>
+      <div class="proposal-meta muted">would scan ${
+        esc(bytes(proposal.bytes_processed))}${schema.length
+          ? ` · ${schema.length} columns: ${
+              esc(schema.slice(0, 6).join(", "))}` : ""}${
+        proposal.meridian_line
+          ? ` · <span class="meridian">${esc(proposal.meridian_line)}</span>`
+          : ""}</div>
+      ${(proposal.warnings || []).length
+        ? `<div class="proposal-warn">${(proposal.warnings || [])
+            .slice(0, 2).map((w) => `<div>⚠ ${esc(w)}</div>`).join("")}</div>`
+        : ""}
+      <div class="proposal-actions">
+        <button class="btn primary" data-run="query">Run query</button>
+        <button class="btn" data-run="dashboard">Run + build dashboard</button>
+        <button class="btn" data-edit="1">Edit SQL</button>
+      </div>`;
+    const pre = div.querySelector(".proposal-sql");
+    const editBtn = div.querySelector("[data-edit]");
+    editBtn.addEventListener("click", () => {
+      const on = pre.contentEditable !== "true";
+      pre.contentEditable = on ? "true" : "false";
+      pre.classList.toggle("editing", on);
+      editBtn.textContent = on ? "Done editing" : "Edit SQL";
+      if (on) pre.focus();
+    });
+    for (const b of div.querySelectorAll("[data-run]")) {
+      b.addEventListener("click", async () => {
+        if (state.running) return;
+        const current = pre.textContent.trim();
+        const edited = current !== written.trim();
+        const dashboard = b.dataset.run === "dashboard";
+        el("chat-chiprow").innerHTML = "";
+        userBubble(`Run: ${proposal.title || "the query"}${
+          edited ? " (edited)" : ""}${
+          dashboard ? " and build a dashboard" : ""}`);
+        const accepted = await api.chatRun(state.session.id, {
+          message_id: meta.message_id || "", sql: edited ? current : "",
+          dashboard, depth: el("chat-depth").value });
+        if (!accepted.available) {
+          say(`<b>not run.</b> ${esc(accepted.reason || "")}`, "error");
+        }
+      });
+    }
+    container.appendChild(div);
+    scroll();
+  }
+
   function memoryNote(turn, text, memoryId) {
     const div = document.createElement("div");
     div.className = "memory-note";
@@ -885,13 +1134,26 @@ export async function renderChat(outlet, wanted = "") {
   function handle(event) {
     const turn = turnFor(event.turn_id || "loose");
     switch (event.ev) {
-      case "turn_started":
+      case "turn_started": {
         setRunning(true);
+        setEmpty(false);
+        // a turn this page did not send — the build chained after a
+        // run, or an ask from another tab — still shows as the
+        // person's turn; one the page sent (or a /skill ask, shown
+        // in the person's own words) is already on screen
+        const bubbles = thread.querySelectorAll(".chat-user");
+        const last = bubbles.length
+          ? bubbles[bubbles.length - 1].textContent.trim() : "";
+        const text = String(event.text || "").trim();
+        if (text && !(last === text || last.endsWith(text))) {
+          userBubble(text, turn.el);       // above the turn it opens
+        }
         turn.startedAt = Date.parse(event.ts || "") || Date.now();
         openBlock(turn);
         pulse(turn, "Thinking…", event.ts);
         pingShelf();                       // the shelf marks it working
         break;
+      }
       case "model_prompt":
         // each model call restarts the clock and starts a new thought
         // segment: after a tool returns the line says Thinking, never
@@ -943,6 +1205,11 @@ export async function renderChat(outlet, wanted = "") {
         artifactCard(turn.extras, event, true);
         pingShelf();
         break;
+      case "proposal":
+        if (!turn.settled) settleBlock(turn);
+        proposalCard(turn.extras, event.proposal || {},
+                     { message_id: event.message_id || "" });
+        break;
       case "chips":
         if (event.clarify) chipRow(null, event.clarify);
         else chipRow(event.suggestions || []);
@@ -954,6 +1221,7 @@ export async function renderChat(outlet, wanted = "") {
       case "turn_done":
         setRunning(false);
         doneThinking(turn, event.elapsed_ms);
+        if (!state.session.title) refreshTitle();
         if (event.status === "partial"
             || event.status === "stopped") {
           turn.el.classList.add("partial");
@@ -981,8 +1249,8 @@ export async function renderChat(outlet, wanted = "") {
       api.chatStreamUrl(state.session.id, state.seq));
     for (const name of [
       "turn_started", "model_prompt", "thinking", "tool_call",
-      "tool_step", "tool_result", "say_token", "artifact", "chips",
-      "budget_tick", "turn_done", "error"]) {
+      "tool_step", "tool_result", "say_token", "artifact", "proposal",
+      "chips", "budget_tick", "turn_done", "error"]) {
       source.addEventListener(name, (message) => {
         let event;
         try { event = JSON.parse(message.data); } catch { return; }
@@ -1051,6 +1319,10 @@ export async function renderChat(outlet, wanted = "") {
         if (row) artifactCard(div.querySelector(".chat-extras"),
                               row, false);
       }
+      if (message.payload?.proposal) {
+        proposalCard(div.querySelector(".chat-extras"),
+                     message.payload.proposal, { message_id: message.id });
+      }
       const chips = message.payload?.chips;
       if (chips?.length
           && message === boot.messages[boot.messages.length - 1]) {
@@ -1058,6 +1330,7 @@ export async function renderChat(outlet, wanted = "") {
       }
     }
   }
+  setEmpty(!(boot.messages || []).length);
   state.seq = boot.head || 0;
   // a turn runs on the server, not in this tab: coming back to a
   // session mid-turn replays the in-flight turn from its first event
@@ -1078,10 +1351,13 @@ export async function renderChat(outlet, wanted = "") {
   async function send(text) {
     if (!text.trim() || state.running) return;
     el("chat-chiprow").innerHTML = "";
+    slash.hidden = true;
+    setEmpty(false);
     userBubble(text);
     input.value = "";
     const accepted = await api.chatSend(state.session.id, text,
-                                        el("chat-depth").value);
+                                        el("chat-depth").value,
+                                        state.mode);
     if (!accepted.available) {
       say(`<b>not sent.</b> ${esc(accepted.reason || "")}`, "error");
     }
@@ -1090,9 +1366,12 @@ export async function renderChat(outlet, wanted = "") {
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      const pick = slash.hidden ? null : slash.querySelector(".slash-item");
+      if (pick) { pickSlash(pick.dataset.name); return; }
       send(input.value);
     }
-    if (e.key === "Escape" && state.running) {
+    if (e.key === "Escape" && !slash.hidden) slash.hidden = true;
+    else if (e.key === "Escape" && state.running) {
       api.chatStop(state.session.id);
     }
   });

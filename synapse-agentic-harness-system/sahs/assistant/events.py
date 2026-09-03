@@ -23,6 +23,7 @@ ASSISTANT_EVENTS: tuple[str, ...] = (
     "tool_result",        # the full result behind the summary
     "say_token",          # streamed assistant prose
     "artifact",           # an artifact created/updated: full spec rides
+    "proposal",           # a query handed over: the card with Run on it
     "chips",              # follow-up suggestions when the turn ends
     "budget_tick",
     "turn_done",

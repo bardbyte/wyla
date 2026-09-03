@@ -255,6 +255,18 @@ the ledger lists `15_low_cardinality_manifest.csv` and
 as deferred with its reason. The new build's `DIFF_vs_prev.md` shows what
 the sources added. Restart the app so the chat serves the new build.
 
+**The query comes first.** In Chat mode a data question ends with the
+query on a card — the SQL, what it will scan, its status and meridian
+line — and three buttons: **Run query** executes it with no model call
+and puts the rows in the panel as a table (saved as `q1`), **Run +
+build dashboard** runs it and then builds the tiles from the rows, and
+**Edit SQL** lets you change the query before running. The chips after
+a run offer a dashboard or a refinement. Switch to **Autopilot** in the
+composer when Synapse should run and build without stopping. Both need
+`SAHS_ALLOW_LIVE=1` for the rows; without it the card still shows the
+query and the run explains the configuration. Type `/` in the composer
+to pick a skill pack for the turn.
+
 **Rows come from the warehouse under two limits.** Until live
 execution is on, the chat can only price a query (dry run) — it never
 sees rows, so a "how many" question ends in dry runs and a partial. Put

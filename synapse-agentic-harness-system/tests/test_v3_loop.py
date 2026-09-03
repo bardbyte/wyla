@@ -217,8 +217,13 @@ def test_the_prompt_is_sections_not_protocol(compiled):
     build, _ = compiled
     system = system_prompt(build, skill_index=all_skills(None))
     assert system.startswith("<identity>\n" + KEY)
-    for tag in ("<chain>", "<graph>", "<skills>", "<memory>"):
+    for tag in ("<chain>", "<mode>", "<graph>", "<skills>", "<memory>"):
         assert tag in system, tag
+    # the autonomy slider is a section: chat hands over, autopilot runs
+    assert "hand it over with propose_sql" in system
+    auto = system_prompt(build, mode="autopilot")
+    assert "Autopilot: run the query yourself" in auto
+    assert "propose_sql is not needed" in auto
     assert "## Skills on demand" in system
     # an empty shelf leaves no empty section behind
     assert "<skills>" not in system_prompt(build)
@@ -247,7 +252,7 @@ def test_the_kit_declares_eleven_tools_plus_follow_ups(compiled,
                     workspace=tmp_path / "ws")
     names = [d["name"] for d in declarations(kit)]
     assert names == ["search", "read", "sample_values", "run_sql",
-                     "python", "check", "artifact", "ask",
+                     "propose_sql", "python", "check", "artifact", "ask",
                      "load_skill", "remember", "note", "suggest_next"]
     for decl in declarations(kit):
         assert decl["parameters"]["type"] == "OBJECT"
@@ -642,3 +647,233 @@ def test_the_transcript_record_and_the_event_family(compiled):
     done = _by(events, "turn_done")[-1]
     assert done["model_calls"] == 2 and done["steps"] == 1
     assert done["status"] == "answered"
+
+
+# ─── the handover (§5): SQL first, the rows on a tap ─────────
+
+SPEND_SQL = ("SELECT part_dt, sum(trans_usd_am) AS acquirer_net_spend "
+             "FROM dw.gms_transaction GROUP BY part_dt")
+
+
+class Warehouse:
+    """A live runner that answers without a warehouse: the sandbox's
+    gates, the kit's limits, and the artifact all stay real."""
+    name = "fake_live"
+
+    def __init__(self):
+        self.calls = []
+
+    def run(self, sql, limit):
+        self.calls.append((sql, limit))
+        return {"rows": [["2026-08-01", 5.0], ["2026-08-02", 7.5]],
+                "schema": [{"name": "part_dt", "type": "DATE"},
+                           {"name": "acquirer_net_spend",
+                            "type": "FLOAT"}],
+                "columns": ["part_dt", "acquirer_net_spend"],
+                "bytes_processed": 1234}
+
+
+def _certified(build):
+    return next(m["id"] for m in build.metrics
+                if m.get("status") == "certified")
+
+
+def test_propose_sql_hands_the_query_over_and_ends_the_turn(
+        compiled, tmp_path):
+    from sahs.evals.substrate import StaticSubstrate
+    build, _ = compiled
+    model = _agent(
+        [{"text": "Here is the query for spend by day."},
+         _call("propose_sql", sql=SPEND_SQL, title="Spend by day",
+               why="The certified expression, by settlement day.",
+               metric_id=_certified(build))],
+        [{"text": "NEVER: the turn ended on the handover"}])
+    runtime = _runtime(compiled, model, tmp=tmp_path,
+                       substrate=StaticSubstrate({}))
+    session = runtime.create_session()
+    events = _turn(runtime, session["id"], "spend by day")
+    handed = _by(events, "proposal")
+    assert len(handed) == 1
+    proposal = handed[0]["proposal"]
+    assert proposal["title"] == "Spend by day"
+    assert proposal["status"] == "certified"
+    assert proposal["metric_id"] == _certified(build)
+    assert "meridian line" in proposal["meridian_line"]
+    assert "gms_transaction" in proposal["sql"]
+    assert handed[0]["message_id"]
+    # one model call: the person runs it, not another round-trip
+    assert len(model.calls) == 1
+    done = _by(events, "turn_done")[0]
+    assert done["status"] == "proposed" and done["model_calls"] == 1
+    assert "Here is the query" in _prose(events)
+    step = _by(events, "tool_step")[0]
+    assert step["tool"] == "propose_sql" and "handed over" in step["summary"]
+    assert step["input"] == SPEND_SQL          # the SQL on the row
+    # the transcript keeps the proposal, so a reload shows the card
+    last = runtime.store.messages(session["id"])[-1]
+    assert last["role"] == "assistant"
+    assert last["payload"]["proposal"]["sql_written"] == SPEND_SQL
+    assert runtime.store.get_session(session["id"])["title"] == "spend by day"
+
+
+def test_propose_sql_refuses_an_unproved_query(compiled, tmp_path):
+    from sahs.evals.substrate import StaticSubstrate
+    model = _agent(
+        [_call("propose_sql", sql="SELECT nope FROM dw.gms_transaction",
+               title="Broken")],
+        [{"text": "I fixed it."},
+         _call("propose_sql", sql=SPEND_SQL, title="Spend by day")])
+    runtime = _runtime(compiled, model, tmp=tmp_path,
+                       substrate=StaticSubstrate({}))
+    session = runtime.create_session()
+    events = _turn(runtime, session["id"], "spend by day")
+    first = _responses(model)[0]["response"]
+    assert first.get("error") and "propose again" in first["hint"]
+    # the second, proved, proposal ends the turn without a metric:
+    # exploratory, and the line says so
+    proposal = _by(events, "proposal")[0]["proposal"]
+    assert proposal["status"] == "exploratory"
+    assert "not on the meridian line" in proposal["meridian_line"]
+    assert len(model.calls) == 2
+
+
+def test_run_executes_the_proposal_without_the_model(compiled, tmp_path,
+                                                     monkeypatch):
+    from sahs.evals.substrate import StaticSubstrate
+    monkeypatch.setenv("SAHS_ALLOW_LIVE", "1")
+    build, _ = compiled
+    warehouse = Warehouse()
+    model = _agent(
+        [{"text": "Here is the query."},
+         _call("propose_sql", sql=SPEND_SQL, title="Spend by day",
+               metric_id=_certified(build))],
+        [{"text": "NEVER: the run needs no model"}])
+    runtime = _runtime(compiled, model, tmp=tmp_path,
+                       substrate=StaticSubstrate({}), runner=warehouse)
+    session = runtime.create_session()
+    _turn(runtime, session["id"], "spend by day")
+    before = runtime.runtime(session["id"]).bus.head()
+    started = runtime.run_proposal(session["id"])
+    assert runtime.wait(session["id"], 60)
+    events = runtime.runtime(session["id"]).bus.since(before)
+    assert started["turn_id"] == events[0]["turn_id"]
+    assert events[0]["ev"] == "turn_started" and events[0]["mode"] == "run"
+    assert len(model.calls) == 1                 # no model call at all
+    assert warehouse.calls and "LIMIT" in warehouse.calls[0][0].upper()
+    step = _by(events, "tool_step")[0]
+    assert step["tool"] == "run_sql" and "2 rows" in step["summary"]
+    assert "q1" in step["summary"]
+    table = _by(events, "artifact")[0]
+    assert table["type"] == "table" and table["title"] == "Spend by day"
+    assert table["spec"]["provenance"]["status"] == "certified"
+    assert table["spec"]["rows"][0]["acquirer_net_spend"] == 5.0
+    assert "watermark" not in table["spec"]
+    prose = _prose(events)
+    assert prose.startswith("Ran it: 2 rows") and "saved as q1" in prose
+    chips = _by(events, "chips")[0]["suggestions"]
+    assert chips[0] == "Build a dashboard from these rows"
+    done = _by(events, "turn_done")[0]
+    assert done["status"] == "answered" and done["model_calls"] == 0
+    # the rows are in the workspace for the next turn's python
+    assert (runtime.workspace(session["id"]) / "q1.json").exists()
+    # the transcript: the run as the person's turn, the receipts after
+    rows = runtime.store.messages(session["id"])
+    assert rows[-2]["role"] == "user" and rows[-2]["text"] == "Run: Spend by day"
+    assert rows[-1]["payload"]["ran"]["status"] == "answered"
+    assert rows[-1]["payload"]["artifacts"] == [table["artifact_id"]]
+
+
+def test_run_with_a_dashboard_chains_the_build_on_autopilot(
+        compiled, tmp_path, monkeypatch):
+    from sahs.evals.substrate import StaticSubstrate
+    monkeypatch.setenv("SAHS_ALLOW_LIVE", "1")
+    build, _ = compiled
+    model = _agent(
+        [_call("propose_sql", sql=SPEND_SQL, title="Spend by day",
+               metric_id=_certified(build))],
+        [{"text": "Built from q1: two days of spend."}])
+    runtime = _runtime(compiled, model, tmp=tmp_path,
+                       substrate=StaticSubstrate({}), runner=Warehouse())
+    session = runtime.create_session()
+    _turn(runtime, session["id"], "spend by day")
+    before = runtime.runtime(session["id"]).bus.head()
+    runtime.run_proposal(session["id"], sql=SPEND_SQL + " LIMIT 5",
+                         dashboard=True)
+    assert runtime.wait(session["id"], 60)
+    events = runtime.runtime(session["id"]).bus.since(before)
+    starts = _by(events, "turn_started")
+    assert [s["mode"] for s in starts] == ["run", "autopilot"]
+    assert starts[0]["text"] == "Run: Spend by day"
+    assert "Build a dashboard" in starts[1]["text"]
+    # the edited SQL ran, and the run says so
+    assert "with your edits" in _prose(events)
+    # the model turn saw the autopilot section and the rows
+    assert "Autopilot: run the query yourself" in model.calls[-1]["system"]
+    assert "q1" in model.calls[-1]["contents"][-1]["parts"][0]["text"]
+    assert [d["status"] for d in _by(events, "turn_done")] == [
+        "answered", "answered"]
+
+
+def test_run_refusals_are_taught_not_swallowed(compiled, tmp_path,
+                                               monkeypatch):
+    from sahs.evals.substrate import StaticSubstrate
+    monkeypatch.delenv("SAHS_ALLOW_LIVE", raising=False)
+    build, _ = compiled
+    model = _agent([_call("propose_sql", sql=SPEND_SQL,
+                          title="Spend by day")])
+    runtime = _runtime(compiled, model, tmp=tmp_path,
+                       substrate=StaticSubstrate({}), runner=Warehouse())
+    session = runtime.create_session()
+    _turn(runtime, session["id"], "spend by day")
+    before = runtime.runtime(session["id"]).bus.head()
+    runtime.run_proposal(session["id"])
+    assert runtime.wait(session["id"], 60)
+    events = runtime.runtime(session["id"]).bus.since(before)
+    prose = _prose(events)
+    assert prose.startswith("I could not run it")
+    assert "configuration, not the query" in prose
+    assert "SAHS_ALLOW_LIVE" in prose
+    assert _by(events, "turn_done")[0]["status"] == "partial"
+    assert not _by(events, "artifact")
+    with pytest.raises(ValueError):
+        runtime.find_proposal(session["id"], "m_nope")
+
+
+def test_a_slash_command_loads_that_skill_for_the_turn(compiled,
+                                                       tmp_path):
+    from sahs.assistant.skills_loader import all_skills
+    model = _agent([{"text": "With the pack loaded: a plain answer."}])
+    runtime = _runtime(compiled, model, tmp=tmp_path)
+    pack = all_skills(None)[0]
+    text, loaded = runtime.slash_skill(f"/{pack.name} what joins gms?")
+    assert text == "what joins gms?" and loaded == [pack.name]
+    assert runtime.slash_skill("/nope what?") == ("/nope what?", [])
+    assert runtime.slash_skill("plain ask")[1] == []
+    session = runtime.create_session()
+    events = _turn(runtime, session["id"], f"/{pack.name} what joins gms?")
+    started = _by(events, "turn_started")[0]
+    assert started["skills"] == [pack.name]
+    assert started["text"] == "what joins gms?"
+    # the pack's doctrine reached the model whole
+    assert pack.name in model.calls[0]["system"]
+    # the person's own words stay in the transcript
+    assert runtime.store.messages(session["id"])[0]["text"].startswith(
+        f"/{pack.name}")
+    assert runtime.mode_for("AUTOPILOT") == "autopilot"
+    assert runtime.mode_for("nope") == "chat"
+    assert runtime.model_label == "scripted"
+
+
+def test_the_composer_names_the_model_the_client_will_use(compiled,
+                                                          tmp_path,
+                                                          monkeypatch):
+    from sahs.util.auth import DEFAULT_VERTEX_MODEL
+    runtime = _runtime(compiled, None, tmp=tmp_path)
+    runtime._model_factory = None            # the laptop: env-bound
+    for var in ("VERTEX_MODEL", "LUMI_VERTEX_MODEL", "GEMINI_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+    assert DEFAULT_VERTEX_MODEL.split("-")[0].capitalize() \
+        in runtime.model_label
+    monkeypatch.setenv("VERTEX_MODEL", "gemini-2.5-pro")
+    assert runtime.model_label == "Gemini 2.5 Pro"
+

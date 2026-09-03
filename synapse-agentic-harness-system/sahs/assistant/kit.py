@@ -184,6 +184,61 @@ def build_kit(build: Build, state: AssistantState, *,
                                   f"compares saved results by name")
         return result
 
+    # ── propose_sql: the handover — priced, disclosed, not run ─
+    def propose_sql(sql: str, title: str, why: str = "",
+                    metric_id: str = "") -> dict[str, Any]:
+        """Hand a proved query to the person: priced by a dry run,
+        carrying its status and meridian line. The turn ends and the
+        card offers Run query / Run + dashboard; the rows come back
+        as a table artifact and as q1 for the next step."""
+        sql = str(sql or "").strip()
+        title = str(title or "").strip()
+        if not sql:
+            return {"error": "propose_sql needs the SQL",
+                    "hint": "the full SELECT you proved with a dry run"}
+        if not title:
+            return {"error": "a proposal needs a title",
+                    "hint": "name it the way the user would look for "
+                            "it later (\"Spend by day, last 30 days\")"}
+        priced = base["run_sql"](sql, mode="dry_run", limit=200)
+        if not isinstance(priced, dict) or priced.get("error"):
+            out = dict(priced) if isinstance(priced, dict) \
+                else {"error": str(priced)}
+            out["hint"] = ((out.get("hint") or "").rstrip(". ")
+                           + ". A query is handed over only once its "
+                           "dry run passes: fix it and propose again"
+                           ).lstrip(". ")
+            return out
+        warnings = list(priced.get("warnings") or [])
+        warnings += [w for w in literal_warnings(build, sql)
+                     if w not in warnings]
+        status = "exploratory"
+        line = ("An ad-hoc query, not on the meridian line: exploratory "
+                "until a check stands behind it.")
+        metric_id = str(metric_id or "").strip()
+        if metric_id:
+            got = base["get_definition_line"](metric_id)
+            if isinstance(got, dict) and got.get("definition_line"):
+                line = got["definition_line"]
+                served = str(got.get("status_served")
+                             or got.get("status") or "")
+                status = "certified" if served == "certified" \
+                    else "pending"
+            else:
+                metric_id = ""
+        proposal = {
+            "sql": priced.get("sql_sent") or sql, "sql_written": sql,
+            "title": title, "why": str(why or "").strip()[:600],
+            "bytes_processed": priced.get("bytes_processed"),
+            "result_schema": priced.get("result_schema"),
+            "warnings": warnings, "metric_id": metric_id,
+            "status": status, "meridian_line": line}
+        state.proposal = proposal
+        return {"ok": True, "ends_turn": True, "proposal": proposal,
+                "note": "handed over: the person runs it from the card "
+                        "(Run query, or Run + dashboard). Say in one or "
+                        "two sentences what it will show, then stop."}
+
     def python(code: str) -> dict[str, Any]:
         return run_python(code, workspace)
 
@@ -395,6 +450,27 @@ def build_kit(build: Build, state: AssistantState, *,
                 "mode": _s("dry_run (default) | run"),
                 "limit": _i("row cap for run, default 200, at most "
                             "1000")}, ["sql"])),
+        ToolSpec(
+            name="propose_sql",
+            signature="propose_sql(sql, title, why?, metric_id?)",
+            maps_to="the handover", ends_turn=True, writes=True,
+            description=(
+                "Hand a query to the person instead of running it: "
+                "the SQL you proved with run_sql(mode=\"dry_run\"), a "
+                "title, why it answers the ask, and the governed "
+                "metric behind it (metric_id) so the card carries the "
+                "status and the meridian line. The dry run prices it "
+                "again; an invalid query comes back to fix. The turn "
+                "ends: the card offers Run query and Run + dashboard, "
+                "the rows arrive as a table artifact and as q1, and "
+                "the next message can build from them."),
+            fn=propose_sql, schema=_obj({
+                "sql": _s("the full SELECT, proved by a dry run"),
+                "title": _s("the name the user would look for later"),
+                "why": _s("one or two sentences: what it answers and "
+                          "the definition it uses"),
+                "metric_id": _s("the governed metric behind it, when "
+                                "there is one")}, ["sql", "title"])),
         ToolSpec(
             name="python", signature="python(code)",
             maps_to="the analysis tool",

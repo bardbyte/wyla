@@ -81,9 +81,12 @@ export const api = {
   chatSessions: (limit = 40) => get(`/api/chat/sessions?limit=${limit}`),
   chatNewSession: () => post("/api/chat/sessions", {}),
   chatSession: (id) => get(`/api/chat/sessions/${encodeURIComponent(id)}`),
-  chatSend: (id, text, depth = "") =>
+  chatSend: (id, text, depth = "", mode = "") =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/messages`,
-         { text, depth }),
+         { text, depth, mode }),
+  // the person pressed Run on a proposed query: no model call
+  chatRun: (id, body) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/run`, body),
   chatStop: (id) => post(`/api/chat/sessions/${encodeURIComponent(id)}/stop`),
   chatRename: (id, title) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/rename`, { title }),
