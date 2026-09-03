@@ -316,9 +316,14 @@ googleapis.com into NO_PROXY for the whole process, so every later
 Vertex call (the OAuth refresh and the stream) went direct into the
 corporate blackhole until the 120 s silence timeout. Each plane now
 carries its own route and its opener never consults NO_PROXY, so a
-dry run cannot reroute a model call; `python scripts/vertex_check.py
---generate` after `python scripts/bq_check.py` in one shell proves it
-on the laptop.
+dry run cannot reroute a model call. Separate check scripts never
+shared the bug (each is its own process); the proof is one process
+doing both in the chat's order:
+
+```bash
+python scripts/planes_check.py     # a dry run, then one model call,
+                                   # the environment watched in between
+```
 
 The client gives up on a model stream after 120 s of silence, retries
 once if nothing had arrived, and the turn then closes in plain language
