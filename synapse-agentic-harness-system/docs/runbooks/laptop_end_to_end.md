@@ -267,6 +267,16 @@ composer when Synapse should run and build without stopping. Both need
 query and the run explains the configuration. Type `/` in the composer
 to pick a skill pack for the turn.
 
+**The query comes first, then the rows, then the picture.** In Chat
+mode a data question ends with the query on a card (its price, status
+and meridian line); Run query executes it with no model call and puts
+the rows in the panel and in the workspace as q1; the "Chart these
+rows" chip draws them with no model call under the same provenance;
+"Build a dashboard from these rows" and "Run + build dashboard" are
+the model's turns, on autopilot. Autopilot mode skips the card. Run
+needs `SAHS_ALLOW_LIVE=1`; without it the card still shows the query
+and the run explains the configuration.
+
 **Rows come from the warehouse under two limits.** Until live
 execution is on, the chat can only price a query (dry run) — it never
 sees rows, so a "how many" question ends in dry runs and a partial. Put
@@ -296,6 +306,19 @@ python scripts/turn_doctor.py          # newest session: each model call
                                        # and tool with its seconds, and the
                                        # OPEN segment a stuck turn sits in
 ```
+
+The doctor now opens with the **network planes**: the route each
+connection pins (BigQuery direct on the PSC contract, Vertex via the
+corporate proxy) and a note when the environment's NO_PROXY names
+googleapis. A turn that hung on the model call right after the first
+dry run was exactly this: the BigQuery connection used to write
+googleapis.com into NO_PROXY for the whole process, so every later
+Vertex call (the OAuth refresh and the stream) went direct into the
+corporate blackhole until the 120 s silence timeout. Each plane now
+carries its own route and its opener never consults NO_PROXY, so a
+dry run cannot reroute a model call; `python scripts/vertex_check.py
+--generate` after `python scripts/bq_check.py` in one shell proves it
+on the laptop.
 
 The client gives up on a model stream after 120 s of silence, retries
 once if nothing had arrived, and the turn then closes in plain language

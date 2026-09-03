@@ -135,9 +135,8 @@ def probe_stream_tools(client: Any) -> dict[str, Any]:
     started = time.perf_counter()
     chunks, calls, signed, text_chunks = 0, [], False, 0
     try:
-        with urllib.request.urlopen(
-                request, timeout=120,
-                context=client.connection.ssl_context()) as response:
+        with client.connection.opener().open(
+                request, timeout=120) as response:
             for raw in response:
                 line = raw.decode("utf-8").strip()
                 if not line.startswith("data:"):
@@ -183,9 +182,7 @@ def probe_interactions(client: Any) -> dict[str, Any]:
         request = urllib.request.Request(
             url, headers={"Authorization": f"Bearer {client._token()}"})
         try:
-            with urllib.request.urlopen(
-                    request, timeout=30,
-                    context=c.ssl_context()) as response:
+            with c.opener().open(request, timeout=30) as response:
                 out[version] = f"HTTP {response.status}"
         except urllib.error.HTTPError as exc:
             out[version] = f"HTTP {exc.code}"

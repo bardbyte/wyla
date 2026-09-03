@@ -33,10 +33,12 @@ warehouse failure class).
 
 **Turn kinds** (`sahs/assistant/loop.py`, `runtime.py`): a model turn in
 `chat` mode (hand the query over) or `autopilot` (run and build), a
-`clarify` end, a `proposed` end, and the **run turn** —
+`clarify` end, a `proposed` end, the **run turn** —
 `run_proposal_turn` executes a handed-over query with no model call and
 lands the rows as a table artifact and as `q1`; `dashboard=true` chains a
-model turn on autopilot that builds from them.
+model turn on autopilot that builds from them — and the **chart turn**,
+`chart_rows_turn`, which draws the saved rows under the run's
+provenance with no model call (the "Chart these rows" action chip).
 
 ### 1.2 The v1 loop toolkit — 14 tools, still behind Ask and the evals (`sahs/loop/tools.py`)
 
@@ -119,15 +121,28 @@ scoped acronyms (a memory, never a guess).
 ## 3 · The flow as it stands
 
 ```
-ask ─► search / read / sample_values ─► run_sql(dry_run) ─► propose_sql
-     (chat mode)                                                │
-   card: [Run query] [Run + build dashboard] [Edit SQL] ◄───────┘
+ask ─► search / read / sample_values ─► propose_sql (prices the query)
+     (chat mode)                                        │
+   card: [Run query] [Run + build dashboard] [Edit SQL] ◄┘
      │                        │
      ▼                        ▼
    run turn (no model)      run turn, then a model turn on autopilot
    table artifact + q1        dashboard artifact from q1
-   chips: Build a dashboard from these rows · Refine the query
+   chips: Chart these rows (no model) · Build a dashboard · Refine
+     │
+     ▼
+   chart turn (no model): line or bar of the numeric columns by the
+   first date-like column, the run's provenance on the artifact
 ```
+
+Showcase, execution, visualization, and where the model is needed:
+
+| step | who does it | model call |
+| --- | --- | --- |
+| showcase: the query, priced and disclosed | the model (`propose_sql`) | one, and it ends the turn |
+| execution: the rows under the limits | the run turn | none |
+| the first picture | the chart turn | none |
+| a designed dashboard, a memo, a comparison | the model, on autopilot from q1 | yes |
 
 Autopilot skips the card: the model runs under the limits, checks, and
 builds. A `/skill-name` prefix loads that pack for the turn. The limits

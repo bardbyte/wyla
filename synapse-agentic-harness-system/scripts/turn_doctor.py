@@ -144,12 +144,48 @@ def render(turns: list[dict[str, Any]]) -> str:
                              "proxy or Vertex is holding it (the client "
                              "gives up after 120s of silence, once, then "
                              "the turn closes in plain language)")
+                if any(seg.get("what", "").startswith("tool run_sql")
+                       for seg in t["segments"]):
+                    lines.append(
+                        "      it follows a warehouse call: check the "
+                        "planes above — the Vertex route must still be "
+                        "the proxy after a BigQuery call (a BigQuery "
+                        "connection used to write googleapis.com into "
+                        "NO_PROXY, sending every later model call "
+                        "direct into the corporate blackhole)")
             else:
                 lines.append("      the tool has not returned: the "
                              "warehouse or the token trip is holding it")
         if t["tokens"] is not None:
             lines.append(f"  tokens so far: {t['tokens']}")
     return "\n".join(lines) if lines else "no turns in this file"
+
+
+def planes() -> str:
+    """The route each network plane pins on its connection, read from
+    the environment without a single network call — the first thing
+    to check when a turn hangs right after a dry run."""
+    from sahs.util.auth import AuthError, BQConnection, VertexConnection
+    lines = ["network planes (each route is pinned on its connection; "
+             "the environment's NO_PROXY is never consulted):"]
+    for label, cls in (("BigQuery", BQConnection),
+                       ("Vertex", VertexConnection)):
+        try:
+            connection = cls.from_env()
+        except AuthError as e:
+            lines.append(f"  {label:<9} not configured: {e}")
+            continue
+        except Exception as e:                       # noqa: BLE001
+            lines.append(f"  {label:<9} could not resolve: {e}")
+            continue
+        lines.append(f"  {label:<9} {connection.route()} · "
+                     f"{connection.endpoint}")
+    leak = (os.environ.get("NO_PROXY", "")
+            + os.environ.get("no_proxy", "")).lower()
+    if "googleapis" in leak:
+        lines.append("  note      NO_PROXY names googleapis in the "
+                     "environment: ignored on both planes by design")
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -177,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.turn:
         turns = [t for t in turns if t["turn_id"] == args.turn]
     print(f"{path}\n")
+    print(planes() + "\n")
     print(render(turns[-3:] if not args.turn else turns))
     return 0
 

@@ -199,9 +199,8 @@ def _get(client: Any, url: str) -> tuple[str, Any]:
     request = urllib.request.Request(
         url, headers={"Authorization": f"Bearer {client._token()}"})
     try:
-        with urllib.request.urlopen(
-                request, timeout=30,
-                context=client.connection.ssl_context()) as response:
+        with client.connection.opener().open(
+                request, timeout=30) as response:
             return "ok", json.loads(response.read().decode("utf-8"))
     except Exception as exc:                        # noqa: BLE001
         return _classify(exc)
@@ -273,9 +272,8 @@ def probe_streaming(client: Any) -> dict[str, Any]:
                  "Content-Type": "application/json"}, method="POST")
     started = time.perf_counter()
     try:
-        with urllib.request.urlopen(
-                request, timeout=60,
-                context=client.connection.ssl_context()) as response:
+        with client.connection.opener().open(
+                request, timeout=60) as response:
             first = None
             chunks = 0
             for line in response:
@@ -320,8 +318,8 @@ def vertex_section(models: list[str] | None = None) -> dict[str, Any]:
         "project": connection.project, "location": connection.location,
         "endpoint": connection.endpoint, "model": connection.model,
         "truststore": connection.truststore_active,
-        "proxy": bool(os.environ.get("HTTPS_PROXY")
-                      or os.environ.get("https_proxy"))}
+        "proxy": bool(connection.proxies),
+        "route": connection.route()}
     control = VertexClient(connection)
     try:
         token = control._token()

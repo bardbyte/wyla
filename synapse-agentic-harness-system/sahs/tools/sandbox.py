@@ -79,9 +79,8 @@ class BQJobRunner:
             headers={"Authorization": f"Bearer {self._token()}",
                      "Content-Type": "application/json"},
             method="POST")
-        with urllib.request.urlopen(
-                request, timeout=90,
-                context=self.connection.ssl_context()) as response:
+        with self.connection.opener().open(
+                request, timeout=90) as response:
             payload = json.loads(response.read().decode("utf-8"))
         fields = (payload.get("schema") or {}).get("fields") or []
         names = [f.get("name", "") for f in fields]

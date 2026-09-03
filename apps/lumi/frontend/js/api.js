@@ -87,6 +87,9 @@ export const api = {
   // the person pressed Run on a proposed query: no model call
   chatRun: (id, body) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/run`, body),
+  // the picture of a run's rows: no model call
+  chatChart: (id, body) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/chart`, body),
   chatStop: (id) => post(`/api/chat/sessions/${encodeURIComponent(id)}/stop`),
   chatRename: (id, title) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/rename`, { title }),

@@ -802,6 +802,7 @@ export async function renderChat(outlet, wanted = "") {
     run_sql: (e) => ["snapshot", "run"].includes(argOf(e, "mode"))
       ? "Running the query" : "Checking the query",
     propose_sql: () => "Writing the query for you to run",
+    chart: () => "Drawing the rows",
     python: () => "Computing",
     check: (e) => ({ part_whole: "Checking the parts add up",
                      crosscheck: "Cross-checking two routes",
@@ -823,7 +824,7 @@ export async function renderChat(outlet, wanted = "") {
   const PAST = {
     search: "searched the graph", read: "read the cards",
     sample_values: "sampled real values", run_sql: "ran the query",
-    propose_sql: "wrote the query",
+    propose_sql: "wrote the query", chart: "drew the chart",
     python: "computed", check: "ran the checks",
     artifact: "built the artifact", ask: "asked a question",
     load_skill: "loaded a skill", remember: "kept a preference",
@@ -994,24 +995,40 @@ export async function renderChat(outlet, wanted = "") {
     scroll();
   }
 
+  // a chip is a follow-up the person taps: plain text becomes the
+  // next message; an action chip ({label, action: "chart", saved_as})
+  // calls the model-free step instead
   function chipRow(suggestions, clarify) {
     const box = el("chat-chiprow");
     const items = clarify
       ? (clarify.options || []).map((o) => ({
           label: o.label, hint: o.evidence || o.why || "" }))
-      : (suggestions || []).slice(0, 3).map((c) => ({ label: c, hint: "" }));
+      : (suggestions || []).slice(0, 3).map((c) =>
+          typeof c === "string" ? { label: c, hint: "" }
+            : { label: c.label || "", hint: c.hint || "",
+                action: c.action || "", payload: c });
     if (clarify) {
       say(`<b>${prose(clarify.question)}</b>`);
     }
     box.innerHTML = items.map((c, i) => `
-      <button class="chip-choice" data-i="${i}">
+      <button class="chip-choice${c.action ? " act" : ""}" data-i="${i}">
         <b>${esc(c.label)}</b>
         ${c.hint ? `<span class="muted">${prose(c.hint)}</span>` : ""}
       </button>`).join("");
     for (const b of box.querySelectorAll(".chip-choice")) {
-      b.addEventListener("click", () => {
+      b.addEventListener("click", async () => {
         const item = items[Number(b.dataset.i)];
         box.innerHTML = "";
+        if (item.action === "chart") {
+          if (state.running) return;
+          const accepted = await api.chatChart(state.session.id, {
+            saved_as: item.payload.saved_as || "" });
+          if (!accepted.available) {
+            say(`<b>not charted.</b> ${esc(accepted.reason || "")}`,
+                "error");
+          }
+          return;
+        }
         send(item.label);
       });
     }

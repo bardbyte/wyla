@@ -250,3 +250,14 @@ def test_the_ask_starts_like_claude_and_hands_queries_over():
                   "model_label", "run_proposal_turn"):
         assert piece in runtime_py, piece
 
+
+def test_the_first_picture_needs_no_model():
+    # the run offers "Chart these rows" as an action chip: the page
+    # calls the chart step, never the model; a plain chip still sends
+    for piece in ("api.chatChart", 'action === "chart"', "Drawing the rows",
+                  "drew the chart", "typeof c === \"string\""):
+        assert piece in CHAT_JS, piece
+    assert "chatChart" in API_JS
+    for piece in ('/chart"', "ChartRows", "chart_rows"):
+        assert piece in BACKEND, piece
+

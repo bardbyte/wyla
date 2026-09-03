@@ -24,7 +24,7 @@ from sahs.tools.api import Build
 
 from .events import ASSISTANT_EVENTS, EventBus
 from .loop import (DEFAULT_MODE, DEFAULT_THINKING, MAX_CALLS, MODES,
-                   THINKING_LEVELS, run_assistant_turn,
+                   THINKING_LEVELS, chart_rows_turn, run_assistant_turn,
                    run_proposal_turn)
 from .skills_loader import all_skills, load_packs
 from .store import AssistantStore
@@ -402,6 +402,68 @@ class AssistantRuntime:
         rt.thread.start()
         return {"turn_id": turn_id, "session_id": session_id,
                 "dashboard": dashboard, "edited": edited}
+
+    def find_run(self, session_id: str, saved_as: str = "") -> dict:
+        """The run whose rows to draw: the one that saved ``saved_as``,
+        or the latest run that answered."""
+        for row in reversed(self.store.messages(session_id)):
+            payload = row.get("payload") or {}
+            ran = payload.get("ran") if isinstance(payload, dict) else None
+            if not ran or ran.get("status") != "answered" \
+                    or not ran.get("saved_as"):
+                continue
+            if saved_as and ran["saved_as"] != saved_as:
+                continue
+            return ran
+        raise ValueError("no rows to chart yet: run a query first, then "
+                         "ask for the picture")
+
+    def chart_rows(self, session_id: str, *, saved_as: str = "",
+                   kind: str = "", x: str = "",
+                   y: list[str] | None = None) -> dict:
+        """The person asked for the picture: the saved rows become a
+        chart under the run's provenance, with no model call."""
+        session = self.store.get_session(session_id)
+        if session is None:
+            raise KeyError(session_id)
+        rt = self.runtime(session_id)
+        if rt.running:
+            raise TurnBusy("a turn is already running in this "
+                           "session: stop it before charting")
+        ran = self.find_run(session_id, saved_as)
+        build = self.build()
+        turn_id = f"t_{uuid.uuid4().hex[:10]}"
+        rt.abort = Abort()
+        rt.current_turn = turn_id
+        title = str(ran.get("title") or "the rows")
+        self.store.add_message(session_id, "user", f"Chart: {title}",
+                               turn_id=turn_id,
+                               payload={"chart": {
+                                   "saved_as": ran["saved_as"],
+                                   "kind": kind, "x": x, "y": y or []}})
+
+        def worker() -> None:
+            try:
+                chart_rows_turn(
+                    build=build, store=self.store, bus=rt.bus,
+                    budget=rt.budget, session=session, turn_id=turn_id,
+                    saved_as=str(ran["saved_as"]), title=title,
+                    provenance=dict(ran.get("provenance") or {}),
+                    workspace=self.workspace(session_id), kind=kind,
+                    x=x, y=list(y or []), graph_root=self.graph_root)
+            except Exception as e:       # never a silent dead turn
+                rt.bus.emit("error", turn_id=turn_id, code="internal",
+                            message="Something broke on my side: "
+                                    f"{type(e).__name__}: {e}",
+                            retryable=True, next_actions=["chart again"])
+                rt.bus.emit("turn_done", turn_id=turn_id,
+                            status="error", **rt.budget.tick())
+
+        rt.thread = threading.Thread(target=worker, daemon=True,
+                                     name=f"chat-chart-{turn_id}")
+        rt.thread.start()
+        return {"turn_id": turn_id, "session_id": session_id,
+                "saved_as": ran["saved_as"]}
 
     def turn_window(self, session_id: str) -> dict:
         """§6: a turn runs on the server, not in the tab. When the

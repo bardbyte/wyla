@@ -59,7 +59,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  endpoint   {connection.endpoint}")
     print(f"  location   {connection.location}")
     print(f"  key file   {connection.key_path} (exists)")
-    print(f"  NO_PROXY   {os.environ.get('NO_PROXY', '(none)')}")
+    print(f"  route      {connection.route()} — pinned on this "
+          "connection (the PSC contract); the environment's NO_PROXY "
+          "is neither read nor written")
     if not connection.ssl_verify:
         print("  ⚠ TLS verification DISABLED (BQ_SSL_NO_VERIFY=1) — "
               "prefer REQUESTS_CA_BUNDLE with the corporate root cert "
