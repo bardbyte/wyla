@@ -948,13 +948,24 @@ def test_an_over_ceiling_query_comes_back_once_then_hands_over_with_the_warning(
         compiled, tmp_path, monkeypatch):
     """4.2 TB against a 1 TB ceiling: the model learns it at handover,
     not at Run. Once to narrow; the second time the card says so."""
-    from sahs.canon.canonical import try_canon
-    from sahs.evals.substrate import DryRunOutcome, StaticSubstrate
+    from sahs.evals.substrate import DryRunOutcome
     monkeypatch.setenv("SAHS_LIVE_MAX_BYTES", "1000000000000")
-    fp = try_canon(SPEND_SQL)[0].fp_expr
-    substrate = StaticSubstrate({fp: DryRunOutcome(
-        valid=True, result_schema=[{"name": "part_dt", "type": "DATE"}],
-        bytes_processed=4_200_000_000_000)})
+    # an earlier module's .env can leave a data project in the process
+    # environment, which qualifies the SQL the sandbox sends: price by
+    # outcome, not by fingerprint, so the order of the suite is moot
+    for name in ("LUMI_BQ_DATA_PROJECT", "BQ_DATA_PROJECT"):
+        monkeypatch.delenv(name, raising=False)
+
+    class BigTable:
+        name = "big_table"
+
+        def dry_run(self, sql):
+            return DryRunOutcome(
+                valid=True,
+                result_schema=[{"name": "part_dt", "type": "DATE"}],
+                bytes_processed=4_200_000_000_000)
+
+    substrate = BigTable()
     model = _agent(
         [_call("propose_sql", sql=SPEND_SQL, title="Spend by day")],
         [{"text": "It cannot be narrowed further; here it is."},
@@ -975,4 +986,60 @@ def test_an_over_ceiling_query_comes_back_once_then_hands_over_with_the_warning(
     assert proposal["bytes_processed"] == 4_200_000_000_000
     assert _by(events, "turn_done")[0]["status"] == "proposed"
     assert len(model.calls) == 2
+
+
+class FutureWarehouse(Warehouse):
+    """The laptop's table: real days, then rows dated in 2118."""
+
+    def run(self, sql, limit):
+        self.calls.append((sql, limit))
+        return {"rows": [["2026-08-01", 5.0], ["2026-08-02", 7.5],
+                         ["2118-02-14", 0.0]],
+                "schema": [{"name": "part_dt", "type": "DATE"},
+                           {"name": "acquirer_net_spend",
+                            "type": "FLOAT"}],
+                "columns": ["part_dt", "acquirer_net_spend"],
+                "bytes_processed": 99}
+
+
+def test_future_dated_rows_are_named_in_the_receipts(compiled, tmp_path,
+                                                     monkeypatch):
+    """The dashboard whose axis ran to 2118: the run says so first."""
+    from sahs.assistant.loop import _future_dates, _future_note
+    from sahs.evals.substrate import StaticSubstrate
+    import datetime as dt
+    rows = [{"part_dt": "2026-08-01", "n": 1},
+            {"part_dt": "2118-02-14", "n": 0},
+            {"part_dt": "2117-01-01", "n": 0}]
+    found = _future_dates(rows, today=dt.date(2026, 9, 3))
+    assert found == {"part_dt": {"rows": 2, "latest": dt.date(2118, 2, 14)}}
+    assert _future_dates(rows[:1], today=dt.date(2026, 9, 3)) == {}
+    assert "2 of these rows are dated after today in part_dt (up to " \
+        "2118-02-14)" in _future_note(rows)
+    assert "part_dt <= CURRENT_DATE()" in _future_note(rows)
+
+    monkeypatch.setenv("SAHS_ALLOW_LIVE", "1")
+    build, _ = compiled
+    model = _agent([_call("propose_sql", sql=SPEND_SQL, title="Spend by day",
+                          metric_id=_certified(build))])
+    runtime = _runtime(compiled, model, tmp=tmp_path,
+                       substrate=StaticSubstrate({}),
+                       runner=FutureWarehouse())
+    session = runtime.create_session()
+    _turn(runtime, session["id"], "spend by day")
+    before = runtime.runtime(session["id"]).bus.head()
+    runtime.run_proposal(session["id"])
+    assert runtime.wait(session["id"], 60)
+    prose = _prose(runtime.runtime(session["id"]).bus.since(before))
+    assert prose.startswith("Ran it: 3 rows")
+    assert "1 of these rows is dated after today in part_dt (up to " \
+        "2118-02-14)" in prose
+    before = runtime.runtime(session["id"]).bus.head()
+    runtime.chart_rows(session["id"])
+    assert runtime.wait(session["id"], 60)
+    drawn = _prose(runtime.runtime(session["id"]).bus.since(before))
+    assert drawn.startswith("Drew it")
+    assert "1 of these points is dated after today" in drawn
+    # the doctrine reached the prompt: a window names both ends
+    assert "A time window names both ends" in model.calls[0]["system"]
 

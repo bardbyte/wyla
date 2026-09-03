@@ -284,7 +284,10 @@ default) is enforced at handover time too: a query over it comes back
 to the model once to narrow, and if it is handed over anyway the card
 says Run will be refused unless it is narrowed or the ceiling raised.
 `python scripts/turn_doctor.py` and `planes_check.py` print the live
-switch and the ceiling with the planes.
+switch and the ceiling with the planes. When a run's rows carry dates
+after today (a window with no upper bound over a table that holds
+future-dated rows: the dashboard whose axis ran to 2118), the run's
+receipts and the chart say so and name the bound to add.
 
 **Rows come from the warehouse under two limits.** Until live
 execution is on, the chat can only price a query (dry run) — it never

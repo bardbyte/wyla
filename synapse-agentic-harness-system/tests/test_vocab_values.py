@@ -280,7 +280,13 @@ def test_digest_tells_the_observed_values_rule(built):
     digest = synapse_digest(build)
     words = digest[digest.index("## words"):]
     words = words[:words.index("\n## ", 1)]
-    assert "observed values are on record for 4 columns" in words
-    assert "2 with an estimated distinct count" in words
-    assert "2 of those lists partial" in words
+    observed = [d for d in build.domains if d.get("values")]
+    estimated = [d for d in observed if d.get("distinct_estimate")]
+    partial = [d for d in estimated
+               if d["distinct_estimate"] > len(d["values"])]
+    assert len(observed) == 3 and len(estimated) == 2 and len(partial) == 2
+    assert (f"observed values are on record for {len(observed)} columns"
+            in words)
+    assert f"{len(estimated)} with an estimated distinct count" in words
+    assert f"{len(partial)} of those lists partial" in words
     assert 'kind="values"' in words and "written as stored" in words
