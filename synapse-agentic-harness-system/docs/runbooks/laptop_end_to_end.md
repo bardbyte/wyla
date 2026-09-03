@@ -252,8 +252,14 @@ Read the build report for `vocab.common_word_acronyms`,
 `domains_minted` / `skipped_unknown_table`, and `bq.domains_with_estimate`;
 the ledger lists `15_low_cardinality_manifest.csv` and
 `low_cardinality_synonyms_index.json` as consumed and `glossary_terms.csv`
-as deferred with its reason. The new build's `DIFF_vs_prev.md` shows what
-the sources added. Restart the app so the chat serves the new build.
+as deferred with its reason. `expressions.catalog_join_edges` counts the
+`joined_tables` pairs from the measures catalog that became join edges
+(witness `catalog_mined`, `source: catalog` in `indexes/joins.jsonl`, no
+ON condition, so never above candidate) and `catalog_join_unresolved`
+counts the joined names the crosswalk could not place — a large number
+there means the alias sidecar wants those names. The new build's
+`DIFF_vs_prev.md` shows what the sources added. Restart the app so the
+chat serves the new build.
 
 **The query comes first.** In Chat mode a data question ends with the
 query on a card — the SQL, what it will scan, its status and meridian

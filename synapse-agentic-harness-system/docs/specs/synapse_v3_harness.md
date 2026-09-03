@@ -316,6 +316,20 @@ handoff, the eval suites.
    environment; the doctor prints both routes first. Reason: two
    planes with opposite network contracts cannot share a
    process-wide switch.
+11. The measures catalog is the fifth join family (2026-09-03). Its
+   `joined_tables` become `joins_via` edges with witness
+   `catalog_mined`: WHICH tables a metric's real queries join, FOR
+   WHAT metric, how many users — never HOW, because the catalog does
+   not record the ON condition. A catalog row therefore never tiers
+   above candidate, cannot vouch for a fan-out, and annotates the
+   measured, declared and studio rows for the same pair
+   (`also_in_catalog`) as they annotate it (`also_witnessed_by`).
+   The rest of the catalog's texture (group-by patterns, executions,
+   miner confidence, business unit, category) rides the metric row,
+   its card, the search hit as `dimensions`, and the digest's
+   "usually by" note. Reason: the audit found the joins and the usage
+   fields loaded onto the metric node and dropped at compile; the
+   agent was reading a poorer catalog than the one on disk.
 
 ## 12 · The laptop, measured (state report of 2026-09-02)
 

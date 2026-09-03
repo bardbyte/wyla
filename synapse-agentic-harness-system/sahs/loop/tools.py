@@ -437,6 +437,9 @@ def toolkit(build: Build, state: LoopState, *,
                     "table": c["table"], "grain": c.get("grain", ""),
                     "support": (row or {}).get("support", 0),
                     "agreement": (row or {}).get("witness_agreement", 0),
+                    # the dimensions its real queries group by
+                    **({"dimensions": (row or {})["group_by_patterns"]}
+                       if (row or {}).get("group_by_patterns") else {}),
                 })
         if kind in ("all", "concepts"):
             for b in search_concepts(build, query, top_k=8)["bindings"]:

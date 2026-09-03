@@ -252,8 +252,13 @@ def validate_sql(build: Build, sql: str, metric_id: str = "") -> dict:
         if join.args.get("on") is None and join.args.get("using") is None:
             other = join.this
             names = [n.name for n in [other] if isinstance(n, exp.Table)]
-            declared = [j for j in build.joins
-                        if {j.get("a"), j.get("b")} <= set(physicals)]
+            # the ON clause that says HOW outranks the row that says
+            # only WHICH (co-query, catalog)
+            declared = sorted(
+                (j for j in build.joins
+                 if {j.get("a"), j.get("b")} <= set(physicals)),
+                key=lambda j: (not j.get("on"),
+                               -int(j.get("support") or 0)))
             hint = ("declared join path: "
                     + declared[0].get("on", f"{declared[0].get('a')} ↔ "
                                             f"{declared[0].get('b')}")

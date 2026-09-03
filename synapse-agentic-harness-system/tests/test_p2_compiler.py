@@ -342,3 +342,86 @@ def test_studio_texture_and_mined_joins_serve(tmp_path):
     # the same-id-different-SQL witness is a VISIBLE census conflict
     census = json.loads((build_dir / "census.json").read_text())
     assert census["summary"]["metric_conflicts"] >= 1
+
+
+def test_catalog_joins_are_the_fifth_family_and_never_tier_above_candidate(
+        tmp_path):
+    """joins.jsonl carries the catalog row (`source: catalog`) with the
+    metrics and measures it was seen in and NO `on`; the families
+    annotate each other on the shared pair; the row tiers as a
+    candidate for every consumer; both table cards say which table,
+    for what metrics, and that the ON is not recorded; the metric row
+    and card carry the catalog's usage texture; the digest says what
+    the metric is usually sliced by."""
+    _, build_dir, _ = _compiled(tmp_path)
+    joins = [json.loads(x) for x in
+             (build_dir / "indexes" / "joins.jsonl"
+              ).read_text().splitlines()]
+    assert {"co_query", "jobs_30d", "constraints", "studio",
+            "catalog"} <= {j["source"] for j in joins}
+    catalog = next(j for j in joins if j["source"] == "catalog")
+    assert (catalog["a"], catalog["b"]) == ("dw.gms_transaction",
+                                            "dw.wwcas_authorization")
+    assert catalog["support"] == 31
+    assert catalog["how"] == "unknown" and "on" not in catalog
+    assert catalog["measures"] == ["mined:gms_transaction__total_spend"]
+    assert catalog["witness_metrics"]
+    assert "not recorded" in catalog["note"]
+    assert {"studio", "constraints"} <= set(catalog["also_witnessed_by"])
+    pair_rows = [j for j in joins
+                 if {j["a"], j["b"]} == {"dw.gms_transaction",
+                                         "dw.wwcas_authorization"}
+                 and j["source"] != "catalog"]
+    assert pair_rows
+    for row in pair_rows:
+        assert row["also_in_catalog"]["support"] == 31
+        assert row["also_in_catalog"]["witness_metrics"] == \
+            catalog["witness_metrics"]
+    from sahs.loop.tools import _tier
+    assert _tier(catalog) == "candidate"
+
+    metrics = [json.loads(x) for x in
+               (build_dir / "indexes" / "metrics.jsonl"
+                ).read_text().splitlines()]
+    spend = next(m for m in metrics
+                 if "mgroup:mined:gms_transaction__total_spend"
+                 in m["mgroups"])
+    assert spend["group_by_patterns"] == ["part_dt"]
+    assert spend["joined_tables"] == ["gms_merchant_char",
+                                      "wwcas_authorization"]
+    assert spend["execution_count"] == 412
+    assert spend["confidence"] == "high"
+    assert spend["business_unit"] == "GMNS"
+    assert spend["data_category"] == "Merchant"
+    assert catalog["witness_metrics"] == [spend["id"]]
+    label = spend["label"] or spend["id"]
+
+    gms_card = (build_dir / "cards" / "tables"
+                / "dw__gms_transaction.md").read_text()
+    assert (f"- dw.wwcas_authorization · in the queries of {label} · "
+            "31 users · ON not recorded [prov:catalog_mined]") in gms_card
+    wwcas_card = (build_dir / "cards" / "tables"
+                  / "dw__wwcas_authorization.md").read_text()
+    assert (f"- dw.gms_transaction · in the queries of {label} · "
+            "31 users · ON not recorded [prov:catalog_mined]") in wwcas_card
+    # the unresolvable gms_merchant_char never becomes a card line
+    assert "gms_merchant_char ·" not in gms_card
+
+    card = (build_dir / "cards" / "metrics"
+            / f"{spend['fp']}.md").read_text()
+    assert ("- usual dimensions: part_dt (the group-by patterns of its "
+            "queries) [prov:catalog_mined]") in card
+    assert ("- usage: 412 executions · 31 users · miner confidence high "
+            "[prov:catalog_mined]") in card
+    assert ("- joined with, in this metric's queries: gms_merchant_char, "
+            "wwcas_authorization (ON not recorded; see the table card's "
+            "joins) [prov:catalog_mined]") in card
+    assert "- category: Merchant · business unit: GMNS " \
+           "[prov:catalog_mined]" in card
+
+    from sahs.loop.digest import synapse_digest
+    from sahs.tools.api import Build
+    digest = synapse_digest(Build.open(tmp_path / "builds"))
+    assert f"- {label} [" in digest
+    assert " · usually by part_dt" in digest
+
