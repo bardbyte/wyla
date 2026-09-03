@@ -241,6 +241,49 @@ def test_std_tech_unmatchable_terms_keep_their_text(tmp_path: Path):
         {"name": "Unknown Term B", "description": "definition B"}]
 
 
+def test_std_tech_compliance_flags_absent_is_unknown(tmp_path: Path):
+    """ABSENT IS NOT FALSE holds for has_pii / has_oncop / has_gdpr too:
+    an entry that never sent the flag has not denied PII. The record
+    keeps None, the graph gets neither a `has_*_atlas` prop nor a
+    policy edge fabricated from silence — but a flag sent as false IS
+    a denial and stays."""
+    from sahs.graph.crosswalk import Crosswalk
+    from sahs.graph.quads import GraphDir
+    from sahs.loaders.quads_emit import emit_std_tech
+
+    src = json.loads((FX / "std_tech_metadata"
+                      / "gms_transaction.json").read_text())
+    # the fixture registers gms TWICE in one envelope (the real feed
+    # does) — silence has to be silence in EVERY registration, or the
+    # fold rightly takes the other one's word
+    for item in src["tech_metadata_list"]:
+        attr = item["datasetAttribute"]
+        attr.pop("has_pii", None)
+        attr.pop("has_oncop", None)
+        attr["has_gdpr"] = "N"
+    d = tmp_path / "std"
+    d.mkdir()
+    (d / "gms.json").write_text(json.dumps(src), encoding="utf-8")
+    entries, quarantined = load_std_tech_metadata(d)
+    assert not quarantined
+    e = entries[0]
+    assert e.has_pii is None and e.has_oncop is None
+    assert e.has_gdpr is False
+    cw = tmp_path / "crosswalk.jsonl"
+    cw.write_text(json.dumps({"physical": "dw.gms_transaction",
+                              "verified_by": "t",
+                              "verified_on": "2026-09-02"}) + "\n",
+                  encoding="utf-8")
+    graph = GraphDir(tmp_path / "graph")
+    emit_std_tech(entries, [], graph, Crosswalk.load(cw), "r1")
+    table = graph.fold_nodes()["table:dw.gms_transaction"].props
+    assert "has_pii_atlas" not in table
+    assert "has_oncop_atlas" not in table
+    assert table["has_gdpr_atlas"] is False
+    assert not [q for q in graph.iter_edges("has_policy")
+                if q.s == "table:dw.gms_transaction"]
+
+
 def test_std_tech_combined_export_parity(tmp_path: Path):
     """The real Atlas feed can ship as ONE std_tech_metadata_all.json —
     a file path must load identically to the per-table directory."""

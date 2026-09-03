@@ -83,6 +83,27 @@ Two conventions hold throughout:
 Fields the feed documents but does not send are simply absent; nothing
 needs changing when they start arriving.
 
+### What the feed sends that this table does not name
+
+The loader picks fields by name, so a key the real feed carries that
+the fixture never had is dropped at the record boundary — with no
+trace, unless something enumerates the feed and diffs it. That is
+`scripts/std_tech_keys.py`: it walks every entry the loader would
+harvest, counts every key at every layer, and marks each against
+`STD_TECH_CONSUMED_KEYS` (pinned in `sahs/loaders/sources/vocab.py`,
+the one list the loader and the census share):
+
+```bash
+python scripts/std_tech_keys.py $SRC/std_tech_metadata          # the real archive
+python scripts/std_tech_keys.py tests/fixtures/sources/std_tech_metadata --strict   # CI: 0 UNCONSUMED
+```
+
+An `UNCONSUMED` row is a decision to make — a prop, an edge, or a
+pinned deferral with a reason — never a silent drop. `ownership` keys
+report `edge+prop` (recognised as a person → `owned_by` edge) or
+`prop only` (kept whole in `ownership_atlas`, not an owner node): a
+steward or a custodian the heuristic does not know shows up there.
+
 ## Loader contract
 
 The harvest accepts BOTH this envelope (table name at Layer 1, payload

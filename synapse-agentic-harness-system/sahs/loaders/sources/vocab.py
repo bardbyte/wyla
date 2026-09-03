@@ -124,6 +124,54 @@ def load_business_terms(path: Path) -> tuple[list[TermRecord],
     return records, quarantined
 
 
+# ── the ONE list of what the loader consumes, by layer ─────────────────
+# ``load_std_tech_metadata`` picks fields by NAME (a whitelist). A key the
+# real feed carries that is not named here is dropped at the record
+# boundary — silently, unless something enumerates the feed and diffs it
+# against this list. ``scripts/std_tech_keys.py`` does exactly that, so
+# the loader and the census can never drift: change a pick below, change
+# this table in the same edit (tests/test_std_tech_keys.py holds them
+# equal on the fixture).
+STD_TECH_CONSUMED_KEYS: dict[str, frozenset[str]] = {
+    "envelope": frozenset({"dataset", "appl_id", "tech_metadata_list"}),
+    "entry": frozenset({
+        "dataset", "appl_id", "datasource", "datasetGroup", "dataserver",
+        "datasystem", "technology", "isActive", "isLatest",
+        "isLineageExist", "datasetAttribute", "pde"}),
+    "datasetAttribute": frozenset({
+        "description", "business_name", "data_category",
+        "data_sub_category", "data_type_name", "has_pii", "has_oncop",
+        "has_gdpr", "ownership", "table_name", "type", "load_type",
+        "is_partitioned", "target_system", "pii_columns"}),
+    "pii_columns[]": frozenset({"column", "pii_role_id"}),
+    "pde": frozenset({"pdeRelPath", "pdeAttribute", "businessMetadata"}),
+    "pdeAttribute": frozenset({
+        "column_name", "description", "business_name", "data_type_name",
+        "pii_role_id", "sde_group", "position", "column_length_number",
+        "nullable_indicator", "primary_key_indicator",
+        "partition_indicator", "derived_logic"}),
+    "businessMetadata[]": frozenset({
+        "businessTermId", "businessTermName", "businessTermDescription",
+        "sourceName", "sourceType", "confidenceScore"}),
+}
+# keys read and deliberately NOT carried, with the reason pinned
+STD_TECH_DEFERRED_KEYS: dict[str, dict[str, str]] = {
+    "envelope": {"page_info": "pagination bookkeeping about the API "
+                              "call, not a fact about the table"},
+}
+# ``ownership`` is consumed WHOLE as the ``ownership_atlas`` prop; a key
+# that names a person (owner / VP) ALSO becomes an ``owned_by`` edge.
+# The census reports which of the two each real key got, so a role the
+# heuristic does not recognise (a steward, a custodian) is visible as
+# "prop only" instead of quietly failing to reach the owner nodes.
+OWNERSHIP_EDGE_MARKERS = ("owner", "vp")
+
+
+def ownership_key_is_person(key: str) -> bool:
+    k = key.lower()
+    return any(marker in k for marker in OWNERSHIP_EDGE_MARKERS)
+
+
 def _harvest_std_tech_entries(payload) -> list[dict]:
     """Find entry-shaped objects ANYWHERE in the export — the loader
     adapts to the file, never the file to the loader. Two shapes match
@@ -255,9 +303,9 @@ def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                     data_sub_category=str(
                         attr.get("data_sub_category") or ""),
                     layer_type=str(attr.get("data_type_name") or ""),
-                    has_pii=bool(attr.get("has_pii")),
-                    has_oncop=bool(attr.get("has_oncop")),
-                    has_gdpr=bool(attr.get("has_gdpr")),
+                    has_pii=_yn(attr.get("has_pii")),
+                    has_oncop=_yn(attr.get("has_oncop")),
+                    has_gdpr=_yn(attr.get("has_gdpr")),
                     ownership=(ownership
                                if isinstance(ownership, dict) else {}),
                     columns=columns,

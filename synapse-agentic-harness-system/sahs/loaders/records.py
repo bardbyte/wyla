@@ -103,9 +103,13 @@ class StdTechEntry(BaseModel):
     data_category: str = ""
     data_sub_category: str = ""
     layer_type: str = ""            # ODL | SOR | DERIVED
-    has_pii: bool
-    has_oncop: bool = False        # ONCOP compliance flag (real feed)
-    has_gdpr: bool = False
+    # compliance flags: ABSENT IS NOT FALSE. An entry that never sent
+    # `has_pii` has not said "no PII" — None stays None to the graph,
+    # where _kept() omits it, so no policy edge and no `has_*_atlas`
+    # prop is ever fabricated from silence
+    has_pii: bool | None = None
+    has_oncop: bool | None = None  # ONCOP compliance flag (real feed)
+    has_gdpr: bool | None = None
     ownership: dict = Field(default_factory=dict)
     columns: list[StdTechColumn] = Field(default_factory=list)
     evidence_ref: str = ""

@@ -40,6 +40,7 @@ from sahs.graph.ids import (
     term_node_id,
 )
 from sahs.graph.quads import SOURCE_WITNESS, GraphDir, NodeRecord, Prov, Quad
+from sahs.loaders.sources.vocab import ownership_key_is_person
 from sahs.loaders.records import (
     ExpressionRecord,
     StdTechEntry,
@@ -493,8 +494,7 @@ def emit_std_tech(entries: list[StdTechEntry], terms: list[TermRecord],
         # CAR id, a cost centre) stays a prop — an id is not an owner.
         for role, value in sorted(entry.ownership.items()):
             name = str(value or "").strip().lower()
-            key = role.lower()
-            if not name or not ("owner" in key or "vp" in key):
+            if not name or not ownership_key_is_person(role):
                 continue
             put_node(owner_id(name), {"role": role, "owner": name},
                      entry.evidence_ref)
