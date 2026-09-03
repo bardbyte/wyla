@@ -8,6 +8,7 @@ key, never calls a model.
     GET  /api/chat/sessions/{id}                   → transcript + artifacts (+ turn_after when a turn is running)
     POST /api/chat/sessions/{id}/messages          {text, depth?, mode?} → turn_id
     POST /api/chat/sessions/{id}/run               {message_id?, sql?, limit?, dashboard?} → turn_id (no model call)
+    POST /api/chat/sessions/{id}/chart             {saved_as?, kind?, x?, y?} → turn_id (no model call)
     GET  /api/chat/sessions/{id}/stream            → SSE (meridian.event/1)
     POST /api/chat/sessions/{id}/stop
     POST /api/chat/sessions/{id}/rename            {title}
@@ -75,6 +76,14 @@ class RunProposal(BaseModel):
     limit: int = Field(default=200, ge=1, le=1000)
     dashboard: bool = False
     depth: str = Field(default="", max_length=12)
+
+
+class ChartRows(BaseModel):
+    """The person asked for the picture of a run's rows."""
+    saved_as: str = Field(default="", max_length=16)
+    kind: str = Field(default="", max_length=12)     # line | bar | area
+    x: str = Field(default="", max_length=120)
+    y: list[str] = Field(default_factory=list, max_length=6)
 
 
 class Rename(BaseModel):
@@ -179,6 +188,26 @@ def run_proposal(session_id: str, req: RunProposal) -> dict:
     except TurnBusy as e:
         return {"available": False, "reason": str(e), "busy": True}
     except (BuildUnavailable, ModelUnavailable) as e:
+        return _unavailable(str(e))
+
+
+@router.post("/sessions/{session_id}/chart", status_code=202)
+def chart_rows(session_id: str, req: ChartRows) -> dict:
+    """Draw a run's saved rows as a chart under the run's provenance,
+    with no model call."""
+    runtime, _ = _chat()
+    from sahs.ask.runtime import BuildUnavailable, TurnBusy
+    try:
+        return {"available": True,
+                **runtime.chart_rows(session_id, saved_as=req.saved_as,
+                                     kind=req.kind, x=req.x, y=req.y)}
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+    except ValueError as e:
+        return _unavailable(str(e))
+    except TurnBusy as e:
+        return {"available": False, "reason": str(e), "busy": True}
+    except BuildUnavailable as e:
         return _unavailable(str(e))
 
 

@@ -877,3 +877,64 @@ def test_the_composer_names_the_model_the_client_will_use(compiled,
     monkeypatch.setenv("VERTEX_MODEL", "gemini-2.5-pro")
     assert runtime.model_label == "Gemini 2.5 Pro"
 
+
+def test_chart_rows_draws_the_saved_rows_without_the_model(
+        compiled, tmp_path, monkeypatch):
+    from sahs.evals.substrate import StaticSubstrate
+    monkeypatch.setenv("SAHS_ALLOW_LIVE", "1")
+    build, _ = compiled
+    model = _agent([_call("propose_sql", sql=SPEND_SQL,
+                          title="Spend by day",
+                          metric_id=_certified(build))])
+    runtime = _runtime(compiled, model, tmp=tmp_path,
+                       substrate=StaticSubstrate({}), runner=Warehouse())
+    session = runtime.create_session()
+    _turn(runtime, session["id"], "spend by day")
+    runtime.run_proposal(session["id"])
+    assert runtime.wait(session["id"], 60)
+    # the run offered the picture as an action chip; the handoff keeps
+    # the label only
+    chips = _by(runtime.runtime(session["id"]).bus.since(0),
+                "chips")[-1]["suggestions"]
+    assert chips[0] == {"label": "Chart these rows", "action": "chart",
+                        "saved_as": "q1"}
+    handoff = runtime.store.get_session(session["id"])["handoff"]
+    assert handoff["chips"][0] == "Chart these rows"
+
+    before = runtime.runtime(session["id"]).bus.head()
+    started = runtime.chart_rows(session["id"])
+    assert started["saved_as"] == "q1"
+    assert runtime.wait(session["id"], 60)
+    events = runtime.runtime(session["id"]).bus.since(before)
+    assert events[0]["ev"] == "turn_started"
+    assert events[0]["mode"] == "chart"
+    assert events[0]["text"] == "Chart: Spend by day"
+    assert len(model.calls) == 1                     # no model call
+    step = _by(events, "tool_step")[0]
+    assert step["tool"] == "chart"
+    assert step["summary"] == "line · 1 series · 2 points · x=part_dt"
+    chart = _by(events, "artifact")[0]
+    assert chart["type"] == "chart"
+    assert chart["title"] == "Spend by day — chart"
+    assert chart["spec"]["kind"] == "line"
+    assert chart["spec"]["series"] == [{"name": "acquirer_net_spend",
+                                        "points": [["2026-08-01", 5.0],
+                                                   ["2026-08-02", 7.5]]}]
+    assert chart["spec"]["provenance"]["status"] == "certified"
+    assert "watermark" not in chart["spec"]
+    assert _prose(events).startswith(
+        "Drew it: a line chart of acquirer_net_spend by part_dt")
+    assert _by(events, "turn_done")[0]["model_calls"] == 0
+    rows = runtime.store.messages(session["id"])
+    assert rows[-2]["text"] == "Chart: Spend by day"
+    assert rows[-1]["payload"]["charted"]["x"] == "part_dt"
+    # named axes and kind are honored
+    runtime.chart_rows(session["id"], kind="bar", x="part_dt",
+                       y=["acquirer_net_spend"])
+    assert runtime.wait(session["id"], 60)
+    bars = _by(runtime.runtime(session["id"]).bus.since(0),
+               "artifact")[-1]
+    assert bars["spec"]["kind"] == "bar"
+    with pytest.raises(ValueError):
+        runtime.find_run(session["id"], "q9")
+

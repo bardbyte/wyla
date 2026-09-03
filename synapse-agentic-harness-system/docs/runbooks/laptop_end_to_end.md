@@ -267,6 +267,16 @@ composer when Synapse should run and build without stopping. Both need
 query and the run explains the configuration. Type `/` in the composer
 to pick a skill pack for the turn.
 
+**The query comes first, then the rows, then the picture.** In Chat
+mode a data question ends with the query on a card (its price, status
+and meridian line); Run query executes it with no model call and puts
+the rows in the panel and in the workspace as q1; the "Chart these
+rows" chip draws them with no model call under the same provenance;
+"Build a dashboard from these rows" and "Run + build dashboard" are
+the model's turns, on autopilot. Autopilot mode skips the card. Run
+needs `SAHS_ALLOW_LIVE=1`; without it the card still shows the query
+and the run explains the configuration.
+
 **Rows come from the warehouse under two limits.** Until live
 execution is on, the chat can only price a query (dry run) — it never
 sees rows, so a "how many" question ends in dry runs and a partial. Put

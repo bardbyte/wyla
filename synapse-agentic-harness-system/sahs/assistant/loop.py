@@ -19,6 +19,7 @@ language with what was already said, never a vanished turn.
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -817,7 +818,14 @@ def run_proposal_turn(*, build: Build, store: AssistantStore,
         if result.get("warnings"):
             said += "\n\nNote: " + " ".join(
                 str(w) for w in result["warnings"][:2])
-        chips = ["Build a dashboard from these rows", "Refine the query"]
+        chips = []
+        if result.get("saved_as"):
+            # the first picture needs no model: the chart turn draws
+            # the saved rows under the same provenance
+            chips.append({"label": "Chart these rows", "action": "chart",
+                          "saved_as": result["saved_as"]})
+        chips += ["Build a dashboard from these rows",
+                  "Refine the query"]
         status = "answered"
     bus.emit("say_token", turn_id=turn_id, delta=said)
     state.chips = chips
@@ -828,7 +836,161 @@ def run_proposal_turn(*, build: Build, store: AssistantStore,
                  "elapsed_ms": round(
                      (time.perf_counter() - started) * 1000, 1),
                  "ran": {"title": title, "edited": edited,
-                         "status": status}})
+                         "status": status,
+                         "saved_as": (result.get("saved_as")
+                                      if isinstance(result, dict)
+                                      else None),
+                         "provenance": (spec["provenance"]
+                                        if status == "answered"
+                                        else None)}})
+    if chips:
+        bus.emit("chips", turn_id=turn_id, suggestions=chips)
+    _persist(store, session_id, state, status, said, chips)
+    _finish(bus, budget, turn_id, status, started, model_calls=0,
+            steps=1, thinking_level="none", skills_loaded=[])
+    return status
+
+
+_DATE_LIKE = re.compile(r"^\d{4}-\d{2}(-\d{2})?([T ].*)?$")
+
+
+def _read_rows(workspace: Path, saved_as: str) -> list[dict[str, Any]]:
+    path = workspace / f"{saved_as}.json"
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    rows = data.get("rows") if isinstance(data, dict) else data
+    return [r for r in (rows or []) if isinstance(r, dict)]
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def chart_rows_turn(*, build: Build, store: AssistantStore,
+                    bus: EventBus, budget: Any, session: dict[str, Any],
+                    turn_id: str, saved_as: str, title: str,
+                    provenance: dict[str, Any], workspace: Path,
+                    kind: str = "", x: str = "",
+                    y: list[str] | None = None,
+                    graph_root: Path | None = None) -> str:
+    """The person asked for the picture: the rows a run saved become a
+    chart under the run's own provenance, with NO model call. The x
+    axis is the first date-like or text column, the series are the
+    numeric columns (at most four), a date axis draws a line and any
+    other a bar; the person can name x, y and the kind instead."""
+    session_id = session["id"]
+    started = time.perf_counter()
+    label = f"Chart: {title}"
+    bus.emit("turn_started", turn_id=turn_id, text=label,
+             build_id=build.version, version=ASSISTANT_VERSION,
+             skills=[], memories=0,
+             project=str(session.get("project_id") or ""),
+             thinking_level="none", mode="chart")
+    budget.start_turn()
+    state = AssistantState()
+    state.notes = list(session.get("notes") or [])
+    kit = build_kit(build, state, store=store, session_id=session_id,
+                    turn_id=turn_id, workspace=workspace,
+                    graph_root=graph_root,
+                    project_id=str(session.get("project_id") or ""))
+    rows = _read_rows(workspace, saved_as)
+    columns = list(rows[0].keys()) if rows else []
+    numeric = [c for c in columns
+               if any(_number(r.get(c)) is not None for r in rows)]
+    wanted_y = [c for c in (y or []) if c in columns]
+    if x and x in columns:
+        axis = x
+    else:
+        axis = next((c for c in columns
+                     if any(_DATE_LIKE.match(str(r.get(c, "")))
+                            for r in rows)), None) \
+            or next((c for c in columns if c not in numeric), None) \
+            or (columns[0] if columns else "")
+    series_cols = wanted_y or [c for c in numeric if c != axis][:4]
+    dated = bool(axis) and any(_DATE_LIKE.match(str(r.get(axis, "")))
+                               for r in rows)
+    chart_kind = kind if kind in ("line", "bar", "area", "scatter") \
+        else ("line" if dated else "bar")
+    args = {"saved_as": saved_as, "x": axis, "y": series_cols,
+            "kind": chart_kind}
+    bus.emit("tool_call", turn_id=turn_id, n=1, tool="chart",
+             args=_short(args, 160), input=_short(args, INPUT_CAP))
+    t0 = time.perf_counter()
+    artifacts: list[str] = []
+    made: Any = None
+    if not rows:
+        said = (f"Nothing to chart: no rows are saved as {saved_as} "
+                "in this chat. Run the query first.")
+        summary = "ERROR: no saved rows"
+        status = "partial"
+    elif not series_cols or not axis:
+        said = ("Nothing to chart: the rows have no numeric column "
+                f"beside {axis or 'the axis'} (columns: "
+                + ", ".join(columns[:8]) + ").")
+        summary = "ERROR: no numeric column"
+        status = "partial"
+    else:
+        spec = {"kind": chart_kind,
+                "series": [{"name": c, "points": [
+                    [str(r.get(axis, "")), _number(r.get(c))]
+                    for r in rows if _number(r.get(c)) is not None]}
+                    for c in series_cols],
+                "provenance": dict(provenance or {})}
+        made = kit["artifact"].fn("chart", f"{title} — chart",
+                                  json.dumps(spec))
+        if isinstance(made, dict) and made.get("_artifact"):
+            row = made["_artifact"]
+            artifacts.append(row["artifact_id"])
+            bus.emit("artifact", turn_id=turn_id,
+                     artifact_id=row["artifact_id"],
+                     version=row["version"], type=row["type"],
+                     title=row["title"], spec=row["spec"])
+            said = (f"Drew it: a {chart_kind} chart of "
+                    + ", ".join(series_cols) + f" by {axis}, {len(rows)} "
+                    f"rows, under the query's own provenance. "
+                    + str((provenance or {}).get("meridian_line") or ""))
+            summary = (f"{chart_kind} · {len(series_cols)} series · "
+                       f"{len(rows)} points · x={axis}")
+            status = "answered"
+        else:
+            problems = (made or {}).get("problems") or []
+            said = ("The chart could not be published: "
+                    + "; ".join(str(p.get("detail", p))
+                                for p in problems[:2]))
+            summary = "ERROR: " + str((made or {}).get("error", ""))
+            status = "partial"
+    elapsed_ms = round((time.perf_counter() - t0) * 1000, 1)
+    trace = [{"kind": "tool", "tool": "chart", "args": _short(args, 160),
+              "input": _short(args, INPUT_CAP), "summary": summary,
+              "elapsed_ms": elapsed_ms}]
+    bus.emit("tool_step", turn_id=turn_id, n=1, tool="chart",
+             args=_short(args, 120), input=_short(args, INPUT_CAP),
+             summary=summary, ref="a1", elapsed_ms=elapsed_ms)
+    bus.emit("tool_result", turn_id=turn_id, ref="a1", tool="chart",
+             content=json.dumps({"rows": len(rows), "x": axis,
+                                 "y": series_cols, "kind": chart_kind,
+                                 "status": status}))
+    bus.emit("say_token", turn_id=turn_id, delta=said)
+    chips = (["Build a dashboard from these rows", "Refine the query"]
+             if status == "answered" else [])
+    state.chips = chips
+    store.add_message(
+        session_id, "assistant", said, turn_id=turn_id,
+        payload={"chips": chips, "artifacts": artifacts,
+                 "trace": _trim_trace(trace),
+                 "elapsed_ms": round(
+                     (time.perf_counter() - started) * 1000, 1),
+                 "charted": {"saved_as": saved_as, "x": axis,
+                             "y": series_cols, "kind": chart_kind,
+                             "status": status}})
     if chips:
         bus.emit("chips", turn_id=turn_id, suggestions=chips)
     _persist(store, session_id, state, status, said, chips)
@@ -860,7 +1022,8 @@ def _persist(store: AssistantStore, session_id: str,
     store.set_handoff(session_id, {
         "status": status,
         "say": prose.replace("\n", " ")[:300],
-        "chips": chips[:3],
+        "chips": [c.get("label", "") if isinstance(c, dict) else str(c)
+                  for c in chips[:3]],
         "artifacts": list(dict.fromkeys(state.artifacts_touched)),
         "checked": checked[-6:],
         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
@@ -876,4 +1039,5 @@ def _finish(bus: EventBus, budget: Any, turn_id: str, status: str,
 
 __all__ = ["ASSISTANT_VERSION", "IDENTITY", "THINKING_LEVELS",
            "DEFAULT_THINKING", "MODES", "DEFAULT_MODE", "system_prompt",
-           "summarize", "run_assistant_turn", "run_proposal_turn"]
+           "summarize", "run_assistant_turn", "run_proposal_turn",
+           "chart_rows_turn"]

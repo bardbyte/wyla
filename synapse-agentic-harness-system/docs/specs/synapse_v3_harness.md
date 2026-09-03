@@ -133,6 +133,17 @@ path.
   the limits, checks, and builds without stopping. The mode is a
   prompt section, not a gate: the limits hold in both. `/skill-name`
   in the composer loads that pack for the turn.
+- **Query first, rows on a tap, the first picture without the
+  model.** In Chat mode a data question ends with `propose_sql`: the
+  query on a card with its price, status and meridian line, and Run
+  query / Run + build dashboard / Edit SQL. The run turn executes with
+  no model call and lands the rows as a table and as q1; "Chart these
+  rows" is an action chip that draws them with no model call either,
+  under the run's provenance (x = the first date-like or text column,
+  the numeric columns as series, a line on a date axis, a bar
+  otherwise); "Build a dashboard from these rows" is the model's turn,
+  on autopilot. Only the showcase and the designed dashboard need the
+  model; execution and the first picture never wait on it.
 - **Plan-first toggle** (Stage 3): when on, the model writes its plan
   as prose and stops before the first `run_sql`; "go ahead" continues.
   The handover above is its first, narrow form.
