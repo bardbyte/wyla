@@ -56,7 +56,7 @@ the disclosure sentence shape, when to ask.
 
 | v3 tool | absorbs from v2 | notes |
 | --- | --- | --- |
-| `search(query, kind?)` | search_semantics, grep_cards, list_metrics, resolve | one door; business areas rank first; `kind=list` for "all X metrics"; exact-token mode inside |
+| `search(query, kind?)` | search_semantics, grep_cards, list_metrics, resolve | one door; business areas rank first; `kind=list` for "all X metrics"; exact-token mode inside; `kind=vocab` expands an acronym with its scope (common-word guard); `kind=values` turns a phrase into the stored code and predicate (docs/specs/vocabulary_and_values.md) |
 | `read(id, section?)` | read_card, get_definition_line, get_join_paths, subgraph | whole card by default; joins are in the table card; `read(ids=[…], as="graph")` returns the subgraph |
 | `sample_values(table, column)` | same | unchanged |
 | `run_sql(sql, mode?)` | run_sql, whatif | the model rewrites SQL itself; rows auto-save as q<N> |
@@ -121,8 +121,21 @@ path.
   (medium, default), Deep (high). A lightweight router proposes the
   level from the ask (chat vs data vs "why") and the dial overrides
   it; the chosen level is visible on the turn.
-- **Plan-first toggle**: when on, the model writes its plan as
-  prose and stops before the first `run_sql`; "go ahead" continues.
+- **The mode, two positions (BUILT 2026-09-03).** *Chat* (default):
+  the model proves a query with a dry run and hands it over with
+  `propose_sql`; the card carries the SQL, its price, its status and
+  meridian line, and offers **Run query**, **Run + build dashboard**
+  and **Edit SQL**. Run executes with no model call
+  (`run_proposal_turn`): the rows land as a table artifact and as
+  `q1`, the receipts stream as prose, the chips offer a dashboard
+  from the rows; Run + build dashboard chains a model turn on
+  autopilot that builds from `q1`. *Autopilot*: the model runs under
+  the limits, checks, and builds without stopping. The mode is a
+  prompt section, not a gate: the limits hold in both. `/skill-name`
+  in the composer loads that pack for the turn.
+- **Plan-first toggle** (Stage 3): when on, the model writes its plan
+  as prose and stops before the first `run_sql`; "go ahead" continues.
+  The handover above is its first, narrow form.
 - Irreversible actions do not exist in a chat (read-only graph,
   sandboxed SQL, artifacts are versions). Live warehouse execution
   stays behind its cost tiers and is the chat's `run` mode: a scan
@@ -173,6 +186,14 @@ path.
 - No "what the model saw" in the chat. No harness sentences in the
   user's language ("strict JSON" never appears again).
 - Chips: model-authored, at most three, optional. (Decision below.)
+- **The ask starts the way Claude's does (BUILT 2026-09-03).** A
+  greeting for the time of day (the person's first name when
+  `LUMI_USER_NAME` is set), a centered composer ("Type / for skills"),
+  the + menu (skills, memory, a new chat), the Chat | Autopilot
+  toggle, the model and the depth. The first message turns it into
+  the conversation: the title (a click renames it) and Share at the
+  top, the thread, the composer docked with the disclaimer under it.
+  No dead controls: no microphone, no upload, until they do something.
 
 ## 7 · Memory, bound to the person
 
@@ -259,6 +280,12 @@ handoff, the eval suites.
    (`SAHS_ALLOW_LIVE=1`, `SAHS_LIVE_MAX_BYTES`, the row cap); the
    frozen-snapshot runner stays an eval fixture. The step row shows
    the SQL that ran.
+9. SQL first (2026-09-03). A data question in Chat mode ends with
+   the query on a card, not with rows: the person presses Run, and
+   the run needs no model. Reason: every laptop stall came after the
+   model already had the query; the handover makes the query the
+   deliverable and the rows a tap. Autopilot keeps the old behavior
+   for those who want it.
 
 ## 12 · The laptop, measured (state report of 2026-09-02)
 

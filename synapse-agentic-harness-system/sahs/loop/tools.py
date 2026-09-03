@@ -401,10 +401,11 @@ def toolkit(build: Build, state: LoopState, *,
 
     # ── search_semantics ── the index, not the text ──────────
     def search_semantics(query: str, kind: str = "all") -> dict[str, Any]:
-        if kind not in ("all", "metrics", "concepts", "joins", "vocab"):
+        if kind not in ("all", "metrics", "concepts", "joins", "vocab",
+                        "values"):
             return _err(f"unknown kind {kind!r}",
                         "kind is one of: all | metrics | concepts | "
-                        "joins | vocab")
+                        "joins | vocab | values")
         results: list[dict[str, Any]] = []
         if kind == "all":
             # intent first: a business word resolves to the business
@@ -452,18 +453,114 @@ def toolkit(build: Build, state: LoopState, *,
         if kind in ("all", "vocab"):
             tokens = _tokens(query)
             raw = {(query or "").strip().lower()}
+            # written as an acronym: REST, CARE — the guard list's
+            # symbols expand only then (or when vocab is asked for)
+            written_upper = {t.lower() for t in re.findall(
+                r"[A-Za-z][A-Za-z0-9/\-]*", query or "") if t.isupper()}
             for v in build.vocab:
                 symbol = (v.get("text") or "").lower()
                 if symbol in raw or symbol in tokens or (
                         tokens & _tokens(v.get("definition", ""))):
-                    results.append({
+                    common = bool(v.get("common_word"))
+                    if (common and kind != "vocab"
+                            and symbol not in written_upper
+                            and symbol not in raw):
+                        continue      # "rest" is a word, not REST
+                    hit = {
                         "kind": "vocab", "text": v.get("text", ""),
                         "definition": v.get("definition", ""),
                         "bu": v.get("bu", ""),
-                        "region": v.get("region", "")})
+                        "region": v.get("region", ""),
+                        "common_word": common}
+                    if common:
+                        hit["guard"] = ("also an ordinary word: expand "
+                                        "only when the ask writes it as "
+                                        "an acronym or the scope fits")
+                    results.append(hit)
                     if sum(1 for r in results
                            if r["kind"] == "vocab") >= 6:
                         break
+        if kind in ("all", "values"):
+            # a business phrase is a stored code somewhere: "KYC done"
+            # → kyc_check_confirmed__c = '1'. Filter on the code,
+            # never on the phrase.
+            low = (query or "").strip().lower()
+            tokens = _tokens(query)
+            cap = 6 if kind == "values" else 3
+            for m in getattr(build, "value_meanings", []) or []:
+                synonym = str(m.get("synonym", "")).strip()
+                syn_tokens = _tokens(synonym)
+                if not synonym or not syn_tokens:
+                    continue
+                if synonym.lower() in low or (
+                        len(syn_tokens) > 1 and syn_tokens <= tokens) \
+                        or (kind == "values" and syn_tokens & tokens):
+                    column = m.get("column", "")
+                    results.append({
+                        "kind": "value", "table": m.get("table", ""),
+                        "column": column, "value": m.get("value", ""),
+                        "synonym": synonym,
+                        "predicate": f"{column} = '{m.get('value', '')}'",
+                        "hint": "a stored code with this meaning: "
+                                "filter with the predicate, never the "
+                                "phrase; say the meaning in the answer"})
+                    if sum(1 for r in results
+                           if r["kind"] == "value") >= cap:
+                        break
+            # a stored value written as stored ("GB", "ACTIVE"): the
+            # profiler's observed values are on record with their share
+            # of rows. Short codes (≤ 3 chars) must be written exactly
+            # as stored — "us" is a pronoun, "US" is a country — longer
+            # values match case-insensitively; kind=values also takes
+            # the whole query as one exact value
+            seen = {(r["table"], r["column"], str(r["value"]))
+                    for r in results if r.get("kind") == "value"}
+            written = set(re.findall(r"[A-Za-z0-9][A-Za-z0-9_\-]*",
+                                     query or ""))
+            written_low = {w.lower() for w in written}
+            for d in getattr(build, "domains", []) or []:
+                parts = (d.get("key") or "").split(".")
+                if len(parts) < 3:
+                    continue
+                table, column = ".".join(parts[:2]), ".".join(parts[2:])
+                synonyms = {str(m.get("value", "")).lower():
+                            m.get("synonym", "")
+                            for m in d.get("meanings") or []}
+                for v in d.get("values") or []:
+                    value = str(v.get("value", "") if isinstance(v, dict)
+                                else v)
+                    if not value or (table, column, value) in seen:
+                        continue
+                    lv = value.lower()
+                    if lv == low and kind == "values":
+                        pass
+                    elif len(value) <= 3:
+                        if value not in written:
+                            continue
+                    elif lv not in written_low:
+                        continue
+                    hit = {
+                        "kind": "value", "table": table,
+                        "column": column, "value": value,
+                        "synonym": synonyms.get(lv, ""),
+                        "predicate": f"{column} = '{value}'",
+                        "observed": {
+                            "count": v.get("count") if isinstance(v, dict)
+                            else None,
+                            "pct": v.get("pct") if isinstance(v, dict)
+                            else None},
+                        "hint": "a value the profiler observed in this "
+                                "column, with its share of rows: filter "
+                                "with the predicate"}
+                    if d.get("distinct_estimate"):
+                        hit["distinct_estimate"] = d["distinct_estimate"]
+                    results.append(hit)
+                    seen.add((table, column, value))
+                    if sum(1 for r in results
+                           if r["kind"] == "value") >= cap:
+                        break
+                if sum(1 for r in results if r["kind"] == "value") >= cap:
+                    break
         if kind in ("all", "joins"):
             tokens = _tokens(query)
             for j in build.joins:
@@ -985,10 +1082,10 @@ def toolkit(build: Build, state: LoopState, *,
             signature="search_semantics(query, kind?)",
             maps_to="ranked, fuzzy — the index, not the text",
             description=(
-                "Ranked metrics/concepts/joins/vocab with status, "
-                "support, agreement, aliases — and business areas: "
-                "a query naming a line of business comes back as "
-                "the area itself, not its furniture.\n"
+                "Ranked metrics/concepts/joins/vocab/values with "
+                "status, support, agreement, aliases — and business "
+                "areas: a query naming a line of business comes back "
+                "as the area itself, not its furniture.\n"
                 "Use for meaning (\"spend\", \"SMB\"); use "
                 "grep_cards for exact tokens."),
             fn=search_semantics),

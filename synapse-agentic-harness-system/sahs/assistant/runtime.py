@@ -10,6 +10,7 @@ a call ceiling in the loop, a session token ceiling here.
 from __future__ import annotations
 
 import os
+import re
 import threading
 import traceback
 import uuid
@@ -22,9 +23,10 @@ from sahs.ask.runtime import BuildUnavailable, LazyModel, TurnBusy
 from sahs.tools.api import Build
 
 from .events import ASSISTANT_EVENTS, EventBus
-from .loop import (DEFAULT_THINKING, MAX_CALLS, THINKING_LEVELS,
-                   run_assistant_turn)
-from .skills_loader import load_packs
+from .loop import (DEFAULT_MODE, DEFAULT_THINKING, MAX_CALLS, MODES,
+                   THINKING_LEVELS, run_assistant_turn,
+                   run_proposal_turn)
+from .skills_loader import all_skills, load_packs
 from .store import AssistantStore
 
 # §5: generous, visible. The loop's own ceilings (MAX_CALLS, the wall
@@ -32,6 +34,10 @@ from .store import AssistantStore
 # breaker behind them. A native-tool turn re-sends its whole context
 # on every call, so the turn cap must hold forty calls of a long
 # context, not twelve of a short one.
+# "/lumi-data-connect how do I …": a slash command names a skill pack
+# to load for this turn — the composer's "Type / for skills"
+SLASH = re.compile(r"^/([A-Za-z0-9][A-Za-z0-9_\-]*)\s*")
+
 CHAT_BUDGET = {"session_tokens": 6_000_000, "session_calls": 800,
                "turn_tokens": 2_500_000, "turn_calls": MAX_CALLS + 20}
 
@@ -190,47 +196,78 @@ class AssistantRuntime:
             return key
         return DEFAULT_THINKING
 
-    def start_turn(self, session_id: str, text: str,
-                   depth: str = "") -> dict:
-        session = self.store.get_session(session_id)
-        if session is None:
-            raise KeyError(session_id)
-        rt = self.runtime(session_id)
-        if rt.running:
-            raise TurnBusy("a turn is already running in this "
-                           "session: stop it before sending another")
-        build = self.build()
-        turn_id = f"t_{uuid.uuid4().hex[:10]}"
-        rt.abort = Abort()
-        rt.current_turn = turn_id
-        self.store.add_message(session_id, "user", text,
-                               turn_id=turn_id)
+    @staticmethod
+    def mode_for(mode: str = "") -> str:
+        """The autonomy slider (§5): chat hands queries over for the
+        person to run; autopilot runs and builds without stopping."""
+        key = (mode or "").strip().lower()
+        return key if key in MODES else DEFAULT_MODE
+
+    @property
+    def model_label(self) -> str:
+        """The model as the composer names it: the Vertex model id
+        prettified (gemini-2.5-pro → Gemini 2.5 Pro); a scripted
+        transport says so."""
+        if self._model_factory is not None:
+            return "scripted"
+        from sahs.util.auth import DEFAULT_VERTEX_MODEL
+        raw = (os.environ.get("VERTEX_MODEL")
+               or os.environ.get("LUMI_VERTEX_MODEL")
+               or os.environ.get("GEMINI_MODEL")
+               or DEFAULT_VERTEX_MODEL).strip()
+        return " ".join(w.capitalize() if w.isalpha() else w
+                        for w in raw.replace("_", "-").split("-") if w)
+
+    def slash_skill(self, text: str) -> tuple[str, list[str]]:
+        """"/lumi-data-connect how do I …" loads that pack for this
+        turn and hands the model the rest; an unknown name stays
+        text, so a question that happens to start with / still asks."""
+        m = SLASH.match(text or "")
+        if not m:
+            return text, []
+        wanted = m.group(1).lower()
+        for pack in all_skills(self.graph_root):
+            if pack.name.lower() == wanted:
+                rest = text[m.end():].strip()
+                return (rest or f"Apply the {pack.name} skill to what "
+                                "we were doing."), [pack.name]
+        return text, []
+
+    def _model_turn(self, session_id: str, session: dict, rt: Any,
+                    build: Build, turn_id: str, text: str, *,
+                    depth: str = "", mode: str = "") -> Any:
+        """One model turn as a callable: start_turn runs it on a
+        thread; a run with dashboard=true chains it after the rows."""
         model = LazyModel(lambda: self.model_for(rt.budget))
         project = self.store.get_project(
             session.get("project_id") or "") \
             if session.get("project_id") else None
-        # the project's pinned packs load with the session's own
+        prompt_text, slashed = self.slash_skill(text)
+        # the project's pinned packs load with the session's own, and
+        # a slash command's pack loads for this turn
         names = list(dict.fromkeys(
             ((project or {}).get("skills") or [])
-            + list(session.get("skills") or [])))
+            + list(session.get("skills") or []) + slashed))
         loaded, _missing = load_packs(self.graph_root, names)
         memories = self.store.list_memories(
             project_id=(project or {}).get("id", ""))
         level = self.thinking_level(depth)
+        chosen = self.mode_for(mode)
 
         def worker() -> None:
             try:
                 run_assistant_turn(
                     build=build, store=self.store, bus=rt.bus,
                     budget=rt.budget, abort=rt.abort, model=model,
-                    session=session, turn_id=turn_id, text=text,
+                    session=session, turn_id=turn_id, text=prompt_text,
                     workspace=self.workspace(session_id),
                     skills=loaded, graph_root=self.graph_root,
                     memories=memories, project=project,
                     snapshot_runner=self.snapshot_runner,
                     runner=self.runner,
                     substrate=self.substrate,
-                    thinking_level=level, user_name=self.user_name)
+                    thinking_level=level, user_name=self.user_name,
+                    mode=chosen)
             except ModelUnavailable as e:
                 rt.bus.emit("error", turn_id=turn_id,
                             code="model_unavailable",
@@ -256,10 +293,115 @@ class AssistantRuntime:
                 rt.bus.emit("turn_done", turn_id=turn_id,
                             status="error", **rt.budget.tick())
 
+        return worker
+
+    def start_turn(self, session_id: str, text: str,
+                   depth: str = "", mode: str = "") -> dict:
+        session = self.store.get_session(session_id)
+        if session is None:
+            raise KeyError(session_id)
+        rt = self.runtime(session_id)
+        if rt.running:
+            raise TurnBusy("a turn is already running in this "
+                           "session: stop it before sending another")
+        build = self.build()
+        turn_id = f"t_{uuid.uuid4().hex[:10]}"
+        rt.abort = Abort()
+        rt.current_turn = turn_id
+        self.store.add_message(session_id, "user", text,
+                               turn_id=turn_id)
+        worker = self._model_turn(session_id, session, rt, build,
+                                  turn_id, text, depth=depth, mode=mode)
         rt.thread = threading.Thread(target=worker, daemon=True,
                                      name=f"chat-{turn_id}")
         rt.thread.start()
-        return {"turn_id": turn_id, "session_id": session_id}
+        return {"turn_id": turn_id, "session_id": session_id,
+                "mode": self.mode_for(mode)}
+
+    def find_proposal(self, session_id: str,
+                      message_id: str = "") -> dict:
+        """The proposal the person pressed Run on: by message id, or
+        the latest one handed over in this chat."""
+        for row in reversed(self.store.messages(session_id)):
+            payload = row.get("payload") or {}
+            if row["role"] != "assistant" or not isinstance(payload, dict):
+                continue
+            if not payload.get("proposal"):
+                continue
+            if message_id and row["id"] != message_id:
+                continue
+            return payload["proposal"]
+        raise ValueError("no query has been proposed in this chat yet: "
+                         "ask a data question and Synapse hands one over")
+
+    def run_proposal(self, session_id: str, *, message_id: str = "",
+                     sql: str = "", limit: int = 200,
+                     dashboard: bool = False, depth: str = "") -> dict:
+        """The person pressed Run: the query executes under the limits
+        with no model call. dashboard=true chains a model turn that
+        builds from the rows once they are in."""
+        session = self.store.get_session(session_id)
+        if session is None:
+            raise KeyError(session_id)
+        rt = self.runtime(session_id)
+        if rt.running:
+            raise TurnBusy("a turn is already running in this "
+                           "session: stop it before running a query")
+        proposal = self.find_proposal(session_id, message_id)
+        build = self.build()
+        turn_id = f"t_{uuid.uuid4().hex[:10]}"
+        rt.abort = Abort()
+        rt.current_turn = turn_id
+        written = str(proposal.get("sql_written") or proposal.get("sql")
+                      or "")
+        edited = bool(sql.strip()) and sql.strip() != written
+        label = (f"Run: {proposal.get('title', 'the query')}"
+                 + (" (edited)" if edited else "")
+                 + (" and build a dashboard" if dashboard else ""))
+        self.store.add_message(session_id, "user", label,
+                               turn_id=turn_id,
+                               payload={"run": {"message_id": message_id,
+                                                "dashboard": dashboard,
+                                                "edited": edited}})
+
+        def worker() -> None:
+            try:
+                status = run_proposal_turn(
+                    build=build, store=self.store, bus=rt.bus,
+                    budget=rt.budget, session=session, turn_id=turn_id,
+                    proposal=proposal, sql=sql, limit=limit,
+                    workspace=self.workspace(session_id),
+                    substrate=self.substrate,
+                    snapshot_runner=self.snapshot_runner,
+                    runner=self.runner, graph_root=self.graph_root)
+            except Exception as e:       # never a silent dead turn
+                rt.bus.emit("error", turn_id=turn_id, code="internal",
+                            message="Something broke on my side: "
+                                    f"{type(e).__name__}: {e}",
+                            retryable=True, next_actions=["run again"])
+                rt.bus.emit("turn_done", turn_id=turn_id,
+                            status="error", **rt.budget.tick())
+                return
+            if dashboard and status == "answered":
+                # the rows are in: the model builds from them, on
+                # autopilot, in the same thread so the tab sees one
+                # continuous piece of work
+                follow = f"t_{uuid.uuid4().hex[:10]}"
+                rt.current_turn = follow
+                ask = ("Build a dashboard from the rows you just ran "
+                       "(saved as q1): the tiles that answer the "
+                       "question, each with its own provenance, and "
+                       "a line on what they show.")
+                self.store.add_message(session_id, "user", ask,
+                                       turn_id=follow)
+                self._model_turn(session_id, session, rt, build, follow,
+                                 ask, depth=depth, mode="autopilot")()
+
+        rt.thread = threading.Thread(target=worker, daemon=True,
+                                     name=f"chat-run-{turn_id}")
+        rt.thread.start()
+        return {"turn_id": turn_id, "session_id": session_id,
+                "dashboard": dashboard, "edited": edited}
 
     def turn_window(self, session_id: str) -> dict:
         """§6: a turn runs on the server, not in the tab. When the

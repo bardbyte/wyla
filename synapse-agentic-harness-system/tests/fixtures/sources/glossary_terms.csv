@@ -1,0 +1,5 @@
+Symbol,Definition,Business_Unit,Global_Region,Entry_Type
+Roll Rate,Movement of balances between delinquency buckets month over month,Risk,All,Glossary Term
+Write-Off,Balance removed from receivables as uncollectible,Risk,All,Glossary Term
+Net Sales,Gross sales minus cancellations,,All,Glossary Term
+Charge Volume,Total spend on the card in the period,TLS,All,Glossary Term

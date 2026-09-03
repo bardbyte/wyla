@@ -16,3 +16,5 @@ class AssistantState(LoopState):
     facts_log: list[dict[str, Any]] = field(default_factory=list)
     skills_loaded: list[str] = field(default_factory=list)
     chips: list[str] = field(default_factory=list)
+    # the query handed to the person (propose_sql): ends the turn
+    proposal: dict[str, Any] | None = None

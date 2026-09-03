@@ -207,3 +207,46 @@ def test_governance_is_visible_not_just_enforced():
         assert status in CSS, status
     # exports carry the provenance footer
     assert "provenanceLine" in CHAT_JS
+
+
+def test_the_ask_starts_like_claude_and_hands_queries_over():
+    # the empty state: a greeting and the composer, nothing else; the
+    # first message turns it into the conversation with its title,
+    # a Share door, the composer docked, the disclaimer under it
+    for piece in ("chat-hero", "chat-greet", "how are things",
+                  "Type / for skills", "Write a message…",
+                  'classList.toggle("empty"', "setEmpty(false)",
+                  "chat-title", "chat-title-input", "api.chatRename",
+                  "chat-share", "Link copied", "chat-plus-pop",
+                  "Browse skills", "chat-mode", "Autopilot",
+                  "synapse-chat-mode", "chat-model", "boot.model",
+                  "boot.user_name", "chat-slash", "paintSlash",
+                  "pickSlash", "chat-foot", "can make mistakes"):
+        assert piece in CHAT_JS, piece
+    for cls in (".chat-hero", ".chatv2.empty", ".chat-box",
+                ".chat-modes", ".chat-mode.on", ".chat-slash",
+                ".chat-title-btn", ".chat-foot", ".proposal-card",
+                ".proposal-sql", ".proposal-actions"):
+        assert cls in CSS, cls
+    # no dead controls: every composer button reaches a real door
+    for gone in ("mic", "Cowork"):
+        assert gone not in CHAT_JS, gone
+    # the handover: the query first, the rows on a tap, no model call
+    for piece in ('case "proposal"', "proposalCard", "Run query",
+                  "Run + build dashboard", "Edit SQL", "api.chatRun",
+                  "payload?.proposal", "propose_sql",
+                  "Writing the query for you to run",
+                  "state.mode", "dashboard, depth"):
+        assert piece in CHAT_JS, piece
+    assert "chatRun" in API_JS and "{ text, depth, mode }" in API_JS
+    for piece in ("/run\"", "run_proposal", "RunProposal",
+                  "mode=req.mode", "dashboard", '"user_name"',
+                  '"model": runtime.model_label'):
+        assert piece in BACKEND, piece
+    # the mode and the slash command are the runtime's, not the page's
+    runtime_py = (SILO / "sahs" / "assistant" / "runtime.py").read_text(
+        encoding="utf-8")
+    for piece in ("def run_proposal", "def slash_skill", "def mode_for",
+                  "model_label", "run_proposal_turn"):
+        assert piece in runtime_py, piece
+

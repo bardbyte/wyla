@@ -278,7 +278,8 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
         return path
 
     report = {"tables": 0, "columns": 0, "columns_from_profile_only": 0,
-              "domains": 0, "templates": 0, "template_rows_skipped": 0,
+              "domains": 0, "domains_with_estimate": 0,
+              "templates": 0, "template_rows_skipped": 0,
               "co_query_edges": 0, "policies_unknown": 0,
               "nested_columns": 0, "field_path_rows_skipped": 0,
               "field_paths_unmintable": 0, "pk_columns": 0,
@@ -509,6 +510,27 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                                        fk["ref_table"], ref_col,
                                        fk["name"], ev11))
 
+        # the value-profile manifest (15_low_cardinality_manifest.csv):
+        # per column, whether it was profiled and the ESTIMATED number
+        # of distinct values — how complete the observed list below is.
+        # Three values on record of an estimated 24 is a partial list,
+        # and the domain says so instead of posing as the whole domain
+        manifest_path = d / "15_low_cardinality_manifest.csv"
+        estimates: dict[str, dict] = {}
+        if manifest_path.exists():
+            for r in _csv_rows(track(manifest_path)):
+                name = (r.get("column_name") or "").strip().lower()
+                if not name:
+                    continue
+                raw = (r.get("distinct_estimate") or "").strip()
+                try:
+                    estimate = int(float(raw)) if raw else None
+                except ValueError:
+                    estimate = None
+                estimates[name] = {
+                    "profiled": (r.get("profiled") or "").strip().upper()
+                    in ("YES", "TRUE", "1"),
+                    "distinct_estimate": estimate}
         lc_dir = d / "15_low_cardinality_values"
         if lc_dir.exists():
             known_cols = {r["column_name"].lower() for r in columns}
@@ -537,13 +559,19 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                     minted_cols.add(col_id(physical, column))
                     report["columns_from_profile_only"] += 1
                 domain = f"domain:{physical}.{column.lower()}"
+                profile = estimates.get(column.lower(), {})
+                if profile.get("distinct_estimate"):
+                    report["domains_with_estimate"] += 1
                 graph.append_node(NodeRecord(
                     id=domain,
                     props={"values": [
                         {"value": r["value"],
                          "count": int(r["value_count"]),
                          "pct": float(r["pct_of_rows"])}
-                        for r in rows[:1000]]},
+                        for r in rows[:1000]],
+                        "distinct_estimate":
+                            profile.get("distinct_estimate"),
+                        "profiled": profile.get("profiled", True)},
                     prov=prov(
                         evidence=f"{d.name}/15_low_cardinality_values/"
                                  f"{value_file.name}")))

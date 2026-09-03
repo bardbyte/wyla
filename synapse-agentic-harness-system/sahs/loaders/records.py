@@ -56,6 +56,17 @@ class VocabRecord(BaseModel):
     evidence_ref: str = ""
 
 
+class ValueMeaning(BaseModel):
+    """value_lookup.json: what a low-cardinality stored value MEANS in
+    one column of one table ("1" in kyc_check_confirmed__c = KYC done)."""
+
+    table: str
+    column: str
+    value: str
+    synonym: str
+    evidence_ref: str = ""
+
+
 class TermRecord(BaseModel):
     """Atlas Federated Data Catalog business terms."""
 

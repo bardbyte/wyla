@@ -6,7 +6,8 @@ key, never calls a model.
     POST /api/chat/sessions                        → session
     GET  /api/chat/sessions                        → the sidebar
     GET  /api/chat/sessions/{id}                   → transcript + artifacts (+ turn_after when a turn is running)
-    POST /api/chat/sessions/{id}/messages          {text, depth?} → turn_id
+    POST /api/chat/sessions/{id}/messages          {text, depth?, mode?} → turn_id
+    POST /api/chat/sessions/{id}/run               {message_id?, sql?, limit?, dashboard?} → turn_id (no model call)
     GET  /api/chat/sessions/{id}/stream            → SSE (meridian.event/1)
     POST /api/chat/sessions/{id}/stop
     POST /api/chat/sessions/{id}/rename            {title}
@@ -60,6 +61,19 @@ def _chat():
 class NewMessage(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
     # the depth dial (v3 §5): quick | standard | deep — thinking level
+    depth: str = Field(default="", max_length=12)
+    # the autonomy slider (v3 §5): chat hands queries over for the
+    # person to run; autopilot runs and builds without stopping
+    mode: str = Field(default="", max_length=12)
+
+
+class RunProposal(BaseModel):
+    """The person pressed Run on a proposed query."""
+    message_id: str = Field(default="", max_length=40)
+    # the card's SQL as run — edited on the card, or empty for as proposed
+    sql: str = Field(default="", max_length=20000)
+    limit: int = Field(default=200, ge=1, le=1000)
+    dashboard: bool = False
     depth: str = Field(default="", max_length=12)
 
 
@@ -122,7 +136,9 @@ def get_session(session_id: str) -> dict:
             "running": rt.running, "head": rt.bus.head(),
             # an in-flight turn: the page replays it from here
             "turn_id": window["turn_id"], "turn_after": window["after"],
-            "budget": rt.budget.tick()}
+            "budget": rt.budget.tick(),
+            # the composer's greeting and its model label
+            "user_name": runtime.user_name, "model": runtime.model_label}
 
 
 @router.post("/sessions/{session_id}/messages", status_code=202)
@@ -133,9 +149,33 @@ def post_message(session_id: str, req: NewMessage) -> dict:
     try:
         return {"available": True,
                 **runtime.start_turn(session_id, req.text,
-                                     depth=req.depth)}
+                                     depth=req.depth, mode=req.mode)}
     except KeyError:
         return _unavailable(f"no session {session_id}")
+    except TurnBusy as e:
+        return {"available": False, "reason": str(e), "busy": True}
+    except (BuildUnavailable, ModelUnavailable) as e:
+        return _unavailable(str(e))
+
+
+@router.post("/sessions/{session_id}/run", status_code=202)
+def run_proposal(session_id: str, req: RunProposal) -> dict:
+    """Run a proposed query under the limits with no model call; with
+    dashboard=true a model turn builds from the rows afterwards."""
+    runtime, _ = _chat()
+    from sahs.ask.model import ModelUnavailable
+    from sahs.ask.runtime import BuildUnavailable, TurnBusy
+    try:
+        return {"available": True,
+                **runtime.run_proposal(session_id,
+                                       message_id=req.message_id,
+                                       sql=req.sql, limit=req.limit,
+                                       dashboard=req.dashboard,
+                                       depth=req.depth)}
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+    except ValueError as e:
+        return _unavailable(str(e))
     except TurnBusy as e:
         return {"available": False, "reason": str(e), "busy": True}
     except (BuildUnavailable, ModelUnavailable) as e:

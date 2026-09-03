@@ -31,7 +31,8 @@ def _tier(row: dict[str, Any]) -> str:
 
 
 def synapse_digest(build: Build,
-                   list_hint: str = 'list_metrics("GMNS")') -> str:
+                   list_hint: str = 'list_metrics("GMNS")',
+                   search_hint: str = "search_semantics") -> str:
     lines: list[str] = [f"# SYNAPSE.md · build {build.version}", ""]
 
     # ── the shelf ────────────────────────────────────────────
@@ -63,6 +64,61 @@ def synapse_digest(build: Build,
                 + f" · {members} metrics"
                 + (f" · tables {', '.join(row.get('tables') or [])}"
                    if row.get("tables") else ""))
+        lines.append("")
+
+    # ── words: scoped acronyms, the common-word guard, value
+    #    meanings — intent understanding before any table ──────
+    acronyms = [v for v in build.vocab if v.get("kind") == "acronym"]
+    observed = [d for d in (getattr(build, "domains", []) or [])
+                if d.get("values")]
+    if acronyms or getattr(build, "value_meanings", None) or observed:
+        by_symbol: dict[str, int] = {}
+        for v in acronyms:
+            key = (v.get("text") or "").lower()
+            by_symbol[key] = by_symbol.get(key, 0) + 1
+        several = sum(1 for n in by_symbol.values() if n > 1)
+        common = sorted({v.get("text", "") for v in acronyms
+                         if v.get("common_word")})
+        meanings = list(getattr(build, "value_meanings", []) or [])
+        columns = {(m.get("table"), m.get("column")) for m in meanings}
+        lines.append("## words")
+        lines.append(
+            f"Acronyms are scoped: the same symbol can mean different "
+            f"things per business unit and region ({len(acronyms)} "
+            f"acronym entries, {several} symbols with several "
+            f"meanings); when the ask names a business area, prefer "
+            f"that area's meaning, and say which one you used.")
+        if common:
+            shown = ", ".join(common[:8]) + (" …" if len(common) > 8
+                                              else "")
+            lines.append(
+                f"{len(common)} acronyms are also ordinary words "
+                f"({shown}): expand them only when the ask writes them "
+                f"as acronyms — {search_hint}(kind=\"vocab\") shows "
+                "the scope and the guard.")
+        if meanings:
+            lines.append(
+                f"Stored codes have meanings on record for "
+                f"{len(columns)} columns: {search_hint}(kind=\"values\") "
+                "turns a phrase (\"KYC done\") into the code and the "
+                "predicate to filter with; sample_values shows a "
+                "column's codes with their meanings. Filter on the "
+                "code, say the meaning.")
+        if observed:
+            estimated = sum(1 for d in observed
+                            if d.get("distinct_estimate"))
+            partial = sum(1 for d in observed
+                          if (d.get("distinct_estimate") or 0)
+                          > len(d.get("values") or []))
+            lines.append(
+                f"The profiler's observed values are on record for "
+                f"{len(observed)} columns ({estimated} with an "
+                f"estimated distinct count, {partial} of those lists "
+                f"partial): {search_hint}(kind=\"values\") also "
+                "matches a value written as stored (\"GB\", "
+                "\"ACTIVE\") with its share of rows; sample_values "
+                "says when a list is partial, so a literal outside it "
+                "is a question, not an error.")
         lines.append("")
 
     # ── top metrics, certified first, by support ─────────────

@@ -207,6 +207,66 @@ panel opens only when the model puts something in it; a memory save
 is disclosed inline with an undo. Set `LUMI_USER_NAME` in the silo
 `.env` so memory addresses the person by name.
 
+**Vocabulary and values.** Drop the five files in the sources dir and
+rebuild: `data_cleaned.csv` and `business_terms.csv` (already loaded),
+`potential_common_word_acronyms.csv` (the common-word guard, a flag on
+the acronym nodes), `glossary_terms.csv` (a generated view: counted for
+drift, never loaded twice), and `low_cardinality_synonyms_index.json` (stored code → meaning,
+per table and column; `value_lookup.json` is accepted too). The build report shows the counts; the chat then
+expands acronyms with their scope, refuses to expand REST unless it is
+written as one, and turns "KYC done" into the code to filter on. The
+strategy is `docs/specs/vocabulary_and_values.md`.
+
+**The archive's own value profile is used too.** Every
+`15_low_cardinality_values/<column>.csv` becomes the column's observed
+values with their share of rows, and `15_low_cardinality_manifest.csv`
+puts the profiler's `distinct_estimate` on the same domain, so
+`sample_values` says "3 values on record of an estimated 24 distinct"
+instead of posing as the whole domain. `search(kind="values")` matches a
+value written as stored ("transactions in GB" → `country_cd = 'GB'`,
+6.3% of rows) as well as a meaning from the lookup.
+
+**Rebuilding the graph with the new sources.** The store is
+append-only: a second build-graph into the same tree appends every quad
+again. Start a new tree and keep `graph/identity` (the crosswalk and the
+human maps) and `graph/runs` (the evidence of earlier runs):
+
+```bash
+mv graph/nodes graph/nodes.before-vocab && mv graph/edges graph/edges.before-vocab
+python scripts/laptop.py build-graph \
+  --graph graph \
+  --crosswalk graph/identity/crosswalk.jsonl \
+  --bq-archive $DATA/real_extractions_production \
+  --sources-dir $DATA/sources \
+  --registry $DATA/real_extractions_production/_batch_summary.csv \
+  --no-jobs-30d \
+  --fresh --run-id vocab1 \
+  --out graph/runs/p2_build_vocab --json
+python scripts/laptop.py compile \
+  --graph graph --builds builds \
+  --out graph/runs/p2_compile_vocab --json
+```
+
+Read the build report for `vocab.common_word_acronyms`,
+`vocab.glossary_view_drift`, `value_meanings.domains_annotated` /
+`domains_minted` / `skipped_unknown_table`, and `bq.domains_with_estimate`;
+the ledger lists `15_low_cardinality_manifest.csv` and
+`low_cardinality_synonyms_index.json` as consumed and `glossary_terms.csv`
+as deferred with its reason. The new build's `DIFF_vs_prev.md` shows what
+the sources added. Restart the app so the chat serves the new build.
+
+**The query comes first.** In Chat mode a data question ends with the
+query on a card — the SQL, what it will scan, its status and meridian
+line — and three buttons: **Run query** executes it with no model call
+and puts the rows in the panel as a table (saved as `q1`), **Run +
+build dashboard** runs it and then builds the tiles from the rows, and
+**Edit SQL** lets you change the query before running. The chips after
+a run offer a dashboard or a refinement. Switch to **Autopilot** in the
+composer when Synapse should run and build without stopping. Both need
+`SAHS_ALLOW_LIVE=1` for the rows; without it the card still shows the
+query and the run explains the configuration. Type `/` in the composer
+to pick a skill pack for the turn.
+
 **Rows come from the warehouse under two limits.** Until live
 execution is on, the chat can only price a query (dry run) — it never
 sees rows, so a "how many" question ends in dry runs and a partial. Put

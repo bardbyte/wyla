@@ -52,9 +52,9 @@ graph — warm, brief, plain, never mystical about yourself.
 
 You are a general reasoner first: a thinking question gets thinking, \
 with no tools. A data question gets the graph: find the definition, \
-read it, prove the query with a dry run, run it for the rows when the \
-limits allow, check, and show your receipts. A deliverable gets an \
-artifact the user keeps.
+read it, prove the query with a dry run, then hand it over with \
+propose_sql or run it as the mode section says, check, and show your \
+receipts. A deliverable gets an artifact the user keeps.
 
 Understand the intent before reaching for a tool. Business words — \
 a team, an acronym, a line of business — name areas of the business \
@@ -93,6 +93,27 @@ gates, the rendering rules) is immutable and outranks everything \
 below it. Lumi, the product, comes next. Then what this user \
 remembered and asked for. Then defaults. A remembered preference \
 steers a choice; it never softens a rule."""
+
+# §5: the autonomy slider as two modes. Chat hands queries over — the
+# person presses Run; Autopilot runs and builds without stopping.
+MODES: dict[str, str] = {
+    "chat": (
+        "Chat mode: the person runs the queries. For a data question, "
+        "find the definition, prove the query with run_sql(mode="
+        "\"dry_run\"), and hand it over with propose_sql — the card "
+        "offers Run query and Run + dashboard; say in one or two "
+        "sentences what it will show, then stop. Run a query yourself "
+        "(run_sql mode \"run\") only when this message asks you to run "
+        "it, or to build from rows already saved (q1, q2 …); then "
+        "check and show the receipts."),
+    "autopilot": (
+        "Autopilot: run the query yourself under the limits (run_sql "
+        "mode \"run\"), check, and build the deliverable without "
+        "stopping to hand over; propose_sql is not needed. Refused for "
+        "cost, narrow the scan; refused as configuration, report it "
+        "and stop."),
+}
+DEFAULT_MODE = "chat"
 
 _DIGEST_CACHE: dict[str, str] = {}
 
@@ -151,8 +172,8 @@ def system_prompt(build: Build, skills: list[Skill] | None = None,
                   project: dict[str, Any] | None = None,
                   artifacts: list[dict[str, Any]] | None = None,
                   notes: list[str] | None = None,
-                  user_name: str = "") -> str:
-    """Identity → chain → the graph digest (business map + shelf) →
+                  user_name: str = "", mode: str = DEFAULT_MODE) -> str:
+    """Identity → chain → mode → the graph digest (business map +
     skills (loaded whole, the rest by name) → memory → this session.
     Stable parts first so the prefix caches; the tools are declared
     to the transport, never pasted here."""
@@ -162,6 +183,7 @@ def system_prompt(build: Build, skills: list[Skill] | None = None,
                                 list_hint='search("GMNS", kind="list")')
         _DIGEST_CACHE[build.version] = digest
     parts = [_section("identity", IDENTITY), _section("chain", CHAIN),
+             _section("mode", MODES.get(mode, MODES[DEFAULT_MODE])),
              _section("graph", digest)]
     skill_text = render_skills(skills or [])
     shelf = render_skill_index(
@@ -252,7 +274,8 @@ def tool_input(name: str, args: dict[str, Any]) -> str:
     keys = {"run_sql": "sql", "python": "code", "search": "query",
             "read": "id", "artifact": "title", "check": "kind",
             "sample_values": "column", "load_skill": "name",
-            "remember": "text", "note": "text", "ask": "question"}
+            "remember": "text", "note": "text", "ask": "question",
+            "propose_sql": "sql"}
     key = keys.get(name)
     value = args.get(key) if key else None
     return str(value)[:INPUT_CAP] if value else ""
@@ -265,9 +288,13 @@ def summarize(tool: str, result: Any) -> str:
     if not isinstance(result, dict):
         return _short(result, 160)
     if result.get("error"):
+        # what refused it: the validator's violations or the artifact
+        # validator's problems, so the row says WHY, not just "invalid"
+        found = (result.get("problems") or result.get("violations")
+                 or [])
         problems = "; ".join(
             f"{p.get('code')}: {p.get('detail')}"
-            for p in result.get("problems", []))[:300]
+            for p in found[:2] if isinstance(p, dict))[:300]
         whose = ("configuration, not the query: "
                  if result.get("kind") in ("environment", "access")
                  else "")
@@ -327,6 +354,11 @@ def summarize(tool: str, result: Any) -> str:
             else ""
         return (f"{result.get('type')} \"{result.get('title')}\" "
                 f"v{result.get('version')} is in the panel{mark}")
+    if tool == "propose_sql":
+        p = result.get("proposal") or {}
+        return (f"handed over \"{_short(p.get('title', ''), 60)}\" · "
+                f"would scan {_bytes(p.get('bytes_processed'))} · "
+                f"{p.get('status', '')}")
     if tool == "ask":
         return "asked: " + _short(
             (result.get("clarify") or {}).get("question", ""), 140)
@@ -381,15 +413,17 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                        thinking_level: str = DEFAULT_THINKING,
                        user_name: str = "",
                        max_calls: int = MAX_CALLS,
-                       wall_seconds: float = WALL_SECONDS) -> str:
+                       wall_seconds: float = WALL_SECONDS,
+                       mode: str = DEFAULT_MODE) -> str:
     session_id = session["id"]
     started = time.perf_counter()
+    mode = mode if mode in MODES else DEFAULT_MODE
     bus.emit("turn_started", turn_id=turn_id, text=text,
              build_id=build.version, version=ASSISTANT_VERSION,
              skills=[s.name for s in (skills or [])],
              memories=len(memories or []),
              project=(project or {}).get("name", ""),
-             thinking_level=thinking_level)
+             thinking_level=thinking_level, mode=mode)
     budget.start_turn()
     prepare_workspace(workspace, build.root)
 
@@ -405,7 +439,7 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
         build, skills, skill_index=all_skills(graph_root),
         memories=memories, project=project,
         artifacts=store.list_artifacts(session_id), notes=state.notes,
-        user_name=user_name)
+        user_name=user_name, mode=mode)
     bus.emit("model_prompt", turn_id=turn_id, n=0, kind="system",
              content=system[:12000])
     contents = _history(store, session_id, turn_id)
@@ -417,6 +451,7 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
     stop_reason = ""
     status = "partial"
     clarify: dict[str, Any] | None = None
+    proposal: dict[str, Any] | None = None   # propose_sql: handed over
     offered = False        # suggest_next after prose closes the turn
     # the thinking trace the transcript keeps (§6): the model's own
     # thought summaries per call, interleaved with the steps
@@ -550,6 +585,9 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                 if name == "ask" and isinstance(result, dict) \
                         and result.get("ok"):
                     clarify = result["clarify"]
+                if name == "propose_sql" and isinstance(result, dict) \
+                        and result.get("ok"):
+                    proposal = result["proposal"]
                 if name == "suggest_next" and isinstance(result, dict) \
                         and result.get("ok") and said:
                     offered = True
@@ -584,6 +622,42 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                         thinking_level=thinking_level,
                         skills_loaded=list(state.skills_loaded))
                 return "clarify"
+
+            if proposal is not None:
+                # the handover: the person runs it from the card, so
+                # the turn ends here without another model call
+                prose = "\n\n".join(s for s in said if s.strip())
+                if not prose:
+                    prose = (f"Here is the query for "
+                             f"{proposal['title']}. Run it when you are "
+                             "ready, or ask for a dashboard.")
+                    _stream(prose)
+                    said.append(prose)
+                chips = list(state.chips)
+                row = store.add_message(
+                    session_id, "assistant", prose, turn_id=turn_id,
+                    payload={"proposal": proposal, "chips": chips,
+                             "artifacts": list(dict.fromkeys(
+                                 state.artifacts_touched)),
+                             "trace": _trim_trace(trace),
+                             "elapsed_ms": round(
+                                 (time.perf_counter() - started) * 1000,
+                                 1)})
+                bus.emit("proposal", turn_id=turn_id,
+                         message_id=row["id"], proposal=proposal)
+                if chips:
+                    bus.emit("chips", turn_id=turn_id, suggestions=chips)
+                if not (session.get("title") or "").strip():
+                    title = text.strip()[:60]
+                    session["title"] = title
+                    store.set_title(session_id, title)
+                _persist(store, session_id, state, "proposed", prose,
+                         chips)
+                _finish(bus, budget, turn_id, "proposed", started,
+                        model_calls=calls, steps=steps,
+                        thinking_level=thinking_level,
+                        skills_loaded=list(state.skills_loaded))
+                return "proposed"
 
             if offered:
                 # the follow-ups came after the answer: that is the
@@ -634,6 +708,135 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
     return status
 
 
+def run_proposal_turn(*, build: Build, store: AssistantStore,
+                      bus: EventBus, budget: Any,
+                      session: dict[str, Any], turn_id: str,
+                      proposal: dict[str, Any], sql: str = "",
+                      limit: int = 200, workspace: Path,
+                      substrate: Any = None, snapshot_runner: Any = None,
+                      runner: Any = None,
+                      graph_root: Path | None = None) -> str:
+    """The person pressed Run: the proposed query executes under the
+    limits with NO model call, the rows land as a table artifact and
+    as q1 in the workspace, and the turn ends with the receipts — the
+    one step of a chat that never waits on the model."""
+    session_id = session["id"]
+    started = time.perf_counter()
+    title = str(proposal.get("title") or "the query")
+    written = str(proposal.get("sql_written") or proposal.get("sql")
+                  or "")
+    sql = (sql or "").strip() or written
+    edited = sql != written
+    bus.emit("turn_started", turn_id=turn_id, text=f"Run: {title}",
+             build_id=build.version, version=ASSISTANT_VERSION,
+             skills=[], memories=0,
+             project=str(session.get("project_id") or ""),
+             thinking_level="none", mode="run")
+    budget.start_turn()
+    prepare_workspace(workspace, build.root)
+    state = AssistantState()
+    state.notes = list(session.get("notes") or [])
+    kit = build_kit(build, state, store=store, session_id=session_id,
+                    turn_id=turn_id, workspace=workspace,
+                    substrate=substrate, snapshot_runner=snapshot_runner,
+                    runner=runner, graph_root=graph_root,
+                    project_id=str(session.get("project_id") or ""))
+    limit = max(1, min(int(limit or 200), 1000))
+    args = {"sql": sql, "mode": "run", "limit": limit}
+    shown = sql[:INPUT_CAP]
+    bus.emit("tool_call", turn_id=turn_id, n=1, tool="run_sql",
+             args=_short(args, 160), input=shown)
+    t0 = time.perf_counter()
+    try:
+        result: Any = kit["run_sql"].fn(sql, mode="run", limit=limit)
+    except Exception as e:                          # noqa: BLE001
+        result = {"error": f"{type(e).__name__}: {e}",
+                  "hint": "the run failed before the warehouse answered"}
+    summary = summarize("run_sql", result)
+    elapsed_ms = round((time.perf_counter() - t0) * 1000, 1)
+    trace = [{"kind": "tool", "tool": "run_sql",
+              "args": _short(args, 160), "input": shown,
+              "summary": summary, "elapsed_ms": elapsed_ms}]
+    _payload, content = _response_payload(result)
+    bus.emit("tool_step", turn_id=turn_id, n=1, tool="run_sql",
+             args=_short(args, 120), input=shown, summary=summary,
+             ref="a1", elapsed_ms=elapsed_ms)
+    bus.emit("tool_result", turn_id=turn_id, ref="a1", tool="run_sql",
+             content=content)
+
+    artifacts: list[str] = []
+    if not isinstance(result, dict) or result.get("error"):
+        err = result if isinstance(result, dict) else {"error": result}
+        hint = str(err.get("hint") or "").strip()
+        if err.get("kind") in ("environment", "access"):
+            said = (f"I could not run it: {err.get('error')}. This is "
+                    "configuration, not the query"
+                    + (f" — {hint}" if hint else "") + ".")
+            chips = ["Explain what to change"]
+        else:
+            said = (f"I could not run it: {err.get('error')}."
+                    + (f" {hint}" if hint else ""))
+            chips = ["Narrow the query", "Explain the error"]
+        status = "partial"
+    else:
+        rows = result.get("rows") or []
+        columns = [c.get("name") for c in (result.get("result_schema")
+                                           or [])
+                   if isinstance(c, dict) and c.get("name")]
+        if not columns and rows:
+            columns = list(rows[0].keys())
+        spec = {"columns": [{"key": c, "label": c} for c in columns],
+                "rows": rows,
+                "provenance": {
+                    "status": proposal.get("status") or "exploratory",
+                    "meridian_line": proposal.get("meridian_line") or "",
+                    **({"metric_id": proposal["metric_id"]}
+                       if proposal.get("metric_id") else {})}}
+        made = kit["artifact"].fn("table", title, json.dumps(spec))
+        if isinstance(made, dict) and made.get("_artifact"):
+            row = made["_artifact"]
+            artifacts.append(row["artifact_id"])
+            bus.emit("artifact", turn_id=turn_id,
+                     artifact_id=row["artifact_id"],
+                     version=row["version"], type=row["type"],
+                     title=row["title"], spec=row["spec"])
+        count = result.get("row_count", len(rows))
+        said = (f"Ran it{' with your edits' if edited else ''}: "
+                f"{count} rows"
+                + (f" (LIMIT {limit})" if result.get("capped") else "")
+                + f", scanned {_bytes(result.get('bytes_processed'))} "
+                f"of a {_bytes(result.get('scan_ceiling_bytes'))} "
+                "ceiling. " + str(proposal.get("meridian_line") or ""))
+        if result.get("saved_as"):
+            said += (f" The rows are saved as {result['saved_as']} for "
+                     "the next step.")
+        if isinstance(made, dict) and made.get("error"):
+            said += (" The table could not be published: "
+                     + "; ".join(str(p.get("detail", ""))
+                                 for p in (made.get("problems") or [])[:2]))
+        if result.get("warnings"):
+            said += "\n\nNote: " + " ".join(
+                str(w) for w in result["warnings"][:2])
+        chips = ["Build a dashboard from these rows", "Refine the query"]
+        status = "answered"
+    bus.emit("say_token", turn_id=turn_id, delta=said)
+    state.chips = chips
+    store.add_message(
+        session_id, "assistant", said, turn_id=turn_id,
+        payload={"chips": chips, "artifacts": artifacts,
+                 "trace": _trim_trace(trace),
+                 "elapsed_ms": round(
+                     (time.perf_counter() - started) * 1000, 1),
+                 "ran": {"title": title, "edited": edited,
+                         "status": status}})
+    if chips:
+        bus.emit("chips", turn_id=turn_id, suggestions=chips)
+    _persist(store, session_id, state, status, said, chips)
+    _finish(bus, budget, turn_id, status, started, model_calls=0,
+            steps=1, thinking_level="none", skills_loaded=[])
+    return status
+
+
 def _trim_trace(trace: list[dict[str, Any]], *, max_entries: int = 60,
                 max_chars: int = 2000) -> list[dict[str, Any]]:
     """What the transcript keeps of the thinking: bounded, the call
@@ -672,5 +875,5 @@ def _finish(bus: EventBus, budget: Any, turn_id: str, status: str,
 
 
 __all__ = ["ASSISTANT_VERSION", "IDENTITY", "THINKING_LEVELS",
-           "DEFAULT_THINKING", "system_prompt", "summarize",
-           "run_assistant_turn"]
+           "DEFAULT_THINKING", "MODES", "DEFAULT_MODE", "system_prompt",
+           "summarize", "run_assistant_turn", "run_proposal_turn"]
