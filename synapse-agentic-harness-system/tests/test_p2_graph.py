@@ -404,13 +404,19 @@ def test_utilization_ledger_accounts_for_every_file(tmp_path):
                   "11_logical_constraints.json"):
         assert by_path[f"real_extractions_production/gms_transaction/"
                        f"{wired}"]["status"] == "consumed", wired
-    # run-2 audit findings: the value-profile manifests defer with a
-    # reason; a view shipping its SQL only as a csv twin is CONSUMED
+    # the value-profile manifest is CONSUMED (its distinct estimates
+    # say how complete each observed list is); its json twin defers as
+    # a format twin. A view shipping its SQL only as a csv twin is
+    # CONSUMED too
     manifest_row = by_path["real_extractions_production/"
                            "gms_transaction/"
                            "15_low_cardinality_manifest.csv"]
-    assert manifest_row["status"] == "deferred" \
-        and "profiling coverage" in manifest_row["reason"]
+    assert manifest_row["status"] == "consumed", manifest_row
+    manifest_twin = by_path["real_extractions_production/"
+                            "gms_transaction/"
+                            "15_low_cardinality_manifest.json"]
+    assert manifest_twin["status"] == "deferred" \
+        and "format twin" in manifest_twin["reason"]
     assert by_path["real_extractions_production/sbs_new_accounts/"
                    "05_view_definition.csv"]["status"] == "consumed"
 

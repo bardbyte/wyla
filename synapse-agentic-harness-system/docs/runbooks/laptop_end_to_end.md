@@ -217,6 +217,44 @@ expands acronyms with their scope, refuses to expand REST unless it is
 written as one, and turns "KYC done" into the code to filter on. The
 strategy is `docs/specs/vocabulary_and_values.md`.
 
+**The archive's own value profile is used too.** Every
+`15_low_cardinality_values/<column>.csv` becomes the column's observed
+values with their share of rows, and `15_low_cardinality_manifest.csv`
+puts the profiler's `distinct_estimate` on the same domain, so
+`sample_values` says "3 values on record of an estimated 24 distinct"
+instead of posing as the whole domain. `search(kind="values")` matches a
+value written as stored ("transactions in GB" → `country_cd = 'GB'`,
+6.3% of rows) as well as a meaning from the lookup.
+
+**Rebuilding the graph with the new sources.** The store is
+append-only: a second build-graph into the same tree appends every quad
+again. Start a new tree and keep `graph/identity` (the crosswalk and the
+human maps) and `graph/runs` (the evidence of earlier runs):
+
+```bash
+mv graph/nodes graph/nodes.before-vocab && mv graph/edges graph/edges.before-vocab
+python scripts/laptop.py build-graph \
+  --graph graph \
+  --crosswalk graph/identity/crosswalk.jsonl \
+  --bq-archive $DATA/real_extractions_production \
+  --sources-dir $DATA/sources \
+  --registry $DATA/real_extractions_production/_batch_summary.csv \
+  --no-jobs-30d \
+  --fresh --run-id vocab1 \
+  --out graph/runs/p2_build_vocab --json
+python scripts/laptop.py compile \
+  --graph graph --builds builds \
+  --out graph/runs/p2_compile_vocab --json
+```
+
+Read the build report for `vocab.common_word_acronyms`,
+`vocab.glossary_view_drift`, `value_meanings.domains_annotated` /
+`domains_minted` / `skipped_unknown_table`, and `bq.domains_with_estimate`;
+the ledger lists `15_low_cardinality_manifest.csv` and
+`low_cardinality_synonyms_index.json` as consumed and `glossary_terms.csv`
+as deferred with its reason. The new build's `DIFF_vs_prev.md` shows what
+the sources added. Restart the app so the chat serves the new build.
+
 **Rows come from the warehouse under two limits.** Until live
 execution is on, the chat can only price a query (dry run) — it never
 sees rows, so a "how many" question ends in dry runs and a partial. Put

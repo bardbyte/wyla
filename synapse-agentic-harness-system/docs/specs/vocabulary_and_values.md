@@ -14,6 +14,8 @@ question before it touches a table.
 | `potential_common_word_acronyms.csv` | 743 | acronyms whose symbols are ordinary words (CARE, FIRST, REST, SMART, YES); every symbol already in the corpus | **a guard list, never a second vocabulary** — becomes `common_word: true` on the acronym node |
 | `glossary_terms.csv` | 1,794 | the corpus filtered to Entry Type = Glossary Term; drifts from it by non-breaking spaces, whitespace, blank business units (1,712 of 1,775 rows match exactly) | **a generated view** — never loaded twice; the drift is counted in the build report and the file is ledgered as deferred |
 | `low_cardinality_synonyms_index.json` | 4,612 mappings | what a low-cardinality stored value MEANS in one column of one table: `"1"` in `kyc_check_confirmed__c` is "KYC done"; 52 tables, 658 columns, 3,276 table/value keys | **source of record for meanings** — `meanings` on the column's `domain:` node, witness `lumi` |
+| `<table>/15_low_cardinality_values/<column>.csv` (archive) | one file per profiled column | the profiler's OBSERVED values with count and share of rows: `US` is 72.0% of `country_cd` | **source of record for observed values** — `values` on the `domain:` node, witness `bq`; the values lane matches them when written as stored |
+| `<table>/15_low_cardinality_manifest.csv` (archive) | one row per profiled column | `profiled` and `distinct_estimate`: how many distinct values the profiler estimates, against the list it kept | **consumed** — `distinct_estimate` on the `domain:` node; 3 values on record of an estimated 24 is a partial list and every tool says so. The `.json` twin is a format twin, deferred |
 
 The rule that decides the table: a file is a source when it carries a
 fact no other file carries; it is a view when every fact in it is
@@ -37,6 +39,8 @@ low_cardinality_synonyms_index.json ──► domain:<table>.<column>   props: m
                        (beside the profiler's observed values; a column the
                         profiler never domained gets its domain minted from
                         the lookup, with its has_domain edge — counted)
+15_low_cardinality_values/<column>.csv ──► domain:<table>.<column>   props: values [{value, count, pct}]
+15_low_cardinality_manifest.csv ───────► the same node   props: distinct_estimate, profiled
 ```
 
 - **Scope is identity.** The same symbol keeps every meaning it has,
@@ -57,7 +61,9 @@ low_cardinality_synonyms_index.json ──► domain:<table>.<column>   props: m
 ## 3 · What the build serves
 
 - `indexes/vocab.jsonl` — acronym rows now carry `common_word`.
-- `indexes/domains.jsonl` — each domain row carries `meanings`.
+- `indexes/domains.jsonl` — each domain row carries the observed
+  `values` (with count and share), `meanings`, and `distinct_estimate`;
+  the build loads it as `build.domains`.
 - `indexes/value_meanings.jsonl` (new) — one flat row per (table,
   column, value, synonym), the index a phrase resolves against.
 - The digest's **words** section tells the model the three rules
@@ -82,7 +88,20 @@ low_cardinality_synonyms_index.json ──► domain:<table>.<column>   props: m
    the other direction: a WHERE literal that is a meaning on record
    ("… = 'Approved'") comes back as a warning naming the code. The
    answer says the meaning; the SQL filters on the code.
-4. **Glossary definitions answer "what is X".** A glossary term's
+4. **A value written as stored is a value.** The same lane matches the
+   profiler's observed values: "transactions in GB" gives
+   `country_cd = 'GB'` with its share of rows (6.3%) and the meaning
+   when one is on record. Short codes (three characters or fewer)
+   must be written exactly as stored — "us" is a pronoun, "US" is a
+   country — longer values match regardless of case, and
+   `kind="values"` takes the whole query as one exact code ("D").
+5. **A partial list is a hint, not a verdict.** The manifest's
+   `distinct_estimate` travels with the domain: `sample_values` says
+   "3 values on record of an estimated 24 distinct", the digest counts
+   the partial lists, and the literal hook softens its warning for a
+   literal outside a partial list. A complete list keeps its plain
+   warning.
+6. **Glossary definitions answer "what is X".** A glossary term's
    definition is the answer to a vocabulary question, with its scope,
    before any table is named.
 

@@ -335,8 +335,9 @@ def build_kit(build: Build, state: AssistantState, *,
                 "token; kind=vocab expands an acronym with its business "
                 "unit and region (the same symbol can mean several "
                 "things); kind=values turns a business phrase (\"KYC "
-                "done\", \"Approved\") into the stored code and the "
-                "predicate to filter with."),
+                "done\", \"Approved\") or a stored value written as "
+                "stored (\"GB\", \"ACTIVE\") into the column, the code, "
+                "its share of rows, and the predicate to filter with."),
             fn=search, schema=_obj({
                 "query": _s("what you are looking for, in the user's "
                             "words or graph words"),

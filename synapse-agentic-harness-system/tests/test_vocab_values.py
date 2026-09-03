@@ -132,6 +132,15 @@ def test_build_serves_meanings_and_the_flag(built):
     got = sample_values(build, "gms_transaction", "country_cd")
     assert [v["value"] for v in got["values"]][:1] == ["US"]
     assert {"value": "US", "synonym": "United States"} in got["meanings"]
+    # the profile manifest's estimate says how complete the list is:
+    # 3 values on record of an estimated 24 is a partial list
+    assert got["distinct_estimate"] == 24
+    assert "3 values on record of an estimated 24" in got["coverage_note"]
+    assert "not a live query" in got["coverage_note"]
+    no_manifest = sample_values(build, "wwcas_authorization",
+                                "approval_cd")
+    assert "distinct_estimate" not in no_manifest
+    assert "partial" not in no_manifest["coverage_note"]
     minted = sample_values(build, "gms_transaction", "bq_only_col")
     assert minted["values"] == [] and minted["meanings"] == [
         {"value": "1", "synonym": "Flag set"}]
@@ -169,6 +178,27 @@ def test_search_guards_common_words_and_resolves_phrases(built):
     approved = search("approved", kind="values")
     assert [r["predicate"] for r in approved["results"]] == [
         "approval_cd = 'A'"]
+    # the profiler's observed values match when written as stored:
+    # "GB" is a country with its share of rows, "us" is a pronoun
+    gb = search("transactions in GB last month")
+    hit = next(r for r in gb["results"] if r["kind"] == "value")
+    assert hit["predicate"] == "country_cd = 'GB'"
+    assert hit["table"] == "dw.gms_transaction"
+    assert hit["observed"] == {"count": 63, "pct": 6.3}
+    assert hit["synonym"] == "United Kingdom"
+    assert hit["distinct_estimate"] == 24
+    pronoun = search("send the totals to us")
+    assert not [r for r in pronoun["results"] if r["kind"] == "value"]
+    # a longer value matches case-insensitively, meaning or not
+    active = search("active accounts by month")
+    hit = next(r for r in active["results"] if r["kind"] == "value")
+    assert hit["predicate"] == "zz_profile_only = 'ACTIVE'"
+    assert hit["synonym"] == "" and hit["observed"]["count"] == 900
+    # kind=values takes the whole query as one exact code
+    code = search("d", kind="values")
+    assert [r["predicate"] for r in code["results"]] == [
+        "approval_cd = 'D'"]
+    assert code["results"][0]["synonym"] == "Declined"
     assert "unknown kind" in search("x", kind="nope")["error"]
     assert "values" in search("x", kind="nope")["hint"]
 
@@ -206,6 +236,12 @@ def test_literal_hook_names_the_code_behind_a_meaning(built):
     assert len(unknown) == 1
     assert "meanings on record" in unknown[0] and "United States" \
         in unknown[0]
+    # a partial list is a hint, not a verdict
+    assert "estimates 24 distinct" in unknown[0] and "partial" in unknown[0]
+    complete = literal_warnings(
+        build, "SELECT 1 FROM dw.wwcas_authorization "
+               "WHERE approval_cd = 'X'")
+    assert len(complete) == 1 and "partial" not in complete[0]
     # a minted domain: no observed values, meanings still teach
     flag = literal_warnings(
         build, "SELECT 1 FROM dw.gms_transaction WHERE bq_only_col = 'Y'")
@@ -236,3 +272,15 @@ def test_summaries_show_why_the_validator_refused():
     line = summarize("run_sql", refused)
     assert line.startswith("ERROR: sql_invalid — unknown_column: column "
                            "'trans_usd_amt'")
+
+
+def test_digest_tells_the_observed_values_rule(built):
+    from sahs.loop.digest import synapse_digest
+    build, _graph, _m = built
+    digest = synapse_digest(build)
+    words = digest[digest.index("## words"):]
+    words = words[:words.index("\n## ", 1)]
+    assert "observed values are on record for 4 columns" in words
+    assert "2 with an estimated distinct count" in words
+    assert "2 of those lists partial" in words
+    assert 'kind="values"' in words and "written as stored" in words

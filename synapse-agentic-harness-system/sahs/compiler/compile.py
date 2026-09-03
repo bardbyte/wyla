@@ -659,7 +659,10 @@ def compile_build(graph_root: Path, builds_root: Path
     domain_rows = [
         {"key": node_id.split(":", 1)[1],
          "values": record.props.get("values", []),
-         "meanings": record.props.get("meanings", [])}
+         "meanings": record.props.get("meanings", []),
+         # the profiler's estimate of distinct values: how complete
+         # the observed list is (None when nothing was estimated)
+         "distinct_estimate": record.props.get("distinct_estimate")}
         for node_id, record in sorted(nodes.items())
         if node_id.startswith("domain:")]
     (build_dir / "indexes" / "domains.jsonl").write_text(

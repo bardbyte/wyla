@@ -41,6 +41,9 @@ class Build:
     tables: list[dict[str, Any]] = field(default_factory=list)
     # stored code → business meaning, per table and column
     value_meanings: list[dict[str, Any]] = field(default_factory=list)
+    # the profiler's observed values per column (with share of rows,
+    # the distinct estimate, and the meanings on record)
+    domains: list[dict[str, Any]] = field(default_factory=list)
     _db: sqlite3.Connection | None = field(default=None, repr=False)
 
     @classmethod
@@ -71,6 +74,7 @@ class Build:
             tables=_jsonl(path / "indexes" / "tables.jsonl"),
             value_meanings=_jsonl(path / "indexes"
                                   / "value_meanings.jsonl"),
+            domains=_jsonl(path / "indexes" / "domains.jsonl"),
         )
 
     @property
@@ -185,7 +189,8 @@ def sample_values(build: Build, table: str, column: str) -> dict:
     physical = build.physical_of(table)
     if physical is None:
         return {"error": f"unknown table {table!r}"}
-    domains = _jsonl(build.root / "indexes" / "domains.jsonl")
+    domains = build.domains or _jsonl(
+        build.root / "indexes" / "domains.jsonl")
     key = f"{physical}.{column.lower()}"
     for row in domains:
         if row.get("key") == key:
@@ -193,6 +198,16 @@ def sample_values(build: Build, table: str, column: str) -> dict:
                    "values": row["values"],
                    "coverage_note": "compiled snapshot domain: "
                                     "not a live query"}
+            estimate = row.get("distinct_estimate")
+            if estimate:
+                # the profiler's estimate says how complete the list
+                # is: 3 values on record of an estimated 24 is partial
+                out["distinct_estimate"] = estimate
+                if estimate > len(row["values"]):
+                    out["coverage_note"] += (
+                        f"; {len(row['values'])} values on record of "
+                        f"an estimated {estimate} distinct — a partial "
+                        "list, a literal outside it may still exist")
             if row.get("meanings"):
                 # what the codes MEAN (value lookup): filter on the
                 # code, say the meaning

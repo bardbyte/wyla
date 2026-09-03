@@ -55,19 +55,20 @@ _FROM = re.compile(r"\b(?:FROM|JOIN)\s+([\w.]+)", re.IGNORECASE)
 
 
 def _observed(build: Build, table: str, column: str
-              ) -> tuple[list[str], list[dict[str, str]]]:
-    """→ (observed values, meanings on record) for one column."""
+              ) -> tuple[list[str], list[dict[str, str]], int]:
+    """→ (observed values, meanings on record, distinct estimate) for
+    one column; the estimate is 0 when the profiler gave none."""
     try:
         got = sample_values(build, table, column)
     except Exception:                               # noqa: BLE001
-        return [], []
+        return [], [], 0
     if not isinstance(got, dict):
-        return [str(v) for v in (got or [])], []
+        return [str(v) for v in (got or [])], [], 0
     values = [str(v.get("value") if isinstance(v, dict) else v)
               for v in (got.get("values") or [])]
     meanings = [m for m in (got.get("meanings") or [])
                 if isinstance(m, dict)]
-    return values, meanings
+    return values, meanings, int(got.get("distinct_estimate") or 0)
 
 
 def literal_warnings(build: Build, sql: str) -> list[str]:
@@ -81,7 +82,7 @@ def literal_warnings(build: Build, sql: str) -> list[str]:
     warnings = []
     for _alias, column, literal in _LITERAL.findall(sql):
         for table in tables:
-            observed, meanings = _observed(build, table, column)
+            observed, meanings, estimate = _observed(build, table, column)
             if not observed and not meanings:
                 continue
             known = {o.lower() for o in observed} | {
@@ -109,6 +110,10 @@ def literal_warnings(build: Build, sql: str) -> list[str]:
                     f"{'observed' if observed else 'known'} values of "
                     f"{table}.{column}; closest: "
                     + ", ".join(repr(c) for c in close))
+            if observed and estimate > len(observed):
+                # a partial list is a hint, not a verdict
+                line += (f" (the profile estimates {estimate} distinct "
+                         "values, so the list on record is partial)")
             if meanings:
                 line += "; meanings on record: " + ", ".join(
                     f"'{m.get('value')}' = {m.get('synonym')}"

@@ -507,6 +507,60 @@ def toolkit(build: Build, state: LoopState, *,
                     if sum(1 for r in results
                            if r["kind"] == "value") >= cap:
                         break
+            # a stored value written as stored ("GB", "ACTIVE"): the
+            # profiler's observed values are on record with their share
+            # of rows. Short codes (≤ 3 chars) must be written exactly
+            # as stored — "us" is a pronoun, "US" is a country — longer
+            # values match case-insensitively; kind=values also takes
+            # the whole query as one exact value
+            seen = {(r["table"], r["column"], str(r["value"]))
+                    for r in results if r.get("kind") == "value"}
+            written = set(re.findall(r"[A-Za-z0-9][A-Za-z0-9_\-]*",
+                                     query or ""))
+            written_low = {w.lower() for w in written}
+            for d in getattr(build, "domains", []) or []:
+                parts = (d.get("key") or "").split(".")
+                if len(parts) < 3:
+                    continue
+                table, column = ".".join(parts[:2]), ".".join(parts[2:])
+                synonyms = {str(m.get("value", "")).lower():
+                            m.get("synonym", "")
+                            for m in d.get("meanings") or []}
+                for v in d.get("values") or []:
+                    value = str(v.get("value", "") if isinstance(v, dict)
+                                else v)
+                    if not value or (table, column, value) in seen:
+                        continue
+                    lv = value.lower()
+                    if lv == low and kind == "values":
+                        pass
+                    elif len(value) <= 3:
+                        if value not in written:
+                            continue
+                    elif lv not in written_low:
+                        continue
+                    hit = {
+                        "kind": "value", "table": table,
+                        "column": column, "value": value,
+                        "synonym": synonyms.get(lv, ""),
+                        "predicate": f"{column} = '{value}'",
+                        "observed": {
+                            "count": v.get("count") if isinstance(v, dict)
+                            else None,
+                            "pct": v.get("pct") if isinstance(v, dict)
+                            else None},
+                        "hint": "a value the profiler observed in this "
+                                "column, with its share of rows: filter "
+                                "with the predicate"}
+                    if d.get("distinct_estimate"):
+                        hit["distinct_estimate"] = d["distinct_estimate"]
+                    results.append(hit)
+                    seen.add((table, column, value))
+                    if sum(1 for r in results
+                           if r["kind"] == "value") >= cap:
+                        break
+                if sum(1 for r in results if r["kind"] == "value") >= cap:
+                    break
         if kind in ("all", "joins"):
             tokens = _tokens(query)
             for j in build.joins:

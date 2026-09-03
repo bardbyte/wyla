@@ -69,7 +69,9 @@ def synapse_digest(build: Build,
     # ── words: scoped acronyms, the common-word guard, value
     #    meanings — intent understanding before any table ──────
     acronyms = [v for v in build.vocab if v.get("kind") == "acronym"]
-    if acronyms or getattr(build, "value_meanings", None):
+    observed = [d for d in (getattr(build, "domains", []) or [])
+                if d.get("values")]
+    if acronyms or getattr(build, "value_meanings", None) or observed:
         by_symbol: dict[str, int] = {}
         for v in acronyms:
             key = (v.get("text") or "").lower()
@@ -102,6 +104,21 @@ def synapse_digest(build: Build,
                 "predicate to filter with; sample_values shows a "
                 "column's codes with their meanings. Filter on the "
                 "code, say the meaning.")
+        if observed:
+            estimated = sum(1 for d in observed
+                            if d.get("distinct_estimate"))
+            partial = sum(1 for d in observed
+                          if (d.get("distinct_estimate") or 0)
+                          > len(d.get("values") or []))
+            lines.append(
+                f"The profiler's observed values are on record for "
+                f"{len(observed)} columns ({estimated} with an "
+                f"estimated distinct count, {partial} of those lists "
+                f"partial): {search_hint}(kind=\"values\") also "
+                "matches a value written as stored (\"GB\", "
+                "\"ACTIVE\") with its share of rows; sample_values "
+                "says when a list is partial, so a literal outside it "
+                "is a question, not an error.")
         lines.append("")
 
     # ── top metrics, certified first, by support ─────────────
