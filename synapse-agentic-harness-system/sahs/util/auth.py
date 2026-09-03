@@ -45,12 +45,14 @@ env/auth — per the E10 console contract), never a stack trace.
 
 from __future__ import annotations
 
+import base64
 import os
 import ssl
+import urllib.request
 from typing import Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 DEFAULT_BQ_ENDPOINT = "https://bigquery-prod.p.googleapis.com"
 DEFAULT_VERTEX_ENDPOINT = "https://aiplatform.googleapis.com"
@@ -90,71 +92,135 @@ def load_dotenv(path: Path | None = None) -> list[str]:
     return loaded
 
 
-def configure_network(endpoint: str) -> dict[str, str]:
-    """Corporate-proxy handling, same contract as the laptop's
-    bq_connect.py: inject the Google hostnames into NO_PROXY so BQ and
-    OAuth calls go DIRECT (the corporate proxy breaks the handshake
-    against Google's private endpoints). Overrides: BQ_FORCE_PROXY=1
-    skips the injection (everything through the proxy);
-    BQ_DISABLE_PROXY=1 drops the proxy entirely for this process.
-    Returns a summary for display."""
-    summary: dict[str, str] = {}
+def env_proxies() -> dict[str, str]:
+    """The corporate proxy as the environment declares it (HTTPS_PROXY /
+    HTTP_PROXY), for the plane that rides it. Read, never written."""
+    out: dict[str, str] = {}
+    https = _first_env("HTTPS_PROXY", "https_proxy")
+    http = _first_env("HTTP_PROXY", "http_proxy")
+    if https:
+        out["https"] = https
+    if http:
+        out["http"] = http
+    return out
+
+
+def bq_proxies() -> dict[str, str]:
+    """The BigQuery plane's route: DIRECT by default — the PSC endpoint
+    and its OAuth token endpoint resolve privately and the corporate
+    proxy breaks the handshake (the laptop's bq_connect contract).
+    ``BQ_FORCE_PROXY=1`` rides the proxy; ``BQ_DISABLE_PROXY=1`` is
+    direct as well."""
     if os.environ.get("BQ_DISABLE_PROXY") == "1":
-        for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy",
-                     "https_proxy"):
-            os.environ.pop(name, None)
-        summary["proxy"] = "disabled (BQ_DISABLE_PROXY=1)"
-        return summary
+        return {}
     if os.environ.get("BQ_FORCE_PROXY") == "1":
-        summary["proxy"] = "forced through proxy (BQ_FORCE_PROXY=1)"
-        return summary
+        return env_proxies()
+    return {}
+
+
+def vertex_proxies() -> dict[str, str]:
+    """The Vertex plane's route: VIA the corporate proxy as the
+    environment declares it (the proven contract: token call and model
+    call both ride it). ``VERTEX_DISABLE_PROXY=1`` and
+    ``VERTEX_NO_PROXY_GOOGLE=1`` are direct — every Vertex host is a
+    Google host, so "direct for Google" is direct."""
+    if os.environ.get("VERTEX_DISABLE_PROXY") == "1" \
+            or os.environ.get("VERTEX_NO_PROXY_GOOGLE") == "1":
+        return {}
+    return env_proxies()
+
+
+def configure_network(endpoint: str) -> dict[str, str]:
+    """The BigQuery plane's route, for display. NOTHING is written to
+    the process environment any more: the route is pinned on the
+    connection (``BQConnection.proxies`` / ``opener()``), so it can
+    never leak into the Vertex plane. It used to: the first dry run
+    injected googleapis.com into NO_PROXY, and every model call after
+    it went DIRECT to Vertex — which the corporate network blackholes —
+    so the turn hung right after a successful dry run."""
+    if os.environ.get("BQ_DISABLE_PROXY") == "1":
+        return {"proxy": "disabled (BQ_DISABLE_PROXY=1): direct"}
+    if os.environ.get("BQ_FORCE_PROXY") == "1":
+        proxy = env_proxies().get("https", "")
+        return {"proxy": "forced through proxy "
+                         + (redact_url(proxy) if proxy
+                            else "(none configured: direct)")
+                         + " (BQ_FORCE_PROXY=1)"}
     host = urlparse(endpoint).hostname or ""
-    hosts = {host, "oauth2.googleapis.com", "www.googleapis.com",
-             "googleapis.com"}
-    hosts.discard("")
-    for name in ("NO_PROXY", "no_proxy"):
-        existing = [h for h in os.environ.get(name, "").split(",") if h]
-        merged = existing + sorted(h for h in hosts if h not in existing)
-        os.environ[name] = ",".join(merged)
-    summary["proxy"] = f"direct for: {', '.join(sorted(hosts))}"
-    return summary
+    hosts = sorted(h for h in {host, "oauth2.googleapis.com"} if h)
+    return {"proxy": f"direct for: {', '.join(hosts)} (pinned on the "
+                     "connection; NO_PROXY untouched)"}
 
 
 def configure_vertex_network(endpoint: str) -> dict[str, str]:
-    """The PROVEN Vertex contract (check_vertex_gemini.py / the ADK
-    apps that ran against prj-d-ea-poc): touch NOTHING. requests and
-    urllib honor HTTPS_PROXY from the environment, so the OAuth token
-    call and the model call ride the corporate proxy, with truststore
-    fixing the MITM chain.
+    """The Vertex plane's route, for display: the PROVEN contract
+    (check_vertex_gemini.py / the ADK apps that ran against
+    prj-d-ea-poc) rides the corporate proxy for the OAuth token call
+    and the model call, with truststore fixing the MITM chain.
 
-    This is deliberately the OPPOSITE of the BQ plane: the BQ PSC
-    endpoint resolves privately and needs the NO_PROXY injection —
-    but borrowing that injection here sent the Vertex OAuth call
-    DIRECT to oauth2.googleapis.com, which the corporate network
-    blackholes (the field symptom: a 120s timeout at the auth step).
+    This is deliberately the OPPOSITE of the BigQuery plane, and the
+    two no longer touch: each connection carries its own route and its
+    opener never consults NO_PROXY, so the BigQuery plane's direct
+    setting cannot send the Vertex OAuth call direct to
+    oauth2.googleapis.com any more (the field symptom: a 120s timeout
+    at the auth step, then the same hang on every model call after the
+    first dry run).
 
-    Knobs for other topologies:
-    - ``VERTEX_DISABLE_PROXY=1`` drops the proxy for this process
-      (direct-egress networks);
-    - ``VERTEX_NO_PROXY_GOOGLE=1`` re-enables the BQ-style host
-      injection (private-DNS setups where googleapis resolves to
-      restricted VIPs)."""
-    summary: dict[str, str] = {}
+    Knobs for other topologies: ``VERTEX_DISABLE_PROXY=1`` (direct
+    egress) and ``VERTEX_NO_PROXY_GOOGLE=1`` (private DNS where
+    googleapis resolves to restricted VIPs) — both direct."""
     if os.environ.get("VERTEX_DISABLE_PROXY") == "1":
-        for name in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy",
-                     "https_proxy"):
-            os.environ.pop(name, None)
-        summary["proxy"] = "disabled (VERTEX_DISABLE_PROXY=1)"
-        return summary
+        return {"proxy": "disabled (VERTEX_DISABLE_PROXY=1): direct"}
     if os.environ.get("VERTEX_NO_PROXY_GOOGLE") == "1":
-        summary = configure_network(endpoint)
-        summary["proxy"] += " (VERTEX_NO_PROXY_GOOGLE=1)"
-        return summary
-    proxy = _first_env("HTTPS_PROXY", "https_proxy")
-    summary["proxy"] = (f"via corporate proxy {redact_url(proxy)} "
-                        "(the proven contract)" if proxy
-                        else "no proxy configured: direct")
-    return summary
+        return {"proxy": "direct for Google hosts "
+                         "(VERTEX_NO_PROXY_GOOGLE=1)"}
+    proxy = env_proxies().get("https", "")
+    return {"proxy": (f"via corporate proxy {redact_url(proxy)} "
+                      "(the proven contract; pinned on the connection, "
+                      "NO_PROXY never consulted)" if proxy
+                      else "no proxy configured: direct")}
+
+
+class PinnedProxyHandler(urllib.request.ProxyHandler):
+    """A proxy decision made per connection, never by the environment.
+
+    The stdlib handler asks ``proxy_bypass(host)`` on every request,
+    which reads NO_PROXY from the process environment — so one plane's
+    direct-connection list silently rerouted the other plane. This
+    handler routes exactly what it was given: an empty mapping is a
+    direct connection, a mapping is that proxy (credentials in the URL
+    become the Proxy-authorization header), and NO_PROXY is never
+    consulted."""
+
+    def proxy_open(self, req, proxy, type):            # noqa: A002
+        orig_type = req.type
+        proxy_type, user, password, hostport = \
+            urllib.request._parse_proxy(proxy)         # noqa: SLF001
+        if proxy_type is None:
+            proxy_type = orig_type
+        if user and password:
+            user_pass = f"{unquote(user)}:{unquote(password)}"
+            creds = base64.b64encode(user_pass.encode()).decode("ascii")
+            req.add_header("Proxy-authorization", "Basic " + creds)
+        req.set_proxy(unquote(hostport), proxy_type)
+        if orig_type == proxy_type or orig_type == "https":
+            return None
+        return self.parent.open(req, timeout=req.timeout)
+
+
+def plane_opener(proxies: dict[str, str],
+                 context: ssl.SSLContext) -> urllib.request.OpenerDirector:
+    """A urllib opener with one plane's route and TLS pinned. Passing
+    the handlers replaces build_opener's environment-derived ones."""
+    return urllib.request.build_opener(
+        PinnedProxyHandler(dict(proxies)),
+        urllib.request.HTTPSHandler(context=context))
+
+
+def describe_route(proxies: dict[str, str]) -> str:
+    """'direct' or 'via <proxy>' (credentials redacted), for display."""
+    proxy = proxies.get("https") or proxies.get("http") or ""
+    return f"via {redact_url(proxy)}" if proxy else "direct"
 
 
 def resolve_ssl() -> tuple[bool, str | None]:
@@ -315,12 +381,17 @@ class BQConnection:
     ca_bundle: str | None = None
     # where the tables live; defaults to the query project
     data_project: str = ""
+    # THIS plane's route: {} is direct (the PSC contract), a mapping is
+    # the proxy. Pinned here and in opener(); never the environment's
+    proxies: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_env(cls) -> "BQConnection":
         """The full laptop bootstrap, mirroring the proven bq_connect
-        flow: .env → validate → resolve endpoint → NO_PROXY injection →
-        SSL settings. Fails fast with a typed error (exit 3)."""
+        flow: .env → validate → resolve endpoint → the route (direct,
+        pinned on the connection) → SSL settings. Fails fast with a
+        typed error (exit 3). The process environment is read, never
+        written."""
         load_dotenv()
         project = resolve_bq_project()
         if not project:
@@ -336,12 +407,12 @@ class BQConnection:
         if not key.exists():
             raise AuthError(f"BigQuery SA key not found on disk: {key}")
         endpoint = resolve_bq_endpoint()
-        configure_network(endpoint)
         verify, bundle = resolve_ssl()
         return cls(project=project, endpoint=endpoint,
                    location=resolve_bq_location(), key_path=key,
                    ssl_verify=verify, ca_bundle=bundle,
-                   data_project=resolve_bq_data_project() or project)
+                   data_project=resolve_bq_data_project() or project,
+                   proxies=bq_proxies())
 
     def ssl_context(self) -> ssl.SSLContext:
         """Context for urllib calls: default verified (with the custom
@@ -354,12 +425,24 @@ class BQConnection:
             return context
         return ssl.create_default_context(cafile=self.ca_bundle)
 
+    def route(self) -> str:
+        return describe_route(self.proxies)
+
+    def opener(self) -> urllib.request.OpenerDirector:
+        """urllib opener with this plane's route and TLS pinned; the
+        environment's NO_PROXY is never consulted."""
+        return plane_opener(self.proxies, self.ssl_context())
+
     def token_session(self):
-        """requests.Session for the OAuth token refresh, honoring the
-        same verify/CA settings (used only against oauth2.googleapis.com
-        — the laptop contract's Step 6)."""
+        """requests.Session for the OAuth token refresh, on this
+        plane's route with the same verify/CA settings (used only
+        against oauth2.googleapis.com — the laptop contract's Step 6).
+        trust_env is off: the route is the connection's, never the
+        environment's."""
         import requests                          # ships with google-auth
         session = requests.Session()
+        session.trust_env = False
+        session.proxies = dict(self.proxies)
         session.verify = (self.ca_bundle or True) if self.ssl_verify \
             else False
         return session
@@ -392,6 +475,9 @@ class VertexConnection:
     ssl_verify: bool = True
     ca_bundle: str | None = None
     truststore_active: bool = False
+    # THIS plane's route: the corporate proxy as the environment
+    # declares it (the proven contract). Pinned here and in opener()
+    proxies: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_env(cls) -> "VertexConnection":
@@ -428,14 +514,14 @@ class VertexConnection:
             pass
         location = resolve_vertex_location()
         endpoint = resolve_vertex_endpoint(location)
-        # NOT configure_network: the Vertex plane rides the proxy by
-        # default (the proven contract) — see configure_vertex_network
-        configure_vertex_network(endpoint)
+        # the Vertex plane rides the proxy by default (the proven
+        # contract) — pinned on the connection, see vertex_proxies
         verify, bundle = resolve_vertex_ssl()
         return cls(project=project, location=location,
                    model=resolve_vertex_model(), endpoint=endpoint,
                    key_path=key, ssl_verify=verify, ca_bundle=bundle,
-                   truststore_active=truststore_active)
+                   truststore_active=truststore_active,
+                   proxies=vertex_proxies())
 
     def ssl_context(self) -> ssl.SSLContext:
         if not self.ssl_verify:
@@ -445,9 +531,21 @@ class VertexConnection:
             return context
         return ssl.create_default_context(cafile=self.ca_bundle)
 
+    def route(self) -> str:
+        return describe_route(self.proxies)
+
+    def opener(self) -> urllib.request.OpenerDirector:
+        """urllib opener with this plane's route and TLS pinned; the
+        environment's NO_PROXY is never consulted, so a BigQuery
+        connection made earlier in the process cannot reroute the
+        model calls."""
+        return plane_opener(self.proxies, self.ssl_context())
+
     def token_session(self):
         import requests                          # ships with google-auth
         session = requests.Session()
+        session.trust_env = False        # the route is the connection's
+        session.proxies = dict(self.proxies)
         session.verify = (self.ca_bundle or True) if self.ssl_verify \
             else False
         return session

@@ -58,14 +58,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  model      {connection.model}")
     print(f"  endpoint   {connection.endpoint}")
     print(f"  key file   {connection.key_path} (exists)")
-    from sahs.util.auth import redact_url
-    proxy = redact_url(os.environ.get("HTTPS_PROXY")
-                       or os.environ.get("https_proxy") or "")
-    print("  proxy      "
-          + (f"via {proxy} — the proven contract (token + model "
-             "calls ride the corporate proxy; credentials redacted)"
-             if proxy else "none configured — direct"))
-    print(f"  NO_PROXY   {os.environ.get('NO_PROXY', '(none)')}")
+    print("  route      "
+          + (f"{connection.route()} — the proven contract (token + "
+             "model calls ride the corporate proxy; credentials "
+             "redacted), pinned on this connection: the environment's "
+             "NO_PROXY is never consulted, so a BigQuery call earlier "
+             "in the process cannot reroute the model calls"
+             if connection.proxies else "direct (no proxy configured, "
+             "or VERTEX_DISABLE_PROXY / VERTEX_NO_PROXY_GOOGLE)"))
+    if "googleapis" in (os.environ.get("NO_PROXY", "")
+                        + os.environ.get("no_proxy", "")).lower():
+        print("  note       NO_PROXY names googleapis in the "
+              "environment: ignored on this plane by design")
     trust_note = ("ACTIVE (OS keychain trust — the clean "
                   "corporate-TLS fix)" if connection.truststore_active
                   else "not installed (pip install truststore "

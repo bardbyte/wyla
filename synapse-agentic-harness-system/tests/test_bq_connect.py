@@ -59,29 +59,33 @@ def test_dotenv_loads_without_overriding(tmp_path, monkeypatch):
         "https://bigquery-prod.p.googleapis.com"
 
 
-def test_no_proxy_injection_and_overrides(monkeypatch):
+def test_the_bq_route_is_pinned_never_injected(monkeypatch):
+    """The route is the connection's, not the process's: NO_PROXY is
+    neither read nor written (the injection used to leak into the
+    Vertex plane and hang every model call after the first dry run)."""
     import os
+    from sahs.util.auth import bq_proxies
     monkeypatch.setenv("NO_PROXY", "internal.corp")
-    configure_network("https://bigquery-prod.p.googleapis.com")
-    for host in ("bigquery-prod.p.googleapis.com",
-                 "oauth2.googleapis.com", "internal.corp"):
-        assert host in os.environ["NO_PROXY"]
-    before = os.environ["NO_PROXY"]
-    configure_network("https://bigquery-prod.p.googleapis.com")
-    assert os.environ["NO_PROXY"] == before       # idempotent, no dupes
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.corp:8080")
+    summary = configure_network("https://bigquery-prod.p.googleapis.com")
+    assert "direct" in summary["proxy"]
+    assert os.environ["NO_PROXY"] == "internal.corp"      # never written
+    assert bq_proxies() == {}
 
     monkeypatch.setenv("BQ_FORCE_PROXY", "1")
-    monkeypatch.setenv("NO_PROXY", "x")
     summary = configure_network("https://bigquery-prod.p.googleapis.com")
     assert "forced" in summary["proxy"]
-    assert os.environ["NO_PROXY"] == "x"          # untouched
+    assert bq_proxies() == {"https": "http://proxy.corp:8080"}
+    assert os.environ["NO_PROXY"] == "internal.corp"      # untouched
 
     monkeypatch.delenv("BQ_FORCE_PROXY")
     monkeypatch.setenv("BQ_DISABLE_PROXY", "1")
-    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.corp:8080")
     summary = configure_network("https://bigquery-prod.p.googleapis.com")
     assert "disabled" in summary["proxy"]
-    assert "HTTPS_PROXY" not in os.environ
+    assert bq_proxies() == {}
+    # the environment is read, never edited: the proxy stays for the
+    # plane that rides it
+    assert os.environ["HTTPS_PROXY"] == "http://proxy.corp:8080"
 
 
 def test_ssl_controls(monkeypatch, tmp_path):
@@ -132,9 +136,12 @@ def test_from_env_full_bootstrap_from_dotenv(monkeypatch, tmp_path):
     assert connection.endpoint == "https://bigquery-prod.p.googleapis.com"
     assert connection.key_path == key
     assert connection.ssl_verify is True
-    # the bootstrap injected the direct-connection hosts
-    assert "oauth2.googleapis.com" in os.environ["NO_PROXY"]
-    assert "bigquery-prod.p.googleapis.com" in os.environ["NO_PROXY"]
+    # the route is pinned on the connection: direct, and the process
+    # environment did not gain a NO_PROXY
+    assert connection.proxies == {} and connection.route() == "direct"
+    assert "NO_PROXY" not in os.environ
+    session = connection.token_session()
+    assert session.trust_env is False and session.proxies == {}
 
 
 def test_data_project_defaults_to_the_query_project(monkeypatch, tmp_path):

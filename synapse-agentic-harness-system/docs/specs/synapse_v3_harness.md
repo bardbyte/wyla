@@ -286,6 +286,14 @@ handoff, the eval suites.
    model already had the query; the handover makes the query the
    deliverable and the rows a tap. Autopilot keeps the old behavior
    for those who want it.
+10. Routes are pinned per connection (2026-09-03). The stall after
+   every first dry run was the BigQuery plane writing googleapis.com
+   into the process's NO_PROXY, which rerouted every later Vertex
+   call direct into the corporate blackhole. Each connection now
+   carries its own proxies and opener; nothing writes the
+   environment; the doctor prints both routes first. Reason: two
+   planes with opposite network contracts cannot share a
+   process-wide switch.
 
 ## 12 · The laptop, measured (state report of 2026-09-02)
 

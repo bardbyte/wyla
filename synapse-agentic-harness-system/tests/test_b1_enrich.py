@@ -473,15 +473,18 @@ def test_vertex_env_contract_is_typed_and_separate(tmp_path,
 
 
 def test_vertex_rides_the_proxy_bq_bypasses_it(tmp_path, monkeypatch):
-    """The two planes have OPPOSITE proven network contracts. BQ's PSC
-    endpoint needs the NO_PROXY injection; Vertex rides the corporate
-    proxy exactly like check_vertex_gemini.py did — injecting
+    """The two planes have OPPOSITE proven network contracts, and each
+    is pinned on its own connection: BQ's PSC endpoint goes direct,
+    Vertex rides the corporate proxy exactly like check_vertex_gemini.py
+    did. They no longer touch the process environment — injecting
     googleapis into NO_PROXY sent the Vertex OAuth call direct and the
-    corporate network blackholed it (timeout at the auth step)."""
+    corporate network blackholed it (a timeout at the auth step, then
+    the same hang on every model call after the first dry run)."""
     from sahs.util.auth import (
         VertexConnection,
         configure_network,
         configure_vertex_network,
+        vertex_proxies,
     )
     empty_env = tmp_path / "empty.env"
     empty_env.write_text("", encoding="utf-8")
@@ -496,26 +499,35 @@ def test_vertex_rides_the_proxy_bq_bypasses_it(tmp_path, monkeypatch):
     monkeypatch.setenv("LUMI_VERTEX_SA_KEY", str(key))
     monkeypatch.setenv("VERTEX_PROJECT_ID", "prj-d-ea-poc")
 
-    # Vertex default: proxy untouched, NOTHING injected into NO_PROXY
+    # Vertex default: the proxy, pinned; NOTHING written to NO_PROXY
     connection = VertexConnection.from_env()
-    assert "googleapis" not in os.environ.get("NO_PROXY", "")
+    assert connection.proxies == {"https": "http://proxy.corp:8080"}
+    assert connection.route() == "via http://proxy.corp:8080"
+    assert "NO_PROXY" not in os.environ
     assert os.environ["HTTPS_PROXY"] == "http://proxy.corp:8080"
     summary = configure_vertex_network(connection.endpoint)
     assert "via corporate proxy" in summary["proxy"]
+    session = connection.token_session()
+    assert session.trust_env is False
+    assert session.proxies == {"https": "http://proxy.corp:8080"}
 
-    # the BQ contract still injects (PSC needs direct)
-    configure_network("https://bigquery-prod.p.googleapis.com")
-    assert "oauth2.googleapis.com" in os.environ["NO_PROXY"]
+    # the BQ contract is direct, and no longer injects anything
+    summary = configure_network("https://bigquery-prod.p.googleapis.com")
+    assert "direct" in summary["proxy"]
+    assert "NO_PROXY" not in os.environ
 
-    # knobs: opt back into injection, or drop the proxy entirely
-    monkeypatch.setenv("NO_PROXY", "")
+    # knobs: direct for Google hosts, or no proxy at all — both leave
+    # the environment alone
     monkeypatch.setenv("VERTEX_NO_PROXY_GOOGLE", "1")
-    configure_vertex_network("https://aiplatform.googleapis.com")
-    assert "aiplatform.googleapis.com" in os.environ["NO_PROXY"]
+    assert vertex_proxies() == {}
+    assert "direct" in configure_vertex_network(
+        "https://aiplatform.googleapis.com")["proxy"]
     monkeypatch.delenv("VERTEX_NO_PROXY_GOOGLE")
     monkeypatch.setenv("VERTEX_DISABLE_PROXY", "1")
-    configure_vertex_network("https://aiplatform.googleapis.com")
-    assert "HTTPS_PROXY" not in os.environ
+    assert vertex_proxies() == {}
+    assert "disabled" in configure_vertex_network(
+        "https://aiplatform.googleapis.com")["proxy"]
+    assert os.environ["HTTPS_PROXY"] == "http://proxy.corp:8080"
 
 
 def test_proxy_credentials_never_printed():

@@ -118,9 +118,8 @@ class VertexClient:
             headers={"Authorization": f"Bearer {self._token()}",
                      "Content-Type": "application/json"},
             method="POST")
-        with urllib.request.urlopen(
-                request, timeout=120,
-                context=self.connection.ssl_context()) as response:
+        with self.connection.opener().open(
+                request, timeout=120) as response:
             return json.loads(response.read().decode("utf-8"))
 
     def generate(self, prompt: str, *, system: str = "",
@@ -281,9 +280,8 @@ class VertexClient:
                      "Content-Type": "application/json"},
             method="POST")
         try:
-            with urllib.request.urlopen(
-                    request, timeout=120,
-                    context=self.connection.ssl_context()) as response:
+            with self.connection.opener().open(
+                    request, timeout=120) as response:
                 for raw in response:
                     line = raw.decode("utf-8").strip()
                     if not line.startswith("data:"):
@@ -435,9 +433,10 @@ class VertexClient:
                      "Content-Type": "application/json"},
             method="POST")
         try:
-            with urllib.request.urlopen(
-                    request, timeout=timeout,
-                    context=self.connection.ssl_context()) as response:
+            # the connection's opener pins the Vertex route: via the
+            # corporate proxy even after a BigQuery call in this process
+            with self.connection.opener().open(
+                    request, timeout=timeout) as response:
                 for raw in response:
                     line = raw.decode("utf-8").strip()
                     if not line.startswith("data:"):

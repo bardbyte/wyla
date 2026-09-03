@@ -297,6 +297,19 @@ python scripts/turn_doctor.py          # newest session: each model call
                                        # OPEN segment a stuck turn sits in
 ```
 
+The doctor now opens with the **network planes**: the route each
+connection pins (BigQuery direct on the PSC contract, Vertex via the
+corporate proxy) and a note when the environment's NO_PROXY names
+googleapis. A turn that hung on the model call right after the first
+dry run was exactly this: the BigQuery connection used to write
+googleapis.com into NO_PROXY for the whole process, so every later
+Vertex call (the OAuth refresh and the stream) went direct into the
+corporate blackhole until the 120 s silence timeout. Each plane now
+carries its own route and its opener never consults NO_PROXY, so a
+dry run cannot reroute a model call; `python scripts/vertex_check.py
+--generate` after `python scripts/bq_check.py` in one shell proves it
+on the laptop.
+
 The client gives up on a model stream after 120 s of silence, retries
 once if nothing had arrived, and the turn then closes in plain language
 with what was already said. Paste the doctor's output with the transcript.

@@ -74,9 +74,10 @@ class BQDryRun:
                      "Content-Type": "application/json"},
             method="POST")
         try:
-            with urllib.request.urlopen(
-                    request, timeout=30,
-                    context=self.connection.ssl_context()) as response:
+            # the connection's opener: this plane's route and TLS,
+            # never the environment's NO_PROXY
+            with self.connection.opener().open(
+                    request, timeout=30) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             try:

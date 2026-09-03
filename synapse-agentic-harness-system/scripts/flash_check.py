@@ -88,9 +88,7 @@ def probe_listed(client: Any) -> tuple[str, str]:
     request = urllib.request.Request(
         url, headers={"Authorization": f"Bearer {client._token()}"})
     try:
-        with urllib.request.urlopen(
-                request, timeout=30,
-                context=c.ssl_context()) as response:
+        with c.opener().open(request, timeout=30) as response:
             meta = json.loads(response.read().decode("utf-8"))
         return "ok", str(meta.get("versionId") or meta.get("name")
                          or "listed")
