@@ -27,7 +27,7 @@ import datetime as _dt
 import json
 import os
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, Mapping
 
 from sahs.canon.canonical import try_canon
 from sahs.tools.api import Build
@@ -36,6 +36,60 @@ from sahs.tools.warehouse_errors import teach_warehouse_error
 from sahs.tools.validate_sql import _DML_DDL, _QUERY_KINDS
 
 DEFAULT_MAX_BYTES = 1_000_000_000
+LIVE_SWITCH = "SAHS_ALLOW_LIVE"
+# names people reach for instead of the switch: the refusal names the
+# one it finds, so "the env is set, why is this not happening" answers
+# itself
+_LIVE_NEAR_MISSES = ("SAHS_LIVE", "ALLOW_LIVE", "SAHS_RUN_LIVE",
+                     "SAHS_LIVE_MODE", "LIVE_MODE")
+_TRUTHY = ("1", "true", "yes", "on")
+
+
+def live_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """The live switch, read forgivingly: 1, true, yes or on."""
+    source: Mapping[str, str] = os.environ if env is None else env
+    return str(source.get(LIVE_SWITCH, "")).strip().lower() in _TRUTHY
+
+
+def live_switch_note(env: Mapping[str, str] | None = None) -> str:
+    """One line on the live switch for the doctor, the checks and the
+    refusal: enabled, or disabled with the near miss named."""
+    source: Mapping[str, str] = os.environ if env is None else env
+    if live_enabled(source):
+        return f"live runs enabled ({LIVE_SWITCH}={source.get(LIVE_SWITCH)})"
+    for name in _LIVE_NEAR_MISSES:
+        if str(source.get(name, "")).strip():
+            return (f"live runs disabled: {name}={source.get(name)} is "
+                    f"set, but the switch is {LIVE_SWITCH}=1")
+    value = str(source.get(LIVE_SWITCH, "")).strip()
+    if value:
+        return (f"live runs disabled: {LIVE_SWITCH}={value!r} is not one "
+                "of 1, true, yes, on")
+    return f"live runs disabled: {LIVE_SWITCH} is not set"
+
+
+def scan_ceiling(env: Mapping[str, str] | None = None) -> int:
+    """The live scan ceiling in bytes (SAHS_LIVE_MAX_BYTES, or the silo
+    default); an unreadable value falls back to the default."""
+    source: Mapping[str, str] = os.environ if env is None else env
+    raw = str(source.get("SAHS_LIVE_MAX_BYTES", "")).strip()
+    try:
+        return int(float(raw)) if raw else DEFAULT_MAX_BYTES
+    except ValueError:
+        return DEFAULT_MAX_BYTES
+
+
+def human_bytes(n: Any) -> str:
+    try:
+        value = float(n)
+    except (TypeError, ValueError):
+        return "an unknown amount"
+    for unit in ("B", "KB", "MB", "GB", "TB", "PB"):
+        if value < 1000 or unit == "PB":
+            return (f"{value:.0f} {unit}" if unit == "B"
+                    else f"{value:.1f} {unit}")
+        value /= 1000
+    return f"{value:.1f} PB"
 DEFAULT_ROW_CAP = 1000
 MIN_PRIOR_JOBS = 20        # A6: thinner priors are anecdotes, not gates
 
@@ -198,12 +252,13 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
                         "hint": "a restricted table: clearance is the "
                                 "steward's to grant, not your SQL; say "
                                 "which table and stop", "source": "gate"})
-        if env.get("SAHS_ALLOW_LIVE") != "1":
+        if not live_enabled(env):
             return _finish(
                 "denied",
-                error="live_disabled: live mode is default-deny: set "
-                      "SAHS_ALLOW_LIVE=1 on the laptop to enable; "
-                      "snapshot mode answers most questions",
+                error=f"live_disabled: {live_switch_note(env)}. Set "
+                      f"{LIVE_SWITCH}=1 in the silo .env (read on the "
+                      "next run) or export it in the shell that starts "
+                      "the app; dry runs answer most questions",
                 taught={"kind": "access", "yours_to_fix": False,
                         "hint": "live execution is switched off on this "
                                 "machine: not your SQL; dry_run and "
@@ -260,7 +315,7 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
     # percentile's clothes, so global alone applies. Constants are
     # assumption A6, revisited from denied-query triage.
     observed = outcome.bytes_processed or 0
-    max_bytes = int(env.get("SAHS_LIVE_MAX_BYTES", DEFAULT_MAX_BYTES))
+    max_bytes = scan_ceiling(env)
     if observed > max_bytes:
         return _finish(
             "denied",

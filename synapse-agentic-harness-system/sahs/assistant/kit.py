@@ -16,7 +16,8 @@ from typing import Any
 
 from sahs.loop.tools import ROW_CAP, ToolSpec, toolkit as v1_toolkit
 from sahs.tools.api import Build
-from sahs.tools.sandbox import DEFAULT_MAX_BYTES, execute_sandboxed
+from sahs.tools.sandbox import (DEFAULT_MAX_BYTES, execute_sandboxed,
+                                human_bytes, scan_ceiling)
 from sahs.tools.validate_sql import validate_sql
 
 from . import checks as _checks
@@ -212,6 +213,31 @@ def build_kit(build: Build, state: AssistantState, *,
         warnings = list(priced.get("warnings") or [])
         warnings += [w for w in literal_warnings(build, sql)
                      if w not in warnings]
+        # the ceiling is known now, not at Run: an over-ceiling query
+        # comes back once to narrow (the partition filter the card's
+        # grain line names); handed over the second time, the card
+        # says Run will be refused unless it is narrowed or the
+        # ceiling is raised
+        from sahs.util.auth import load_dotenv
+        load_dotenv()
+        ceiling = scan_ceiling()
+        scanned = int(priced.get("bytes_processed") or 0)
+        over = scanned > ceiling
+        if over and state.ceiling_refusals == 0:
+            state.ceiling_refusals += 1
+            return {"error": f"over_ceiling: this query would scan "
+                             f"{human_bytes(scanned)}, over the "
+                             f"{human_bytes(ceiling)} live ceiling: Run "
+                             "would be refused for cost",
+                    "hint": "narrow the scan before handing over: a "
+                            "filter on the table's partition column (the "
+                            "card's grain line names it), a tighter date "
+                            "range, fewer columns; then propose again. If "
+                            "it cannot be narrowed, propose it again as "
+                            "is and the card will say so",
+                    "kind": "cost", "yours_to_fix": True,
+                    "bytes_processed": scanned,
+                    "scan_ceiling_bytes": ceiling}
         status = "exploratory"
         line = ("An ad-hoc query, not on the meridian line: exploratory "
                 "until a check stands behind it.")
@@ -232,12 +258,19 @@ def build_kit(build: Build, state: AssistantState, *,
             "bytes_processed": priced.get("bytes_processed"),
             "result_schema": priced.get("result_schema"),
             "warnings": warnings, "metric_id": metric_id,
-            "status": status, "meridian_line": line}
+            "status": status, "meridian_line": line,
+            "scan_ceiling_bytes": ceiling, "over_ceiling": over}
         state.proposal = proposal
+        note = ("handed over: the person runs it from the card (Run "
+                "query, or Run + dashboard). Say in one or two sentences "
+                "what it will show, then stop.")
+        if over:
+            note += (f" It would scan {human_bytes(scanned)}, over the "
+                     f"{human_bytes(ceiling)} live ceiling: say so, and "
+                     "that Run needs a narrower query or a higher "
+                     "ceiling.")
         return {"ok": True, "ends_turn": True, "proposal": proposal,
-                "note": "handed over: the person runs it from the card "
-                        "(Run query, or Run + dashboard). Say in one or "
-                        "two sentences what it will show, then stop."}
+                "note": note}
 
     def python(code: str) -> dict[str, Any]:
         return run_python(code, workspace)

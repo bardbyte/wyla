@@ -771,7 +771,9 @@ def test_run_executes_the_proposal_without_the_model(compiled, tmp_path,
     prose = _prose(events)
     assert prose.startswith("Ran it: 2 rows") and "saved as q1" in prose
     chips = _by(events, "chips")[0]["suggestions"]
-    assert chips[0] == "Build a dashboard from these rows"
+    assert chips[0] == {"label": "Chart these rows", "action": "chart",
+                        "saved_as": "q1"}
+    assert chips[1] == "Build a dashboard from these rows"
     done = _by(events, "turn_done")[0]
     assert done["status"] == "answered" and done["model_calls"] == 0
     # the rows are in the workspace for the next turn's python
@@ -818,6 +820,7 @@ def test_run_refusals_are_taught_not_swallowed(compiled, tmp_path,
                                                monkeypatch):
     from sahs.evals.substrate import StaticSubstrate
     monkeypatch.delenv("SAHS_ALLOW_LIVE", raising=False)
+    monkeypatch.setenv("SAHS_LIVE", "1")          # the laptop's near miss
     build, _ = compiled
     model = _agent([_call("propose_sql", sql=SPEND_SQL,
                           title="Spend by day")])
@@ -832,7 +835,9 @@ def test_run_refusals_are_taught_not_swallowed(compiled, tmp_path,
     prose = _prose(events)
     assert prose.startswith("I could not run it")
     assert "configuration, not the query" in prose
-    assert "SAHS_ALLOW_LIVE" in prose
+    assert "SAHS_LIVE=1 is set, but the switch is SAHS_ALLOW_LIVE=1" \
+        in prose
+    assert "read on the next run" in prose
     assert _by(events, "turn_done")[0]["status"] == "partial"
     assert not _by(events, "artifact")
     with pytest.raises(ValueError):
@@ -937,4 +942,37 @@ def test_chart_rows_draws_the_saved_rows_without_the_model(
     assert bars["spec"]["kind"] == "bar"
     with pytest.raises(ValueError):
         runtime.find_run(session["id"], "q9")
+
+
+def test_an_over_ceiling_query_comes_back_once_then_hands_over_with_the_warning(
+        compiled, tmp_path, monkeypatch):
+    """4.2 TB against a 1 TB ceiling: the model learns it at handover,
+    not at Run. Once to narrow; the second time the card says so."""
+    from sahs.canon.canonical import try_canon
+    from sahs.evals.substrate import DryRunOutcome, StaticSubstrate
+    monkeypatch.setenv("SAHS_LIVE_MAX_BYTES", "1000000000000")
+    fp = try_canon(SPEND_SQL)[0].fp_expr
+    substrate = StaticSubstrate({fp: DryRunOutcome(
+        valid=True, result_schema=[{"name": "part_dt", "type": "DATE"}],
+        bytes_processed=4_200_000_000_000)})
+    model = _agent(
+        [_call("propose_sql", sql=SPEND_SQL, title="Spend by day")],
+        [{"text": "It cannot be narrowed further; here it is."},
+         _call("propose_sql", sql=SPEND_SQL, title="Spend by day")])
+    runtime = _runtime(compiled, model, tmp=tmp_path, substrate=substrate)
+    session = runtime.create_session()
+    events = _turn(runtime, session["id"], "spend by day")
+    first = _responses(model)[0]["response"]
+    assert first["error"].startswith("over_ceiling: this query would scan "
+                                     "4.2 TB, over the 1.0 TB live ceiling")
+    assert first["kind"] == "cost" and first["yours_to_fix"] is True
+    assert "partition column" in first["hint"]
+    second = _responses(model)[1]["response"]
+    assert second["ok"] and "over the 1.0 TB live ceiling" in second["note"]
+    proposal = _by(events, "proposal")[0]["proposal"]
+    assert proposal["over_ceiling"] is True
+    assert proposal["scan_ceiling_bytes"] == 10**12
+    assert proposal["bytes_processed"] == 4_200_000_000_000
+    assert _by(events, "turn_done")[0]["status"] == "proposed"
+    assert len(model.calls) == 2
 

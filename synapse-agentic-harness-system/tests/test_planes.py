@@ -185,3 +185,49 @@ def test_planes_check_proves_both_planes_in_one_process(tmp_path,
     assert planes_check.main([]) == 1
     assert "route leaked" in capsys.readouterr().err
 
+
+def test_the_live_switch_is_read_forgivingly_and_names_a_near_miss():
+    """"The env is set, why is this not happening": the .env said
+    SAHS_LIVE=1. The switch is SAHS_ALLOW_LIVE; the refusal and the
+    doctor now name the near miss instead of repeating the rule."""
+    from sahs.tools.sandbox import (human_bytes, live_enabled,
+                                    live_switch_note, scan_ceiling)
+    for value in ("1", "true", "YES", " on "):
+        assert live_enabled({"SAHS_ALLOW_LIVE": value}), value
+    assert not live_enabled({"SAHS_ALLOW_LIVE": "0"})
+    assert not live_enabled({"SAHS_LIVE": "1"})
+    assert not live_enabled({})
+    assert live_switch_note({"SAHS_ALLOW_LIVE": "1"}) == \
+        "live runs enabled (SAHS_ALLOW_LIVE=1)"
+    assert live_switch_note({"SAHS_LIVE": "1"}) == (
+        "live runs disabled: SAHS_LIVE=1 is set, but the switch is "
+        "SAHS_ALLOW_LIVE=1")
+    assert "is not one of 1, true, yes, on" in live_switch_note(
+        {"SAHS_ALLOW_LIVE": "enabled"})
+    assert live_switch_note({}) == \
+        "live runs disabled: SAHS_ALLOW_LIVE is not set"
+    assert scan_ceiling({}) == 1_000_000_000
+    assert scan_ceiling({"SAHS_LIVE_MAX_BYTES": "1000000000000"}) == 10**12
+    assert scan_ceiling({"SAHS_LIVE_MAX_BYTES": "1e10"}) == 10**10
+    assert scan_ceiling({"SAHS_LIVE_MAX_BYTES": "lots"}) == 1_000_000_000
+    assert human_bytes(4.2e12) == "4.2 TB"
+    assert human_bytes(10**12) == "1.0 TB"
+    assert human_bytes(512) == "512 B"
+    assert human_bytes(None) == "an unknown amount"
+
+
+def test_the_doctor_shows_the_live_switch_with_the_planes(tmp_path,
+                                                         monkeypatch):
+    sys.path.insert(0, str(SILO / "scripts"))
+    import turn_doctor
+    empty = tmp_path / "empty.env"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setenv("SAHS_ENV_FILE", str(empty))
+    for name in ("SAHS_ALLOW_LIVE", "SAHS_LIVE_MAX_BYTES"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("SAHS_LIVE", "1")
+    monkeypatch.setenv("SAHS_LIVE_MAX_BYTES", "1000000000000")
+    text = turn_doctor.planes()
+    assert ("live      live runs disabled: SAHS_LIVE=1 is set, but the "
+            "switch is SAHS_ALLOW_LIVE=1 · scan ceiling 1.0 TB") in text
+

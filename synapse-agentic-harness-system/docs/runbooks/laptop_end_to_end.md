@@ -274,8 +274,17 @@ the rows in the panel and in the workspace as q1; the "Chart these
 rows" chip draws them with no model call under the same provenance;
 "Build a dashboard from these rows" and "Run + build dashboard" are
 the model's turns, on autopilot. Autopilot mode skips the card. Run
-needs `SAHS_ALLOW_LIVE=1`; without it the card still shows the query
-and the run explains the configuration.
+needs `SAHS_ALLOW_LIVE=1` (that exact name: `SAHS_LIVE=1` does
+nothing, and the refusal now names such a near miss); put it in the
+silo `.env`, which every run reads, or export it in the shell that
+starts the app — an export in another shell never reaches a running
+server. Without it the card still shows the query and the run explains
+the configuration. The scan ceiling (`SAHS_LIVE_MAX_BYTES`, 1 GB by
+default) is enforced at handover time too: a query over it comes back
+to the model once to narrow, and if it is handed over anyway the card
+says Run will be refused unless it is narrowed or the ceiling raised.
+`python scripts/turn_doctor.py` and `planes_check.py` print the live
+switch and the ceiling with the planes.
 
 **Rows come from the warehouse under two limits.** Until live
 execution is on, the chat can only price a query (dry run) — it never

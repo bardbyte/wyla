@@ -260,4 +260,7 @@ def test_the_first_picture_needs_no_model():
     assert "chatChart" in API_JS
     for piece in ('/chart"', "ChartRows", "chart_rows"):
         assert piece in BACKEND, piece
+    # the card says when Run would be refused for cost
+    assert "proposal.over_ceiling" in CHAT_JS
+    assert "ceiling for live" in CHAT_JS
 

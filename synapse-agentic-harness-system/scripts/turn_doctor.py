@@ -185,6 +185,10 @@ def planes() -> str:
     if "googleapis" in leak:
         lines.append("  note      NO_PROXY names googleapis in the "
                      "environment: ignored on both planes by design")
+    from sahs.tools.sandbox import (human_bytes, live_switch_note,
+                                    scan_ceiling)
+    lines.append(f"  live      {live_switch_note()} · scan ceiling "
+                 f"{human_bytes(scan_ceiling())}")
     return "\n".join(lines)
 
 

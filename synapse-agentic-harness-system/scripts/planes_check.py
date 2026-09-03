@@ -87,6 +87,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"  ✓ model answered {time.perf_counter() - started:.1f}s "
           f"after the dry run: {' '.join(text.split())[:60]}")
+    from sahs.tools.sandbox import (human_bytes, live_switch_note,
+                                    scan_ceiling)
+    print(f"  live      {live_switch_note()} · scan ceiling "
+          f"{human_bytes(scan_ceiling())}")
     print("both planes hold in one process: the chat's first dry run "
           "cannot reroute its model calls")
     return 0

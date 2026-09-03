@@ -74,7 +74,8 @@ class Generation:
 def _execute_mode() -> str:
     """Live only when BOTH the sandbox is unlocked and Ask is asked to
     use it; otherwise the dry run, which returns zero rows by design."""
-    if (os.environ.get("SAHS_ALLOW_LIVE") == "1"
+    from sahs.tools.sandbox import live_enabled
+    if (live_enabled()
             and os.environ.get("ASK_EXECUTE", "").lower() == "live"):
         return "live"
     return "snapshot"

@@ -18,3 +18,6 @@ class AssistantState(LoopState):
     chips: list[str] = field(default_factory=list)
     # the query handed to the person (propose_sql): ends the turn
     proposal: dict[str, Any] | None = None
+    # propose_sql refuses an over-ceiling query once, so the model
+    # narrows it; the second time it hands over with the warning
+    ceiling_refusals: int = 0

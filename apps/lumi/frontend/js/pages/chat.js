@@ -1093,6 +1093,12 @@ export async function renderChat(outlet, wanted = "") {
         proposal.meridian_line
           ? ` · <span class="meridian">${esc(proposal.meridian_line)}</span>`
           : ""}</div>
+      ${proposal.over_ceiling
+        ? `<div class="proposal-warn">⚠ over the ${
+            esc(bytes(proposal.scan_ceiling_bytes))} ceiling for live
+            runs: Run will be refused unless the query is narrowed
+            (Edit SQL: a filter on the partition column) or the ceiling
+            is raised in the silo settings</div>` : ""}
       ${(proposal.warnings || []).length
         ? `<div class="proposal-warn">${(proposal.warnings || [])
             .slice(0, 2).map((w) => `<div>⚠ ${esc(w)}</div>`).join("")}</div>`
