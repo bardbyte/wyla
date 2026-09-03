@@ -1,23 +1,26 @@
 /** Semantics Explorer: the metrics browser. Steward order
- * (certified first, then the unreviewed bulk, then pending specs),
+ * (published first, then the unreviewed bulk, then pending specs),
  * filterable by status AND by table, searchable; every row shows
  * the name and the exact calculation, every header carries an ⓘ.
  * Tables live on their own tab now. */
 
 import { api } from "../api.js";
-import { card, esc, loading, tierChip, unavailable } from "../ui.js";
+import {
+  card, esc, loading, statusLabel, tierChip, unavailable,
+} from "../ui.js";
 
 const STATUSES = ["", "certified", "unreviewed", "pending_certification"];
 const STATUS_LABEL = {
-  "": "all", certified: "certified", unreviewed: "unreviewed",
-  pending_certification: "pending",
+  "": "all", certified: statusLabel("certified"),
+  unreviewed: statusLabel("unreviewed"),
+  pending_certification: statusLabel("pending_certification"),
 };
 
 const INFO = {
   metric: "The metric's name (mined ones without a steward name show "
     + "their fingerprint) and, underneath, the exact canonical "
     + "calculation. Hover a truncated calculation to read all of it.",
-  status: "certified: steward-certified in the Data Marketplace · "
+  status: "published: steward-published in the Data Marketplace · "
     + "unreviewed: real usage evidence, no steward decision yet · "
     + "pending: a spec submitted for certification",
   witnesses: "Independent evidence families that attest this metric, "
@@ -111,8 +114,7 @@ export async function renderSemantics(outlet) {
                 esc(r.label) || `${esc((r.fp || r.id).slice(0, 12))}… “?”`}</a>
               <span class="expr" title="${esc(r.expr)}">${esc(r.expr)}</span>
             </div>
-            ${tierChip(r.tier,
-              STATUS_LABEL[r.status_served] ?? r.status_served)}
+            ${tierChip(r.tier, statusLabel(r.status_served))}
             <span class="muted clip" title="${esc(
               Object.entries(r.witnesses)
                 .map(([w, n]) => `${w} ×${n}`).join(", ") || "none yet")}">${

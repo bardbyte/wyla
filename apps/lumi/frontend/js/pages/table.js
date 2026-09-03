@@ -7,13 +7,8 @@
 import { api } from "../api.js";
 import { createPullout } from "../pullout.js";
 import {
-  card, esc, feedbackBar, loading, unavailable,
+  card, esc, feedbackBar, loading, statusLabel, unavailable,
 } from "../ui.js";
-
-const STATUS_LABEL = {
-  certified: "certified", unreviewed: "unreviewed",
-  pending_certification: "pending", team_candidate: "team",
-};
 
 export async function renderTable(outlet, physical) {
   outlet.innerHTML = `
@@ -138,15 +133,14 @@ export async function renderTable(outlet, physical) {
         <div class="family-row">
           <a class="linklike" href="#/metric/${
             encodeURIComponent(mh.id)}">${esc(mh.label || mh.id)}</a>
-          <span class="chip">${esc(
-            STATUS_LABEL[mh.status_served] ?? mh.status_served)}</span>
+          <span class="chip">${esc(statusLabel(mh.status_served))}</span>
           <span class="mono muted">${mh.support}</span>
         </div>`).join("");
     if (mhPills) {
       mhPills.innerHTML = ["", ...statuses].map((s) => `
         <button class="pill ${mhFilter === s ? "on" : ""}"
           data-s="${esc(s)}">${
-          s ? esc(STATUS_LABEL[s] ?? s) : "all"}</button>`).join("");
+          s ? esc(statusLabel(s)) : "all"}</button>`).join("");
     }
   };
   if (mhPills) {

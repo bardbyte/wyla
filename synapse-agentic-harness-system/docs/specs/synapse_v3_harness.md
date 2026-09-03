@@ -330,6 +330,22 @@ handoff, the eval suites.
    "usually by" note. Reason: the audit found the joins and the usage
    fields loaded onto the metric node and dropped at compile; the
    agent was reading a poorer catalog than the one on disk.
+12. The model is told what day it is (2026-09-03). The session
+   section, the last one so the cached prefix holds within a day,
+   opens with today's date, the periods "this month", "last month",
+   "this quarter", "last quarter" and "year to date" resolve to, and
+   the newest partition the build saw, read as a date. The identity
+   says relative words resolve against that date, never against the
+   model's own sense of now. Reason: a model has no clock; the first
+   dashboards were windowed against its training-time present.
+13. The product says "published" where the graph says certified
+   (2026-09-03). One label map in the frontend's shared helpers
+   renders the chip word; the CSS class, the filter key, the API
+   value and the model's disclosure vocabulary stay `certified`, so
+   nothing in the graph, the evals or the prose contract moves.
+   Reason: "published" is the Data Marketplace's word for a steward-
+   approved definition, and the chip is read by the people who use
+   that word.
 
 ## 12 · The laptop, measured (state report of 2026-09-02)
 

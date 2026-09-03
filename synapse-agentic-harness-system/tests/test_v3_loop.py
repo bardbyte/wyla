@@ -1043,3 +1043,40 @@ def test_future_dated_rows_are_named_in_the_receipts(compiled, tmp_path,
     # the doctrine reached the prompt: a window names both ends
     assert "A time window names both ends" in model.calls[0]["system"]
 
+
+def test_the_prompt_tells_the_model_what_day_it_is(compiled):
+    """The model has no clock: the session section says the date and
+    the periods the relative words resolve to, and the identity says
+    to resolve against it. The horizon line appears only when the
+    build knows a newest partition, read as a date from the archive's
+    partition id; nothing is invented."""
+    import datetime as dt
+    from types import SimpleNamespace
+    from sahs.assistant.loop import _date_block, system_prompt
+    build, _ = compiled
+    system = system_prompt(build, today=dt.date(2026, 9, 3))
+    assert "<session>" in system
+    assert "Today is Thursday, 2026-09-03." in system
+    assert ("This month is September 2026; last month was August 2026; "
+            "this quarter is Q3 2026, from 2026-07-01; last quarter was "
+            "Q2 2026; the year to date runs from 2026-01-01.") in system
+    assert "never against your own sense of now" in system
+    assert "resolve against that date" in system           # identity
+    assert "Data on record runs to 2026-08-22, the newest partition" \
+        in system                                  # fixture: 20260822
+    # the date is the last section: the cached prefix is untouched
+    assert system.index("<session>") > system.index("<memory>")
+    # the year boundary: January resolves to last year's December and Q4
+    january = _date_block(build, dt.date(2026, 1, 15))
+    assert "last month was December 2025" in january
+    assert "last quarter was Q4 2025" in january
+    # a build that knows its newest partition says so
+    horizon = _date_block(SimpleNamespace(tables=[
+        {"physical": "dw.a", "partition_latest": "2026-08-30"},
+        {"physical": "dw.b", "partition_latest": "2026-08-31"},
+        {"physical": "dw.c"}]), dt.date(2026, 9, 3))
+    assert "Data on record runs to 2026-08-31, the newest partition" \
+        in horizon
+    # two calls on the same day are the same bytes: still cacheable
+    assert system == system_prompt(build, today=dt.date(2026, 9, 3))
+

@@ -12,7 +12,7 @@
 
 import { api } from "../api.js";
 import { renderMarkdown } from "../md.js";
-import { esc, prose } from "../ui.js";
+import { esc, prose, statusLabel } from "../ui.js";
 
 const SESSION_KEY = "synapse-chat-session";
 const PALETTE = ["#2f6feb", "#e8710a", "#1a9850", "#9970ab",
@@ -334,7 +334,7 @@ export async function renderChat(outlet, wanted = "") {
   function statusChip(prov) {
     if (!prov || !prov.status) return "";
     return `<span class="status-chip s-${esc(prov.status)}">${
-      esc(prov.status)}</span>`;
+      esc(statusLabel(prov.status))}</span>`;
   }
 
   function chartSVG(spec, width = 520, height = 280) {
@@ -643,7 +643,7 @@ export async function renderChat(outlet, wanted = "") {
           height="30" rx="8"/>
         ${n.status ? `<circle cx="${p[0] - 66}" cy="${p[1]}" r="4"
           fill="${DOT[n.status] || "#9a938a"}"><title>${
-          esc(n.status)}</title></circle>` : ""}
+          esc(statusLabel(n.status))}</title></circle>` : ""}
         <text x="${p[0] + (n.status ? 6 : 0)}" y="${p[1] + 4}"
           text-anchor="middle"><title>${esc(n.id)}</title>${
           esc(label)}</text></g>`;
@@ -756,7 +756,8 @@ export async function renderChat(outlet, wanted = "") {
   function provenanceLine(row) {
     const prov = (row.spec || {}).provenance;
     return `build ${row.spec?.build_id || "?"} · v${row.version}`
-      + (prov ? ` · ${prov.status} · ${prov.meridian_line}` : "")
+      + (prov ? ` · ${statusLabel(prov.status)} · ${prov.meridian_line}`
+              : "")
       + (row.spec?.watermark ? ` · ${row.spec.watermark}` : "");
   }
 
@@ -975,7 +976,7 @@ export async function renderChat(outlet, wanted = "") {
                      crosscheck: "Cross-checking two routes",
                      coverage: "Checking coverage",
                      fanout: "Checking the join is safe",
-                     reconcile: "Reconciling against the certified "
+                     reconcile: "Reconciling against the published "
                                 + "definition",
                      answer: "Verifying the answer" }[argOf(e, "kind")]
                    || "Running a check"),

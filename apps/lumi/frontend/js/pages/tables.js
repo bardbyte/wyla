@@ -11,7 +11,7 @@ export const TABLE_INFO = {
   columns: "Columns BigQuery can actually serve for this table",
   metricsCol: "Witnessed metrics computed on this table",
   joins: "Join evidence touching this table (declared, measured, or "
-    + "certified-SQL scoped)",
+    + "published-SQL scoped)",
   tickets: "Open data-quality tickets from the structural census, "
     + "e.g. columns declared upstream that BigQuery cannot serve "
     + "(phantom columns). Zero is good news",

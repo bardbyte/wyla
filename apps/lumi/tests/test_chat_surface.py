@@ -281,3 +281,20 @@ def test_the_artifact_drawer_and_the_report():
                 ".chartv2 .line", "prefers-reduced-motion"):
         assert cls in CSS, cls
 
+
+def test_metric_status_reads_published_on_every_chip():
+    """The product says "published" where the graph says certified:
+    one label map in ui.js, used by the chat's status chip and the
+    provenance footer and by the metrics, table and metric pages. The
+    CSS class, the filter key and the API word stay the graph's value."""
+    ui_js = (FRONTEND / "js" / "ui.js").read_text(encoding="utf-8")
+    assert 'certified: "published"' in ui_js
+    assert "statusLabel(prov.status)" in CHAT_JS
+    assert "esc(prov.status)}</span>" not in CHAT_JS
+    for page in ("semantics", "table", "metric"):
+        text = (FRONTEND / "js" / "pages" / f"{page}.js").read_text(
+            encoding="utf-8")
+        assert "statusLabel" in text, page
+        assert 'certified: "certified"' not in text, page
+    assert ".status-chip.s-certified" in CSS
+

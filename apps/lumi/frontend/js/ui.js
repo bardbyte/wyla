@@ -26,6 +26,17 @@ export const tierChip = (tier, label = "") => {
     esc(label || t.word)} ${t.glyph}</span>`;
 };
 
+// a metric's status as the product says it: the graph's value stays
+// the CSS class, the filter key and the API word; the chip says the
+// label. "published" is what the Data Marketplace calls a steward-
+// approved definition.
+export const STATUS_LABEL = {
+  certified: "published", pending_certification: "pending",
+  pending: "pending", unreviewed: "unreviewed", team_candidate: "team",
+  rejected: "rejected", deprecated: "deprecated",
+};
+export const statusLabel = (s) => STATUS_LABEL[s] ?? String(s ?? "");
+
 export const card = (label, body, cls = "") =>
   `<div class="card ${cls}"><div class="card-label">${esc(label)}</div>${body}</div>`;
 

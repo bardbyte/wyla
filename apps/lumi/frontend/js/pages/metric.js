@@ -5,7 +5,7 @@
 
 import { api } from "../api.js";
 import {
-  card, esc, feedbackBar, loading, tierChip, unavailable,
+  card, esc, feedbackBar, loading, statusLabel, tierChip, unavailable,
 } from "../ui.js";
 
 export async function renderMetric(outlet, id) {
@@ -60,7 +60,8 @@ export async function renderMetric(outlet, id) {
       <div class="profile-head">
         <span class="profile-title">${esc(m.label)
           || `${esc((m.fp ?? id).slice(0, 12))}… “?”`}</span>
-        ${tierChip(detail.tier ?? "gu", m.status_served ?? m.status)}
+        ${tierChip(detail.tier ?? "gu",
+                   statusLabel(m.status_served ?? m.status))}
         ${m.line_of_business
           ? `<span class="muted">${esc(m.line_of_business)}</span>` : ""}
       </div>
@@ -108,7 +109,8 @@ export async function renderMetric(outlet, id) {
            appear here</span>` : ""}
       ${(detail.family ?? []).map((f) => `
         <div class="family-row"><span>${esc(f.label || f.id)}</span>
-          <span class="chip">${esc(f.status_served ?? f.status)}</span>
+          <span class="chip">${esc(
+            statusLabel(f.status_served ?? f.status))}</span>
           <span class="mono muted">${esc(String(f.support ?? ""))}</span>
         </div>`).join("")}
       ${conflicts.map((r) => `
