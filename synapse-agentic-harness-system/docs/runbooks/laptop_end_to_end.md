@@ -261,6 +261,12 @@ there means the alias sidecar wants those names. The new build's
 `DIFF_vs_prev.md` shows what the sources added. Restart the app so the
 chat serves the new build.
 
+**The second surface.** The same app serves Synapse Semantic
+Intelligence at `http://localhost:8400/synapse/`: the chat with its
+artifacts published in the transcript, Search chats as a page, and
+Data Products and Metrics Explorer as cards. It reads the same build
+and needs nothing extra; a hard refresh picks up a new page.
+
 **The query comes first.** In Chat mode a data question ends with the
 query on a card — the SQL, what it will scan, its status and meridian
 line — and three buttons: **Run query** executes it with no model call

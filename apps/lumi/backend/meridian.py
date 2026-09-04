@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import re
 import os
 import sys
 from pathlib import Path
@@ -243,7 +244,20 @@ class MeridianData:
                 "witnesses": row.get("support_by_witness", {}),
                 "used_by": row.get("used_by", {}),
                 "table": row.get("table", ""),
-                "lob": row.get("line_of_business", "")})
+                "lob": row.get("line_of_business", ""),
+                # the texture a card can show: what it answers, at
+                # what grain, sliced how, from which catalog, how used
+                "question": row.get("question") or "",
+                "grain": row.get("grain") or "",
+                "dimensions": (row.get("approved_dimensions")
+                               or row.get("group_by_patterns") or []),
+                "description": row.get("description") or "",
+                "domain": row.get("domain") or "",
+                "execution_count": row.get("execution_count"),
+                "confidence": row.get("confidence") or "",
+                "last_seen": row.get("last_seen") or "",
+                "business_unit": row.get("business_unit") or "",
+                "data_category": row.get("data_category") or ""})
             if len(rows) >= limit:
                 break
         total = len(build.metrics)
@@ -283,10 +297,68 @@ class MeridianData:
                  "metrics_here": metrics_by_table.get(physical, 0),
                  "joins": joins_by_table.get(physical, 0),
                  "tickets": tickets_by_table.get(physical, 0),
-                 "cost_prior": build.cost_priors.get(physical)}
+                 "cost_prior": build.cost_priors.get(physical),
+                 **self._table_texture(build, physical)}
                 for physical, columns in sorted(build.schema.items())]
         return {"available": True, "build_id": build.version,
                 "rows": rows}
+
+    _CARD_PURPOSE = re.compile(r"^- purpose: (.*?) \[prov:", re.M)
+    _CARD_OWNER = re.compile(
+        r"^- owner: (.*?) · business unit: (.*?) · layer: (.*?) \[prov:",
+        re.M)
+
+    @staticmethod
+    def _partition_day(value: Any) -> str:
+        text = str(value or "").strip()
+        if len(text) == 8 and text.isdigit():
+            return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+        return text
+
+    def _table_texture(self, build: Any, physical: str) -> dict:
+        """What a Data Product card says beyond the counts: the
+        description and stewardship from the compiled card, the size,
+        freshness and keys from the tables index, the metrics computed
+        on it and the tables it joins — all read from the build, never
+        re-derived."""
+        card = (build.root / "cards" / "tables"
+                / f"{physical.replace('.', '__')}.md")
+        text = card.read_text(encoding="utf-8") if card.exists() else ""
+        purpose = self._CARD_PURPOSE.search(text)
+        owner = self._CARD_OWNER.search(text)
+        facts = build.table_facts(physical)
+
+        def clean(value: str | None) -> str:
+            value = (value or "").strip()
+            return "" if value == "?" else value
+        metrics = sorted((m for m in build.metrics
+                          if m.get("table") == physical and m.get("label")),
+                         key=lambda m: -int(m.get("support") or 0))
+        partners: dict[str, int] = {}
+        for j in build.joins:
+            ends = (j.get("a"), j.get("b"))
+            if physical in ends:
+                other = ends[1] if ends[0] == physical else ends[0]
+                if other and other != physical:
+                    partners[other] = partners.get(other, 0) \
+                        + int(j.get("support") or 0)
+        return {
+            "description": purpose.group(1).strip() if purpose else "",
+            "owner": clean(owner.group(1)) if owner else "",
+            "business_unit": clean(owner.group(2)) if owner else "",
+            "layer": clean(owner.group(3)) if owner else "",
+            "rows": facts.get("total_rows"),
+            "latest_partition": self._partition_day(
+                facts.get("partition_latest")),
+            "lifecycle": str(facts.get("lifecycle") or ""),
+            "object_type": str(facts.get("object_type") or ""),
+            "primary_key": list(facts.get("primary_key") or []),
+            # one name per metric: fused variants share a label
+            "metric_names": list(dict.fromkeys(
+                m["label"] for m in metrics))[:4],
+            "join_partners": [name for name, _n in sorted(
+                partners.items(), key=lambda kv: (-kv[1], kv[0]))[:4]],
+        }
 
     def metric(self, metric_id: str) -> dict:
         build, reason = self._load()

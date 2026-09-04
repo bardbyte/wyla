@@ -81,3 +81,21 @@ runner); this app is the product and its copy of the read plane
 ```bash
 python -m pytest apps/lumi/tests/ -q
 ```
+
+## Synapse Semantic Intelligence: the second surface
+
+The same server also serves a second frontend at
+`http://localhost:8400/synapse/` from `apps/synapse/frontend`: a copy
+of this one, stripped for the people who ask questions rather than
+steward the graph. The left header reads Synapse Semantic
+Intelligence; New chat and Search chats sit at the top, the recent
+chats under them, and Data Products, Metrics Explorer and Artifacts in
+their own section at the bottom above the account. Home, Skills,
+Cosmos and Operate are not there. Search chats is a page of its own
+(`/api/chat/search`: every chat, fuzzy, the matching lines shown).
+Data Products and Metrics Explorer are cards read from the compiled
+build. Artifacts publish inside the chat where the turn made them:
+there is no drawer on this surface. The two frontends share the API
+and the build; they do not share files, so a change to one is a
+change to one.
+

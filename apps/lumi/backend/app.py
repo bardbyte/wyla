@@ -31,6 +31,10 @@ from apps.lumi.backend.chat import router as chat_router
 from apps.lumi.backend.meridian import router as meridian_router
 
 _FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
+# the second surface: Synapse Semantic Intelligence — the same API and
+# build, a stripped nav (chat, search, data products, metrics,
+# artifacts), artifacts published inside the chat
+_SYNAPSE = Path(__file__).resolve().parents[2] / "synapse" / "frontend"
 
 
 def _load_env_file() -> None:
@@ -98,6 +102,10 @@ def create_app() -> FastAPI:
     app.include_router(ask_router)      # Ask (E18), in-process
     app.include_router(chat_router)     # Synapse v2 chat, in-process
 
+    if _SYNAPSE.exists():
+        # mounted before "/" so the root mount cannot swallow it
+        app.mount("/synapse", StaticFiles(directory=str(_SYNAPSE),
+                                          html=True), name="synapse")
     if _FRONTEND.exists():
         app.mount("/", StaticFiles(directory=str(_FRONTEND),
                                    html=True), name="app")

@@ -1,0 +1,137 @@
+/* Synapse Semantic Intelligence: this surface's own layer over app.css.
+ * The sidebar: chats first, the library in its own section at the
+ * bottom above the account. The library pages: cards. The chat:
+ * artifacts published inside the transcript, no drawer. */
+
+/* ── sidebar ── */
+.sidenav { gap: var(--s-2); }
+.brand { padding-bottom: var(--s-3); }
+.brand .wordmark { font-size: var(--fs-16); letter-spacing: 0.04em;
+                   text-transform: uppercase; }
+.brand .tagline { font-weight: 600; color: var(--ink-2);
+                  letter-spacing: 0.01em; }
+.chats { flex: 1; min-height: 120px; margin-top: var(--s-2); }
+.navlist.explore {
+  margin-top: auto; padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+}
+.navlist.explore .shelf-head { padding: 0 10px 6px; margin-top: 0; }
+.navlist.explore a { animation: none; }
+.account { border-top: 1px solid var(--line); border-radius: 0;
+           padding-top: 12px; margin-top: var(--s-2); }
+
+/* ── the library pages ── */
+.library-page, .search-page { max-width: 1120px; margin: 0 auto;
+                              padding: 18px 18px 40px; }
+.page-head h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -0.01em; }
+.page-head p { margin: 0 0 var(--s-3); max-width: 720px; }
+.library-tools {
+  display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap;
+  margin: 0 0 var(--s-3);
+}
+.library-tools .search { flex: 1; min-width: 220px; }
+.library-tools select.search { flex: 0 1 auto; }
+.card-grid {
+  display: grid; gap: var(--s-3);
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+.card-grid > .card.empty { grid-column: 1 / -1; }
+.product-card, .metric-card {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  text-decoration: none; color: inherit; cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease,
+              border-color 0.15s ease;
+  animation: tile-in 0.35s ease both;
+}
+.product-card:hover, .metric-card:hover {
+  transform: translateY(-2px); border-color: var(--accent);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
+}
+.product-head, .metric-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; min-width: 0;
+}
+.product-name, .metric-name {
+  font-weight: 700; font-size: var(--fs-14); color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.product-physical { font-size: var(--fs-11); }
+.product-desc, .metric-question {
+  margin: 0; font-size: var(--fs-13); color: var(--ink-2);
+  display: -webkit-box; -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical; overflow: hidden;
+}
+.product-stats { display: flex; gap: 12px; flex-wrap: wrap;
+                 font-size: var(--fs-12); color: var(--ink-3); }
+.product-stats b { color: var(--ink); font-size: var(--fs-13); }
+.product-meta { display: flex; gap: 10px; flex-wrap: wrap;
+                font-size: var(--fs-11); }
+.product-metrics { display: flex; gap: 6px; flex-wrap: wrap; }
+.product-metrics .pill { cursor: default; font-size: var(--fs-11); }
+.product-joins { font-size: var(--fs-11); }
+.metric-card .sqlchip {
+  display: block; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; font-size: var(--fs-11); max-width: 100%;
+}
+.metric-guidance { margin: 0; font-size: var(--fs-12); }
+
+/* ── search chats ── */
+.search.big {
+  width: 100%; box-sizing: border-box; font-size: var(--fs-16);
+  padding: 12px 14px; margin: 0 0 8px;
+}
+.search-results { display: flex; flex-direction: column; gap: 8px;
+                  margin-top: 8px; }
+.search-hit {
+  display: block; text-decoration: none; color: inherit;
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: 10px 12px; background: var(--surface);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  animation: tile-in 0.3s ease both;
+}
+.search-hit:hover, .search-hit.top { border-color: var(--accent);
+                                     background: var(--accent-soft); }
+.search-hit-head { display: flex; justify-content: space-between;
+                   gap: 10px; align-items: baseline; }
+.search-title { font-weight: 700; }
+.search-snippet { font-size: var(--fs-12); color: var(--ink-2);
+                  margin-top: 4px; display: flex; gap: 8px; }
+.search-snippet .role {
+  flex: none; width: 56px; color: var(--ink-3);
+  text-transform: uppercase; font-size: var(--fs-11);
+  letter-spacing: 0.04em; padding-top: 1px;
+}
+.search-hit mark { background: #ffe58a; color: inherit;
+                   padding: 0 1px; border-radius: 2px; }
+:root[data-theme="dark"] .search-hit mark { background: #6b5a12; }
+.muted.small { font-size: var(--fs-11); margin-top: 4px; }
+
+/* ── artifacts publish inside the chat: no drawer ── */
+.chatv2 { grid-template-columns: minmax(0, 1fr); }
+.chat-turn.has-artifact { max-width: 100%; }
+.artifact-block {
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--surface); margin-top: 8px; overflow: hidden;
+  animation: tile-in 0.35s ease both;
+}
+.artifact-head {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--line); font-size: var(--fs-12);
+  min-width: 0;
+}
+.artifact-head .artifact-name {
+  font-size: var(--fs-13); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; min-width: 0;
+}
+.artifact-head .spacer { flex: 1; }
+.artifact-version { font-size: var(--fs-11); }
+.artifact-export { display: inline-flex; gap: 4px; }
+.artifact-export .btn { padding: 2px 8px; font-size: var(--fs-11); }
+.artifact-body { padding: 12px; overflow-x: auto; }
+.artifact-body .chartv2 { max-width: 100%; }
+/* a chart or a tile published on its own keeps a readable size: the
+ * transcript is wide, the picture need not be */
+.artifact-body > svg.chartv2, .artifact-body > .kpi-tile {
+  max-width: 720px; display: block;
+}
+.artifact-body > .watermark-band + svg.chartv2 { max-width: 720px; }

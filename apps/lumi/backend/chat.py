@@ -131,6 +131,19 @@ def list_sessions(limit: int = 50) -> dict:
     return {"available": True, "sessions": runtime.sessions(limit)}
 
 
+@router.get("/search")
+def search_chats(q: str = "", limit: int = 200) -> dict:
+    """Search across the chats: every session's title and messages,
+    fuzzy (a typo still finds it), the matching lines as snippets;
+    an empty q lists every chat newest first."""
+    runtime, _ = _chat()
+    from sahs.assistant.search import search_sessions
+    return {"available": True, "query": q,
+            "sessions": search_sessions(runtime.sessions(1000),
+                                        runtime.store.messages, q,
+                                        limit=limit)}
+
+
 @router.get("/sessions/{session_id}")
 def get_session(session_id: str) -> dict:
     runtime, _ = _chat()

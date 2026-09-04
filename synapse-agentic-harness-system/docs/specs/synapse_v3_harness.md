@@ -346,6 +346,22 @@ handoff, the eval suites.
    Reason: "published" is the Data Marketplace's word for a steward-
    approved definition, and the chip is read by the people who use
    that word.
+14. A second surface, Synapse Semantic Intelligence (2026-09-03), a
+   duplicate of the frontend under `apps/synapse/frontend`, served at
+   `/synapse/` by the same server against the same API and build.
+   Stripped for the people who ask: New chat and Search chats at the
+   top, the recent chats, then Data Products, Metrics Explorer and
+   Artifacts in their own section above the account; no Home,
+   Skills, Cosmos or Operate. Search chats is a page (every chat,
+   fuzzy, the matched lines lit; `sahs/assistant/search.py` is the
+   finder). Data Products and Metrics Explorer are cards carrying the
+   description, stewardship, size, freshness, metrics and joins the
+   build already holds. Artifacts publish inside the chat where the
+   turn made them; the drawer belongs to the admin surface. Reason:
+   the user asked for a duplicate to strip, so the admin console
+   keeps its full nav and the asking surface loses what asking never
+   needs; the two do not share files, so a change to one is a change
+   to one.
 
 ## 12 · The laptop, measured (state report of 2026-09-02)
 
