@@ -68,5 +68,32 @@ toggle.addEventListener("click", () => {
 });
 applyThemeGlyph();
 
+/* the brand: an image logo named by SYNAPSE_LOGO in the silo .env
+ * replaces the words once it has loaded; without one, or when the
+ * file cannot be read, the words stay */
+async function brandLogo() {
+  const brand = document.getElementById("brand");
+  if (!brand) return;
+  let got = {};
+  try {
+    got = await fetch("/api/lumi/brand").then((r) => r.json());
+  } catch { return; }
+  if (!got.logo) return;
+  const img = new Image();
+  img.className = "brand-logo";
+  img.alt = "Synapse Semantic Intelligence";
+  img.onload = () => {
+    const link = document.createElement("a");
+    link.className = "brand-link";
+    link.href = "#/chat";
+    link.title = "Synapse Semantic Intelligence";
+    link.appendChild(img);
+    brand.replaceChildren(link);
+    brand.classList.add("has-logo");
+  };
+  img.src = `/api/lumi/logo?v=${encodeURIComponent(got.stamp || "")}`;
+}
+
 route();
 refreshChats();
+brandLogo();

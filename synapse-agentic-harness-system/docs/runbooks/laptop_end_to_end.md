@@ -265,7 +265,11 @@ chat serves the new build.
 Intelligence at `http://localhost:8400/synapse/`: the chat with its
 artifacts published in the transcript, Search chats as a page, and
 Data Products and Metrics Explorer as cards. It reads the same build
-and needs nothing extra; a hard refresh picks up a new page.
+and needs nothing extra; a hard refresh picks up a new page. To put
+your logo in its left header, set `SYNAPSE_LOGO=/path/to/logo.png` in
+the silo `.env` (png, jpg, svg, webp or gif) and restart the app: the
+image replaces the words, and the words stay when the file is not
+there.
 
 **The query comes first.** In Chat mode a data question ends with the
 query on a card — the SQL, what it will scan, its status and meridian

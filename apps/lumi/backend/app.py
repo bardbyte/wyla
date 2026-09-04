@@ -24,6 +24,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from apps.lumi.backend.ask import router as ask_router
@@ -35,6 +36,25 @@ _FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 # build, a stripped nav (chat, search, data products, metrics,
 # artifacts), artifacts published inside the chat
 _SYNAPSE = Path(__file__).resolve().parents[2] / "synapse" / "frontend"
+
+# the brand image for the second surface: SYNAPSE_LOGO in the silo .env
+# names an image file on this machine; the page swaps its words for it
+_LOGO_TYPES = {".png": "image/png", ".jpg": "image/jpeg",
+               ".jpeg": "image/jpeg", ".svg": "image/svg+xml",
+               ".webp": "image/webp", ".gif": "image/gif"}
+LOGO_VAR = "SYNAPSE_LOGO"
+
+
+def _logo_path() -> Path | None:
+    """The configured logo when it is an image file that exists; None
+    otherwise (unset, missing, or not an image)."""
+    raw = (os.environ.get(LOGO_VAR) or "").strip().strip("'\"")
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    if path.suffix.lower() not in _LOGO_TYPES or not path.is_file():
+        return None
+    return path
 
 
 def _load_env_file() -> None:
@@ -97,6 +117,34 @@ def create_app() -> FastAPI:
                                  "gemini-3.1-pro-preview")),
             },
         }
+
+    @app.get("/api/lumi/brand")
+    def brand() -> dict:
+        """Whether a logo is served, and why not when it is not — the
+        path itself never leaves the machine."""
+        raw = (os.environ.get(LOGO_VAR) or "").strip()
+        path = _logo_path()
+        return {
+            "logo": path is not None,
+            "configured": bool(raw),
+            "reason": ("" if path is not None or not raw else
+                       f"{LOGO_VAR} is set but no image file is at that "
+                       "path (png, jpg, jpeg, svg, webp or gif)"),
+            # a cache-buster: the file's mtime, so a replaced logo shows
+            "stamp": str(int(path.stat().st_mtime)) if path else "",
+        }
+
+    @app.get("/api/lumi/logo")
+    def logo():
+        path = _logo_path()
+        if path is None:
+            return JSONResponse(
+                {"available": False,
+                 "reason": f"no logo: set {LOGO_VAR}=/path/to/logo.png in "
+                           "the silo .env and restart the app"},
+                status_code=404)
+        return FileResponse(str(path),
+                            media_type=_LOGO_TYPES[path.suffix.lower()])
 
     app.include_router(meridian_router)
     app.include_router(ask_router)      # Ask (E18), in-process

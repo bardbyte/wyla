@@ -181,3 +181,42 @@ def test_search_chats_lists_everything_and_forgives_a_typo(client):
     none = client.get("/api/chat/search",
                       params={"q": "zebra quantum"}).json()["sessions"]
     assert not any(s["id"] == made["id"] for s in none)
+
+
+
+def test_logo_from_the_env_replaces_the_words(client, tmp_path, monkeypatch):
+    """SYNAPSE_LOGO in the silo .env names an image on the machine: the
+    server serves it and says whether one is configured; the page
+    swaps its words for the image only when one is served. A missing
+    file or a non-image is refused with a reason, and the words stay."""
+    monkeypatch.delenv("SYNAPSE_LOGO", raising=False)
+    assert client.get("/api/lumi/brand").json() == {
+        "logo": False, "configured": False, "reason": "", "stamp": ""}
+    refused = client.get("/api/lumi/logo")
+    assert refused.status_code == 404
+    assert "SYNAPSE_LOGO" in refused.json()["reason"]
+    # configured to something that is not an image: refused, explained
+    text = tmp_path / "logo.txt"
+    text.write_text("not an image")
+    monkeypatch.setenv("SYNAPSE_LOGO", str(text))
+    got = client.get("/api/lumi/brand").json()
+    assert got["logo"] is False and got["configured"] is True
+    assert "png" in got["reason"]
+    assert client.get("/api/lumi/logo").status_code == 404
+    # configured to an svg: served with its media type and a stamp
+    svg = tmp_path / "logo.svg"
+    svg.write_text("<svg xmlns='http://www.w3.org/2000/svg' width='120' "
+                   "height='40'><text y='28' font-size='24'>ACME</text>"
+                   "</svg>", encoding="utf-8")
+    monkeypatch.setenv("SYNAPSE_LOGO", str(svg))
+    got = client.get("/api/lumi/brand").json()
+    assert got["logo"] is True and got["stamp"]
+    served = client.get("/api/lumi/logo")
+    assert served.status_code == 200
+    assert served.headers["content-type"].startswith("image/svg+xml")
+    assert b"ACME" in served.content
+    # the page: the words are the fallback, the swap waits for the load
+    assert 'id="brand"' in INDEX and "Semantic Intelligence" in INDEX
+    assert "brandLogo" in MAIN and "/api/lumi/brand" in MAIN
+    assert "img.onload" in MAIN and "replaceChildren" in MAIN
+    assert ".brand-logo" in CSS

@@ -361,7 +361,10 @@ handoff, the eval suites.
    the user asked for a duplicate to strip, so the admin console
    keeps its full nav and the asking surface loses what asking never
    needs; the two do not share files, so a change to one is a change
-   to one.
+   to one. The left header takes an image: `SYNAPSE_LOGO` in the
+   silo `.env` names a file on the machine, the server serves it, the
+   page swaps the words for it once it has loaded, and the words stay
+   when there is none.
 
 ## 12 · The laptop, measured (state report of 2026-09-02)
 

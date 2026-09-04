@@ -97,5 +97,8 @@ Data Products and Metrics Explorer are cards read from the compiled
 build. Artifacts publish inside the chat where the turn made them:
 there is no drawer on this surface. The two frontends share the API
 and the build; they do not share files, so a change to one is a
-change to one.
+change to one. `SYNAPSE_LOGO=/path/to/logo.png` in the silo `.env`
+puts an image in the second surface's left header in place of the
+words (`/api/lumi/logo` serves it; `/api/lumi/brand` says whether one
+is configured).
 
