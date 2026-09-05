@@ -380,9 +380,12 @@ refuses, never after a 200) and reads it from the answer's
 `authorization_token` field (the other usual names are tried after
 it, and a lone long string as a last resort), reads what the answer
 says about expiry (nothing, on this gateway) and what the token's own
-JWT claims say (the token is opaque on this gateway, 918 characters
-and no claims, so only the probe can tell its lifetime), then makes
-four model calls. Each is addressed the guide's way,
+JWT claims say (this gateway's token is a JWT with an `exp` claim
+and no `iat`, so the lifetime is `exp` minus the minting moment, and
+the probe confirms it), then makes the model calls, plus a prompt-cache
+check: the same 3K-token prefix twice, reading `cachedContentTokenCount`
+on the second call, which says whether the harness's stable prefix
+still earns its cache through the gateway. Each is addressed the guide's way,
 `…/models/gemini-2.5-pro/generateContent` with a slash: EAG's scopes
 are path patterns under the model name, and Google's own colon form
 (`gemini-2.5-pro:generateContent`) falls outside them, which the
@@ -396,7 +399,9 @@ the bytes streamed or arrived in one burst, as SSE or as a JSON
 array), a native tool call with its thought signature echoed back on
 the round trip, the thoughts flag in both spellings (the guide's
 `include_thoughts` and the harness's `includeThoughts`), and a system
-instruction. With `--probe-ttl` it keeps
+instruction (with room under the output cap: on 2.5 the thinking
+tokens count against `maxOutputTokens`, and a tight cap yields an
+empty answer). With `--probe-ttl` it keeps
 sending a deliberately invalid request every 20 s until the gateway
 answers 401: that is the token's real lifetime, which the client will
 have to keep itself. Secrets never print; paste the block (and the
