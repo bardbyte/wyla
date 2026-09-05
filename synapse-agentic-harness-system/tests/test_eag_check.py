@@ -10,10 +10,10 @@ import hmac
 import json
 
 from sahs.util.eag import (Config, EagError, Route, RouteChooser,
-                           classify_probe, classify_stream, env_warnings,
-                           extract_token, find_expiry, fingerprint,
-                           hmac_signature, jwt_claims, render_report,
-                           run_checks, token_headers)
+                           _error_text, classify_probe, classify_stream,
+                           env_warnings, extract_token, find_expiry,
+                           fingerprint, hmac_signature, jwt_claims,
+                           render_report, run_checks, token_headers)
 
 SECRET = base64.b64encode(b"a-32-byte-secret-for-the-tests!!").decode()
 
@@ -87,12 +87,20 @@ class Gateway:
     tools answer with a signed functionCall; the token dies 300 s
     after minting."""
 
-    def __init__(self, unit="ms", token_field="authorization_token"):
+    def __init__(self, unit="ms", token_field="authorization_token",
+                 path_form="slash"):
         self.calls = []
         self.now = 1_700_000_000.0
         self.minted = None
         self.unit = unit
         self.token_field = token_field
+        self.path_form = path_form        # the form the gateway routes
+
+    def _routed(self, url):
+        """EAG routes by path pattern: the wrong separator between the
+        model and the method is a bare 401 before Gemini is reached."""
+        sep = "/" if self.path_form == "slash" else ":"
+        return f"gemini-2.5-pro{sep}" in url
 
     def clock(self):
         return self.now
@@ -115,6 +123,8 @@ class Gateway:
                 {"iat": int(self.now), "exp": int(self.now) + 300})
             }).encode()
         assert headers["Authorization"].startswith("Bearer ")
+        if not self._routed(url):
+            return 401, {"WWW-Authenticate": 'Bearer error="invalid_scope"'}, b""
         if self.now - (self.minted or self.now) >= 300:
             return 401, {}, b'{"error":{"message":"token expired"}}'
         payload = json.loads(body or b"{}")
@@ -151,6 +161,8 @@ class Gateway:
 
     def stream(self, url, headers, body, **kw):
         self.calls.append(("STREAM", url, headers, body))
+        if not self._routed(url):
+            return 401, {}, iter([(0.0, b"")])
         frame = lambda text: ("data: " + json.dumps({"candidates": [{   # noqa: E731
             "content": {"parts": [{"text": text}]},
             "finishReason": "STOP"}]}) + "\n\n").encode()
@@ -173,6 +185,12 @@ def test_the_whole_check_against_a_scripted_gateway():
     assert [a["unit"] for a in report["token"]["attempts"]] == ["ms"]
     assert "says nothing about expiry" in by_name["token"]["detail"]
     assert "field authorization_token" in by_name["token"]["detail"]
+    # the path: the guide's slash form, taken on the first call
+    assert by_name["path"]["ok"] is True and report["path"]["chosen"] == "slash"
+    assert report["path"]["tried"] == []
+    assert "/models/gemini-2.5-pro/generateContent" in by_name["path"]["detail"]
+    assert all("gemini-2.5-pro:" not in c[1] for c in gw.calls
+               if c[0] in ("POST", "STREAM"))
     # generate: the guide's spelling of the thoughts flag, first try
     assert by_name["generate"]["ok"] is True
     assert report["generate"]["thinking_key"] == "include_thoughts"
@@ -201,6 +219,7 @@ def test_the_whole_check_against_a_scripted_gateway():
     assert "✓ token" in text and "✓ generate" in text and "✓ stream" in text
     assert "native tools work with signatures" in text
     assert "thoughts flag: the guide's spelling only" in text
+    assert "path form: slash" in text
     assert "measured lifetime" in text
     # no secret anywhere in the report
     dumped = json.dumps(report)
@@ -223,7 +242,7 @@ def test_missing_credentials_and_env_mode_are_reported_not_raised():
     report = run_checks(cfg, gw.http, gw.stream, now=gw.clock,
                         clock=gw.clock, sleep=gw.sleep, only={"token", "generate"})
     assert report["token"]["source"] == "env" and report["token"]["ttl_s"] == 240
-    assert {c["name"] for c in report["checks"]} == {"token", "generate"}
+    assert {c["name"] for c in report["checks"]} == {"token", "path", "generate"}
 
 
 def test_a_dead_gateway_is_a_recorded_failure_after_one_attempt():
@@ -341,4 +360,55 @@ def test_the_model_comes_from_eag_model_and_gemini_model_is_warned_about():
     text = render_report({"config": {}, "checks": [],
                           "warnings": ["GEMINI_MODEL=x is set …"]})
     assert "! warning GEMINI_MODEL=x is set" in text
+
+
+def test_a_gateway_that_wants_the_colon_form_is_found_and_the_refusal_explained():
+    """The other way round: a gateway routing Google's colon form
+    answers the slash form with a bare 401. The check falls back, pins
+    the colon, and the path row says what the slash got — the
+    reason read from the WWW-Authenticate header, not an empty body."""
+    gw = Gateway(path_form="colon")
+    report = run_checks(Config(app_id="app", secret=SECRET), gw.http,
+                        gw.stream, now=gw.clock, clock=gw.clock,
+                        sleep=gw.sleep, only={"token", "generate", "stream"})
+    by_name = {c["name"]: c for c in report["checks"]}
+    assert by_name["path"]["ok"] is True and report["path"]["chosen"] == "colon"
+    assert report["path"]["tried"] == [{
+        "form": "slash", "status": 401,
+        "reason": "HTTP 401 with an empty body (the gateway answered before "
+                  "Gemini did) · WWW-Authenticate: Bearer "
+                  "error=\"invalid_scope\""}]
+    assert by_name["generate"]["ok"] is True
+    assert by_name["stream"]["ok"] is True and report["stream"]["form"] == "sse"
+    # every call after the first rode the pinned form
+    urls = [c[1] for c in gw.calls if "generateContent" in c[1]
+            or "streamGenerateContent" in c[1]]
+    assert urls[0].endswith("gemini-2.5-pro/generateContent")
+    assert all("gemini-2.5-pro:" in u for u in urls[1:])
+
+
+def test_a_pinned_path_form_is_not_second_guessed():
+    """EAG_PATH_FORM=colon against a slash-only gateway: one form, one
+    refusal, reported as the gateway's answer, no fallback."""
+    gw = Gateway(path_form="slash")
+    report = run_checks(Config(app_id="app", secret=SECRET, path_form="colon"),
+                        gw.http, gw.stream, now=gw.clock, clock=gw.clock,
+                        sleep=gw.sleep, only={"token", "generate"})
+    by_name = {c["name"]: c for c in report["checks"]}
+    assert "path" not in by_name
+    assert by_name["generate"]["ok"] is False
+    assert by_name["generate"]["detail"].startswith(
+        "HTTP 401 with an empty body")
+    assert "invalid_scope" in by_name["generate"]["detail"]
+
+
+def test_an_empty_refusal_is_read_from_the_headers():
+    assert _error_text(401, b"", {"WWW-Authenticate": "Bearer realm=eag",
+                                   "X-Reason": "scope"}) == \
+        ("HTTP 401 with an empty body (the gateway answered before Gemini "
+         "did) · WWW-Authenticate: Bearer realm=eag; X-Reason: scope")
+    assert _error_text(401, b"", {"Content-Length": "0"}) == \
+        "HTTP 401 with an empty body (the gateway answered before Gemini did)"
+    assert _error_text(403, b'{"description":"denied","error_code":"E1"}') \
+        == "HTTP 403: denied [E1]"
 

@@ -414,6 +414,11 @@ class Config:
     thinking_budget: int = 1056
     show_thoughts: bool = True
     prompt: str = "In two sentences, what is a cash rewards credit card?"
+    # EAG addresses a method with a slash (…/gemini-2.5-pro/generateContent,
+    # the guide's form, matching its path-pattern scopes); Google's own
+    # REST uses a colon (…/gemini-2.5-pro:generateContent). auto tries
+    # the slash first and falls back on a 401/404
+    path_form: str = "auto"
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Config":
@@ -443,6 +448,7 @@ class Config:
             show_thoughts=(env.get("SHOW_THOUGHTS") or "true").lower()
             in ("1", "true", "yes", "on"),
             prompt=env.get("GEMINI_PROMPT") or cls.prompt,
+            path_form=(env.get("EAG_PATH_FORM") or "auto").strip().lower(),
         )
 
     def display(self) -> dict[str, Any]:
@@ -453,7 +459,8 @@ class Config:
                 "model": self.model, "version": self.version,
                 "scopes": self.scopes, "timestamp_unit": self.timestamp_unit,
                 "thinking_budget": self.thinking_budget,
-                "show_thoughts": self.show_thoughts}
+                "show_thoughts": self.show_thoughts,
+                "path_form": self.path_form}
 
 
 def _json(body: bytes) -> Any:
@@ -463,16 +470,42 @@ def _json(body: bytes) -> Any:
         return None
 
 
-def _error_text(status: int, body: bytes) -> str:
+_REASON_HEADERS = ("www-authenticate", "x-error", "x-error-message",
+                   "x-reason", "x-apigw-error", "x-amzn-errortype",
+                   "x-kong-response", "x-envoy-upstream-service-time")
+
+
+def _header_hints(headers: dict[str, str] | None) -> str:
+    """What a gateway says in its headers when it says nothing in the
+    body: WWW-Authenticate and any header that names an error."""
+    hints = []
+    for key, value in (headers or {}).items():
+        low = key.lower()
+        if low in _REASON_HEADERS or "error" in low or "reason" in low:
+            hints.append(f"{key}: {str(value)[:120]}")
+    return "; ".join(hints)
+
+
+def _error_text(status: int, body: bytes,
+                headers: dict[str, str] | None = None) -> str:
     payload = _json(body)
     if isinstance(payload, dict):
+        # the gateway's own code rides along (OneIdentity: UEXP001)
+        code = payload.get("error_code") or payload.get("code") or ""
+        tail = f" [{code}]" if isinstance(code, (str, int)) and code else ""
         err = payload.get("error")
         if isinstance(err, dict) and err.get("message"):
-            return f"HTTP {status}: {err['message']}"[:300]
-        for key in ("message", "error_description", "error", "detail"):
+            return f"HTTP {status}: {err['message']}"[:300] + tail
+        for key in ("message", "error_description", "error", "detail",
+                    "description"):
             if isinstance(payload.get(key), str):
-                return f"HTTP {status}: {payload[key]}"[:300]
-    return f"HTTP {status}: {body.decode('utf-8', 'replace')[:200].strip()}"
+                return f"HTTP {status}: {payload[key]}"[:300] + tail
+    text = body.decode("utf-8", "replace")[:200].strip()
+    if not text:
+        hints = _header_hints(headers)
+        return (f"HTTP {status} with an empty body (the gateway answered "
+                "before Gemini did)" + (f" · {hints}" if hints else ""))
+    return f"HTTP {status}: {text}"
 
 
 def _generation_config(cfg: Config, thinking_key: str,
@@ -612,13 +645,45 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
     # own JSON accepts both). The thinking check below asks the gateway
     # about each; generate starts from the guide's and falls back.
     thinking_key = "include_thoughts"
+    # the path form is decided by the first model call: the guide's
+    # slash form first (EAG's scopes are path patterns under the
+    # model name), Google's colon form when the gateway refuses it
+    # with a 401 or 404 — a refusal that arrives before Gemini answers
+    forms = (["slash", "colon"] if cfg.path_form not in ("slash", "colon")
+             else [cfg.path_form])
+    path: dict[str, Any] = {"chosen": "", "tried": []}
+    last_headers: dict[str, dict[str, str]] = {}
+
+    def endpoint(form: str, method: str) -> str:
+        sep = "/" if form == "slash" else ":"
+        return f"{model_url}{sep}{method}"
+
+    def candidates() -> list[str]:
+        return [path["chosen"]] if path["chosen"] else list(forms)
 
     def generate(body: dict[str, Any]) -> tuple[int, Any, bytes, float]:
-        (status, _h, raw), seconds = timed(
-            http, "POST", f"{model_url}:generateContent",
-            {**auth, "Accept": "application/json"},
-            json.dumps(body).encode("utf-8"))
-        return status, _json(raw), raw, seconds
+        raw_body = json.dumps(body).encode("utf-8")
+        outcome: tuple[int, Any, bytes, float] | None = None
+        for form in candidates():
+            (status, headers, raw), seconds = timed(
+                http, "POST", endpoint(form, "generateContent"),
+                {**auth, "Accept": "application/json"}, raw_body)
+            last_headers["generate"] = headers
+            outcome = (status, _json(raw), raw, seconds)
+            if not path["chosen"] and status in (401, 404) \
+                    and form != candidates()[-1]:
+                path["tried"].append({"form": form, "status": status,
+                                      "reason": _error_text(status, raw,
+                                                            headers)})
+                continue
+            if not path["chosen"] and status not in (401, 404):
+                path["chosen"] = form
+            break
+        assert outcome is not None
+        return outcome
+
+    def gateway_reason(status: int, raw: bytes) -> str:
+        return _error_text(status, raw, last_headers.get("generate"))
 
     # ── generate ──
     if "generate" in want:
@@ -633,6 +698,16 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                 body["generationConfig"] = _generation_config(cfg,
                                                               thinking_key)
                 status, payload, raw, seconds = generate(body)
+            if path["chosen"] or path["tried"]:
+                chosen = path["chosen"]
+                record("path", bool(chosen),
+                       (f"{endpoint(chosen, 'generateContent')} "
+                        f"({'the guide' if chosen == 'slash' else 'Google'}"
+                        f"'s {chosen} form)" if chosen else
+                        "neither path form was accepted")
+                       + "".join(f" · {t['form']} form refused: {t['reason']}"
+                                 for t in path["tried"]),
+                       chosen=chosen, tried=path["tried"])
             if status == 200 and isinstance(payload, dict):
                 got = summarize_answer(payload)
                 record("generate", True,
@@ -641,7 +716,7 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                        f" part(s) · text: {got['text'][:120]!r}",
                        seconds=seconds, thinking_key=thinking_key, **got)
             else:
-                record("generate", False, _error_text(status, raw),
+                record("generate", False, gateway_reason(status, raw),
                        status=status, seconds=seconds)
         except EagError as e:
             record("generate", False, str(e))
@@ -652,10 +727,12 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                               "parts": [{"text": cfg.prompt}]}],
                 "generationConfig": _generation_config(cfg, thinking_key)}
         raw_body = json.dumps(body).encode("utf-8")
-        for suffix in ("?alt=sse", ""):
+        tries = [(form, suffix) for form in candidates()
+                 for suffix in ("?alt=sse", "")]
+        for form, suffix in tries:
             try:
                 status, headers, chunks = stream(
-                    f"{model_url}:streamGenerateContent{suffix}",
+                    endpoint(form, "streamGenerateContent") + suffix,
                     {**auth, "Accept": "text/event-stream"
                      if suffix else "application/json"}, raw_body)
                 collected = list(chunks)
@@ -666,11 +743,13 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                 "content-type", "")
             if status != 200:
                 raw = b"".join(p for _t, p in collected)
-                if suffix:
-                    continue                    # try the plain form
-                record("stream", False, _error_text(status, raw),
-                       status=status)
+                if (form, suffix) != tries[-1]:
+                    continue                    # the next form or suffix
+                record("stream", False, _error_text(status, raw, headers),
+                       status=status, path_form=form, suffix=suffix)
                 break
+            if not path["chosen"]:
+                path["chosen"] = form
             got = classify_stream(content_type, collected)
             record("stream", got["streamed"] or None,
                    (f"{'streams' if got['streamed'] else 'arrives in one burst'}"
@@ -681,7 +760,7 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                     f" · finish {got['finish']} · text: {got['text'][:80]!r}"
                     + ("" if suffix else " · alt=sse was refused; this is "
                        "the plain streamGenerateContent form")),
-                   suffix=suffix, status=status, **got)
+                   suffix=suffix, status=status, path_form=form, **got)
             break
 
     # ── native tools, with the signature echoed back ──
@@ -701,7 +780,8 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
         try:
             status, payload, raw, seconds = generate(body)
             if status != 200 or not isinstance(payload, dict):
-                record("tools", False, _error_text(status, raw), status=status)
+                record("tools", False, gateway_reason(status, raw),
+                       status=status)
             else:
                 first = summarize_answer(payload)
                 call = first["function_calls"][0] if first["function_calls"] \
@@ -733,7 +813,7 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                            f"{'present' if first['signature'] else 'absent'}"
                            + (f" · round trip 200 in {seconds2} s · text: "
                               f"{second['text'][:100]!r}" if second else
-                              f" · round trip {_error_text(status2, raw2)}"),
+                              f" · round trip {gateway_reason(status2, raw2)}"),
                            call=call, signature=first["signature"],
                            round_trip_status=status2,
                            round_trip_text=(second or {}).get("text", ""),
@@ -758,7 +838,7 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
             accepted[key] = {"ok": status == 200,
                              "thought_parts": got["thought_parts"] if got
                              else 0,
-                             "note": "" if got else _error_text(status, raw),
+                             "note": "" if got else gateway_reason(status, raw),
                              "seconds": seconds}
         harness = accepted["includeThoughts"]["ok"]
         record("thinking", harness,
@@ -787,7 +867,8 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                        followed="pong" in got["text"].lower(),
                        text=got["text"], seconds=seconds)
             else:
-                record("system", False, _error_text(status, raw), status=status)
+                record("system", False, gateway_reason(status, raw),
+                       status=status)
         except EagError as e:
             record("system", False, str(e))
 
@@ -799,9 +880,10 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
         deadline = minted_at + probe_minutes * 60
         while True:
             try:
-                status, _h, raw = http("POST", f"{model_url}:generateContent",
-                                       {**auth, "Accept": "application/json"},
-                                       b"{}")
+                status, _h, raw = http(
+                    "POST", endpoint(path["chosen"] or forms[0],
+                                     "generateContent"),
+                    {**auth, "Accept": "application/json"}, b"{}")
                 state = classify_probe(status)
             except EagError as e:
                 state, status = f"error: {e}", 0
@@ -860,6 +942,10 @@ def render_report(report: dict[str, Any]) -> str:
     by_name = {c["name"]: c for c in report.get("checks", [])}
     if by_name.get("generate", {}).get("ok"):
         verdict.append("generateContent works")
+    path = by_name.get("path")
+    if path:
+        verdict.append(f"path form: {report.get('path', {}).get('chosen')}"
+                       if path["ok"] else "no path form accepted")
     thinking = by_name.get("thinking")
     if thinking:
         verdict.append("thoughts flag: both spellings" if thinking["ok"]

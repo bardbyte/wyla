@@ -380,7 +380,17 @@ refuses, never after a 200) and reads it from the answer's
 `authorization_token` field (the other usual names are tried after
 it, and a lone long string as a last resort), reads what the answer
 says about expiry (nothing, on this gateway) and what the token's own
-JWT claims say, then makes four model calls: `generateContent` with
+JWT claims say (the token is opaque on this gateway, 918 characters
+and no claims, so only the probe can tell its lifetime), then makes
+four model calls. Each is addressed the guide's way,
+`…/models/gemini-2.5-pro/generateContent` with a slash: EAG's scopes
+are path patterns under the model name, and Google's own colon form
+(`gemini-2.5-pro:generateContent`) falls outside them, which the
+gateway answers with a bare 401 before Gemini is reached. The check
+tries the slash first, falls back to the colon on a 401 or 404, and
+the `path` row says which form was taken and what the other got, the
+reason read from the response headers when the body is empty. The
+calls: `generateContent` with
 thought summaries, `streamGenerateContent?alt=sse` (and says whether
 the bytes streamed or arrived in one burst, as SSE or as a JSON
 array), a native tool call with its thought signature echoed back on
