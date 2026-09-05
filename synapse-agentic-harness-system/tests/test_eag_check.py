@@ -156,9 +156,14 @@ def test_the_whole_check_against_a_scripted_gateway():
     assert report["token"]["unit"] == "s" and report["token"]["ttl_s"] == 300
     assert [a["unit"] for a in report["token"]["attempts"]] == ["ms", "s"]
     assert "says nothing about expiry" in by_name["token"]["detail"]
-    # generate: the guide's spelling of includeThoughts was needed
+    # generate: the guide's spelling of the thoughts flag, first try
     assert by_name["generate"]["ok"] is True
     assert report["generate"]["thinking_key"] == "include_thoughts"
+    # the thoughts flag, both ways: this gateway takes the guide's only
+    assert by_name["thinking"]["ok"] is False
+    assert report["thinking"]["include_thoughts"]["ok"] is True
+    assert report["thinking"]["includeThoughts"]["ok"] is False
+    assert "the harness sends includeThoughts" in by_name["thinking"]["detail"]
     assert report["generate"]["thought_parts"] == 1
     assert report["generate"]["usage"]["thoughts"] == 30
     # stream: real SSE frames over time
@@ -178,6 +183,7 @@ def test_the_whole_check_against_a_scripted_gateway():
     text = render_report(report)
     assert "✓ token" in text and "✓ generate" in text and "✓ stream" in text
     assert "native tools work with signatures" in text
+    assert "thoughts flag: the guide's spelling only" in text
     assert "measured lifetime" in text
     # no secret anywhere in the report
     dumped = json.dumps(report)

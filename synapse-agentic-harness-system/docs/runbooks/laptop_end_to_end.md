@@ -376,7 +376,9 @@ claims say, then makes four model calls: `generateContent` with
 thought summaries, `streamGenerateContent?alt=sse` (and says whether
 the bytes streamed or arrived in one burst, as SSE or as a JSON
 array), a native tool call with its thought signature echoed back on
-the round trip, and a system instruction. With `--probe-ttl` it keeps
+the round trip, the thoughts flag in both spellings (the guide's
+`include_thoughts` and the harness's `includeThoughts`), and a system
+instruction. With `--probe-ttl` it keeps
 sending a deliberately invalid request every 20 s until the gateway
 answers 401: that is the token's real lifetime, which the client will
 have to keep itself. Secrets never print; paste the block (and the

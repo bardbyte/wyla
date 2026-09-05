@@ -4,7 +4,8 @@ token, do what the harness asks of Vertex today? Run it on the laptop
 BEFORE any of it enters the program.
 
     python scripts/eag_check.py                  # token, generate, stream,
-                                                 # tools, system instruction
+                                                 # tools, the thoughts flag
+                                                 # both ways, system instruction
     python scripts/eag_check.py --probe-ttl 7    # then watch the token die
                                                  # (up to 7 minutes)
     python scripts/eag_check.py --only token,generate
@@ -43,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
                              "until it dies or this many minutes pass")
     parser.add_argument("--only", default="",
                         help="comma list of token,generate,stream,tools,"
-                             "system,probe")
+                             "thinking,system,probe")
     parser.add_argument("--json", default="", metavar="FILE",
                         help="also write the full report (secrets redacted)")
     args = parser.parse_args(argv)
@@ -83,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
         return http_stream(chosen, url, headers, body, **kw)
 
     print(f"route: {chosen.label}")
+    mode = (__import__("os").environ.get("GEMINI_MODE") or "").strip()
+    if mode:
+        print(f"note: GEMINI_MODE={mode} in the environment; this check "
+              "runs both request modes regardless")
     print("running the checks (a few model calls; the probe, if asked, "
           "waits up to the minutes you gave)…", flush=True)
     report = run_checks(cfg, http, stream, probe_minutes=args.probe_ttl,

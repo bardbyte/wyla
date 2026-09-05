@@ -438,8 +438,8 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
     """Every check, in the order a client would need them, each
     recorded whether it passed or not; nothing stops early except a
     missing token, without which nothing else can be tried."""
-    want = only or {"token", "generate", "stream", "tools", "system",
-                    "probe"}
+    want = only or {"token", "generate", "stream", "tools", "thinking",
+                    "system", "probe"}
     report: dict[str, Any] = {"config": cfg.display(), "checks": []}
 
     def record(name: str, ok: bool | None, detail: str, **data: Any) -> None:
@@ -523,7 +523,11 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
 
     auth = _bearer(token)
     model_url = f"{cfg.base_url}/models/{cfg.model}"
-    thinking_key = "includeThoughts"
+    # the guide spells the flag include_thoughts and that spelling is
+    # proven on their setup; the harness sends includeThoughts (Gemini's
+    # own JSON accepts both). The thinking check below asks the gateway
+    # about each; generate starts from the guide's and falls back.
+    thinking_key = "include_thoughts"
 
     def generate(body: dict[str, Any]) -> tuple[int, Any, bytes, float]:
         (status, _h, raw), seconds = timed(
@@ -541,7 +545,7 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
             status, payload, raw, seconds = generate(body)
             if status == 400 and cfg.thinking_budget and "thought" in \
                     _error_text(status, raw).lower():
-                thinking_key = "include_thoughts"    # the guide's spelling
+                thinking_key = "includeThoughts"     # the harness's spelling
                 body["generationConfig"] = _generation_config(cfg,
                                                               thinking_key)
                 status, payload, raw, seconds = generate(body)
@@ -653,6 +657,35 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
         except EagError as e:
             record("tools", False, str(e))
 
+    # ── the thoughts flag, both spellings ──
+    if "thinking" in want and cfg.thinking_budget:
+        accepted: dict[str, Any] = {}
+        for key in ("include_thoughts", "includeThoughts"):
+            body = {"contents": [{"role": "user",
+                                  "parts": [{"text": "Say OK."}]}],
+                    "generationConfig": _generation_config(cfg, key, 64)}
+            try:
+                status, payload, raw, seconds = generate(body)
+            except EagError as e:
+                accepted[key] = {"ok": False, "note": str(e)}
+                continue
+            got = (summarize_answer(payload)
+                   if status == 200 and isinstance(payload, dict) else None)
+            accepted[key] = {"ok": status == 200,
+                             "thought_parts": got["thought_parts"] if got
+                             else 0,
+                             "note": "" if got else _error_text(status, raw),
+                             "seconds": seconds}
+        harness = accepted["includeThoughts"]["ok"]
+        record("thinking", harness,
+               " · ".join(f"{key}: {'accepted' if v['ok'] else 'refused'}"
+                          + (f" ({v['thought_parts']} thought part(s))"
+                             if v["ok"] else f" ({v['note'][:80]})")
+                          for key, v in accepted.items())
+               + ("" if harness else " · the harness sends includeThoughts: "
+                  "the EAG plane must spell it the guide's way"),
+               **accepted)
+
     # ── a system instruction ──
     if "system" in want:
         body = {"systemInstruction": {"parts": [{
@@ -727,6 +760,10 @@ def render_report(report: dict[str, Any]) -> str:
     by_name = {c["name"]: c for c in report.get("checks", [])}
     if by_name.get("generate", {}).get("ok"):
         verdict.append("generateContent works")
+    thinking = by_name.get("thinking")
+    if thinking:
+        verdict.append("thoughts flag: both spellings" if thinking["ok"]
+                       else "thoughts flag: the guide's spelling only")
     stream = by_name.get("stream")
     if stream:
         verdict.append("streams" if stream["ok"] else
