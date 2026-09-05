@@ -369,7 +369,12 @@ python scripts/eag_check.py                       # token · generate · stream 
 python scripts/eag_check.py --probe-ttl 7 --json eag_report.json   # then watch the token die
 ```
 
-The check mints the token with a milliseconds timestamp (the unit
+The route is decided by the first real request, the token POST:
+direct first, then the corporate proxy, whichever answers with any
+HTTP status. The model id comes from `EAG_MODEL` (leave `GEMINI_MODEL`
+unset: the Vertex plane reads that name as a fallback and the check
+warns when it is set without `VERTEX_MODEL`). The check mints the
+token with a milliseconds timestamp (the unit
 OneIdentity takes; a seconds timestamp is tried only if the gateway
 refuses, never after a 200) and reads it from the answer's
 `authorization_token` field (the other usual names are tried after

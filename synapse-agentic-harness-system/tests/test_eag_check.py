@@ -9,7 +9,8 @@ import hashlib
 import hmac
 import json
 
-from sahs.util.eag import (Config, EagError, classify_probe, classify_stream,
+from sahs.util.eag import (Config, EagError, Route, RouteChooser,
+                           classify_probe, classify_stream, env_warnings,
                            extract_token, find_expiry, fingerprint,
                            hmac_signature, jwt_claims, render_report,
                            run_checks, token_headers)
@@ -225,12 +226,20 @@ def test_missing_credentials_and_env_mode_are_reported_not_raised():
     assert {c["name"] for c in report["checks"]} == {"token", "generate"}
 
 
-def test_a_dead_gateway_is_a_recorded_failure():
+def test_a_dead_gateway_is_a_recorded_failure_after_one_attempt():
+    """A transport failure is not a refusal: no second timestamp is
+    signed for a network that did not answer, and the detail says
+    reached-or-not rather than refused."""
+    calls = []
+
     def down(*a, **k):
+        calls.append(a)
         raise EagError("unreachable via proxy.corp:8080")
     report = run_checks(Config(app_id="app", secret=SECRET), down, down)
     assert report["checks"][0]["ok"] is False
-    assert "unreachable" in report["checks"][0]["detail"]
+    assert report["checks"][0]["detail"].startswith(
+        "OneIdentity could not be reached: ms: unreachable")
+    assert len(calls) == 1 and len(report["token"]["attempts"]) == 1
 
 
 def test_the_seconds_fallback_only_runs_when_the_gateway_refuses():
@@ -272,4 +281,64 @@ def test_a_200_with_an_unreadable_token_is_our_fault_and_says_so():
     assert "zzzz" not in json.dumps(report) and "yyyy" not in json.dumps(report)
     assert [a["unit"] for a in report["token"]["attempts"]] == ["ms"]
     assert len(report["checks"]) == 1                # nothing else was tried
+
+
+def test_the_route_is_decided_by_the_first_real_request():
+    """No GET probe: the token POST itself tries direct, then the
+    proxy; whichever answers with ANY status is pinned for every later
+    call, and when none answers the failure names each route."""
+    direct = Route({}, None, "direct")
+    via = Route({"https": "http://proxy.corp:8080"}, None, "via proxy.corp")
+    seen = []
+
+    def call(route, method, url, headers, body, **kw):
+        seen.append(route.label)
+        if route is direct:
+            raise EagError("unreachable via [Errno -2] Name or service not known")
+        return 405, {}, b"method not allowed"
+
+    chooser = RouteChooser([direct, via], call=call, stream=call)
+    assert chooser.label == "undecided"
+    status, _h, _b = chooser.http("POST", "https://x/token", {}, b"{}")
+    assert status == 405 and chooser.label == "via proxy.corp"
+    chooser.http("POST", "https://x/again", {}, b"{}")
+    assert seen == ["direct", "via proxy.corp", "via proxy.corp"]
+    assert chooser.failures == ["direct: unreachable via [Errno -2] Name or "
+                                "service not known"]
+    # while undecided, each request reports ITS failures, not a pile
+    def down_all(route, *a, **k):
+        raise EagError(f"dead on {route.label}")
+    twice = RouteChooser([direct, via], call=down_all, stream=down_all)
+    for _ in range(2):
+        try:
+            twice.http("POST", "https://x/token", {}, b"{}")
+        except EagError:
+            pass
+    assert len(twice.failures) == 2
+
+    def down(route, *a, **k):
+        raise EagError(f"dead on {route.label}")
+    nothing = RouteChooser([direct, via], call=down, stream=down)
+    try:
+        nothing.http("POST", "https://x/token", {}, b"{}")
+    except EagError as e:
+        assert "no route reaches the gateway" in str(e)
+        assert "direct" in str(e) and "via proxy.corp" in str(e)
+    else:
+        raise AssertionError("no route should have raised")
+
+
+def test_the_model_comes_from_eag_model_and_gemini_model_is_warned_about():
+    assert Config.from_env({"EAG_MODEL": "gemini-2.5-flash",
+                            "GEMINI_MODEL": "x"}).model == "gemini-2.5-flash"
+    assert Config.from_env({"GEMINI_MODEL": "gemini-2.5-pro"}).model == \
+        "gemini-2.5-pro"
+    assert Config.from_env({}).model == "gemini-2.5-pro"
+    assert env_warnings({"GEMINI_MODEL": "gemini-2.5-pro"})[0].startswith(
+        "GEMINI_MODEL=gemini-2.5-pro is set and VERTEX_MODEL is not")
+    assert env_warnings({"GEMINI_MODEL": "x", "VERTEX_MODEL": "y"}) == []
+    assert env_warnings({"EAG_MODEL": "x"}) == []
+    text = render_report({"config": {}, "checks": [],
+                          "warnings": ["GEMINI_MODEL=x is set …"]})
+    assert "! warning GEMINI_MODEL=x is set" in text
 

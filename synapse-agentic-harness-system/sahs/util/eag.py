@@ -204,6 +204,51 @@ def candidate_routes(env: dict[str, str]) -> list[Route]:
     return [direct] + ([via] if via else [])
 
 
+class RouteChooser:
+    """The route is decided by the FIRST real request, not by a probe:
+    each candidate is tried in order until one gets an HTTP answer of
+    any status (a 405 or a 403 is still an answer), and that route
+    serves every later call. The token endpoint only takes POST, so
+    no GET is ever sent to it."""
+
+    def __init__(self, routes: list[Route], *, call: Any = None,
+                 stream: Any = None) -> None:
+        self.routes = list(routes)
+        self.chosen: Route | None = None
+        self.failures: list[str] = []
+        self._call = call or http_call
+        self._stream = stream or http_stream
+
+    @property
+    def label(self) -> str:
+        return self.chosen.label if self.chosen else "undecided"
+
+    def _pick(self, attempt: Callable[["Route"], Any]) -> Any:
+        if self.chosen is not None:
+            return attempt(self.chosen)
+        self.failures = []                  # this request's, not a pile
+        for route in self.routes:
+            try:
+                result = attempt(route)
+            except EagError as e:
+                self.failures.append(f"{route.label}: {e}")
+                continue
+            self.chosen = route
+            return result
+        raise EagError("no route reaches the gateway — "
+                       + "; ".join(self.failures))
+
+    def http(self, method: str, url: str, headers: dict[str, str],
+             body: bytes | None, **kw: Any):
+        return self._pick(lambda route: self._call(route, method, url,
+                                                   headers, body, **kw))
+
+    def stream(self, url: str, headers: dict[str, str], body: bytes,
+               **kw: Any):
+        return self._pick(lambda route: self._stream(route, url, headers,
+                                                     body, **kw))
+
+
 def http_call(route: Route, method: str, url: str,
               headers: dict[str, str], body: bytes | None, *,
               timeout: float = 90.0) -> tuple[int, dict[str, str], bytes]:
@@ -386,7 +431,11 @@ class Config:
             bearer=(env.get("GEMINI_BEARER_TOKEN") or "").strip(),
             token_url=(env.get("ONEID_TOKEN_URL") or ONEID_TOKEN_URL).strip(),
             base_url=(env.get("EAG_BASE_URL") or EAG_BASE_URL).rstrip("/"),
-            model=(env.get("GEMINI_MODEL") or DEFAULT_MODEL).strip(),
+            # EAG_MODEL first: GEMINI_MODEL is also read by the Vertex
+            # plane as a fallback, so setting it for this check would
+            # move the chat's model too
+            model=(env.get("EAG_MODEL") or env.get("GEMINI_MODEL")
+                   or DEFAULT_MODEL).strip(),
             version=str(env.get("AUTH_VERSION") or "2").strip(),
             scopes=scopes,
             timestamp_unit=(env.get("ONEID_TIMESTAMP_UNIT") or "ms").strip(),
@@ -504,8 +553,10 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                 (status, _h, raw), seconds = timed(
                     http, "POST", cfg.token_url, headers, body)
             except EagError as e:
+                # a transport failure is not a refusal: another
+                # timestamp would meet the same dead network
                 attempts.append({"unit": unit, "error": str(e)})
-                continue
+                break
             payload = _json(raw)
             token, field = extract_token(payload)
             keys = (sorted(payload.keys()) if isinstance(payload, dict)
@@ -526,10 +577,12 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                 break
         if not token:
             answered = [a for a in attempts if a.get("status") == 200]
+            reached = [a for a in attempts if "status" in a]
             record("token", False,
                    ("OneIdentity answered 200 but the token field was not "
                     "recognized: " if answered else
-                    "OneIdentity refused every attempt: ")
+                    "OneIdentity refused every attempt: " if reached else
+                    "OneIdentity could not be reached: ")
                    + "; ".join(f"{a['unit']}: {a.get('note') or a.get('error')}"
                                for a in attempts), attempts=attempts)
             return report
@@ -775,6 +828,20 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
 # ── the paste block ────────────────────────────────────────────
 
 
+def env_warnings(env: dict[str, str]) -> list[str]:
+    """What the environment would do to the OTHER plane: GEMINI_MODEL
+    without VERTEX_MODEL moves the chat's Vertex calls onto it."""
+    out = []
+    if env.get("GEMINI_MODEL") and not (env.get("VERTEX_MODEL")
+                                         or env.get("LUMI_VERTEX_MODEL")):
+        out.append(f"GEMINI_MODEL={env['GEMINI_MODEL']} is set and "
+                   "VERTEX_MODEL is not: the Vertex plane (the chat) reads "
+                   "GEMINI_MODEL as a fallback and would run on it too — "
+                   "use EAG_MODEL for this check, or set VERTEX_MODEL "
+                   "explicitly")
+    return out
+
+
 def render_report(report: dict[str, Any]) -> str:
     mark = {True: "✓", False: "✗", None: "·"}
     lines = ["=== EAG check ==="]
@@ -785,6 +852,8 @@ def render_report(report: dict[str, Any]) -> str:
                  f" · APP_SECRET {cfg.get('app_secret')}")
     if report.get("route"):
         lines.append(f"route     {report['route']}")
+    for line in report.get("warnings", []):
+        lines.append(f"! warning {line}")
     for check in report.get("checks", []):
         lines.append(f"{mark[check['ok']]} {check['name']:<9} {check['detail']}")
     verdict = []
