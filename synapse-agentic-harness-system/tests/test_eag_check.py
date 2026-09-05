@@ -37,9 +37,15 @@ def test_signature_is_urlsafe_unpadded_hmac_over_app_version_timestamp():
 
 
 def test_token_reading_finds_the_token_the_expiry_and_the_jwt_claims():
-    assert extract_token({"access_token": "abc"}) == "abc"
-    assert extract_token({"data": {"token": "nested"}}) == "nested"
-    assert extract_token({"nothing": 1}) == ""
+    assert extract_token({"authorization_token": "one"}) == \
+        ("one", "authorization_token")                  # OneIdentity's name
+    assert extract_token({"access_token": "abc"}) == ("abc", "access_token")
+    assert extract_token({"data": {"token": "nested"}}) == \
+        ("nested", "data.token")
+    assert extract_token({"unheard_of": "x" * 64, "type": "Bearer"}) == \
+        ("x" * 64, "unheard_of (by shape)")
+    assert extract_token({"nothing": 1}) == ("", "")
+    assert extract_token("not json") == ("", "")
     assert find_expiry({"expires_in": 300, "data": {"exp": 9}}) == {
         "expires_in": 300, "exp": 9}
     assert find_expiry({"access_token": "x"}) == {}
@@ -73,15 +79,19 @@ def test_stream_classification_tells_sse_from_a_burst():
 
 
 class Gateway:
-    """OneIdentity + EAG, scripted: the token endpoint wants SECONDS
-    (a ms timestamp is refused), the model rejects includeThoughts
-    once (the guide's snake_case works), tools answer with a signed
-    functionCall, and the token dies 300 s after minting."""
+    """OneIdentity + EAG, scripted like the laptop showed them: the
+    token endpoint takes MILLISECONDS (a seconds timestamp is refused
+    with UEXP001) and answers {"authorization_token": …}; the model
+    takes the guide's include_thoughts and refuses includeThoughts;
+    tools answer with a signed functionCall; the token dies 300 s
+    after minting."""
 
-    def __init__(self):
+    def __init__(self, unit="ms", token_field="authorization_token"):
         self.calls = []
         self.now = 1_700_000_000.0
         self.minted = None
+        self.unit = unit
+        self.token_field = token_field
 
     def clock(self):
         return self.now
@@ -93,13 +103,16 @@ class Gateway:
         self.calls.append((method, url, headers, body))
         if url.endswith("/application/token"):
             stamp = headers["X-Auth-Timestamp"]
-            if len(stamp) > 10:                       # milliseconds: refused
-                return 401, {}, json.dumps(
-                    {"error": {"message": "invalid signature"}}).encode()
+            is_ms = len(stamp) > 10
+            if is_ms != (self.unit == "ms"):
+                return 403, {}, json.dumps({
+                    "description": "Client credential cannot be validated "
+                                   ": {Signature Expired}",
+                    "error_code": "UEXP001"}).encode()
             self.minted = self.now
-            return 200, {}, json.dumps({"access_token": _jwt(
-                {"iat": int(self.now), "exp": int(self.now) + 300}),
-                "token_type": "Bearer"}).encode()
+            return 200, {}, json.dumps({self.token_field: _jwt(
+                {"iat": int(self.now), "exp": int(self.now) + 300})
+            }).encode()
         assert headers["Authorization"].startswith("Bearer ")
         if self.now - (self.minted or self.now) >= 300:
             return 401, {}, b'{"error":{"message":"token expired"}}'
@@ -151,11 +164,14 @@ def test_the_whole_check_against_a_scripted_gateway():
     report = run_checks(cfg, gw.http, gw.stream, now=gw.clock, clock=gw.clock,
                         sleep=gw.sleep, probe_minutes=8)
     by_name = {c["name"]: c for c in report["checks"]}
-    # the token: ms refused, seconds accepted, the JWT says 300 s
+    # the token: milliseconds taken first time, read from
+    # authorization_token, the JWT says 300 s, no second signature
     assert by_name["token"]["ok"] is True
-    assert report["token"]["unit"] == "s" and report["token"]["ttl_s"] == 300
-    assert [a["unit"] for a in report["token"]["attempts"]] == ["ms", "s"]
+    assert report["token"]["unit"] == "ms" and report["token"]["ttl_s"] == 300
+    assert report["token"]["field"] == "authorization_token"
+    assert [a["unit"] for a in report["token"]["attempts"]] == ["ms"]
     assert "says nothing about expiry" in by_name["token"]["detail"]
+    assert "field authorization_token" in by_name["token"]["detail"]
     # generate: the guide's spelling of the thoughts flag, first try
     assert by_name["generate"]["ok"] is True
     assert report["generate"]["thinking_key"] == "include_thoughts"
@@ -215,3 +231,45 @@ def test_a_dead_gateway_is_a_recorded_failure():
     report = run_checks(Config(app_id="app", secret=SECRET), down, down)
     assert report["checks"][0]["ok"] is False
     assert "unreachable" in report["checks"][0]["detail"]
+
+
+def test_the_seconds_fallback_only_runs_when_the_gateway_refuses():
+    """A gateway that wants seconds refuses the ms signature with 403:
+    then, and only then, the seconds one is sent."""
+    gw = Gateway(unit="s")
+    report = run_checks(Config(app_id="app", secret=SECRET), gw.http,
+                        gw.stream, now=gw.clock, clock=gw.clock,
+                        sleep=gw.sleep, only={"token"})
+    assert report["checks"][0]["ok"] is True
+    assert [a["unit"] for a in report["token"]["attempts"]] == ["ms", "s"]
+    assert "UEXP001" in report["token"]["attempts"][0]["note"]
+
+
+def test_a_200_with_an_unreadable_token_is_our_fault_and_says_so():
+    """The laptop's case before the fix: a 200 whose token field we did
+    not know. Now it is reported as a 200 with the keys named, no
+    second signature is sent, and not one byte of the body leaks."""
+    gw = Gateway(token_field="something_new")
+    # the by-shape fallback would read a lone long string; make it two
+    real_http = gw.http
+
+    def http(method, url, headers, body, **kw):
+        status, h, raw = real_http(method, url, headers, body, **kw)
+        if url.endswith("/application/token") and status == 200:
+            payload = json.loads(raw)
+            payload["other"] = "y" * 60
+            payload["something_new"] = "z" * 60
+            return status, h, json.dumps(payload).encode()
+        return status, h, raw
+
+    report = run_checks(Config(app_id="app", secret=SECRET), http, gw.stream,
+                        now=gw.clock, clock=gw.clock, sleep=gw.sleep)
+    token = report["checks"][0]
+    assert token["ok"] is False
+    assert token["detail"].startswith("OneIdentity answered 200 but the "
+                                      "token field was not recognized")
+    assert "other" in token["detail"] and "something_new" in token["detail"]
+    assert "zzzz" not in json.dumps(report) and "yyyy" not in json.dumps(report)
+    assert [a["unit"] for a in report["token"]["attempts"]] == ["ms"]
+    assert len(report["checks"]) == 1                # nothing else was tried
+

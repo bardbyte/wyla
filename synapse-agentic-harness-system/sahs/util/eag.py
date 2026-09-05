@@ -44,8 +44,11 @@ DEFAULT_SCOPES = [
     "/genai/google/v1/models/bge-large-en/embeddings/**::post",
     "/genai/google/v1/models/bge-large-en/**::post",
 ]
-TOKEN_FIELDS = ("access_token", "accessToken", "token", "bearer",
-                "bearerToken", "jwt", "id_token")
+# OneIdentity answers {"authorization_token": "…"} (the laptop, 2026-09-05);
+# the other names are the usual suspects, tried after it
+TOKEN_FIELDS = ("authorization_token", "authorizationToken", "access_token",
+                "accessToken", "token", "bearer", "bearerToken", "jwt",
+                "id_token")
 EXPIRY_FIELDS = ("expires_in", "expiresIn", "expiry", "expires_at",
                  "expiresAt", "exp", "ttl", "validity")
 PROBE_INTERVAL = 20.0          # seconds between token-lifetime probes
@@ -126,18 +129,28 @@ def fingerprint(secret: str) -> str:
     return f"{len(secret)} chars · sha256 {digest}"
 
 
-def extract_token(payload: Any) -> str:
-    if isinstance(payload, dict):
-        for key in TOKEN_FIELDS:
-            value = payload.get(key)
-            if isinstance(value, str) and value:
-                return value
-        for value in payload.values():        # one level down
-            if isinstance(value, dict):
-                inner = extract_token(value)
-                if inner:
-                    return inner
-    return ""
+def extract_token(payload: Any) -> tuple[str, str]:
+    """→ (token, the field it was under); ("", "") when none. A known
+    name first, one level down next, and as a last resort the single
+    long space-free string in the answer — so an unfamiliar field name
+    never turns a 200 into a false refusal again."""
+    if not isinstance(payload, dict):
+        return "", ""
+    for key in TOKEN_FIELDS:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip(), key
+    for key, value in payload.items():        # one level down
+        if isinstance(value, dict):
+            inner, field = extract_token(value)
+            if inner:
+                return inner, f"{key}.{field}"
+    shaped = [(key, value) for key, value in payload.items()
+              if isinstance(value, str) and len(value) >= 40
+              and " " not in value]
+    if len(shaped) == 1:
+        return shaped[0][1], f"{shaped[0][0]} (by shape)"
+    return "", ""
 
 
 # ── the transport: urllib over a pinned route ──────────────────
@@ -473,10 +486,15 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                    "(AUTH_MODE=generated), or AUTH_MODE=env with "
                    "GEMINI_BEARER_TOKEN")
             return report
+        # milliseconds is what OneIdentity takes (the laptop proved it);
+        # the other unit is tried only when the gateway REFUSES, never
+        # after a 200 — a 200 whose token we failed to read is our
+        # fault to report, not a reason to sign again
         units = [cfg.timestamp_unit] + [u for u in ("ms", "s")
                                         if u != cfg.timestamp_unit]
         attempts: list[dict[str, Any]] = []
         payload: Any = None
+        field = ""
         for unit in units:
             stamp = timestamp_now(unit, now)
             headers = token_headers(cfg.app_id, cfg.secret,
@@ -489,17 +507,29 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                 attempts.append({"unit": unit, "error": str(e)})
                 continue
             payload = _json(raw)
-            token = extract_token(payload)
-            attempts.append({"unit": unit, "status": status,
-                             "seconds": seconds,
-                             "keys": sorted(payload.keys())
-                             if isinstance(payload, dict) else [],
-                             "note": "" if token else _error_text(status, raw)})
+            token, field = extract_token(payload)
+            keys = (sorted(payload.keys()) if isinstance(payload, dict)
+                    else [])
+            attempt = {"unit": unit, "status": status, "seconds": seconds,
+                       "keys": keys, "field": field}
+            if status == 200 and not token:
+                # never the body: a 200 body IS the token
+                attempt["note"] = ("200, but no token field recognized "
+                                   f"among {keys or 'a non-JSON body'}")
+            elif status != 200:
+                attempt["note"] = _error_text(status, raw)
+            attempts.append(attempt)
             if token:
                 minted_at = now()
                 break
+            if status == 200:
+                break
         if not token:
-            record("token", False, "OneIdentity refused every attempt: "
+            answered = [a for a in attempts if a.get("status") == 200]
+            record("token", False,
+                   ("OneIdentity answered 200 but the token field was not "
+                    "recognized: " if answered else
+                    "OneIdentity refused every attempt: ")
                    + "; ".join(f"{a['unit']}: {a.get('note') or a.get('error')}"
                                for a in attempts), attempts=attempts)
             return report
@@ -511,15 +541,16 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
         used = attempts[-1]
         record("token", True,
                f"minted in {used['seconds']} s with a {used['unit']} "
-               f"timestamp · answer keys: {', '.join(used['keys']) or '?'}"
+               f"timestamp · field {field} · answer keys: "
+               f"{', '.join(used['keys']) or '?'}"
                + (f" · says expiry: {expiry}" if expiry else
                   " · says nothing about expiry")
                + (f" · JWT exp−iat = {ttl} s" if ttl is not None else
-                  " · not a JWT (no exp to read)"),
-               source="oneidentity", unit=used["unit"], attempts=attempts,
-               keys=used["keys"], expiry_fields=expiry, jwt=bool(claims),
-               exp=claims.get("exp"), iat=claims.get("iat"), ttl_s=ttl,
-               token=fingerprint(token))
+                  f" · not a JWT ({len(token)} chars, no exp to read)"),
+               source="oneidentity", unit=used["unit"], field=field,
+               attempts=attempts, keys=used["keys"], expiry_fields=expiry,
+               jwt=bool(claims), exp=claims.get("exp"),
+               iat=claims.get("iat"), ttl_s=ttl, token=fingerprint(token))
 
     auth = _bearer(token)
     model_url = f"{cfg.base_url}/models/{cfg.model}"

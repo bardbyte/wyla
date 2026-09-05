@@ -369,10 +369,13 @@ python scripts/eag_check.py                       # token · generate · stream 
 python scripts/eag_check.py --probe-ttl 7 --json eag_report.json   # then watch the token die
 ```
 
-The check mints the token (trying a milliseconds and a seconds
-timestamp and saying which the gateway took), reads what the answer
-says about expiry (usually nothing) and what the token's own JWT
-claims say, then makes four model calls: `generateContent` with
+The check mints the token with a milliseconds timestamp (the unit
+OneIdentity takes; a seconds timestamp is tried only if the gateway
+refuses, never after a 200) and reads it from the answer's
+`authorization_token` field (the other usual names are tried after
+it, and a lone long string as a last resort), reads what the answer
+says about expiry (nothing, on this gateway) and what the token's own
+JWT claims say, then makes four model calls: `generateContent` with
 thought summaries, `streamGenerateContent?alt=sse` (and says whether
 the bytes streamed or arrived in one burst, as SSE or as a JSON
 array), a native tool call with its thought signature echoed back on
