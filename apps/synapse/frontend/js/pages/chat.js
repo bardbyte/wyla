@@ -77,25 +77,13 @@ export async function renderChat(outlet, wanted = "") {
             Check the receipts before you act on a number.</div>
         </div>
       </div>
-      <aside class="chat-panel" id="chat-panel" hidden>
-        <div class="chat-panel-head">
-          <b class="panel-title" id="panel-title"></b>
-          <select id="panel-version" title="Version"></select>
-          <button class="btn" id="panel-close" title="Close">✕</button>
-          <div class="panel-actions">
-            <span id="panel-export"></span>
-          </div>
-        </div>
-        <div class="chat-panel-body" id="panel-body"></div>
-      </aside>
     </div>`;
 
   const el = (id) => outlet.querySelector("#" + id);
   const thread = el("chat-thread");
   const input = el("chat-input");
   const state = { session: null, source: null, turns: new Map(),
-                  running: false, seq: 0, artifacts: new Map(),
-                  panelId: "" };
+                  running: false, seq: 0, artifacts: new Map() };
 
   const scroll = () => { thread.scrollTop = thread.scrollHeight; };
   const say = (html, cls = "") => {
@@ -201,7 +189,6 @@ export async function renderChat(outlet, wanted = "") {
   // the + menu: the real doors, never a dead control
   const plusPop = el("chat-plus-pop");
   plusPop.innerHTML = `
-    <a class="plus-item" href="#/skills">✦ Browse skills</a>
     <button class="plus-item" id="plus-memory">⊚ Memory</button>
     <a class="plus-item" href="#/chat/new">✳ New chat</a>`;
   el("chat-plus").addEventListener("click", () => {
@@ -761,17 +748,18 @@ export async function renderChat(outlet, wanted = "") {
       + (row.spec?.watermark ? ` · ${row.spec.watermark}` : "");
   }
 
-  function exportButtons(row) {
-    const box = el("panel-export");
+  function exportButtons(row, host) {
+    const box = host.querySelector(".artifact-export");
+    const body = host.querySelector(".artifact-body");
     const slug = (row.title || row.type).toLowerCase()
       .replace(/[^a-z0-9]+/g, "-").slice(0, 40);
     const buttons = [];
     if (row.type === "chart") {
       buttons.push(["SVG", () => download(`${slug}.svg`,
         "image/svg+xml",
-        el("panel-body").querySelector("svg").outerHTML)]);
+        body.querySelector("svg").outerHTML)]);
       buttons.push(["PNG", () => {
-        const svg = el("panel-body").querySelector("svg");
+        const svg = body.querySelector("svg");
         const img = new Image();
         img.onload = () => {
           const canvas = document.createElement("canvas");
@@ -821,7 +809,7 @@ export async function renderChat(outlet, wanted = "") {
             esc(row.title)}</title><style>${styles}</style>` +
           `<body style="max-width:900px;margin:24px auto;` +
           `font-family:sans-serif"><h2>${esc(row.title)}</h2>` +
-          el("panel-body").innerHTML +
+          body.innerHTML +
           `<p style="font-size:11px;color:#777">${
             esc(provenanceLine(row))}</p></body>`);
       }]);
@@ -834,7 +822,7 @@ export async function renderChat(outlet, wanted = "") {
       } else {
         buttons.push(["SVG", () => download(`${slug}.svg`,
           "image/svg+xml",
-          el("panel-body").querySelector("svg").outerHTML)]);
+          body.querySelector("svg").outerHTML)]);
       }
     }
     // every type exports a deck server-side: one panel per slide,
@@ -856,53 +844,31 @@ export async function renderChat(outlet, wanted = "") {
     }
   }
 
-  async function openArtifact(artifactId, version = null) {
+  // artifacts publish inside the chat: the block renders the artifact
+  // where the turn made it, with its exports and its versions;
+  // reopening an old chat renders every artifact again in place
+  async function showArtifact(block, artifactId, version = null) {
     const got = await api.chatArtifact(artifactId, version);
-    if (!got.available) return;
+    if (!got.available || !block.isConnected) return;
     const row = got.artifact;
-    state.panelId = artifactId;
     state.artifacts.set(artifactId, row);
-    const panel = el("chat-panel");
-    panel.hidden = false;
-    el("panel-title").textContent = row.title;
-    el("panel-body").innerHTML = renderArtifactBody(row);
-    el("panel-body").scrollTop = 0;       // the artifact, from its top
-    bindTable(el("panel-body"));
-    animateNumbers(el("panel-body"));
-    if (row.type === "dashboard") {
-      bindDashboardFilters(el("panel-body"), row);
-    }
-    exportButtons(row);
-    // the drawer slides in from the right edge and moves the chat to
-    // the middle; the card it came from lights up
-    requestAnimationFrame(() => {
-      panel.classList.add("open");
-      shell.classList.add("panel-open");
-    });
-    for (const card of thread.querySelectorAll(".artifact-inline")) {
-      card.classList.toggle("on", card.dataset.artifact === artifactId);
-    }
+    const body = block.querySelector(".artifact-body");
+    block.querySelector(".artifact-name").textContent = row.title;
+    body.innerHTML = renderArtifactBody(row);
+    bindTable(body);
+    animateNumbers(body);
+    if (row.type === "dashboard") bindDashboardFilters(body, row);
+    exportButtons(row, block);
     const versions = await api.chatArtifactVersions(artifactId);
-    const select = el("panel-version");
-    select.innerHTML = (versions.versions || []).map((v) =>
+    const select = block.querySelector(".artifact-version");
+    const list = versions.versions || [];
+    select.hidden = list.length < 2;
+    select.innerHTML = list.map((v) =>
       `<option value="${v.version}"${v.version === row.version
         ? " selected" : ""}>v${v.version}</option>`).join("");
     select.onchange = () =>
-      openArtifact(artifactId, Number(select.value));
+      showArtifact(block, artifactId, Number(select.value));
   }
-  el("panel-close").addEventListener("click", () => {
-    const panel = el("chat-panel");
-    panel.classList.remove("open");
-    shell.classList.remove("panel-open");
-    state.panelId = "";
-    for (const card of thread.querySelectorAll(".artifact-inline.on")) {
-      card.classList.remove("on");
-    }
-    // hidden once it has slid out, so nothing off-screen stays live
-    setTimeout(() => {
-      if (!panel.classList.contains("open")) panel.hidden = true;
-    }, 340);
-  });
 
   // ── the stream ───────────────────────────────────────────
   function turnFor(turnId) {
@@ -1204,24 +1170,28 @@ export async function renderChat(outlet, wanted = "") {
 
   function artifactCard(container, row, live) {
     const div = document.createElement("div");
-    div.className = "card artifact-inline";
+    div.className = "artifact-block";
     div.dataset.artifact = row.artifact_id;
     div.innerHTML = `
-      <span class="glyph">${{ chart: "📊", table: "▦",
-        document: "🗎", dashboard: "▥", diagram: "✦",
-        kpi: "◉" }[row.type] || "▣"}</span>
-      <span class="artifact-name" title="${esc(row.title)}">${
-        esc(row.title)}</span>
-      <span class="muted">${esc(row.type)} · v${row.version}${
-        row.spec?.watermark
-          ? ` · ${esc(row.spec.watermark)}` : ""}</span>
-      <button class="btn">open</button>`;
-    div.querySelector("button").addEventListener("click", () =>
-      openArtifact(row.artifact_id));
+      <div class="artifact-head">
+        <span class="glyph">${{ chart: "📊", table: "▦",
+          document: "🗎", dashboard: "▥", diagram: "✦",
+          kpi: "◉" }[row.type] || "▣"}</span>
+        <b class="artifact-name" title="${esc(row.title)}">${
+          esc(row.title)}</b>
+        <span class="muted">${esc(row.type)}${
+          row.spec?.watermark
+            ? ` · ${esc(row.spec.watermark)}` : ""}</span>
+        <select class="artifact-version" title="Version" hidden></select>
+        <span class="spacer"></span>
+        <span class="artifact-export"></span>
+      </div>
+      <div class="artifact-body"><p class="muted">rendering…</p></div>`;
+    container.closest(".chat-turn")?.classList.add("has-artifact");
     container.appendChild(div);
-    // the panel is model-invoked: it opens on an artifact in THIS
-    // interaction, never on reopening an old chat
-    if (live) openArtifact(row.artifact_id);
+    // published in the chat, where the turn made it: no drawer, no
+    // scrolling up to find it
+    showArtifact(div, row.artifact_id).then(() => { if (live) scroll(); });
     scroll();
   }
 

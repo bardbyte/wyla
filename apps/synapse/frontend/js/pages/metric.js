@@ -11,7 +11,7 @@ import {
 export async function renderMetric(outlet, id) {
   outlet.innerHTML = `
     <div class="masthead" style="padding:0">
-      <a class="linklike" href="#/semantics">← Semantics Explorer</a>
+      <a class="linklike" href="#/metrics">← Metrics Explorer</a>
       <span class="muted">› Metric Profile</span>
     </div>
     <div id="siblings"></div>
@@ -37,7 +37,7 @@ export async function renderMetric(outlet, id) {
               title="${esc(r.expr || r.label || r.id)}">${
               esc(r.label) || `${esc((r.fp || r.id).slice(0, 8))}…`}</a>`)
             .join("")}
-          <a class="linklike" href="#/table/${
+          <a class="linklike" href="#/product/${
             encodeURIComponent(bound)}">the table →</a>
         </div>`;
     });
@@ -46,7 +46,7 @@ export async function renderMetric(outlet, id) {
   if (!detail.found || !detail.metric) {
     host.innerHTML = card("", `<p>metric ${esc(id)} is not in the
       promoted build</p>
-      <a class="btn" href="#/semantics">← back</a>`, "empty");
+      <a class="btn" href="#/metrics">← back</a>`, "empty");
     return;
   }
   const m = detail.metric;
@@ -121,7 +121,7 @@ export async function renderMetric(outlet, id) {
 
     <div class="grid2">
       ${card("BINDING", m.table
-        ? `<a class="linklike mono" href="#/table/${
+        ? `<a class="linklike mono" href="#/product/${
             encodeURIComponent(m.table)}">${esc(m.table)}</a>`
         : `<span class="muted">no table binding on record</span>`)}
       ${card("WHO USES", Object.keys(m.used_by ?? {}).length

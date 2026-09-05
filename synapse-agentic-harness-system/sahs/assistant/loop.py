@@ -65,7 +65,10 @@ not a table browse. When a first look misses, rephrase and look \
 again from another angle before concluding anything is absent. Read \
 a card before using what is on it; sample a column's values before \
 writing a filter literal. A time window names both ends — a lower and \
-an upper bound on the date — so future-dated rows never ride in.
+an upper bound on the date — so future-dated rows never ride in. The \
+session section says what day it is: "last month", "this quarter" and \
+"year to date" resolve against that date, never against your own \
+sense of now.
 
 Numbers come from tools; reasoning comes from you. You never invent \
 a table, column, metric, or number: if it is not in a card, an \
@@ -154,9 +157,52 @@ def _project_block(project: dict[str, Any] | None) -> str:
             + str(project["instructions"]).strip()[:2000])
 
 
-def _session_block(artifacts: list[dict[str, Any]] | None,
-                   notes: list[str] | None) -> str:
-    lines = []
+def _partition_day(value: Any) -> str:
+    """A partition id as BigQuery names it (20260822) reads as a date
+    (2026-08-22); anything else is shown as recorded."""
+    text = str(value or "").strip()
+    if len(text) == 8 and text.isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+    return text
+
+
+def _date_block(build: Any, today: _dt.date | None = None) -> str:
+    """What day it is, spelled out with the periods the relative words
+    resolve to, and the newest partition the build saw. The model has
+    no clock and no calendar: without this line "last month" resolves
+    against its training-time sense of now, and a window with no upper
+    bound rides into the future. It lives in the session section, the
+    last one, so the cached prefix stays stable within a day."""
+    today = today or _dt.date.today()
+    month_start = today.replace(day=1)
+    last_month = month_start - _dt.timedelta(days=1)
+    quarter = (today.month - 1) // 3 + 1
+    quarter_start = _dt.date(today.year, 3 * (quarter - 1) + 1, 1)
+    last_quarter_end = quarter_start - _dt.timedelta(days=1)
+    last_quarter = (last_quarter_end.month - 1) // 3 + 1
+    lines = [
+        f"Today is {today:%A}, {today.isoformat()}. This month is "
+        f"{today:%B %Y}; last month was {last_month:%B %Y}; this quarter "
+        f"is Q{quarter} {today.year}, from {quarter_start.isoformat()}; "
+        f"last quarter was Q{last_quarter} {last_quarter_end.year}; the "
+        f"year to date runs from {today.year}-01-01. Relative words "
+        "resolve against this date, never against your own sense of "
+        "now."]
+    horizon = max((_partition_day(t.get("partition_latest"))
+                   for t in (getattr(build, "tables", None) or [])),
+                  default="")
+    if horizon:
+        lines.append(
+            f"Data on record runs to {horizon}, the newest partition the "
+            "build saw; each table card's partitioned line says its own, "
+            "and rows after it may not exist yet.")
+    return "\n".join(lines)
+
+
+def _session_block(build: Any, artifacts: list[dict[str, Any]] | None,
+                   notes: list[str] | None,
+                   today: _dt.date | None = None) -> str:
+    lines = [_date_block(build, today)]
     if artifacts:
         lines.append("Artifacts kept in this chat (pass artifact_id "
                      "to publish a new version instead of a copy):")
@@ -175,11 +221,13 @@ def system_prompt(build: Build, skills: list[Skill] | None = None,
                   project: dict[str, Any] | None = None,
                   artifacts: list[dict[str, Any]] | None = None,
                   notes: list[str] | None = None,
-                  user_name: str = "", mode: str = DEFAULT_MODE) -> str:
+                  user_name: str = "", mode: str = DEFAULT_MODE,
+                  today: _dt.date | None = None) -> str:
     """Identity → chain → mode → the graph digest (business map +
-    skills (loaded whole, the rest by name) → memory → this session.
-    Stable parts first so the prefix caches; the tools are declared
-    to the transport, never pasted here."""
+    skills (loaded whole, the rest by name) → memory → this session
+    (today's date first, then the artifacts and notes). Stable parts
+    first so the prefix caches; the tools are declared to the
+    transport, never pasted here."""
     digest = _DIGEST_CACHE.get(build.version)
     if digest is None:
         digest = synapse_digest(build,
@@ -199,9 +247,8 @@ def system_prompt(build: Build, skills: list[Skill] | None = None,
                                      _memory_block(memories, user_name))
                          if p)
     parts.append(_section("memory", memory))
-    session = _session_block(artifacts, notes)
-    if session:
-        parts.append(_section("session", session))
+    parts.append(_section("session",
+                          _session_block(build, artifacts, notes, today)))
     return "\n\n".join(parts)
 
 

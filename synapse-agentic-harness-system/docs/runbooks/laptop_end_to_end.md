@@ -261,6 +261,16 @@ there means the alias sidecar wants those names. The new build's
 `DIFF_vs_prev.md` shows what the sources added. Restart the app so the
 chat serves the new build.
 
+**The second surface.** The same app serves Synapse Semantic
+Intelligence at `http://localhost:8400/synapse/`: the chat with its
+artifacts published in the transcript, Search chats as a page, and
+Data Products and Metrics Explorer as cards. It reads the same build
+and needs nothing extra; a hard refresh picks up a new page. To put
+your logo in its left header, set `SYNAPSE_LOGO=/path/to/logo.png` in
+the silo `.env` (png, jpg, svg, webp or gif) and restart the app: the
+image replaces the words, and the words stay when the file is not
+there.
+
 **The query comes first.** In Chat mode a data question ends with the
 query on a card — the SQL, what it will scan, its status and meridian
 line — and three buttons: **Run query** executes it with no model call
@@ -346,6 +356,33 @@ python scripts/planes_check.py     # a dry run, then one model call,
 The client gives up on a model stream after 120 s of silence, retries
 once if nothing had arrived, and the turn then closes in plain language
 with what was already said. Paste the doctor's output with the transcript.
+
+**Gemini 2.5 Pro through EAG (a candidate for the model plane).** The
+guide's path is a OneIdentity bearer token minted from `APP_ID` and
+`APP_SECRET` (an HMAC-signed request), then Gemini's own REST protocol
+behind `eag-dev.aexp.com`. Before any of it enters the program, prove
+what it does on the laptop:
+
+```bash
+# in the silo .env: APP_ID, APP_SECRET (or AUTH_MODE=env + GEMINI_BEARER_TOKEN)
+python scripts/eag_check.py                       # token · generate · stream · tools · system
+python scripts/eag_check.py --probe-ttl 7 --json eag_report.json   # then watch the token die
+```
+
+The check mints the token (trying a milliseconds and a seconds
+timestamp and saying which the gateway took), reads what the answer
+says about expiry (usually nothing) and what the token's own JWT
+claims say, then makes four model calls: `generateContent` with
+thought summaries, `streamGenerateContent?alt=sse` (and says whether
+the bytes streamed or arrived in one burst, as SSE or as a JSON
+array), a native tool call with its thought signature echoed back on
+the round trip, the thoughts flag in both spellings (the guide's
+`include_thoughts` and the harness's `includeThoughts`), and a system
+instruction. With `--probe-ttl` it keeps
+sending a deliberately invalid request every 20 s until the gateway
+answers 401: that is the token's real lifetime, which the client will
+have to keep itself. Secrets never print; paste the block (and the
+JSON) back.
 
 **Before the first query:** the graph names tables `dw.<table>`, and
 BigQuery resolves that against the project that runs the query

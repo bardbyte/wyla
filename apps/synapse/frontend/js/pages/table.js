@@ -13,8 +13,8 @@ import {
 export async function renderTable(outlet, physical) {
   outlet.innerHTML = `
     <div class="masthead" style="padding:0">
-      <a class="linklike" href="#/tables">← Tables</a>
-      <span class="muted">› Table Profile</span>
+      <a class="linklike" href="#/products">← Data Products</a>
+      <span class="muted">› Data Product</span>
       <span class="spacer"></span>
       <button class="icon-btn" id="t-prev" title="previous table">‹</button>
       <select class="search" id="t-pick"
@@ -37,7 +37,7 @@ export async function renderTable(outlet, physical) {
     pick.innerHTML = all.map((t) => `
       <option value="${esc(t)}" ${t === physical ? "selected" : ""}>${
       esc(t)}</option>`).join("");
-    const jump = (t) => { location.hash = `#/table/${
+    const jump = (t) => { location.hash = `#/product/${
       encodeURIComponent(t)}`; };
     pick.addEventListener("change", () => jump(pick.value));
     const at = all.indexOf(physical);
@@ -58,7 +58,7 @@ export async function renderTable(outlet, physical) {
   if (!detail.found) {
     host.innerHTML = card("", `<p>${esc(physical)} is not in the
       promoted build</p>
-      <a class="btn" href="#/tables">← back</a>`, "empty");
+      <a class="btn" href="#/products">← back</a>`, "empty");
     return pullout.teardown;
   }
   const columns = Object.entries(detail.columns ?? {});
@@ -96,7 +96,7 @@ export async function renderTable(outlet, physical) {
              alone is not a join</span>`
           : (detail.joins ?? []).map((j) => `
             <div class="joinrow">
-              <a class="linklike mono" href="#/table/${
+              <a class="linklike mono" href="#/product/${
                 encodeURIComponent(j.a === physical ? j.b : j.a)}">${
                 esc(j.a === physical ? j.b : j.a)}</a>
               <span class="chip">${esc(j.source)}</span>

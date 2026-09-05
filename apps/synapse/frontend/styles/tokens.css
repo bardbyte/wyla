@@ -1,0 +1,139 @@
+/* Synapse by Lumi — design tokens, taken from the Lumi design canvas
+ * (the locked brand plane): deep #00175A ink · bright #006FCF as the
+ * INTERACTIVE accent only · ice washes · Plus Jakarta Sans + IBM Plex
+ * Mono. Tier colors are the only other semantic colors, and crimson
+ * means definition conflict — only, ever. Dark is not inverted light:
+ * navy grounds, brightened accent and tiers holding 4.5:1. */
+
+:root {
+  --font-ui: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo,
+    Consolas, monospace;
+
+  --fs-11: 0.6875rem;
+  --fs-12: 0.75rem;
+  --fs-13: 0.8125rem;
+  --fs-14: 0.875rem;
+  --fs-16: 1rem;
+  --fs-20: 1.25rem;
+  --fs-32: 2rem;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-hero: 18px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --t-fast: 120ms ease;
+  --t-med: 220ms ease;
+
+  /* light (the artboards) */
+  --bg: #f5f8fc;
+  --surface: #ffffff;
+  --surface-2: #eef3fa;
+  --surface-3: #e2eaf6;
+  --line: #d7e2f2;
+  --line-strong: #a9b8d4;
+  --ink: #00175a;
+  --ink-2: #33415f;
+  --ink-3: #5b6b8f;
+  --accent: #006fcf;
+  --accent-hover: #005fb8;
+  --accent-soft: #eaf2fb;
+  --on-accent: #ffffff;
+  --hero: #00175a;
+  --hero-line: #2b3f7e;
+  --on-hero: #c6dcf5;
+  --tier-high: #0e7a55;
+  --tier-high-soft: #eaf6f0;
+  --tier-mid: #b07908;
+  --tier-mid-soft: #fdf4e0;
+  --tier-low: #7c8bab;
+  --tier-low-soft: #eef3fa;
+  --conflict: #b3282d;
+  --conflict-soft: #fdf0f0;
+  --gold: #b58a2a;
+  --data: #3b6fe0;
+  --shadow: 0 1px 3px rgba(0, 23, 90, 0.07);
+  --shadow-lift: 0 4px 12px rgba(0, 23, 90, 0.1),
+    0 12px 40px rgba(0, 23, 90, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b1430;
+    --surface: #101c38;
+    --surface-2: #16234a;
+    --surface-3: #1d2c58;
+    --line: #2a3a66;
+    --line-strong: #3d5188;
+    --ink: #e8edf5;
+    --ink-2: #b9c6e0;
+    --ink-3: #8fa3c8;
+    --accent: #57a9f2;
+    --accent-hover: #7cbcf6;
+    --accent-soft: #14294d;
+    --on-accent: #061024;
+    --hero: #101c38;
+    --hero-line: #2a3a66;
+    --on-hero: #c6dcf5;
+    --tier-high: #2bae84;
+    --tier-high-soft: #12312a;
+    --tier-mid: #d8a93f;
+    --tier-mid-soft: #2f2712;
+    --tier-low: #8b98b0;
+    --tier-low-soft: #1b2646;
+    --conflict: #e4697a;
+    --conflict-soft: #331722;
+    --gold: #d8b25e;
+    --data: #5e8df0;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.35);
+    --shadow-lift: 0 4px 12px rgba(0, 0, 0, 0.45),
+      0 12px 40px rgba(0, 0, 0, 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0b1430;
+  --surface: #101c38;
+  --surface-2: #16234a;
+  --surface-3: #1d2c58;
+  --line: #2a3a66;
+  --line-strong: #3d5188;
+  --ink: #e8edf5;
+  --ink-2: #b9c6e0;
+  --ink-3: #8fa3c8;
+  --accent: #57a9f2;
+  --accent-hover: #7cbcf6;
+  --accent-soft: #14294d;
+  --on-accent: #061024;
+  --hero: #101c38;
+  --hero-line: #2a3a66;
+  --on-hero: #c6dcf5;
+  --tier-high: #2bae84;
+  --tier-high-soft: #12312a;
+  --tier-mid: #d8a93f;
+  --tier-mid-soft: #2f2712;
+  --tier-low: #8b98b0;
+  --tier-low-soft: #1b2646;
+  --conflict: #e4697a;
+  --conflict-soft: #331722;
+  --gold: #d8b25e;
+  --data: #5e8df0;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lift: 0 4px 12px rgba(0, 0, 0, 0.45),
+    0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0ms;
+    --t-med: 0ms;
+  }
+}
