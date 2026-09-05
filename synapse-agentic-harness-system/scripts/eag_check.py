@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
                              "until it dies or this many minutes pass")
     parser.add_argument("--only", default="",
                         help="comma list of token,generate,stream,tools,"
-                             "thinking,system,probe")
+                             "thinking,system,cache,probe")
     parser.add_argument("--json", default="", metavar="FILE",
                         help="also write the full report (secrets redacted)")
     args = parser.parse_args(argv)

@@ -149,6 +149,17 @@ class Gateway:
                 {"text": "Certified as sum(trans_usd_am)."}]},
                 "finishReason": "STOP"}]}).encode()
         if payload.get("systemInstruction"):
+            text = payload["systemInstruction"]["parts"][0]["text"]
+            if len(text) > 2000:                    # the cache check
+                self.prefixes = getattr(self, "prefixes", 0) + 1
+                return 200, {}, json.dumps({"candidates": [{"content": {
+                    "parts": [{"text": "OK"}]}, "finishReason": "STOP"}],
+                    "usageMetadata": {"promptTokenCount": 3100,
+                                      "candidatesTokenCount": 1,
+                                      "cachedContentTokenCount":
+                                          3000 if self.prefixes > 1 else 0}
+                }).encode()
+            assert payload["generationConfig"]["maxOutputTokens"] >= 1024
             return 200, {}, json.dumps({"candidates": [{"content": {"parts": [
                 {"text": "PONG"}]}, "finishReason": "STOP"}]}).encode()
         return 200, {}, json.dumps({"candidates": [{"content": {"parts": [
@@ -208,8 +219,14 @@ def test_the_whole_check_against_a_scripted_gateway():
     assert by_name["tools"]["ok"] is True and report["tools"]["signature"]
     assert report["tools"]["call"]["name"] == "lookup_metric"
     assert "sum(trans_usd_am)" in report["tools"]["round_trip_text"]
-    # the system instruction was followed
+    # the system instruction was followed, with room under the cap
     assert by_name["system"]["ok"] is True and report["system"]["followed"]
+    assert report["system"]["finish"] == "STOP"
+    # the prompt cache: the second long prefix came back cached
+    assert by_name["cache"]["ok"] is True
+    assert report["cache"]["cached_tokens"] == 3000
+    assert "3000 cached of 3100 prompt tokens" in by_name["cache"]["detail"]
+    assert report["generate"]["usage"]["cached"] is None
     # the probe watched the token die at 300 s
     assert by_name["probe"]["ok"] is True
     assert report["probe"]["verdict"] == "dead"
@@ -221,6 +238,7 @@ def test_the_whole_check_against_a_scripted_gateway():
     assert "thoughts flag: the guide's spelling only" in text
     assert "path form: slash" in text
     assert "measured lifetime" in text
+    assert "prompt cache works through the gateway" in text
     # no secret anywhere in the report
     dumped = json.dumps(report)
     assert SECRET not in dumped and "sig==" not in report["config"].values()
@@ -243,6 +261,7 @@ def test_missing_credentials_and_env_mode_are_reported_not_raised():
                         clock=gw.clock, sleep=gw.sleep, only={"token", "generate"})
     assert report["token"]["source"] == "env" and report["token"]["ttl_s"] == 240
     assert {c["name"] for c in report["checks"]} == {"token", "path", "generate"}
+    assert report["token"]["ttl_s"] == 240              # exp − iat
 
 
 def test_a_dead_gateway_is_a_recorded_failure_after_one_attempt():
@@ -411,4 +430,30 @@ def test_an_empty_refusal_is_read_from_the_headers():
         "HTTP 401 with an empty body (the gateway answered before Gemini did)"
     assert _error_text(403, b'{"description":"denied","error_code":"E1"}') \
         == "HTTP 403: denied [E1]"
+
+
+def test_a_jwt_with_exp_but_no_iat_gets_its_lifetime_from_the_minting():
+    """The laptop's token: a JWT that says when it expires but not when
+    it was issued. The lifetime is exp minus the minting moment, the
+    detail says so, and the probe line carries the JWT's number."""
+    gw = Gateway()
+    real_http = gw.http
+
+    def http(method, url, headers, body, **kw):
+        status, h, raw = real_http(method, url, headers, body, **kw)
+        if url.endswith("/application/token") and status == 200:
+            return status, h, json.dumps({"authorization_token": _jwt(
+                {"exp": int(gw.now) + 900})}).encode()
+        return status, h, raw
+
+    report = run_checks(Config(app_id="app", secret=SECRET), http, gw.stream,
+                        now=gw.clock, clock=gw.clock, sleep=gw.sleep,
+                        probe_minutes=1, only={"token", "probe"})
+    by_name = {c["name"]: c for c in report["checks"]}
+    assert report["token"]["jwt"] is True and report["token"]["iat"] is None
+    assert report["token"]["ttl_s"] == 900
+    assert "JWT expires 900 s after minting" in by_name["token"]["detail"]
+    assert "not a JWT" not in by_name["token"]["detail"]
+    assert "its JWT says 900 s" in by_name["probe"]["detail"]
+    assert report["probe"]["refresh_hint"].startswith("refresh at ~720 s by the JWT")
 

@@ -324,6 +324,7 @@ def summarize_answer(payload: dict[str, Any]) -> dict[str, Any]:
         "usage": {"prompt": usage.get("promptTokenCount"),
                   "output": usage.get("candidatesTokenCount"),
                   "thoughts": usage.get("thoughtsTokenCount"),
+                  "cached": usage.get("cachedContentTokenCount"),
                   "total": usage.get("totalTokenCount")},
         "model_version": payload.get("modelVersion", ""),
     }
@@ -534,7 +535,7 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
     recorded whether it passed or not; nothing stops early except a
     missing token, without which nothing else can be tried."""
     want = only or {"token", "generate", "stream", "tools", "thinking",
-                    "system", "probe"}
+                    "system", "cache", "probe"}
     report: dict[str, Any] = {"config": cfg.display(), "checks": []}
 
     def record(name: str, ok: bool | None, detail: str, **data: Any) -> None:
@@ -556,12 +557,16 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                    "is empty")
             return report
         claims = jwt_claims(token) or {}
-        record("token", True, f"from the environment ({fingerprint(token)})",
-               source="env", jwt=bool(claims),
-               exp=claims.get("exp"), iat=claims.get("iat"),
-               ttl_s=(claims["exp"] - claims["iat"]) if
-               isinstance(claims.get("exp"), int)
-               and isinstance(claims.get("iat"), int) else None)
+        exp = claims.get("exp") if isinstance(claims.get("exp"), int) \
+            else None
+        iat = claims.get("iat") if isinstance(claims.get("iat"), int) \
+            else None
+        record("token", True, f"from the environment ({fingerprint(token)})"
+               + (f" · JWT expires {exp - int(minted_at)} s from now"
+                  if exp is not None else ""),
+               source="env", jwt=bool(claims), exp=exp, iat=iat,
+               ttl_s=(exp - iat) if exp is not None and iat is not None
+               else (exp - int(minted_at) if exp is not None else None))
     else:
         if not cfg.app_id or not cfg.secret:
             record("token", False, "APP_ID and APP_SECRET are needed "
@@ -621,9 +626,14 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
             return report
         claims = jwt_claims(token) or {}
         expiry = find_expiry(payload) if isinstance(payload, dict) else {}
-        ttl = ((claims["exp"] - claims["iat"])
-               if isinstance(claims.get("exp"), int)
-               and isinstance(claims.get("iat"), int) else None)
+        exp = claims.get("exp") if isinstance(claims.get("exp"), int) \
+            else None
+        iat = claims.get("iat") if isinstance(claims.get("iat"), int) \
+            else None
+        # the lifetime: exp − iat when the token says both; exp minus
+        # the minting moment when it says only exp (this gateway's case)
+        ttl = (exp - iat) if exp is not None and iat is not None else (
+            exp - int(minted_at) if exp is not None else None)
         used = attempts[-1]
         record("token", True,
                f"minted in {used['seconds']} s with a {used['unit']} "
@@ -631,12 +641,17 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                f"{', '.join(used['keys']) or '?'}"
                + (f" · says expiry: {expiry}" if expiry else
                   " · says nothing about expiry")
-               + (f" · JWT exp−iat = {ttl} s" if ttl is not None else
+               + (f" · JWT exp−iat = {ttl} s" if iat is not None
+                  and exp is not None else
+                  f" · JWT expires {ttl} s after minting (exp {exp}, no iat)"
+                  if exp is not None else
+                  f" · JWT without an exp claim ({len(token)} chars)"
+                  if claims else
                   f" · not a JWT ({len(token)} chars, no exp to read)"),
                source="oneidentity", unit=used["unit"], field=field,
                attempts=attempts, keys=used["keys"], expiry_fields=expiry,
-               jwt=bool(claims), exp=claims.get("exp"),
-               iat=claims.get("iat"), ttl_s=ttl, token=fingerprint(token))
+               jwt=bool(claims), exp=exp, iat=iat, ttl_s=ttl,
+               minted_at=int(minted_at), token=fingerprint(token))
 
     auth = _bearer(token)
     model_url = f"{cfg.base_url}/models/{cfg.model}"
@@ -852,25 +867,62 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
 
     # ── a system instruction ──
     if "system" in want:
+        # on 2.5 the thinking tokens count against maxOutputTokens: a
+        # tight cap yields an empty answer, so the cap leaves room
         body = {"systemInstruction": {"parts": [{
                     "text": "Reply with exactly the single word PONG."}]},
                 "contents": [{"role": "user", "parts": [{"text": "ping"}]}],
-                "generationConfig": _generation_config(cfg, thinking_key, 64)}
+                "generationConfig": _generation_config(
+                    cfg, thinking_key, max(1024, cfg.thinking_budget + 256))}
         try:
             status, payload, raw, seconds = generate(body)
             if status == 200 and isinstance(payload, dict):
                 got = summarize_answer(payload)
                 record("system", True,
-                       f"accepted in {seconds} s · text: {got['text'][:40]!r}"
+                       f"accepted in {seconds} s · finish {got['finish']} · "
+                       f"text: {got['text'][:40]!r}"
                        + ("" if "pong" in got["text"].lower()
                           else " (the instruction was not followed)"),
                        followed="pong" in got["text"].lower(),
-                       text=got["text"], seconds=seconds)
+                       finish=got["finish"], text=got["text"],
+                       seconds=seconds)
             else:
                 record("system", False, gateway_reason(status, raw),
                        status=status)
         except EagError as e:
             record("system", False, str(e))
+
+    # ── the prompt cache through the gateway: a long prefix, twice ──
+    if "cache" in want:
+        # ~3K tokens of stable text, the shape of the harness's prefix
+        prefix = ("You are Synapse, an analytical colleague over a governed "
+                  "graph of tables, metrics and joins. " * 220)
+        seen: list[dict[str, Any]] = []
+        for i in range(2):
+            body = {"systemInstruction": {"parts": [{"text": prefix}]},
+                    "contents": [{"role": "user", "parts": [{
+                        "text": f"Reply with the single word OK. ({i})"}]}],
+                    "generationConfig": _generation_config(
+                        cfg, thinking_key, max(1024, cfg.thinking_budget + 256))}
+            try:
+                status, payload, raw, seconds = generate(body)
+            except EagError as e:
+                seen.append({"error": str(e)})
+                break
+            got = (summarize_answer(payload)
+                   if status == 200 and isinstance(payload, dict) else None)
+            seen.append({"status": status, "seconds": seconds,
+                         "usage": got["usage"] if got else None,
+                         "note": "" if got else gateway_reason(status, raw)})
+        second = seen[-1] if len(seen) == 2 else {}
+        cached = (second.get("usage") or {}).get("cached")
+        record("cache", bool(cached) if second.get("status") == 200 else False,
+               (f"second call: {cached or 0} cached of "
+                f"{(second.get('usage') or {}).get('prompt')} prompt tokens"
+                f" · {seen[0].get('seconds')} s then {second.get('seconds')} s"
+                if second.get("status") == 200 else
+                "; ".join(str(x.get("note") or x.get("error")) for x in seen)),
+               calls=seen, cached_tokens=cached)
 
     # ── the token's real lifetime ──
     if "probe" in want and probe_minutes > 0:
@@ -895,14 +947,18 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
             if now() >= deadline:
                 break
             sleep(PROBE_INTERVAL)
+        said = report.get("token", {}).get("ttl_s")
         record("probe", died_at is not None or None,
                (f"the token died between {timeline[-2]['age_s'] if len(timeline) > 1 else 0}"
                 f" s and {died_at} s after minting" if died_at is not None
                 else f"still alive {timeline[-1]['age_s']} s after minting "
-                     f"(the probe stopped at {probe_minutes} min)"),
+                     f"(the probe stopped at {probe_minutes} min)")
+               + (f" · its JWT says {said} s" if said else ""),
                timeline=timeline, verdict=verdict, died_at_s=died_at,
                refresh_hint=(f"refresh at ~{int(died_at * 0.8)} s, or on the "
-                             "first 401" if died_at else ""))
+                             "first 401" if died_at else
+                             f"refresh at ~{int(said * 0.8)} s by the JWT, or "
+                             "on the first 401" if said else ""))
 
     return report
 
@@ -960,6 +1016,10 @@ def render_report(report: dict[str, Any]) -> str:
         verdict.append("native tools " + ("work" if tools["ok"] else "failed")
                        + (" with signatures" if report.get("tools", {})
                           .get("signature") else ""))
+    cache = by_name.get("cache")
+    if cache:
+        verdict.append("prompt cache works through the gateway" if cache["ok"]
+                       else "no prompt cache seen")
     token = report.get("token", {})
     if token.get("ttl_s"):
         verdict.append(f"token lives {token['ttl_s']} s by its JWT")
