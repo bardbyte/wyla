@@ -99,6 +99,13 @@ def create_app() -> FastAPI:
         def _set(*names: str) -> bool:
             return any(bool(env(n)) for n in names)
 
+        def _plane() -> str:
+            try:
+                from sahs.util.eag import model_plane
+                return model_plane()
+            except ImportError:                 # silo not present
+                return "vertex"
+
         return {
             "bq": {
                 "key": _set("LUMI_BQ_SA_KEY",
@@ -116,6 +123,15 @@ def create_app() -> FastAPI:
                              env("GEMINI_MODEL",
                                  "gemini-3.1-pro-preview")),
             },
+            # the second model plane: Gemini through EAG behind a
+            # OneIdentity token, and which plane the chat rides
+            "eag": {
+                "app_id": _set("APP_ID"),
+                "secret": _set("APP_SECRET"),
+                "bearer": _set("GEMINI_BEARER_TOKEN"),
+                "model": env("EAG_MODEL", "gemini-2.5-pro"),
+            },
+            "plane": _plane(),
         }
 
     @app.get("/api/lumi/brand")
