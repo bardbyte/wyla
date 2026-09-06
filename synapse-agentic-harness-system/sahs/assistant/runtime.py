@@ -101,8 +101,8 @@ class AssistantRuntime:
     def model_for(self, budget: Budget) -> Any:
         if self._model_factory is not None:
             return self._model_factory(budget)
-        from .agent import VertexAgent           # env-bound, late
-        return VertexAgent.from_env(budget)
+        from .agent import agent_from_env       # env-bound, late: the
+        return agent_from_env(budget)           # plane is the .env's
 
     def workspace(self, session_id: str) -> Path:
         return (self.graph_root / "runs" / "chat" / "workspaces"
@@ -210,13 +210,18 @@ class AssistantRuntime:
         transport says so."""
         if self._model_factory is not None:
             return "scripted"
+        from sahs.util.eag import Config, model_plane
+        pretty = lambda raw: " ".join(                       # noqa: E731
+            w.capitalize() if w.isalpha() else w
+            for w in raw.replace("_", "-").split("-") if w)
+        if model_plane() == "eag":
+            return pretty(Config.from_env().model) + " via EAG"
         from sahs.util.auth import DEFAULT_VERTEX_MODEL
         raw = (os.environ.get("VERTEX_MODEL")
                or os.environ.get("LUMI_VERTEX_MODEL")
                or os.environ.get("GEMINI_MODEL")
                or DEFAULT_VERTEX_MODEL).strip()
-        return " ".join(w.capitalize() if w.isalpha() else w
-                        for w in raw.replace("_", "-").split("-") if w)
+        return pretty(raw)
 
     def slash_skill(self, text: str) -> tuple[str, list[str]]:
         """"/lumi-data-connect how do I …" loads that pack for this

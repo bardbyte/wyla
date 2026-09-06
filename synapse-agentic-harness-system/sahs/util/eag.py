@@ -25,6 +25,7 @@ import hmac
 import json
 import os
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -1030,3 +1031,147 @@ def render_report(report: dict[str, Any]) -> str:
     if verdict:
         lines.append("verdict   " + " · ".join(verdict))
     return "\n".join(lines)
+
+
+# ── the plane switch ───────────────────────────────────────────
+
+PLANE_VAR = "SAHS_MODEL_PLANE"
+
+
+def model_plane(env: dict[str, str] | None = None) -> str:
+    """Which plane the chat's model calls ride: ``vertex`` or ``eag``.
+    SAHS_MODEL_PLANE names one; ``auto`` (the default) picks EAG when
+    its credentials are in the environment and Vertex otherwise."""
+    env = dict(os.environ if env is None else env)
+    wanted = (env.get(PLANE_VAR) or "auto").strip().lower()
+    if wanted in ("vertex", "eag"):
+        return wanted
+    has_eag = bool((env.get("APP_ID") and env.get("APP_SECRET"))
+                   or env.get("GEMINI_BEARER_TOKEN"))
+    return "eag" if has_eag else "vertex"
+
+
+def plane_note(env: dict[str, str] | None = None) -> str:
+    """Why the plane is what it is, for the doctor."""
+    env = dict(os.environ if env is None else env)
+    wanted = (env.get(PLANE_VAR) or "auto").strip().lower()
+    if wanted in ("vertex", "eag"):
+        return f"{PLANE_VAR}={wanted}"
+    has_eag = bool((env.get("APP_ID") and env.get("APP_SECRET"))
+                   or env.get("GEMINI_BEARER_TOKEN"))
+    return (f"{PLANE_VAR} unset: EAG credentials present" if has_eag
+            else f"{PLANE_VAR} unset: no EAG credentials")
+
+
+# ── thinking as a budget (2.5) ─────────────────────────────────
+
+# the depth dial's three levels as token budgets; 2.5 Pro counts the
+# thinking against maxOutputTokens, so the client raises the cap by
+# the budget. Override with EAG_THINKING_BUDGETS=low:512,medium:2048,…
+THINKING_BUDGETS = {"low": 1024, "medium": 4096, "high": 16384,
+                    "json": 512}
+
+
+def thinking_budgets(env: dict[str, str] | None = None) -> dict[str, int]:
+    env = dict(os.environ if env is None else env)
+    out = dict(THINKING_BUDGETS)
+    for item in (env.get("EAG_THINKING_BUDGETS") or "").split(","):
+        key, _, value = item.strip().partition(":")
+        if key.strip() in out and value.strip().isdigit():
+            out[key.strip()] = int(value.strip())
+    if (env.get("EAG_JSON_THINKING_BUDGET") or "").strip().isdigit():
+        out["json"] = int(env["EAG_JSON_THINKING_BUDGET"].strip())
+    return out
+
+
+# ── the token manager ──────────────────────────────────────────
+
+DEFAULT_LIFETIME = 300.0     # when a token says nothing: the guide's number
+REFRESH_FRACTION = 0.8       # mint again at 80% of the lifetime
+MIN_REMAINING = 45.0         # and never start a call this close to the end
+
+
+class TokenManager:
+    """One OneIdentity token at a time: minted on demand, reused while
+    comfortably valid, minted again at 80% of its lifetime (read from
+    its exp claim; the laptop's tokens live 599 s) or when a call is
+    refused with a 401. Thread-safe: turns run on threads. With
+    AUTH_MODE=env the environment's bearer is used as it is."""
+
+    def __init__(self, cfg: Config, http: Http, *,
+                 now: Callable[[], float] = time.time) -> None:
+        self.cfg = cfg
+        self._http = http
+        self._now = now
+        self._lock = threading.Lock()
+        self._token = ""
+        self._minted_at = 0.0
+        self._expires_at = 0.0
+        self.mints = 0
+
+    def token(self) -> str:
+        with self._lock:
+            if self.cfg.auth_mode == "env":
+                if not self.cfg.bearer:
+                    raise EagError("AUTH_MODE=env but GEMINI_BEARER_TOKEN "
+                                   "is empty")
+                if not self._token:
+                    self._adopt(self.cfg.bearer)
+                return self._token
+            if self._token and not self._stale():
+                return self._token
+            self._mint()
+            return self._token
+
+    def invalidate(self) -> None:
+        """A 401 said the token is dead: the next call mints anew."""
+        with self._lock:
+            self._token = ""
+
+    def remaining(self) -> float:
+        return max(0.0, self._expires_at - self._now()) if self._token \
+            else 0.0
+
+    def describe(self) -> str:
+        if not self._token:
+            return "no token yet (minted on the first call)"
+        age = int(self._now() - self._minted_at)
+        return (f"token minted {age} s ago · {int(self.remaining())} s left "
+                f"· refresh at {int(REFRESH_FRACTION * (self._expires_at - self._minted_at))} s")
+
+    def _stale(self) -> bool:
+        now = self._now()
+        lifetime = self._expires_at - self._minted_at
+        return (now >= self._minted_at + REFRESH_FRACTION * lifetime
+                or self._expires_at - now < MIN_REMAINING)
+
+    def _adopt(self, token: str) -> None:
+        now = self._now()
+        claims = jwt_claims(token) or {}
+        exp = claims.get("exp")
+        self._token = token
+        self._minted_at = now
+        self._expires_at = (float(exp) if isinstance(exp, int) and exp > now
+                            else now + DEFAULT_LIFETIME)
+
+    def _mint(self) -> None:
+        if not self.cfg.app_id or not self.cfg.secret:
+            raise EagError("APP_ID and APP_SECRET are needed to mint a "
+                           "OneIdentity token (or AUTH_MODE=env with "
+                           "GEMINI_BEARER_TOKEN)")
+        stamp = timestamp_now(self.cfg.timestamp_unit, self._now)
+        headers = token_headers(self.cfg.app_id, self.cfg.secret,
+                                version=self.cfg.version, timestamp=stamp)
+        body = json.dumps({"scope": self.cfg.scopes}).encode("utf-8")
+        status, answer_headers, raw = self._http(
+            "POST", self.cfg.token_url, headers, body, timeout=30)
+        if status != 200:
+            raise EagError("OneIdentity refused the token request: "
+                           + _error_text(status, raw, answer_headers))
+        token, _field = extract_token(_json(raw))
+        if not token:
+            raise EagError("OneIdentity answered 200 but no token field "
+                           "was recognized")
+        self._adopt(token)
+        self.mints += 1
+

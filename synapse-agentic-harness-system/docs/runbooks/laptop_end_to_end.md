@@ -407,6 +407,25 @@ answers 401: that is the token's real lifetime, which the client will
 have to keep itself. Secrets never print; paste the block (and the
 JSON) back.
 
+**The chat on EAG (Gemini 2.5 Pro).** With `APP_ID` and `APP_SECRET`
+in the silo `.env` the chat's model calls ride EAG (`SAHS_MODEL_PLANE`
+is `auto`; set it to `vertex` to go back, `eag` to insist). Restart
+the app: the composer's model label reads "Gemini 2.5 Pro via EAG",
+`python scripts/turn_doctor.py` prints the plane and why, and
+`python scripts/planes_check.py` proves it in one process after a dry
+run: the token minted, its remaining life, one model answer. What
+changes in the chat: EAG serves no stream, so each model call lands
+whole. The thinking block fills and the prose appears when a call
+returns; between calls the live line ticks and the tool rows appear.
+Run, the chart from saved rows and the dashboards are untouched: they
+never call the model. The depth dial maps to thinking budgets (Quick
+1024, Standard 4096, Deep 16384 tokens; `EAG_THINKING_BUDGETS`
+overrides), and since 2.5 counts the thinking against the output cap
+the client raises the cap by the budget. The token lives 599 s and is
+minted again at 80% of that or on the first 401, with the call
+retried once. The prompt is unchanged; where 2.5 slips is a matter
+for the evals, not for guessing.
+
 **Before the first query:** the graph names tables `dw.<table>`, and
 BigQuery resolves that against the project that runs the query
 (`prj-p-lumi-gpt`), not the one that hosts the data. Set
