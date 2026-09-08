@@ -1,5 +1,5 @@
 """Session skills (Agent Loop v1 §2/§4): analyst-authored context the
-loop carries, Claude-Code style.
+loop carries, coding-agent style.
 
 A skill is a markdown file in ``<graph>/skills/`` — the analyst's own
 words about how THEY read the data (a fiscal-calendar note, a team's

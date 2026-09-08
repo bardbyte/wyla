@@ -49,7 +49,7 @@ htmlcov/
 output/
 *.log
 
-# Claude Code local context — never push these…
+# local agent context — never push these…
 .claude/*
 **/.claude/*
 CLAUDE.md

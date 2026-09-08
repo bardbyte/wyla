@@ -138,7 +138,7 @@ export async function renderAsk(outlet, wanted = "") {
   state.skillsLoaded = new Set(boot.session.skills || []);
 
   // ── skills: what the session carries into the loop's context ──
-  // Claude-style: an explicit picker; chips show what is loaded; the
+  // chat-assistant-style: an explicit picker; chips show what is loaded; the
   // text itself only ever travels server-side into the system prompt.
   async function refreshSkills() {
     try {

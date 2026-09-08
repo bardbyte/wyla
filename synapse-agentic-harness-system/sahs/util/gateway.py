@@ -1,9 +1,9 @@
-"""Gemini through EAG with a OneIdentity bearer token — the pieces a
+"""Gemini through the gateway with an identity-service bearer token — the pieces a
 validation needs, pure and injectable, BEFORE any of it enters the
 harness.
 
-OneIdentity mints a short-lived bearer token from an HMAC-signed
-request (APP_ID + APP_SECRET); EAG fronts Gemini's own REST protocol
+The identity service mints a short-lived bearer token from an HMAC-signed
+request (APP_ID + APP_SECRET); the gateway fronts Gemini's own REST protocol
 (generateContent / streamGenerateContent) behind that token. The
 token answer does not say when the token dies (the guide says about
 five minutes), so a client has to keep time itself: this module
@@ -44,7 +44,7 @@ DEFAULT_SCOPES = [
     "/genai/google/v1/models/bge-large-en/embeddings/**::post",
     "/genai/google/v1/models/bge-large-en/**::post",
 ]
-# OneIdentity answers {"authorization_token": "…"} (the laptop, 2026-09-05);
+# the identity service answers {"authorization_token": "…"} (the laptop, 2026-09-05);
 # the other names are the usual suspects, tried after it
 TOKEN_FIELDS = ("authorization_token", "authorizationToken", "access_token",
                 "accessToken", "token", "bearer", "bearerToken", "jwt",
@@ -58,12 +58,12 @@ class GatewayError(RuntimeError):
     """A transport failure with its reason; never a stack trace."""
 
 
-# ── OneIdentity: the signed token request ──────────────────────
+# ── the identity service: the signed token request ──────────────────────
 
 
 def hmac_signature(app_id: str, version: str | int, timestamp: str,
                    secret_b64: str) -> str:
-    """The OneIdentity signature: ``<appID>-<version>-<timestamp>``
+    """The the identity service signature: ``<appID>-<version>-<timestamp>``
     signed with HMAC-SHA256 under the base64-DECODED secret, as
     URL-safe base64 without ``=`` padding."""
     key = base64.b64decode(secret_b64.strip())
@@ -415,7 +415,7 @@ class Config:
     thinking_budget: int = 1056
     show_thoughts: bool = True
     prompt: str = "In two sentences, what is a cash rewards credit card?"
-    # EAG addresses a method with a slash (…/gemini-2.5-pro/generateContent,
+    # the gateway addresses a method with a slash (…/gemini-2.5-pro/generateContent,
     # the guide's form, matching its path-pattern scopes); Google's own
     # REST uses a colon (…/gemini-2.5-pro:generateContent). auto tries
     # the slash first and falls back on a 401/404
@@ -491,7 +491,7 @@ def _error_text(status: int, body: bytes,
                 headers: dict[str, str] | None = None) -> str:
     payload = _json(body)
     if isinstance(payload, dict):
-        # the gateway's own code rides along (OneIdentity: UEXP001)
+        # the gateway's own code rides along (The identity service: UEXP001)
         code = payload.get("error_code") or payload.get("code") or ""
         tail = f" [{code}]" if isinstance(code, (str, int)) and code else ""
         err = payload.get("error")
@@ -573,7 +573,7 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                    "(AUTH_MODE=generated), or AUTH_MODE=env with "
                    "GEMINI_BEARER_TOKEN")
             return report
-        # milliseconds is what OneIdentity takes (the laptop proved it);
+        # milliseconds is what the identity service takes (the laptop proved it);
         # the other unit is tried only when the gateway REFUSES, never
         # after a 200 — a 200 whose token we failed to read is our
         # fault to report, not a reason to sign again
@@ -617,10 +617,10 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
             answered = [a for a in attempts if a.get("status") == 200]
             reached = [a for a in attempts if "status" in a]
             record("token", False,
-                   ("OneIdentity answered 200 but the token field was not "
+                   ("The identity service answered 200 but the token field was not "
                     "recognized: " if answered else
-                    "OneIdentity refused every attempt: " if reached else
-                    "OneIdentity could not be reached: ")
+                    "The identity service refused every attempt: " if reached else
+                    "The identity service could not be reached: ")
                    + "; ".join(f"{a['unit']}: {a.get('note') or a.get('error')}"
                                for a in attempts), attempts=attempts)
             return report
@@ -648,7 +648,7 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                   f" · JWT without an exp claim ({len(token)} chars)"
                   if claims else
                   f" · not a JWT ({len(token)} chars, no exp to read)"),
-               source="oneidentity", unit=used["unit"], field=field,
+               source="idp", unit=used["unit"], field=field,
                attempts=attempts, keys=used["keys"], expiry_fields=expiry,
                jwt=bool(claims), exp=exp, iat=iat, ttl_s=ttl,
                minted_at=int(minted_at), token=fingerprint(token))
@@ -661,7 +661,7 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
     # about each; generate starts from the guide's and falls back.
     thinking_key = "include_thoughts"
     # the path form is decided by the first model call: the guide's
-    # slash form first (EAG's scopes are path patterns under the
+    # slash form first (the gateway's scopes are path patterns under the
     # model name), Google's colon form when the gateway refuses it
     # with a 401 or 404 — a refusal that arrives before Gemini answers
     forms = (["slash", "colon"] if cfg.path_form not in ("slash", "colon")
@@ -862,7 +862,7 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                              if v["ok"] else f" ({v['note'][:80]})")
                           for key, v in accepted.items())
                + ("" if harness else " · the harness sends includeThoughts: "
-                  "the EAG plane must spell it the guide's way"),
+                  "the gateway plane must spell it the guide's way"),
                **accepted)
 
     # ── a system instruction ──
@@ -982,7 +982,7 @@ def env_warnings(env: dict[str, str]) -> list[str]:
 
 def render_report(report: dict[str, Any]) -> str:
     mark = {True: "✓", False: "✗", None: "·"}
-    lines = ["=== EAG check ==="]
+    lines = ["=== Gateway check ==="]
     cfg = report.get("config", {})
     lines.append(f"model     {cfg.get('model')} at {cfg.get('base_url')}")
     lines.append(f"token url {cfg.get('token_url')}")

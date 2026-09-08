@@ -1046,7 +1046,7 @@ export async function renderChat(outlet, wanted = "") {
     }, 1000);
   }
 
-  // ── the thinking block, the way Claude shows it: the model's own
+  // ── the thinking block, the way a chat assistant shows it: the model's own
   // thought summaries in the order they happen, interleaved with the
   // steps — open while it works, "Thought for 34s" when the answer
   // lands, yours to expand; new work reopens it
@@ -1118,7 +1118,7 @@ export async function renderChat(outlet, wanted = "") {
   }
 
   // the call's input — the SQL, the code — sits under the row, shown
-  // on a click, the way Claude shows what a tool was given
+  // on a click, the way a chat assistant shows what a tool was given
   function attachInput(row, input) {
     if (!input || row.querySelector(".step-input")) return;
     const pre = document.createElement("pre");

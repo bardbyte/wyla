@@ -141,7 +141,7 @@ def resolve(build: Build, question: str,
         if symbol in (question or "").lower().split() \
                 or symbol in tokens:
             bu = (context.get("bu") or "").lower()
-            # real acropedia rows carry comma-joined multi-BU scopes
+            # real glossary rows carry comma-joined multi-BU scopes
             # ("GMNS,Technology") — an acronym matches when ANY of its
             # scopes matches the question's bu context
             scopes = {b.strip() for b in

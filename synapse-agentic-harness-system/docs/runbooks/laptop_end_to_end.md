@@ -35,7 +35,7 @@ path flags. Two kinds of input:
     ├── studio_results_*.csv           # raw Studio catalog export(s) —
     │   # consumed whole: metric rows fuse onto canonical ids, the full
     │   # SQL rides as doc evidence, joins are mined in-silo (scoped)
-    ├── data_cleaned.csv               # acropedia glossary
+    ├── data_cleaned.csv               # enterprise glossary
     ├── business_terms.csv             # Atlas/Collibra terms
     ├── std_tech_metadata/             # 46 per-table Atlas JSONs …
     │   └── <table>.json               # … OR one combined export:
@@ -94,7 +94,7 @@ record stays in git, the bulk artifacts do not.
 
 ```bash
 git clone <repo> && cd wyla
-git checkout claude/semantic-layer-sources-m9jymm   # or main once merged
+git checkout main
 cd synapse-agentic-harness-system
 python3 --version                      # needs >= 3.11
 pip install -e ".[sql]"                # sqlglot 30.15.* + pydantic + pyyaml
@@ -357,8 +357,8 @@ The client gives up on a model stream after 120 s of silence, retries
 once if nothing had arrived, and the turn then closes in plain language
 with what was already said. Paste the doctor's output with the transcript.
 
-**Gemini 2.5 Pro through EAG (a candidate for the model plane).** The
-guide's path is a OneIdentity bearer token minted from `APP_ID` and
+**Gemini 2.5 Pro through the gateway (a candidate for the model plane).** The
+guide's path is an identity-service bearer token minted from `APP_ID` and
 `APP_SECRET` (an HMAC-signed request), then Gemini's own REST protocol
 behind `gateway.example.com`. Before any of it enters the program, prove
 what it does on the laptop:
@@ -375,7 +375,7 @@ HTTP status. The model id comes from `GATEWAY_MODEL` (leave `GEMINI_MODEL`
 unset: the Vertex plane reads that name as a fallback and the check
 warns when it is set without `VERTEX_MODEL`). The check mints the
 token with a milliseconds timestamp (the unit
-OneIdentity takes; a seconds timestamp is tried only if the gateway
+The identity service takes; a seconds timestamp is tried only if the gateway
 refuses, never after a 200) and reads it from the answer's
 `authorization_token` field (the other usual names are tried after
 it, and a lone long string as a last resort), reads what the answer
@@ -386,7 +386,7 @@ the probe confirms it), then makes the model calls, plus a prompt-cache
 check: the same 3K-token prefix twice, reading `cachedContentTokenCount`
 on the second call, which says whether the harness's stable prefix
 still earns its cache through the gateway. Each is addressed the guide's way,
-`…/models/gemini-2.5-pro/generateContent` with a slash: EAG's scopes
+`…/models/gemini-2.5-pro/generateContent` with a slash: the gateway's scopes
 are path patterns under the model name, and Google's own colon form
 (`gemini-2.5-pro:generateContent`) falls outside them, which the
 gateway answers with a bare 401 before Gemini is reached. The check

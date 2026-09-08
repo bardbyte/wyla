@@ -35,7 +35,7 @@ stable cacheable prefix (≥4,096 tokens so implicit caching engages):
 ```
 <identity>     Synapse, an analytical colleague. Warm, brief, plain.
                Numbers come from tools; reasoning comes from you.
-<chain>        platform (governance, immutable) > Lumi (product) >
+<chain>        platform (governance, immutable) > Synapse (product) >
                the user's memory and asks > defaults
 <business_map> the LOB rows, metric counts, tables   (data, stable)
 <shelf>        top metrics · concepts · skills by name  (data, stable)
@@ -164,7 +164,7 @@ path.
 - Text streams as it arrives. Function-call arguments stream too, so
   the activity line can say "Reading the Submitter Active Locations
   card…" before the call returns.
-- **The thinking block, the way Claude shows it.** Under the user's
+- **The thinking block, the way a chat assistant shows it.** Under the user's
   message, one block streams the model's own thought summaries in
   the order they happen, interleaved with the steps ("Searching the
   graph for enrolments — 16 results"); its header is the live line
@@ -208,7 +208,7 @@ path.
 - No "what the model saw" in the chat. No harness sentences in the
   user's language ("strict JSON" never appears again).
 - Chips: model-authored, at most three, optional. (Decision below.)
-- **The ask starts the way Claude's does (BUILT 2026-09-03).** A
+- **The ask starts the way a chat assistant's does (BUILT 2026-09-03).** A
   greeting for the time of day (the person's first name when
   `SYNAPSE_USER_NAME` is set), a centered composer ("Type / for skills"),
   the + menu (skills, memory, a new chat), the Chat | Autopilot
@@ -406,6 +406,6 @@ What v3 is actually built against — not the fixture.
   question and grain; 35 have a description. The batch gate (80%)
   is not yet met.
 - **Housekeeping the report exposed:** the checkout lives in the
-  OneDrive-synced desktop, so the SA key and `.env` must stay
+  cloud-synced desktop, so the SA key and `.env` must stay
   outside it (`~/.gcp/`); 1,706 tickets and 0 reviews means the
   steward door has never been opened on this graph.

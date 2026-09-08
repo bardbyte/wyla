@@ -217,7 +217,7 @@ def test_grain_divergence_files_review_item(tmp_path):
 
 
 def test_enricher_context_carries_company_vocabulary(tmp_path):
-    """The enricher reads the company's own reference shelf — acropedia
+    """The enricher reads the company's own reference shelf — the glossary
     acronym expansions + Atlas business terms — scoped to each item's
     text (snake_case split so alif_cnt finds ALIF), rendered into the
     prompt as authoritative vocabulary. The blind exam gets the same
@@ -228,7 +228,7 @@ def test_enricher_context_carries_company_vocabulary(tmp_path):
     graph_dir, builds = _compiled(tmp_path)
     build = Build.open(builds)
     single, multi = _vocab_index(build)
-    assert "alif" in single            # acropedia acronym plane loaded
+    assert "alif" in single            # glossary acronym plane loaded
     item = {"label": "Submitter ALIF", "sql": "count(alif_cnt)",
             "table": "dw.gms_transaction", "columns": [], "filters": []}
     entries = _vocab_for(item, single, multi)

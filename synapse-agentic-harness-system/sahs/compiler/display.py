@@ -26,7 +26,7 @@ from typing import Any
 SOURCE_DISPLAY: dict[str, dict[str, str]] = {
     "bq": {
         "family": "warehouse",
-        "display": "Lumi Warehouse: BigQuery Catalog",
+        "display": "Synapse Warehouse: BigQuery Catalog",
         "chip": "BQ Catalog",
         "blurb": "Tables, columns, and constraints as BigQuery itself "
                  "declares them."},
@@ -62,7 +62,7 @@ SOURCE_DISPLAY: dict[str, dict[str, str]] = {
                  "their meanings."},
     "value_lookup": {
         "family": "atlas_mdm",
-        "display": "Lumi Value Meanings",
+        "display": "Synapse Value Meanings",
         "chip": "Value Meanings", "sub": "stored code → meaning",
         "blurb": "What a low-cardinality stored value means in one "
                  "column of one table — the index a business phrase "

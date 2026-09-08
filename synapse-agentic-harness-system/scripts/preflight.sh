@@ -8,7 +8,7 @@
 #
 # Read-only: never modifies data, never prints secrets (env vars are
 # reported set/unset only), never touches the network. Ends with a
-# "PASTE THIS BACK" JSON block — send that block to Claude to confirm
+# "PASTE THIS BACK" JSON block — send that block back with the run report to confirm
 # readiness and lock the run-time estimate.
 
 set -u
@@ -256,7 +256,7 @@ hdr "verdict"
   || bad "$PROBLEMS blocking problem(s), $WARNINGS warning(s) — fix ✗ items first"
 
 echo
-echo "=== PASTE THIS BACK TO CLAUDE ==="
+echo "=== REPORT BLOCK ==="
 $PY - <<EOF
 import json
 print(json.dumps({

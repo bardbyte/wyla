@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""EAG check — can Gemini 2.5 Pro through EAG, behind a OneIdentity
+"""Gateway check — can Gemini 2.5 Pro through the gateway, behind an identity-service
 token, do what the harness asks of Vertex today? Run it on the laptop
 BEFORE any of it enters the program.
 

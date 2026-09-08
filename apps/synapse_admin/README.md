@@ -1,7 +1,7 @@
 # Synapse by Lumi — the product (apps/synapse_admin)
 
 The freshly-built admin surface over the Meridian context graph,
-authored directly from the Lumi design canvas
+authored directly from the design canvas
 (`apps/synapse_admin/design/wireframes/`). One process, **zero build
 steps**: FastAPI serves the Meridian read plane and a hand-authored
 ES-module frontend (no bundler, no node; three.js vendored locally so

@@ -5,7 +5,7 @@ branch: main
 date: 2026-08-30T00:00:00Z
 
 ### Updated in this project
-- Lumi component sheet + F1–F9 flows + principles sheet built on repo types/tokens
+- Admin component sheet + F1–F9 flows + principles sheet built on repo types/tokens
 - 12-screen admin product: Home, Semantics Explorer, Metric/Table/Concept Profiles, Graph Explorer, Steward Queue, Enrichment Runs, Builds & Diffs, Evals, Assumptions, Sessions
 
 ## Screen map
@@ -15,4 +15,4 @@ date: 2026-08-30T00:00:00Z
 | Table Profile.dc.html | apps/console/frontend/src/styles/tokens.css, apps/console/frontend/src/lib/types.ts (Product, TableInsights, Witness) |
 | Agent Theater.dc.html | apps/console/backend/events.py (event protocol via README), apps/console/frontend/src/lib/types.ts (ConsoleEvent, Tier) |
 | Graph Cosmos.dc.html | apps/console/frontend/src/lib/types.ts (GraphMapNode/Edge), apps/console/frontend/src/styles/tokens.css |
-| Admin Components.dc.html, F1–F6, Admin Principles.dc.html | same sources, Lumi rebrand (#00175A/#006FCF, Plus Jakarta Sans) |
+| Admin Components.dc.html, F1–F6, Admin Principles.dc.html | same sources, Admin rebrand (#00175A/#006FCF, Plus Jakarta Sans) |

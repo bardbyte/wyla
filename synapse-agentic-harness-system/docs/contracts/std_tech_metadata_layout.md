@@ -19,7 +19,7 @@ MUST keep parsing exactly this shape; fixtures mirror it.
 `datasource` (GCP project, e.g. `demo-warehouse`) · `datasetGroup` (BQ
 dataset) · `dataserver` (`Lumi`) · `technology` (`BigQuery`) ·
 `isActive` (`Y`) · `isLineageExist` (`Y`) · `datasystem`
-(`NGBD – Lumi Metadata Management`) — plus Layers 3 and 4 nested here.
+(`Metadata Management`) — plus Layers 3 and 4 nested here.
 
 ## Layer 3 — `datasetAttribute` (properties & governance)
 

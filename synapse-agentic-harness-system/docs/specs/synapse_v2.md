@@ -1,4 +1,4 @@
-# Synapse v2 — A Claude-class assistant over Meridian
+# Synapse v2 — An assistant over Meridian
 
 > Landed verbatim as the governing design (the author's words below,
 > unedited), superseding the Agent Loop v1 turn pipeline. Everything
@@ -9,7 +9,7 @@
 The pivot: from a governed pipeline with a model inside, to a general assistant with governed tools around it. September 1, 2026.
 
 ## 0 · What we got wrong, in one paragraph
-We optimized for governance first and built the harness as a pipeline — classify, apply, resolve, contract, verify, render — with the model confined to composing SQL inside a plan schema. That produces trustworthy single-metric answers and a product that feels like a query console. Claude's harness proves the other order works: a strong general model, a thin loop, tools that are truthful, artifacts the user can see and keep, skills loaded on demand, memory across chats — and verification as something the model does with tools plus a few schema-enforced rendering rules. Governance becomes a property of the tools and the artifacts, not a gate in front of the conversation. We keep everything we built underneath (graph, build, tools, verifier, budgets, store, events) and replace the front pipeline with an assistant.
+We optimized for governance first and built the harness as a pipeline — classify, apply, resolve, contract, verify, render — with the model confined to composing SQL inside a plan schema. That produces trustworthy single-metric answers and a product that feels like a query console. A general assistant's harness proves the other order works: a strong general model, a thin loop, tools that are truthful, artifacts the user can see and keep, skills loaded on demand, memory across chats — and verification as something the model does with tools plus a few schema-enforced rendering rules. Governance becomes a property of the tools and the artifacts, not a gate in front of the conversation. We keep everything we built underneath (graph, build, tools, verifier, budgets, store, events) and replace the front pipeline with an assistant.
 
 ## 1 · The shape
 
@@ -23,12 +23,12 @@ system prompt: who it is · how it reasons · the Meridian world · rendering & 
         │
    skills (on-demand SKILL.md packs: analysis playbooks, domain rules, dashboard design, exec summary)
         │
-   UI: Claude-shaped — sidebar/projects/recents, chat stream with tool activity, artifact panel
+   UI: chat-assistant-shaped — sidebar/projects/recents, chat stream with tool activity, artifact panel
 ```
 
 The model is a general reasoner first. It answers "what's a good way to think about merchant churn" with no tools; it answers "show me approval rate by segment" with the Meridian toolkit; it answers "build me a Q2 dashboard for the CFO" with all five toolkits and two skills. Same loop, same voice.
 
-## 2 · The loop (thin, Claude-shaped)
+## 2 · The loop (thin, chat-assistant-shaped)
 
 ```python
 while budget.ok():
@@ -47,15 +47,15 @@ Same eight-plus tools, now framed as capabilities, with descriptions written for
 ## 4 · The Analysis toolkit (compute) — this is what makes it capable
 
 * `run_sql(sql, mode=dry_run|snapshot|live, limit)` — validated, cost-gated, ACL-enforced; errors teach. Live mode remains policy-gated (persona floor + steward-enabled tables).
-* `python(code)` — Claude's analysis tool: a sandbox with pandas/numpy/plotting and the `meridian` SDK preloaded, query results available as DataFrames, files written to the session workspace. This is where decomposition, variance analysis, cohorts, forecasts, anomaly checks, and "why did it move" actually happen. Snapshot by default; no credentials in the sandbox; budgeted.
+* `python(code)` — an analysis tool: a sandbox with pandas/numpy/plotting and the `meridian` SDK preloaded, query results available as DataFrames, files written to the session workspace. This is where decomposition, variance analysis, cohorts, forecasts, anomaly checks, and "why did it move" actually happen. Snapshot by default; no credentials in the sandbox; budgeted.
 * `check(kind, …)` — the verification primitives as callable tools the model uses mid-analysis: `reconcile(composed, certified_metric)`, `part_whole(breakdown, total)`, `fanout(join)`, `coverage(query)`, `crosscheck(a, b)`. Results are facts the model can cite.
 * `compare(plan_a, plan_b)` — same measure across two periods/cohorts/definitions, returned as an aligned frame (the "same for Canada, side by side" primitive).
 * `whatif(plan, patch)` — re-run a query with one slot changed; the cheapest magic there is.
 
-## 5 · The Artifact toolkit (show) — Claude's artifact panel, for analytics
+## 5 · The Artifact toolkit (show) — an artifact panel, for analytics
 Artifacts are standalone, versioned, side-panel outputs the user keeps. Types:
 
-* `chart` (line/bar/scatter/area; Amex-branded theme; data + provenance embedded)
+* `chart` (line/bar/scatter/area; brand-themed; data + provenance embedded)
 * `dashboard` — a multi-panel React/HTML artifact: KPI tiles with meridian lines, charts, a filter bar wired to `whatif`, a notes column; iterates in place ("make the second chart a cohort view"); every tile carries its definition status
 * `diagram` — Mermaid/SVG: lineage, join topology, funnel/flow, decision trees; plus `constellation(subgraph)` — the cosmos view of what the answer used
 * `table` — sortable, with provenance per column
@@ -69,17 +69,17 @@ Artifacts are standalone, versioned, side-panel outputs the user keeps. Types:
 2. Composed numbers require a passing `reconcile` or `crosscheck` fact to lose the EXPLORATORY watermark — the harness checks that the check result exists in the trajectory before rendering a governed number.
 3. Nothing writes to truth except the clerk; variants and compositions become candidates + ReviewItems exactly as before (the flywheel is unchanged). Plus budgets/breakers in code, the persona floor filtering what tools may return, and the fresh-context verifier — now a `verify_answer` tool the model calls before it renders a governed number (and the harness runs automatically on any answer marked "publish"). The plan schema survives as the working note the SQL-over-Meridian skill recommends, not as a gate.
 
-## 7 · Skills (on-demand, progressive disclosure — exactly Claude's model)
+## 7 · Skills (on-demand, progressive disclosure — the progressive-disclosure model)
 Loaded when relevant, ≤2K tokens each, versioned, witnessed:
 
 * meridian-sql — the search doctrine: resolve first, grep for exact tokens, read a card before using it, sample before filtering, join paths before joining, prefer certified → say so for pending → reconcile anything composed; keep a working plan note.
 * analysis-playbooks — decomposition (rate vs mix), variance bridges, cohort/retention, funnel, seasonality/forecast basics, anomaly triage; each with the checks it must run.
 * domain packs — TLS rulebook, GMNS conventions, CFR definitions (the existing skill_contract witnesses).
-* dashboard-design — Amex brand tokens, tile grammar, chart choice rules, "one question per panel," disclosure placement.
+* dashboard-design — brand tokens, tile grammar, chart choice rules, "one question per panel," disclosure placement.
 * executive-summary — the memo shape leaders read: headline, three drivers, one risk, definitions footer.
 * user-added skills enter through the E14 door: usable immediately as "unreviewed," governed after review.
 
-## 8 · Memory, projects, chats (Claude's organization)
+## 8 · Memory, projects, chats (the familiar organization)
 
 * Sidebar: Projects (a folder with its own context + pinned skills + artifacts), Recents (auto-titled), Starred, search across chats, rename/archive, New chat always one tap.
 * Project memory: persistent instructions + files + the artifacts produced there; a CFO project carries its dashboards and its persona floor.
@@ -98,7 +98,7 @@ Grounded delight, each one a tool or a rendering habit:
 * Proactive honesty: when a number is pending or composed, the assistant says so in one clause and offers "use certified only" — trust as a feature people can feel.
 * Session handoff: reopen tomorrow, it says where you left off and what it was checking.
 
-## 10 · UI — Claude-shaped, artifact-first
+## 10 · UI — chat-assistant-shaped, artifact-first
 Left sidebar (projects/recents/starred/search/new chat) · center chat stream (streamed markdown, collapsed tool activity, inline chips, inline small charts) · right artifact panel (the current artifact, version history, export, "open in dashboard") · masthead (build id, persona floor, budget meter). Mobile: chat-first with artifacts as swipe-over. Everything the A2UI component work produced survives as artifact/message types; nothing is wasted.
 
 ## 11 · Evals (outcome-graded, plus artifact quality)
@@ -109,7 +109,7 @@ Keep: graph, compiler, build, the eight tools, store, events bus, budgets/breake
 
 ## 13 · Build order
 
-1. The thin loop + `python` + artifacts (`chart`, `table`, `document`) + export — the Claude-feel arrives here.
+1. The thin loop + `python` + artifacts (`chart`, `table`, `document`) + export — the assistant feel arrives here.
 2. Meridian toolkit re-exposed with colleague-grade descriptions; `verify_answer` + `check.*` as tools; rendering rules 1–3 enforced.
 3. Skills loader + meridian-sql + analysis-playbooks + dashboard-design.
 4. `dashboard` and `diagram` artifacts, `whatif`, `compare`, follow-up chips, constellation.

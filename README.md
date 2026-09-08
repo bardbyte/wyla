@@ -9,10 +9,10 @@ synapse-agentic-harness-system/   SAHS — the Meridian silo: census → ground 
                                   the agent loop, evals, the laptop scripts
 apps/synapse_admin/                        Synapse by Lumi — FastAPI read plane + the
                                   hand-authored ES-module frontend (one process,
-                                  zero build); apps/synapse_admin/design/ holds the Lumi
+                                  zero build); apps/synapse_admin/design/ holds the admin
                                   wireframes and mocks the product was built from
 apps/synapse/                     Synapse Semantic Intelligence — the second
-                                  frontend, served by the same Lumi server at /synapse/
+                                  frontend, served by the same admin server at /synapse/
 docs/design_inventory.md          the design-file sweep the UI skill keeps current
 archive/                          the pre-SAHS platform, kept whole for reference
 ```

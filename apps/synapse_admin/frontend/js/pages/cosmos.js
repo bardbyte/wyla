@@ -7,7 +7,7 @@
 import { api } from "../api.js";
 import { card, esc, loading, tierChip, unavailable } from "../ui.js";
 
-// Amex brand ramp: trust still reads as GLOW + the rail's tier words,
+// Brand ramp: trust still reads as GLOW + the rail's tier words,
 // hue stays in the blue family (bright blue = strongest evidence)
 const TIER_COLOR = (dark) => dark
   ? { ha: 0x57a9f2, gr: 0x82bef7, in: 0x64789e, gu: 0x475572 }

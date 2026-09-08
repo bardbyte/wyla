@@ -1,4 +1,4 @@
-"""gateway_check — the OneIdentity signature, the token reading, the stream
+"""gateway_check — the the identity service signature, the token reading, the stream
 classification and the whole check flow, pinned offline with a fake
 gateway (the transport is injected; nothing here touches a network)."""
 
@@ -39,7 +39,7 @@ def test_signature_is_urlsafe_unpadded_hmac_over_app_version_timestamp():
 
 def test_token_reading_finds_the_token_the_expiry_and_the_jwt_claims():
     assert extract_token({"authorization_token": "one"}) == \
-        ("one", "authorization_token")                  # OneIdentity's name
+        ("one", "authorization_token")                  # the identity service's name
     assert extract_token({"access_token": "abc"}) == ("abc", "access_token")
     assert extract_token({"data": {"token": "nested"}}) == \
         ("nested", "data.token")
@@ -80,7 +80,7 @@ def test_stream_classification_tells_sse_from_a_burst():
 
 
 class Gateway:
-    """OneIdentity + EAG, scripted like the laptop showed them: the
+    """The identity service + the gateway, scripted like the laptop showed them: the
     token endpoint takes MILLISECONDS (a seconds timestamp is refused
     with UEXP001) and answers {"authorization_token": …}; the model
     takes the guide's include_thoughts and refuses includeThoughts;
@@ -97,7 +97,7 @@ class Gateway:
         self.path_form = path_form        # the form the gateway routes
 
     def _routed(self, url):
-        """EAG routes by path pattern: the wrong separator between the
+        """The gateway routes by path pattern: the wrong separator between the
         model and the method is a bare 401 before Gemini is reached."""
         sep = "/" if self.path_form == "slash" else ":"
         return f"gemini-2.5-pro{sep}" in url
@@ -276,7 +276,7 @@ def test_a_dead_gateway_is_a_recorded_failure_after_one_attempt():
     report = run_checks(Config(app_id="app", secret=SECRET), down, down)
     assert report["checks"][0]["ok"] is False
     assert report["checks"][0]["detail"].startswith(
-        "OneIdentity could not be reached: ms: unreachable")
+        "The identity service could not be reached: ms: unreachable")
     assert len(calls) == 1 and len(report["token"]["attempts"]) == 1
 
 
@@ -313,7 +313,7 @@ def test_a_200_with_an_unreadable_token_is_our_fault_and_says_so():
                         now=gw.clock, clock=gw.clock, sleep=gw.sleep)
     token = report["checks"][0]
     assert token["ok"] is False
-    assert token["detail"].startswith("OneIdentity answered 200 but the "
+    assert token["detail"].startswith("The identity service answered 200 but the "
                                       "token field was not recognized")
     assert "other" in token["detail"] and "something_new" in token["detail"]
     assert "zzzz" not in json.dumps(report) and "yyyy" not in json.dumps(report)
@@ -422,10 +422,10 @@ def test_a_pinned_path_form_is_not_second_guessed():
 
 
 def test_an_empty_refusal_is_read_from_the_headers():
-    assert _error_text(401, b"", {"WWW-Authenticate": "Bearer realm=eag",
+    assert _error_text(401, b"", {"WWW-Authenticate": "Bearer realm=gateway",
                                    "X-Reason": "scope"}) == \
         ("HTTP 401 with an empty body (the gateway answered before Gemini "
-         "did) · WWW-Authenticate: Bearer realm=eag; X-Reason: scope")
+         "did) · WWW-Authenticate: Bearer realm=gateway; X-Reason: scope")
     assert _error_text(401, b"", {"Content-Length": "0"}) == \
         "HTTP 401 with an empty body (the gateway answered before Gemini did)"
     assert _error_text(403, b'{"description":"denied","error_code":"E1"}') \

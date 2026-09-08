@@ -136,7 +136,7 @@ def _std_tech_path(sources: Path) -> Path | None:
     return directory if directory.is_dir() else None
 
 
-# the value-meaning index under the name Lumi exports it, or the
+# the value-meaning index under the name the MDM export uses, or the
 # generic one; the first that exists wins
 VALUE_LOOKUP_NAMES = ("low_cardinality_synonyms_index.json",
                       "value_lookup.json")

@@ -1,4 +1,4 @@
-/** The pullout: a Claude-style panel sliding in from the right with
+/** The pullout: a chat-assistant-style panel sliding in from the right with
  * copy-to-clipboard and close (button or Esc). One implementation,
  * used by the Artifacts reader and the Table Profile's agent card. */
 
