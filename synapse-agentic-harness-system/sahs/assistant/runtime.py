@@ -34,7 +34,7 @@ from .store import AssistantStore
 # breaker behind them. A native-tool turn re-sends its whole context
 # on every call, so the turn cap must hold forty calls of a long
 # context, not twelve of a short one.
-# "/lumi-data-connect how do I …": a slash command names a skill pack
+# "/synapse-data-connect how do I …": a slash command names a skill pack
 # to load for this turn — the composer's "Type / for skills"
 SLASH = re.compile(r"^/([A-Za-z0-9][A-Za-z0-9_\-]*)\s*")
 
@@ -219,7 +219,7 @@ class AssistantRuntime:
                         for w in raw.replace("_", "-").split("-") if w)
 
     def slash_skill(self, text: str) -> tuple[str, list[str]]:
-        """"/lumi-data-connect how do I …" loads that pack for this
+        """"/synapse-data-connect how do I …" loads that pack for this
         turn and hands the model the rest; an unknown name stays
         text, so a question that happens to start with / still asks."""
         m = SLASH.match(text or "")

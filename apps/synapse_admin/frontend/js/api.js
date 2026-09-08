@@ -79,9 +79,6 @@ export const api = {
   askStop: (id) => post(`/api/sessions/${encodeURIComponent(id)}/stop`),
   askSkills: () => get("/api/skills"),
   chatSessions: (limit = 40) => get(`/api/chat/sessions?limit=${limit}`),
-  // every chat, or the ones a fuzzy query finds, with the lines that matched
-  chatSearch: (q = "", limit = 200) =>
-    get(`/api/chat/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   chatNewSession: () => post("/api/chat/sessions", {}),
   chatSession: (id) => get(`/api/chat/sessions/${encodeURIComponent(id)}`),
   chatSend: (id, text, depth = "", mode = "") =>

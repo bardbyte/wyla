@@ -7,9 +7,9 @@ came before it.
 synapse-agentic-harness-system/   SAHS — the Meridian silo: census → ground →
                                   truth graph → compiled builds → serving tools,
                                   the agent loop, evals, the laptop scripts
-apps/lumi/                        Synapse by Lumi — FastAPI read plane + the
+apps/synapse_admin/                        Synapse by Lumi — FastAPI read plane + the
                                   hand-authored ES-module frontend (one process,
-                                  zero build); apps/lumi/design/ holds the Lumi
+                                  zero build); apps/synapse_admin/design/ holds the Lumi
                                   wireframes and mocks the product was built from
 apps/synapse/                     Synapse Semantic Intelligence — the second
                                   frontend, served by the same Lumi server at /synapse/
@@ -22,8 +22,8 @@ archive/                          the pre-SAHS platform, kept whole for referenc
 ```bash
 pip install -e "synapse-agentic-harness-system[sql,dev]" fastapi uvicorn
 cp synapse-agentic-harness-system/.env.example synapse-agentic-harness-system/.env  # fill in paths
-uvicorn apps.lumi.backend.app:app --port 8400        # from the repo root
-python -m pytest synapse-agentic-harness-system/tests apps/lumi/tests -q
+uvicorn apps.synapse_admin.backend.app:app --port 8400        # from the repo root
+python -m pytest synapse-agentic-harness-system/tests apps/synapse_admin/tests -q
 ```
 
 The silo's runbooks are the operating manual:

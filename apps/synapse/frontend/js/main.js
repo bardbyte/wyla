@@ -63,7 +63,7 @@ toggle.addEventListener("click", () => {
       matchMedia("(prefers-color-scheme: dark)").matches);
   const next = dark ? "light" : "dark";
   document.documentElement.dataset.theme = next;
-  try { localStorage.setItem("lumi-theme", next); } catch { /* fine */ }
+  try { localStorage.setItem("synapse-theme", next); } catch { /* fine */ }
   applyThemeGlyph();
 });
 applyThemeGlyph();
@@ -76,7 +76,7 @@ async function brandLogo() {
   if (!brand) return;
   let got = {};
   try {
-    got = await fetch("/api/lumi/brand").then((r) => r.json());
+    got = await fetch("/api/synapse/brand").then((r) => r.json());
   } catch { return; }
   if (!got.logo) return;
   const img = new Image();
@@ -91,7 +91,7 @@ async function brandLogo() {
     brand.replaceChildren(link);
     brand.classList.add("has-logo");
   };
-  img.src = `/api/lumi/logo?v=${encodeURIComponent(got.stamp || "")}`;
+  img.src = `/api/synapse/logo?v=${encodeURIComponent(got.stamp || "")}`;
 }
 
 route();

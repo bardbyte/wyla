@@ -1,0 +1,300 @@
+"""Synapse v3 §6 — the conversational surface is wired to the loop.
+
+The frontend has no build step, so these are the missing compiler:
+every event the assistant emits must reach an arm on the page, every
+api helper the page calls must exist and point at a served route, and
+the governance the validator enforces must be VISIBLE (status chips,
+meridian lines, watermarks) — an enforced rule the user cannot see is
+a rule they cannot trust.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+FRONTEND = REPO_ROOT / "apps" / "synapse_admin" / "frontend"
+SILO = REPO_ROOT / "synapse-agentic-harness-system"
+
+CHAT_JS = (FRONTEND / "js" / "pages" / "chat.js").read_text(
+    encoding="utf-8")
+CHATS_JS = (FRONTEND / "js" / "chats.js").read_text(encoding="utf-8")
+API_JS = (FRONTEND / "js" / "api.js").read_text(encoding="utf-8")
+MAIN_JS = (FRONTEND / "js" / "main.js").read_text(encoding="utf-8")
+INDEX = (FRONTEND / "index.html").read_text(encoding="utf-8")
+CSS = (FRONTEND / "styles" / "app.css").read_text(encoding="utf-8")
+BACKEND = (REPO_ROOT / "apps" / "synapse_admin" / "backend"
+           / "chat.py").read_text(encoding="utf-8")
+
+
+def test_every_assistant_event_reaches_the_page():
+    sys.path.insert(0, str(SILO))
+    from sahs.assistant.events import ASSISTANT_EVENTS
+    handled = set(re.findall(r'case "(\w+)":', CHAT_JS))
+    missing = [e for e in ASSISTANT_EVENTS if e not in handled]
+    assert not missing, f"the page ignores {missing}"
+    subscribed = set(re.findall(r'"(\w+)"', CHAT_JS.split(
+        "for (const name of [")[1].split("]")[0]))
+    unsubscribed = [e for e in ASSISTANT_EVENTS
+                    if e not in subscribed]
+    assert not unsubscribed, f"no SSE listener for {unsubscribed}"
+
+
+def test_every_chat_helper_exists_and_is_served():
+    called = set(re.findall(r"api\.(chat\w+)\(", CHAT_JS))
+    assert called
+    defined = set(re.findall(r"\n  (chat\w+):", API_JS))
+    missing = called - defined
+    assert not missing, f"page calls undefined helpers {missing}"
+    for route in ("/sessions", "/sessions/{session_id}/messages",
+                  "/sessions/{session_id}/stream",
+                  "/sessions/{session_id}/stop",
+                  "/sessions/{session_id}/skills",
+                  '"/skills"', '"/projects"',
+                  "/sessions/{session_id}/project",
+                  "/sessions/{session_id}/star",
+                  "/sessions/{session_id}/archive",
+                  '"/memories"', "/memories/{memory_id}/retire",
+                  "/artifacts/{artifact_id}",
+                  "/artifacts/{artifact_id}/versions",
+                  "/artifacts/{artifact_id}/export.pptx"):
+        assert route in BACKEND, f"no served route {route}"
+    # the shelf is served for the Skills page (no picker anywhere)
+    assert '"/skills"' in BACKEND
+    assert ".origin-tag" in CSS
+
+
+def test_the_shell_offers_the_door():
+    # one nav, not two: "New ask" starts a chat; the shelf below
+    # lists them; the old Ask tab left the nav (deep links survive)
+    assert 'href="#/chat/new" data-tab="chat"' in INDEX
+    assert "New ask" in INDEX
+    assert 'data-tab="ask"' not in INDEX
+    assert 'class="chats-search"' in INDEX
+    assert "chat: () => renderChat(outlet, arg)" in MAIN_JS
+    assert 'page === "chat"' in MAIN_JS
+    assert "api.chatSessions" in CHATS_JS
+    assert "#/chat/" in CHATS_JS
+    # the page itself carries no second sidebar
+    assert "chat-side" not in CHAT_JS
+    assert 'wanted === "new"' in CHAT_JS
+
+
+def test_the_claude_shape_is_present():
+    for piece in ("chat-panel", "chat-thread", "chat-chiprow",
+                  "panel-version", "panel-export", "pingShelf"):
+        assert piece in CHAT_JS, piece
+    for cls in (".chatv2", ".chat-panel", ".chat-row",
+                ".chats-search", ".chartv2", ".artifact-footer"):
+        assert cls in CSS, cls
+    # the artifact panel is model-invoked: it opens on an artifact
+    # event in this interaction, never on reopening an old chat — a
+    # card in the transcript reopens it
+    assert "openArtifact(boot.artifacts" not in CHAT_JS
+    assert "if (live) openArtifact(row.artifact_id);" in CHAT_JS
+    assert "artifactCard(turn.extras, event, true)" in CHAT_JS
+    assert "artifactCard(div.querySelector(\".chat-extras\")" in CHAT_JS
+    # chips: at most three, model-authored
+    assert ".slice(0, 3)" in CHAT_JS
+
+
+def test_the_organization_is_present():
+    # §8: starred + archive live in the shell shelf; projects stay
+    # implemented (store, API) but deliberately OFF the surface
+    for piece in ("data-star", "data-archive", "shelf-head"):
+        assert piece in CHATS_JS, piece
+    assert "project-row" not in CHATS_JS
+    assert "chat-project" not in CHAT_JS
+    assert '"/projects"' in BACKEND          # the door stays served
+    # the chat page: memory panel, handoff banner, deck export
+    for piece in ("chat-memory-btn", "chatRetireMemory",
+                  "handoff-note", "Where you left off",
+                  "chatPptxUrl"):
+        assert piece in CHAT_JS, piece
+    for cls in (".memory-row", ".handoff-note", ".row-btn"):
+        assert cls in CSS, cls
+    # memory is disclosed and retirable, never silently gone — and a
+    # save is disclosed inline with an undo the moment it happens
+    assert "retire" in BACKEND and "retire_memory" in BACKEND
+    assert "memoryNote" in CHAT_JS and "Remembered:" in CHAT_JS
+    assert ".memory-note" in CSS
+
+
+def test_thinking_is_alive_and_skills_are_browsable():
+    # one live line: the model's own thought summaries and a friendly
+    # verb per call, replaced in place, collapsed into "Worked for …"
+    # when the turn lands — verbs deduplicated, no tool names
+    for piece in ("thinking-line", "think-orb", "showThinking",
+                  "doneThinking", "friendly", "VERBS", "PAST",
+                  "Thought", 'case "thinking"', 'case "tool_call"',
+                  "lastLine", "new Set(turn.verbs)",
+                  # the thinking block: thought segments interleaved
+                  # with steps, folded to "Thought for" on the answer,
+                  # reopened by new work, replayed from the trace
+                  "think-seg", "thoughtSegment", "settleBlock",
+                  "openBlock", "traceBlock", "payload?.trace",
+                  "if (!turn.settled) settleBlock(turn)",
+                  # a step's input (the SQL, the code) on a click
+                  "attachInput", "step-input", "event.input", "t.input"):
+        assert piece in CHAT_JS, piece
+    assert ".think-seg" in CSS and ".step-input" in CSS
+    for cls in (".thinking-line", "@keyframes think-orb",
+                "@keyframes think-shimmer", "prefers-reduced-motion"):
+        assert cls in CSS, cls
+    # the hidden attribute always wins — the bug the real transcript
+    # exposed was display:flex outranking [hidden]
+    assert "[hidden] { display: none !important; }" in CSS
+    # the thinking line never returns after the turn landed
+    assert "if (turn.done) return;" in CHAT_JS
+    # the live line has a heartbeat: seconds tick, each model call
+    # restarts the clock, prose or the end stops it
+    for piece in ("function pulse", "stopPulse", "Still ",
+                  'pulse(turn, "Thinking…", event.ts)',
+                  "clearInterval(turn.tick)"):
+        assert piece in CHAT_JS, piece
+    # no harness words in the user's language
+    for gone in ("what the model saw", "saw-toggle", "saw-panel",
+                 "strict JSON", "Worked through", "working…"):
+        assert gone not in CHAT_JS, gone
+    # the depth dial rides on every send
+    assert "chat-depth" in CHAT_JS and "depth" in BACKEND
+    # a turn belongs to the server: coming back mid-turn reattaches
+    # from the turn's first event, and the shelf marks a working chat
+    assert '"turn_after": window["after"]' in BACKEND
+    assert "state.seq = boot.turn_after;" in CHAT_JS
+    assert "setRunning(true);\n  }" in CHAT_JS
+    assert "chat-when working" in CHATS_JS
+    assert ".chat-when.working" in CSS
+    # no picker anywhere: the agent loads packs itself; people browse
+    # the shelf on the Skills tab
+    assert "chat-skills-btn" not in CHAT_JS
+    assert "chatSetSkills" not in CHAT_JS
+    assert 'href="#/skills" data-tab="skills"' in INDEX
+    assert "skills: renderSkills" in MAIN_JS
+    skills_js = (FRONTEND / "js" / "pages" / "skills.js").read_text(
+        encoding="utf-8")
+    assert "api.chatSkills" in skills_js
+    assert "read the doctrine" in skills_js
+    assert "origin-tag" in skills_js
+
+
+def test_dashboards_and_diagrams_render():
+    for piece in ("kpiTile", "diagramSVG", "dash-grid",
+                  "filter-opt", "mermaid-src",
+                  "bindDashboardFilters", "tileFooter"):
+        assert piece in CHAT_JS, piece
+    for cls in (".dash-grid", ".kpi-tile", ".tile-footer",
+                ".diagramv2", ".filter-opt"):
+        assert cls in CSS, cls
+    # a filter pick goes through the conversation, never a hidden
+    # client-side query — the binder composes a whatif message
+    assert "whatif" in CHAT_JS.split("bindDashboardFilters")[1][:600]
+    # dashboards export as an HTML bundle; diagrams as SVG or .mmd
+    assert '".html"' in CHAT_JS.replace("`${slug}.html`",
+                                        '".html"')
+    assert ".mmd" in CHAT_JS
+
+
+def test_governance_is_visible_not_just_enforced():
+    # status chips, meridian line, and the watermark all render
+    assert "status-chip" in CHAT_JS
+    assert "meridian_line" in CHAT_JS
+    assert "watermark" in CHAT_JS
+    for status in ("s-certified", "s-pending", "s-composed",
+                   "s-exploratory"):
+        assert status in CSS, status
+    # exports carry the provenance footer
+    assert "provenanceLine" in CHAT_JS
+
+
+def test_the_ask_starts_like_claude_and_hands_queries_over():
+    # the empty state: a greeting and the composer, nothing else; the
+    # first message turns it into the conversation with its title,
+    # a Share door, the composer docked, the disclaimer under it
+    for piece in ("chat-hero", "chat-greet", "how are things",
+                  "Type / for skills", "Write a message…",
+                  'classList.toggle("empty"', "setEmpty(false)",
+                  "chat-title", "chat-title-input", "api.chatRename",
+                  "chat-share", "Link copied", "chat-plus-pop",
+                  "Browse skills", "chat-mode", "Autopilot",
+                  "synapse-chat-mode", "chat-model", "boot.model",
+                  "boot.user_name", "chat-slash", "paintSlash",
+                  "pickSlash", "chat-foot", "can make mistakes"):
+        assert piece in CHAT_JS, piece
+    for cls in (".chat-hero", ".chatv2.empty", ".chat-box",
+                ".chat-modes", ".chat-mode.on", ".chat-slash",
+                ".chat-title-btn", ".chat-foot", ".proposal-card",
+                ".proposal-sql", ".proposal-actions"):
+        assert cls in CSS, cls
+    # no dead controls: every composer button reaches a real door
+    for gone in ("mic", "Cowork"):
+        assert gone not in CHAT_JS, gone
+    # the handover: the query first, the rows on a tap, no model call
+    for piece in ('case "proposal"', "proposalCard", "Run query",
+                  "Run + build dashboard", "Edit SQL", "api.chatRun",
+                  "payload?.proposal", "propose_sql",
+                  "Writing the query for you to run",
+                  "state.mode", "dashboard, depth"):
+        assert piece in CHAT_JS, piece
+    assert "chatRun" in API_JS and "{ text, depth, mode }" in API_JS
+    for piece in ("/run\"", "run_proposal", "RunProposal",
+                  "mode=req.mode", "dashboard", '"user_name"',
+                  '"model": runtime.model_label'):
+        assert piece in BACKEND, piece
+    # the mode and the slash command are the runtime's, not the page's
+    runtime_py = (SILO / "sahs" / "assistant" / "runtime.py").read_text(
+        encoding="utf-8")
+    for piece in ("def run_proposal", "def slash_skill", "def mode_for",
+                  "model_label", "run_proposal_turn"):
+        assert piece in runtime_py, piece
+
+
+def test_the_first_picture_needs_no_model():
+    # the run offers "Chart these rows" as an action chip: the page
+    # calls the chart step, never the model; a plain chip still sends
+    for piece in ("api.chatChart", 'action === "chart"', "Drawing the rows",
+                  "drew the chart", "typeof c === \"string\""):
+        assert piece in CHAT_JS, piece
+    assert "chatChart" in API_JS
+    for piece in ('/chart"', "ChartRows", "chart_rows"):
+        assert piece in BACKEND, piece
+    # the card says when Run would be refused for cost
+    assert "proposal.over_ceiling" in CHAT_JS
+    assert "ceiling for live" in CHAT_JS
+
+
+def test_the_artifact_drawer_and_the_report():
+    # the panel is a drawer: it slides in from the right edge and
+    # moves the chat to the middle; opening a card always brings the
+    # artifact into view; the masthead carries no tokens or build id
+    for piece in ('classList.add("open")', "panel-open", "scrollTop = 0",
+                  'id="chat-meter" hidden', 'id="chat-build" hidden',
+                  "tableReport", "animateNumbers", "sparkline",
+                  "report-strip", "tablev3", "Show all",
+                  'class="line"', 'class="bar"', "--i:"):
+        assert piece in CHAT_JS, piece
+    for cls in (".chat-panel.open", ".chatv2.panel-open .chat-main",
+                "--panel-w", ".report-strip", ".stat-spark", ".tablev3",
+                "@keyframes draw", "@keyframes grow", "@keyframes tile-in",
+                ".chartv2 .line", "prefers-reduced-motion"):
+        assert cls in CSS, cls
+
+
+def test_metric_status_reads_published_on_every_chip():
+    """The product says "published" where the graph says certified:
+    one label map in ui.js, used by the chat's status chip and the
+    provenance footer and by the metrics, table and metric pages. The
+    CSS class, the filter key and the API word stay the graph's value."""
+    ui_js = (FRONTEND / "js" / "ui.js").read_text(encoding="utf-8")
+    assert 'certified: "published"' in ui_js
+    assert "statusLabel(prov.status)" in CHAT_JS
+    assert "esc(prov.status)}</span>" not in CHAT_JS
+    for page in ("semantics", "table", "metric"):
+        text = (FRONTEND / "js" / "pages" / f"{page}.js").read_text(
+            encoding="utf-8")
+        assert "statusLabel" in text, page
+        assert 'certified: "certified"' not in text, page
+    assert ".status-chip.s-certified" in CSS
+

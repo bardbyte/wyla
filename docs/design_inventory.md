@@ -1,6 +1,6 @@
 # Synapse by Lumi — design inventory (draft, staged for docs/design_inventory.md at go-ahead)
 
-> Sweep of apps/console/design/** (now `apps/lumi/design/`; the console itself is under `archive/apps/console`) on 2026-08-30 (branch tip e0067f4). Two visual systems
+> Sweep of apps/console/design/** (now `apps/synapse_admin/design/`; the console itself is under `archive/apps/console`) on 2026-08-30 (branch tip e0067f4). Two visual systems
 > run through the set; **Lumi is canonical**, Synapse-branded twins are superseded.
 
 ## Format
@@ -29,7 +29,7 @@ Artboards are design references; production pages build in the React SPA.
 ## Artboards (file → screen → notes)
 - Synapse Wireframes.dc.html — exploration sheet (brand options 2a-2f, screens ×3 layouts);
   only file with CSS classes; sketch layer in Patrick Hand.
-- Lumi Home.dc.html — landing: navy hero + 3 CTAs; WHAT IT DOES (6 promises) / LIVE PROOF
+- Admin Home.dc.html — landing: navy hero + 3 CTAs; WHAT IT DOES (6 promises) / LIVE PROOF
   (46 tables·3,074 metrics·15,288 vocab·joins 2◆·readiness 73%·TQSR 0.71·reviews 14);
   SINCE LAST BUILD strip; 5-group screen index (HOME/UNDERSTAND/GOVERN/OPERATE/WORK·E16);
   tier legend.
@@ -40,7 +40,7 @@ Artboards are design references; production pages build in the React SPA.
   MEANING (question prov:dmp, grain prov:studio·observed, amber llm_enriched unreviewed);
   WITNESSES bars+agreement; FAMILY tree (proposed/child/quiet ○) + crimson competing-
   definition banner; BINDINGS; WHO USES (GMNS 1302/CFR 1089); Rename/Deprecate.
-- Lumi Table Profile.dc.html (canonical; Table Profile.dc.html = Synapse twin) — 73%
+- Admin Table Profile.dc.html (canonical; Table Profile.dc.html = Synapse twin) — 73%
   readiness donut; columns grid w/ per-column tier+PII ⊘; measures 3-up; witness ledger
   (human ×10/MDM ×8/BigQuery ×6/glossary ×5/mined ×2); usage sparkline; join topology;
   "what we don't know yet" dashed card; 360px "Who says so" drawer; viewMode analyst|VP.
@@ -84,12 +84,12 @@ Artboards are design references; production pages build in the React SPA.
   CONSTANTS + MODELS & ABLATION LOG. → docs/assumptions.md rendered.
 - Sessions.dc.html — session list (mine/all); plan-version chain v1→v5; budget $/cap;
   handoff preview. Flagged "ships with E16".
-- Lumi Components.dc.html — component library spec, 13 specimens: 1 Answer Card · 2 Plan
+- Admin Components.dc.html — component library spec, 13 specimens: 1 Answer Card · 2 Plan
   Panel · 3 Disambiguation Chips · 4 Join & Grain Preview · 5 Tap-out Card · 9 Lifecycle
   Tracker · 10 Provenance Popover · 11 Agent Theater Strip · 12 Verifier Verdict Card ·
   13 Analysis Notebook · 14 Budget Meter · 15 Plan Version Stepper · 16 Session Handoff
   Card (numbers 6-8 absent). Grain REQ crimson *; evidence-bearing disambiguation options.
-- Lumi Principles.dc.html — 8 principles (thresholds; one component everywhere; uncertainty
+- Admin Principles.dc.html — 8 principles (thresholds; one component everywhere; uncertainty
   is a rendered surface; recorded as you·reversible; flywheel shown; verification is a
   surface; exploratory carries a passport; the stream is the interface). "crimson =
   definition conflict, only, ever."

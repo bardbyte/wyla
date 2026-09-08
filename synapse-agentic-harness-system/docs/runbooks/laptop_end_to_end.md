@@ -179,7 +179,7 @@ Commit after each phase (each runbook has the exact `git add` line).
 
 ```bash
 pip install -e ".[sql,dev,assistant]"   # assistant adds python-pptx + numpy
-uvicorn apps.lumi.backend.app:app --port 8400   # from the repo root
+uvicorn apps.synapse_admin.backend.app:app --port 8400   # from the repo root
 # → open http://127.0.0.1:8400/#/chat  (New ask in the nav)
 
 # the two asks that decide Stage 1 (docs/specs/synapse_v3_harness.md §10):
@@ -365,8 +365,8 @@ what it does on the laptop:
 
 ```bash
 # in the silo .env: APP_ID, APP_SECRET (or AUTH_MODE=env + GEMINI_BEARER_TOKEN)
-python scripts/eag_check.py                       # token · generate · stream · tools · system
-python scripts/eag_check.py --probe-ttl 7 --json eag_report.json   # then watch the token die
+python scripts/gateway_check.py                       # token · generate · stream · tools · system
+python scripts/gateway_check.py --probe-ttl 7 --json gateway_report.json   # then watch the token die
 ```
 
 The route is decided by the first real request, the token POST:

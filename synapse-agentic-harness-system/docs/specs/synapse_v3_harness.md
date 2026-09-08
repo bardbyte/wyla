@@ -3,7 +3,7 @@
 Status: DESIGN, Stage 1 BUILT (2026-09-02). Applies the Gemini 3.1
 Pro harness research (Cherny / Model Spec / Karpathy) to Synapse.
 Stage 1 of §10 is in the tree (`sahs/assistant/{agent,loop,kit,
-hooks,state}.py`, the surface in `apps/lumi/frontend/js/pages/chat.js`);
+hooks,state}.py`, the surface in `apps/synapse_admin/frontend/js/pages/chat.js`);
 Stages 2–4 are not. v2's checks, artifacts, store, events, and evals
 stay; the turn loop, the kit, and the surface changed.
 

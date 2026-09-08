@@ -1,0 +1,104 @@
+# Synapse by Lumi — the product (apps/synapse_admin)
+
+The freshly-built admin surface over the Meridian context graph,
+authored directly from the Lumi design canvas
+(`apps/synapse_admin/design/wireframes/`). One process, **zero build
+steps**: FastAPI serves the Meridian read plane and a hand-authored
+ES-module frontend (no bundler, no node; three.js vendored locally so
+the Cosmos renders offline).
+
+## Run
+
+```bash
+# from the repo root; needs fastapi + uvicorn in the venv
+uvicorn apps.synapse_admin.backend.app:app --port 8400
+# → http://localhost:8400  (opens on Home)
+```
+
+The app reads the silo's promoted build. Defaults resolve
+`synapse-agentic-harness-system/{builds,graph}` next to it; override
+with `MERIDIAN_SILO_DIR` / `MERIDIAN_BUILDS_DIR` /
+`MERIDIAN_GRAPH_DIR` / `MERIDIAN_SOURCES_DIR`. **No compiled build →
+every surface renders its designed empty state with the server's
+reason — nothing is mocked, ever.** Builds compiled before E17-A lack
+`indexes/sources.json` and `indexes/graph_map.json`; one
+`laptop.py compile` lights up the Sources rail and the Cosmos.
+
+**Knowledge Files** (Home card + `#/artifacts`) read from two
+places: the skills tree (`MERIDIAN_SKILLS_DIR`, any nesting —
+`CFR/<skill>`, `CFR/TLS/<semantics>`; defaults to
+`<sources>/skills`) and the sources dir, resolved in order:
+`MERIDIAN_SOURCES_DIR` → the silo's own `sources/` if present → the
+absolute `--sources-dir` recorded by your latest
+`laptop.py build-graph` run (manifests record their input roots).
+Clicking a file opens the pullout reader (copy to clipboard, Esc or
+✕ to close); the creator stages typed knowledge or dumped text files
+into `sources/artifacts/`, and the SharePoint MCP connector button
+is a labeled door until the connector service lands. The easiest way to set it: paste
+`MERIDIAN_SOURCES_DIR=/path/to/$DATA/sources` into the silo's `.env`
+(see `.env.example`) — the app loads it at startup with the
+pipeline's own loader, and shell-exported variables always win over
+the file. When the shelf is empty the page says exactly which path
+it checked. `python scripts/graph_state.py` (in the silo) prints
+where the shelf resolves on this machine, along with the promoted
+build, statuses, and every enrichment run's blind-gate line.
+
+The same `.env` as the pipeline rides along: `/api/synapse/planes`
+reports the BQ (PSC) and Vertex (proxy) planes as booleans —
+configured or not, never values. The app itself calls neither;
+enrichment and dry-runs stay with `laptop.py`.
+
+## Surfaces
+
+| route | screen |
+|---|---|
+| `#/home` | capabilities: hero + doors, six promises, LIVE PROOF, the Sources rail (ledger as trust centerpiece), exclusions |
+| `#/semantics` | Explorer — metrics (search + status filters) and tables |
+| `#/metric/<id>` · `#/table/<t>` | the profiles — deep-linkable URLs |
+| `#/cosmos` | the graph sky from `graph_map.json` (positions baked at compile) |
+| `#/artifacts` | Knowledge Files shelf + the staging door (`sources/artifacts/`) |
+| `#/operate` | Builds & Diffs + Enrichment Runs from the real reports |
+
+Ask (the conversational surface) ships with E16 and is shown as a
+labeled door — never an unlabeled fake.
+
+## Invariants
+
+- The clerk is the only graph writer. This app reads, stages source
+  files, and records feedback (`graph/runs/feedback/*.jsonl`) — it
+  never writes quads.
+- Every number traces to the promoted build or a run report.
+- Status is its own axis; a source's display name never implies
+  authority. Tiers render ● ◆ ◐ ○; crimson is definition conflict —
+  only, ever.
+
+`archive/apps/console` is the legacy shell (agent theater, scripted
+runner); this app is the product and its copy of the read plane
+(`backend/meridian.py`) is the canonical one.
+
+## Tests
+
+```bash
+python -m pytest apps/synapse_admin/tests/ -q
+```
+
+## Synapse Semantic Intelligence: the second surface
+
+The same server also serves a second frontend at
+`http://localhost:8400/synapse/` from `apps/synapse/frontend`: a copy
+of this one, stripped for the people who ask questions rather than
+steward the graph. The left header reads Synapse Semantic
+Intelligence; New chat and Search chats sit at the top, the recent
+chats under them, and Data Products, Metrics Explorer and Artifacts in
+their own section at the bottom above the account. Home, Skills,
+Cosmos and Operate are not there. Search chats is a page of its own
+(`/api/chat/search`: every chat, fuzzy, the matching lines shown).
+Data Products and Metrics Explorer are cards read from the compiled
+build. Artifacts publish inside the chat where the turn made them:
+there is no drawer on this surface. The two frontends share the API
+and the build; they do not share files, so a change to one is a
+change to one. `SYNAPSE_LOGO=/path/to/logo.png` in the silo `.env`
+puts an image in the second surface's left header in place of the
+words (`/api/synapse/logo` serves it; `/api/synapse/brand` says whether one
+is configured).
+
