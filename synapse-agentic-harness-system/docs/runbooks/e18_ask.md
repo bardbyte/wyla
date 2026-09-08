@@ -23,7 +23,7 @@ line and no key ever reaches the browser.
 | variable | what it does |
 |---|---|
 | `MERIDIAN_BUILDS_DIR` / `MERIDIAN_GRAPH_DIR` | which build Ask answers from, where sessions and events are written (`graph/runs/ask/`) |
-| `LUMI_VERTEX_SA_KEY` | the Vertex service-account key (a DIFFERENT project than BQ) |
+| `SYNAPSE_VERTEX_SA_KEY` | the Vertex service-account key (a DIFFERENT project than BQ) |
 | `VERTEX_PROJECT_ID` · `VERTEX_LOCATION` · `VERTEX_MODEL` | the model contract; location defaults to `global`, model to `gemini-3.1-pro-preview` |
 | `SAHS_ALLOW_LIVE=1` + `ASK_EXECUTE=live` | BOTH required before Ask executes for real; otherwise every query is a dry run that returns zero rows by design |
 | `SYNAPSE_COST_IN` / `SYNAPSE_COST_OUT` | dollars per million tokens. Unset → the budget meter reports tokens and says the rate is not configured, rather than inventing a price |

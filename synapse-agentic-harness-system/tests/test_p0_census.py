@@ -44,7 +44,7 @@ def test_registry_suffix_and_ambiguity():
     assert reg.resolve("nope_table") == (None, "unknown")
     # real queries reference tables FULLY QUALIFIED — they resolve by
     # their table component; ambiguity still never guesses
-    assert reg.resolve("`axp-lumi`.dw.gms_transaction") == \
+    assert reg.resolve("`demo-warehouse`.dw.gms_transaction") == \
         ("gms_transaction", "qualified")
     assert reg.resolve("dw.authorization") == (None, "ambiguous")
     assert reg.resolve("dw.nope_table") == (None, "unknown")
@@ -293,7 +293,7 @@ def test_std_tech_real_envelope_shape(tmp_path: Path):
         "appl_id": "600001868",
         "page_info": {"total_pages": 1, "downloaded_elements": 2},
         "tech_metadata_list": [
-            {"datasource": "axp-lumi", "technology": "BigQuery",
+            {"datasource": "demo-warehouse", "technology": "BigQuery",
              "isActive": "Y",
              "datasetAttribute": {
                  "business_name": "Acquisitions data for US market",
@@ -317,7 +317,7 @@ def test_std_tech_real_envelope_shape(tmp_path: Path):
                   "pdeAttribute": {"data_type_name": "STRING",
                                    "pii_role_id":
                                        "NGBD-SDE-Date-of-Birth"}}]},
-            {"datasource": "axp-lumi",
+            {"datasource": "demo-warehouse",
              "datasetAttribute": {"data_type_name": "ODL",
                                   "has_pii": False},
              "pde": []},

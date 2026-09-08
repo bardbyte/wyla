@@ -143,10 +143,10 @@ def teach_warehouse_error(build: Any, sql: str, message: str, *,
                 f"and the build knows it as {physical}, so the query "
                 "was sent to the wrong project: this is configuration, "
                 "not your SQL. The sandbox qualifies tables with "
-                "LUMI_BQ_DATA_PROJECT (currently "
+                "SYNAPSE_BQ_DATA_PROJECT (currently "
                 f"{data_project or 'unset'}) and runs in BQ_LOCATION "
                 f"({location or 'US'}). Tell the user to set "
-                "LUMI_BQ_DATA_PROJECT to the project that hosts the "
+                "SYNAPSE_BQ_DATA_PROJECT to the project that hosts the "
                 "tables"
                 + (" and BQ_LOCATION to the dataset's location"
                    if loc else "")
@@ -154,7 +154,7 @@ def teach_warehouse_error(build: Any, sql: str, message: str, *,
                 f"scripts/bq_check.py --table {physical}. Do not "
                 "retry until they have.",
                 yours=False,
-                fix_env={"LUMI_BQ_DATA_PROJECT":
+                fix_env={"SYNAPSE_BQ_DATA_PROJECT":
                          "the project that hosts the tables",
                          "BQ_LOCATION": loc or (location or "US")},
                 smoke=f"python scripts/bq_check.py --table {physical}")
@@ -180,12 +180,12 @@ def teach_warehouse_error(build: Any, sql: str, message: str, *,
                 + (f", location {loc}" if loc else "")
                 + "; the build's tables live in it, so the query went "
                 "to the wrong project or location: configuration, not "
-                "your SQL. Tell the user to set LUMI_BQ_DATA_PROJECT "
+                "your SQL. Tell the user to set SYNAPSE_BQ_DATA_PROJECT "
                 "(and BQ_LOCATION if the dataset is regional) in the "
                 "silo .env and prove it with scripts/bq_check.py "
                 "--table; do not retry until they have.",
                 yours=False,
-                fix_env={"LUMI_BQ_DATA_PROJECT":
+                fix_env={"SYNAPSE_BQ_DATA_PROJECT":
                          "the project that hosts the tables",
                          "BQ_LOCATION": loc or (location or "US")})
         datasets = sorted({t.split(".")[0] for t in schema})

@@ -10,7 +10,7 @@ Updated todo list
 
 | Column | What it tells you |
 |---|---|
-| `table_name` | The `axp-lumi.dw.*` table name |
+| `table_name` | The `demo-warehouse.dw.*` table name |
 | `status` | `success` or `error` |
 | `error` | Error message if failed (empty on success) |
 | `total_pages` / `total_no_of_elements` / `downloaded_elements` | Pagination counts |

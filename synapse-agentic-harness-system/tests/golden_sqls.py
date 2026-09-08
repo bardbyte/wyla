@@ -53,7 +53,7 @@ GOLDEN = {
     "g18_agg_filters":
         "SELECT SUM(CASE WHEN status = 'A' THEN amt ELSE 0 END) FROM txns",
     "g19_dotted_table":
-        "SELECT x FROM `axp-lumi`.dw.wwcas_authorization "
+        "SELECT x FROM `demo-warehouse`.dw.wwcas_authorization "
         "WHERE part_dt = '2026-08-01'",
     "g20_between":
         "SELECT * FROM t WHERE d BETWEEN '2026-01-01' AND '2026-03-31'",

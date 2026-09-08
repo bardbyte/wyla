@@ -8,26 +8,26 @@ fresh and owns nothing else.
 
 Resolution order (first hit wins), matching the existing laptop setup:
 
-    BQ key       LUMI_BQ_SA_KEY      → GOOGLE_APPLICATION_CREDENTIALS
-    Vertex key   LUMI_VERTEX_SA_KEY  → GOOGLE_APPLICATION_CREDENTIALS
-    BQ project   BQ_PROJECT_ID → LUMI_BQ_PROJECT → GOOGLE_CLOUD_PROJECT
+    BQ key       SYNAPSE_BQ_SA_KEY      → GOOGLE_APPLICATION_CREDENTIALS
+    Vertex key   SYNAPSE_VERTEX_SA_KEY  → GOOGLE_APPLICATION_CREDENTIALS
+    BQ project   BQ_PROJECT_ID → SYNAPSE_BQ_PROJECT → GOOGLE_CLOUD_PROJECT
     BQ endpoint  BIGQUERY_API_BASE_URL → BIGQUERY_URL → enterprise PSC default
     BQ location  BQ_LOCATION → "US"
-    BQ data proj BQ_DATA_PROJECT → LUMI_BQ_DATA_PROJECT → the BQ project
-                 (the project that HOSTS the tables, e.g. axp-lumi, when
+    BQ data proj BQ_DATA_PROJECT → SYNAPSE_BQ_DATA_PROJECT → the BQ project
+                 (the project that HOSTS the tables, e.g. demo-warehouse, when
                  it differs from the one that runs and bills the query)
 
 Vertex resolution honors the PROVEN laptop contract (the ADK apps and
-check_vertex_gemini.py that already ran against prj-d-ea-poc): the
+check_vertex_gemini.py that already ran against demo-vertex): the
 standard GOOGLE_* names, location "global" (Vertex's globally-routed
 endpoint — the right default for the Gemini previews), GEMINI_MODEL,
 and the GEMINI_* TLS knobs. Silo-first names win when both are set:
 
-    Vertex project   VERTEX_PROJECT_ID → LUMI_VERTEX_PROJECT
+    Vertex project   VERTEX_PROJECT_ID → SYNAPSE_VERTEX_PROJECT
                      → GOOGLE_CLOUD_PROJECT      (never a BQ_* var)
-    Vertex location  VERTEX_LOCATION → LUMI_VERTEX_LOCATION
+    Vertex location  VERTEX_LOCATION → SYNAPSE_VERTEX_LOCATION
                      → GOOGLE_CLOUD_LOCATION → "global"
-    Vertex model     VERTEX_MODEL → LUMI_VERTEX_MODEL → GEMINI_MODEL
+    Vertex model     VERTEX_MODEL → SYNAPSE_VERTEX_MODEL → GEMINI_MODEL
                      → "gemini-3.1-pro-preview" (the proven default)
     Vertex URL       VERTEX_API_BASE_URL → derived from location
                      (global → aiplatform.googleapis.com; regional →
@@ -155,7 +155,7 @@ def configure_network(endpoint: str) -> dict[str, str]:
 def configure_vertex_network(endpoint: str) -> dict[str, str]:
     """The Vertex plane's route, for display: the PROVEN contract
     (check_vertex_gemini.py / the ADK apps that ran against
-    prj-d-ea-poc) rides the corporate proxy for the OAuth token call
+    demo-vertex) rides the corporate proxy for the OAuth token call
     and the model call, with truststore fixing the MITM chain.
 
     This is deliberately the OPPOSITE of the BigQuery plane, and the
@@ -256,17 +256,17 @@ def _first_env(*names: str) -> str | None:
 
 
 def resolve_bq_key_path() -> Path | None:
-    v = _first_env("LUMI_BQ_SA_KEY", "GOOGLE_APPLICATION_CREDENTIALS")
+    v = _first_env("SYNAPSE_BQ_SA_KEY", "GOOGLE_APPLICATION_CREDENTIALS")
     return Path(v).expanduser() if v else None
 
 
 def resolve_vertex_key_path() -> Path | None:
-    v = _first_env("LUMI_VERTEX_SA_KEY", "GOOGLE_APPLICATION_CREDENTIALS")
+    v = _first_env("SYNAPSE_VERTEX_SA_KEY", "GOOGLE_APPLICATION_CREDENTIALS")
     return Path(v).expanduser() if v else None
 
 
 def resolve_bq_project() -> str | None:
-    return _first_env("BQ_PROJECT_ID", "LUMI_BQ_PROJECT",
+    return _first_env("BQ_PROJECT_ID", "SYNAPSE_BQ_PROJECT",
                       "GOOGLE_CLOUD_PROJECT")
 
 
@@ -280,7 +280,7 @@ DEFAULT_VERTEX_LOCATION = "global"     # the proven laptop default —
                                        # endpoint, right for the
                                        # Gemini previews
 DEFAULT_VERTEX_MODEL = "gemini-3.1-pro-preview"   # proven reachable
-                                                  # from prj-d-ea-poc
+                                                  # from demo-vertex
 
 
 def resolve_vertex_endpoint(location: str = "") -> str:
@@ -298,21 +298,21 @@ def resolve_vertex_endpoint(location: str = "") -> str:
 
 def resolve_vertex_project() -> str | None:
     """Never a BQ_* variable: the laptop's Vertex SVC-ID lives in a
-    DIFFERENT project (prj-d-ea-poc) than the BQ dry-run one, and a
+    DIFFERENT project (demo-vertex) than the BQ dry-run one, and a
     silent BQ fallback would bill (and fail) against the wrong
     project. GOOGLE_CLOUD_PROJECT is accepted because the proven ADK
     setup already sets it to the VERTEX project."""
-    return _first_env("VERTEX_PROJECT_ID", "LUMI_VERTEX_PROJECT",
+    return _first_env("VERTEX_PROJECT_ID", "SYNAPSE_VERTEX_PROJECT",
                       "GOOGLE_CLOUD_PROJECT")
 
 
 def resolve_vertex_location() -> str:
-    return _first_env("VERTEX_LOCATION", "LUMI_VERTEX_LOCATION",
+    return _first_env("VERTEX_LOCATION", "SYNAPSE_VERTEX_LOCATION",
                       "GOOGLE_CLOUD_LOCATION") or DEFAULT_VERTEX_LOCATION
 
 
 def resolve_vertex_model() -> str:
-    return _first_env("VERTEX_MODEL", "LUMI_VERTEX_MODEL",
+    return _first_env("VERTEX_MODEL", "SYNAPSE_VERTEX_MODEL",
                       "GEMINI_MODEL") or DEFAULT_VERTEX_MODEL
 
 
@@ -335,12 +335,12 @@ def resolve_bq_location() -> str:
 
 
 def resolve_bq_data_project() -> str | None:
-    """The project that HOSTS the tables (``axp-lumi.dw.<table>``),
+    """The project that HOSTS the tables (``demo-warehouse.dw.<table>``),
     when it is not the project that runs and bills the query. The
     graph names tables ``dataset.table``; the sandbox qualifies them
     with this project before any dry run or execution, so a query
     written from the cards resolves where the data actually lives."""
-    return _first_env("BQ_DATA_PROJECT", "LUMI_BQ_DATA_PROJECT")
+    return _first_env("BQ_DATA_PROJECT", "SYNAPSE_BQ_DATA_PROJECT")
 
 
 _BQ_CREDENTIALS: dict[str, Any] = {}
@@ -397,12 +397,12 @@ class BQConnection:
         if not project:
             raise AuthError(
                 "no BigQuery project configured: set BQ_PROJECT_ID (or "
-                "LUMI_BQ_PROJECT / GOOGLE_CLOUD_PROJECT), e.g. in .env")
+                "SYNAPSE_BQ_PROJECT / GOOGLE_CLOUD_PROJECT), e.g. in .env")
         key = resolve_bq_key_path()
         if key is None:
             raise AuthError(
                 "no SA key configured: set GOOGLE_APPLICATION_"
-                "CREDENTIALS (or LUMI_BQ_SA_KEY) to the key-file path, "
+                "CREDENTIALS (or SYNAPSE_BQ_SA_KEY) to the key-file path, "
                 "e.g. in .env")
         if not key.exists():
             raise AuthError(f"BigQuery SA key not found on disk: {key}")
@@ -494,13 +494,13 @@ class VertexConnection:
         if not project:
             raise AuthError(
                 "no Vertex project configured: set VERTEX_PROJECT_ID "
-                "(or LUMI_VERTEX_PROJECT / GOOGLE_CLOUD_PROJECT), "
+                "(or SYNAPSE_VERTEX_PROJECT / GOOGLE_CLOUD_PROJECT), "
                 "e.g. in .env. This is a DIFFERENT project than the "
                 "BQ one and is never borrowed from a BQ_* variable")
         key = resolve_vertex_key_path()
         if key is None:
             raise AuthError(
-                "no Vertex SA key configured: set LUMI_VERTEX_SA_KEY "
+                "no Vertex SA key configured: set SYNAPSE_VERTEX_SA_KEY "
                 "(or GOOGLE_APPLICATION_CREDENTIALS) to the key-file "
                 "path, e.g. in .env")
         if not key.exists():

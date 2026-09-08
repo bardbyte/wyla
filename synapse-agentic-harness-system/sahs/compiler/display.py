@@ -55,9 +55,9 @@ SOURCE_DISPLAY: dict[str, dict[str, str]] = {
         "blurb": "The federated business-term catalog, the official "
                  "names for business concepts."},
     "glossary": {
-        "family": "acropedia",
-        "display": "Acropedia",
-        "chip": "Acropedia",
+        "family": "glossary",
+        "display": "Glossary",
+        "chip": "Glossary",
         "blurb": "The enterprise glossary: acronyms and terms with "
                  "their meanings."},
     "value_lookup": {

@@ -12,10 +12,10 @@ BEFORE any of it enters the program.
     python scripts/gateway_check.py --json gateway_report.json
 
 Reads the silo .env (never overriding the shell): APP_ID, APP_SECRET,
-AUTH_MODE (generated | env), GEMINI_BEARER_TOKEN, EAG_MODEL (not
+AUTH_MODE (generated | env), GEMINI_BEARER_TOKEN, GATEWAY_MODEL (not
 GEMINI_MODEL: the Vertex plane reads that one too), AUTH_VERSION, THINKING_BUDGET, SHOW_THOUGHTS, GEMINI_PROMPT,
-ONEID_TOKEN_URL, EAG_BASE_URL, EAG_SCOPES, ONEID_TIMESTAMP_UNIT (ms |
-s; both are tried), EAG_ROUTE (auto | direct | proxy), EAG_CA_BUNDLE.
+IDP_TOKEN_URL, GATEWAY_BASE_URL, GATEWAY_SCOPES, IDP_TIMESTAMP_UNIT (ms |
+s; both are tried), GATEWAY_ROUTE (auto | direct | proxy), GATEWAY_CA_BUNDLE.
 Secrets never print: the report shows lengths and hashes only.
 Exit 0 = the model answered · 3 = no token · 1 = generate refused.
 """
@@ -77,8 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     print()
     print(render_report(report))
     if chooser.chosen is None:
-        print("  (on the corporate network try EAG_ROUTE=proxy, or name the "
-              "root cert with EAG_CA_BUNDLE; pip install truststore is the "
+        print("  (on the corporate network try GATEWAY_ROUTE=proxy, or name the "
+              "root cert with GATEWAY_CA_BUNDLE; pip install truststore is the "
               "clean fix for TLS interception)", file=sys.stderr)
     if args.json:
         Path(args.json).write_text(json.dumps(report, indent=1, default=str)

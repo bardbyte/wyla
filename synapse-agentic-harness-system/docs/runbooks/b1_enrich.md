@@ -109,18 +109,18 @@ descriptions — under three non-negotiables:
 The Vertex SVC-ID and project are DIFFERENT from the BQ dry-run ones,
 and the resolution honors the PROVEN laptop contract — the same env
 the ADK apps and `check_vertex_gemini.py` already ran with against
-`prj-d-ea-poc`. If your `.env` still carries the ADK-era variables,
+`demo-vertex`. If your `.env` still carries the ADK-era variables,
 **nothing new is needed** — they resolve as-is:
 
 ```
 # proven ADK setup (works unchanged):
-GOOGLE_APPLICATION_CREDENTIALS=~/.gcp/prj-d-ea-poc.json
-GOOGLE_CLOUD_PROJECT=prj-d-ea-poc
+GOOGLE_APPLICATION_CREDENTIALS=~/.gcp/demo-vertex.json
+GOOGLE_CLOUD_PROJECT=demo-vertex
 GOOGLE_CLOUD_LOCATION=global            # optional — global is default
 GEMINI_MODEL=gemini-3.1-pro-preview     # optional — this is default
 
 # silo-first names (win over the above when both are set):
-# LUMI_VERTEX_SA_KEY=… VERTEX_PROJECT_ID=… VERTEX_LOCATION=…
+# SYNAPSE_VERTEX_SA_KEY=… VERTEX_PROJECT_ID=… VERTEX_LOCATION=…
 # VERTEX_MODEL=…  VERTEX_API_BASE_URL=<PSC endpoint if applicable>
 ```
 
@@ -132,8 +132,8 @@ When both live in the same `.env`, use the explicit names so neither
 borrows the other's key:
 
 ```
-LUMI_BQ_SA_KEY=~/.gcp/<bq-key>.json
-LUMI_VERTEX_SA_KEY=~/.gcp/<vertex-key>.json
+SYNAPSE_BQ_SA_KEY=~/.gcp/<bq-key>.json
+SYNAPSE_VERTEX_SA_KEY=~/.gcp/<vertex-key>.json
 ```
 A regional location (e.g. `us-central1`) derives its own regional host
 automatically; `global` uses the globally-routed endpoint (the right

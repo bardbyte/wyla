@@ -267,7 +267,7 @@ def test_alias_to_unknown_physical_dies_at_load(tmp_path):
 def test_crosswalk_blocking_is_a_build_error(tmp_path):
     broken = tmp_path / "broken.jsonl"
     broken.write_text(json.dumps({
-        "physical": "dw.gms_transaction", "lumi_asset_id": "lumi-ds-001",
+        "physical": "dw.gms_transaction", "lumi_asset_id": "synapse-ds-001",
         "atlas_entity_id": "gms_transaction", "verified_by": "x",
         "verified_on": "2026-08-25"}) + "\n")
     result = _build(tmp_path / "g", tmp_path / "run", crosswalk=broken)
@@ -348,7 +348,7 @@ def test_crosswalk_lookup_paths():
         == "dw.gms_transaction"
     assert crosswalk.physical_for_lumi("wwcas_authorization") \
         == "dw.wwcas_authorization"
-    assert crosswalk.physical_for_lumi("?", "lumi-ds-001") \
+    assert crosswalk.physical_for_lumi("?", "synapse-ds-001") \
         == "dw.gms_transaction"
     assert crosswalk.physical_for_atlas("gms_transaction") \
         == "dw.gms_transaction"

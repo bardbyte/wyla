@@ -77,7 +77,7 @@ def test_read_plane_end_to_end(client):
     assert home["excluded_tables"]
     shelf = client.get("/api/meridian/sources").json()
     by_source = {s["source"]: s for s in shelf["sources"]}
-    assert by_source["glossary"]["display"] == "Acropedia"
+    assert by_source["glossary"]["display"] == "Glossary"
     metrics = client.get("/api/meridian/explorer/metrics",
                          params={"status": "certified"}).json()
     assert metrics["rows"] and all(

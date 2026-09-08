@@ -21,8 +21,8 @@ from sahs.util.auth import (                     # noqa: E402
     resolve_ssl,
 )
 
-_BQ_VARS = ("LUMI_BQ_SA_KEY", "GOOGLE_APPLICATION_CREDENTIALS",
-            "BQ_PROJECT_ID", "LUMI_BQ_PROJECT", "GOOGLE_CLOUD_PROJECT",
+_BQ_VARS = ("SYNAPSE_BQ_SA_KEY", "GOOGLE_APPLICATION_CREDENTIALS",
+            "BQ_PROJECT_ID", "SYNAPSE_BQ_PROJECT", "GOOGLE_CLOUD_PROJECT",
             "BIGQUERY_API_BASE_URL", "BIGQUERY_URL", "BQ_LOCATION",
             "BQ_SSL_NO_VERIFY", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE",
             "BQ_DISABLE_PROXY", "BQ_FORCE_PROXY", "SAHS_ENV_FILE",
@@ -45,8 +45,8 @@ def test_dotenv_loads_without_overriding(tmp_path, monkeypatch):
     env = tmp_path / ".env"
     env.write_text(
         "# laptop config\n"
-        "GOOGLE_APPLICATION_CREDENTIALS=/keys/prj-p-lumi-gpt.json\n"
-        "export BQ_PROJECT_ID='prj-p-lumi-gpt'\n"
+        "GOOGLE_APPLICATION_CREDENTIALS=/keys/demo-billing.json\n"
+        "export BQ_PROJECT_ID='demo-billing'\n"
         "BIGQUERY_URL=\"https://bigquery-prod.p.googleapis.com\"\n")
     monkeypatch.setenv("BQ_PROJECT_ID", "already-exported")
     loaded = load_dotenv(env)
@@ -90,15 +90,15 @@ def test_the_bq_route_is_pinned_never_injected(monkeypatch):
 
 def test_ssl_controls(monkeypatch, tmp_path):
     assert resolve_ssl() == (True, None)
-    monkeypatch.setenv("REQUESTS_CA_BUNDLE", "/certs/amex-root.pem")
-    assert resolve_ssl() == (True, "/certs/amex-root.pem")
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", "/certs/corp-root.pem")
+    assert resolve_ssl() == (True, "/certs/corp-root.pem")
     monkeypatch.setenv("BQ_SSL_NO_VERIFY", "1")
     assert resolve_ssl() == (False, None)
 
     key = tmp_path / "key.json"
     key.write_text("{}")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(key))
-    monkeypatch.setenv("BQ_PROJECT_ID", "prj-p-lumi-gpt")
+    monkeypatch.setenv("BQ_PROJECT_ID", "demo-billing")
     connection = BQConnection.from_env()
     assert connection.ssl_verify is False
     context = connection.ssl_context()
@@ -109,7 +109,7 @@ def test_ssl_controls(monkeypatch, tmp_path):
 def test_from_env_fails_fast(monkeypatch, tmp_path):
     with pytest.raises(AuthError, match="project"):
         BQConnection.from_env()
-    monkeypatch.setenv("BQ_PROJECT_ID", "prj-p-lumi-gpt")
+    monkeypatch.setenv("BQ_PROJECT_ID", "demo-billing")
     with pytest.raises(AuthError, match="SA key"):
         BQConnection.from_env()
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS",
@@ -120,19 +120,19 @@ def test_from_env_fails_fast(monkeypatch, tmp_path):
 
 def test_from_env_full_bootstrap_from_dotenv(monkeypatch, tmp_path):
     import os
-    key = tmp_path / "prj-p-lumi-gpt.json"
+    key = tmp_path / "demo-billing.json"
     key.write_text("{}")
     env = tmp_path / "laptop.env"
     env.write_text(
         f"GOOGLE_APPLICATION_CREDENTIALS={key}\n"
-        "BQ_PROJECT_ID=prj-p-lumi-gpt\n"
-        "LUMI_BQ_DATA_PROJECT=axp-lumi\n"
+        "BQ_PROJECT_ID=demo-billing\n"
+        "SYNAPSE_BQ_DATA_PROJECT=demo-warehouse\n"
         "BIGQUERY_URL=https://bigquery-prod.p.googleapis.com\n")
     monkeypatch.setenv("SAHS_ENV_FILE", str(env))
     connection = BQConnection.from_env()
-    assert connection.project == "prj-p-lumi-gpt"
+    assert connection.project == "demo-billing"
     # the tables live in another project: the sandbox qualifies with it
-    assert connection.data_project == "axp-lumi"
+    assert connection.data_project == "demo-warehouse"
     assert connection.endpoint == "https://bigquery-prod.p.googleapis.com"
     assert connection.key_path == key
     assert connection.ssl_verify is True
@@ -147,14 +147,14 @@ def test_from_env_full_bootstrap_from_dotenv(monkeypatch, tmp_path):
 def test_data_project_defaults_to_the_query_project(monkeypatch, tmp_path):
     key = tmp_path / "key.json"
     key.write_text("{}")
-    monkeypatch.setenv("BQ_PROJECT_ID", "prj-p-lumi-gpt")
+    monkeypatch.setenv("BQ_PROJECT_ID", "demo-billing")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(key))
     monkeypatch.delenv("BQ_DATA_PROJECT", raising=False)
-    monkeypatch.delenv("LUMI_BQ_DATA_PROJECT", raising=False)
+    monkeypatch.delenv("SYNAPSE_BQ_DATA_PROJECT", raising=False)
     connection = BQConnection.from_env()
-    assert connection.data_project == "prj-p-lumi-gpt"
-    monkeypatch.setenv("BQ_DATA_PROJECT", "axp-lumi")
-    assert BQConnection.from_env().data_project == "axp-lumi"
+    assert connection.data_project == "demo-billing"
+    monkeypatch.setenv("BQ_DATA_PROJECT", "demo-warehouse")
+    assert BQConnection.from_env().data_project == "demo-warehouse"
 
 
 def test_bq_token_is_cached_per_key_file(monkeypatch, tmp_path):

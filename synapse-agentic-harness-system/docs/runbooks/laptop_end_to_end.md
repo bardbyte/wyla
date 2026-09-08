@@ -106,9 +106,9 @@ export DATA=~/meridian-data            # wherever you put the inputs
 `meridian-data/` may also live inside the repo checkout — the root
 `.gitignore` excludes it — but never `git add` archive data manually.
 
-Env (P1 onward — P0 needs no network at all): `LUMI_BQ_SA_KEY` (or
+Env (P1 onward — P0 needs no network at all): `SYNAPSE_BQ_SA_KEY` (or
 `GOOGLE_APPLICATION_CREDENTIALS`), `BQ_PROJECT_ID` (or
-`LUMI_BQ_PROJECT` / `GOOGLE_CLOUD_PROJECT`); optional
+`SYNAPSE_BQ_PROJECT` / `GOOGLE_CLOUD_PROJECT`); optional
 `BIGQUERY_API_BASE_URL` (defaults to the enterprise PSC endpoint),
 `BQ_LOCATION` (defaults `US`). Same contract the extraction laptop
 already uses. Missing env exits **3** with a typed message.
@@ -204,7 +204,7 @@ results reach the model whole; the depth dial in the composer
 line that speaks the model's own thought summaries and collapses to
 "Worked for 12s · searched the graph, read the cards"; the artifact
 panel opens only when the model puts something in it; a memory save
-is disclosed inline with an undo. Set `LUMI_USER_NAME` in the silo
+is disclosed inline with an undo. Set `SYNAPSE_USER_NAME` in the silo
 `.env` so memory addresses the person by name.
 
 **Vocabulary and values.** Drop the five files in the sources dir and
@@ -360,7 +360,7 @@ with what was already said. Paste the doctor's output with the transcript.
 **Gemini 2.5 Pro through EAG (a candidate for the model plane).** The
 guide's path is a OneIdentity bearer token minted from `APP_ID` and
 `APP_SECRET` (an HMAC-signed request), then Gemini's own REST protocol
-behind `eag-dev.aexp.com`. Before any of it enters the program, prove
+behind `gateway.example.com`. Before any of it enters the program, prove
 what it does on the laptop:
 
 ```bash
@@ -371,7 +371,7 @@ python scripts/gateway_check.py --probe-ttl 7 --json gateway_report.json   # the
 
 The route is decided by the first real request, the token POST:
 direct first, then the corporate proxy, whichever answers with any
-HTTP status. The model id comes from `EAG_MODEL` (leave `GEMINI_MODEL`
+HTTP status. The model id comes from `GATEWAY_MODEL` (leave `GEMINI_MODEL`
 unset: the Vertex plane reads that name as a fallback and the check
 warns when it is set without `VERTEX_MODEL`). The check mints the
 token with a milliseconds timestamp (the unit
@@ -409,15 +409,15 @@ JSON) back.
 
 **Before the first query:** the graph names tables `dw.<table>`, and
 BigQuery resolves that against the project that runs the query
-(`prj-p-lumi-gpt`), not the one that hosts the data. Set
-`LUMI_BQ_DATA_PROJECT=axp-lumi` in the silo `.env` (and `BQ_LOCATION`
+(`demo-billing`), not the one that hosts the data. Set
+`SYNAPSE_BQ_DATA_PROJECT=demo-warehouse` in the silo `.env` (and `BQ_LOCATION`
 if the dataset is regional); the sandbox then qualifies every known
-table as `axp-lumi.dw.<table>` before any dry run or execution, and
+table as `demo-warehouse.dw.<table>` before any dry run or execution, and
 the run_sql result shows the SQL it sent as `sql_sent`. Prove it once:
 
 ```bash
 python scripts/bq_check.py --table dw.gms_transaction
-# ✓ `axp-lumi.dw.gms_transaction` resolves · bytes …
+# ✓ `demo-warehouse.dw.gms_transaction` resolves · bytes …
 ```
 
 The chat stores its sessions under `graph/runs/chat/`; artifacts,

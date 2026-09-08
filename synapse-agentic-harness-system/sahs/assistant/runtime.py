@@ -69,9 +69,9 @@ class AssistantRuntime:
         # inject a static or fault-injecting one
         self.substrate = substrate
         # memory is bound to the person (§7): the name rides into the
-        # prompt's memory section; LUMI_USER_NAME sets it on a laptop
+        # prompt's memory section; SYNAPSE_USER_NAME sets it on a laptop
         self.user_name = (user_name if user_name is not None
-                          else os.environ.get("LUMI_USER_NAME", "")).strip()
+                          else os.environ.get("SYNAPSE_USER_NAME", "")).strip()
         self.graph_root = Path(graph_root)
         self.events_dir = Path(events_dir) if events_dir else None
         if self.events_dir:
@@ -212,7 +212,7 @@ class AssistantRuntime:
             return "scripted"
         from sahs.util.auth import DEFAULT_VERTEX_MODEL
         raw = (os.environ.get("VERTEX_MODEL")
-               or os.environ.get("LUMI_VERTEX_MODEL")
+               or os.environ.get("SYNAPSE_VERTEX_MODEL")
                or os.environ.get("GEMINI_MODEL")
                or DEFAULT_VERTEX_MODEL).strip()
         return " ".join(w.capitalize() if w.isalpha() else w

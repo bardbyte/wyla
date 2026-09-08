@@ -34,9 +34,9 @@ from typing import Any, Callable, Iterator
 from sahs.util.auth import (_first_env, describe_route, env_proxies,
                             plane_opener, redact_url)
 
-ONEID_TOKEN_URL = ("https://oneidentityapi-dev.aexp.com/security/digital"
+IDP_TOKEN_URL = ("https://idp.example.com/security/digital"
                    "/v1/application/token")
-EAG_BASE_URL = "https://eag-dev.aexp.com/genai/google/v1"
+GATEWAY_BASE_URL = "https://gateway.example.com/genai/google/v1"
 DEFAULT_MODEL = "gemini-2.5-pro"
 DEFAULT_SCOPES = [
     "/genai/google/v1/models/gemini-2.5-pro/**::post",
@@ -168,7 +168,7 @@ class Route:
 
 def ssl_context() -> tuple[ssl.SSLContext, str]:
     """TLS for the corporate endpoints: truststore (the OS keychain)
-    when installed, else the bundle named by EAG_CA_BUNDLE →
+    when installed, else the bundle named by GATEWAY_CA_BUNDLE →
     REQUESTS_CA_BUNDLE → SSL_CERT_FILE, else the system default.
     Verification is never disabled."""
     note = "system default"
@@ -178,7 +178,7 @@ def ssl_context() -> tuple[ssl.SSLContext, str]:
         note = "truststore (OS keychain)"
     except ImportError:
         pass
-    bundle = _first_env("EAG_CA_BUNDLE", "REQUESTS_CA_BUNDLE",
+    bundle = _first_env("GATEWAY_CA_BUNDLE", "REQUESTS_CA_BUNDLE",
                         "SSL_CERT_FILE")
     context = ssl.create_default_context(cafile=bundle)
     if bundle:
@@ -187,12 +187,12 @@ def ssl_context() -> tuple[ssl.SSLContext, str]:
 
 
 def candidate_routes(env: dict[str, str]) -> list[Route]:
-    """The routes to try, in order. EAG_ROUTE=direct or proxy pins
+    """The routes to try, in order. GATEWAY_ROUTE=direct or proxy pins
     one; auto (the default) tries direct first, then the corporate
     proxy the environment declares — the internal gateways usually
     answer direct, Google's endpoints never do."""
     context, note = ssl_context()
-    wanted = (env.get("EAG_ROUTE") or "auto").strip().lower()
+    wanted = (env.get("GATEWAY_ROUTE") or "auto").strip().lower()
     proxied = env_proxies()
     direct = Route({}, context, f"direct · TLS {note}")
     via = Route(proxied, context,
@@ -406,8 +406,8 @@ class Config:
     secret: str = ""
     auth_mode: str = "generated"
     bearer: str = ""
-    token_url: str = ONEID_TOKEN_URL
-    base_url: str = EAG_BASE_URL
+    token_url: str = IDP_TOKEN_URL
+    base_url: str = GATEWAY_BASE_URL
     model: str = DEFAULT_MODEL
     version: str = "2"
     scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
@@ -424,7 +424,7 @@ class Config:
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Config":
         env = dict(os.environ if env is None else env)
-        scopes = [s.strip() for s in (env.get("EAG_SCOPES") or "").split(",")
+        scopes = [s.strip() for s in (env.get("GATEWAY_SCOPES") or "").split(",")
                   if s.strip()] or list(DEFAULT_SCOPES)
         try:
             budget = int(env.get("THINKING_BUDGET") or 1056)
@@ -435,21 +435,21 @@ class Config:
             secret=(env.get("APP_SECRET") or "").strip(),
             auth_mode=(env.get("AUTH_MODE") or "generated").strip().lower(),
             bearer=(env.get("GEMINI_BEARER_TOKEN") or "").strip(),
-            token_url=(env.get("ONEID_TOKEN_URL") or ONEID_TOKEN_URL).strip(),
-            base_url=(env.get("EAG_BASE_URL") or EAG_BASE_URL).rstrip("/"),
-            # EAG_MODEL first: GEMINI_MODEL is also read by the Vertex
+            token_url=(env.get("IDP_TOKEN_URL") or IDP_TOKEN_URL).strip(),
+            base_url=(env.get("GATEWAY_BASE_URL") or GATEWAY_BASE_URL).rstrip("/"),
+            # GATEWAY_MODEL first: GEMINI_MODEL is also read by the Vertex
             # plane as a fallback, so setting it for this check would
             # move the chat's model too
-            model=(env.get("EAG_MODEL") or env.get("GEMINI_MODEL")
+            model=(env.get("GATEWAY_MODEL") or env.get("GEMINI_MODEL")
                    or DEFAULT_MODEL).strip(),
             version=str(env.get("AUTH_VERSION") or "2").strip(),
             scopes=scopes,
-            timestamp_unit=(env.get("ONEID_TIMESTAMP_UNIT") or "ms").strip(),
+            timestamp_unit=(env.get("IDP_TIMESTAMP_UNIT") or "ms").strip(),
             thinking_budget=budget,
             show_thoughts=(env.get("SHOW_THOUGHTS") or "true").lower()
             in ("1", "true", "yes", "on"),
             prompt=env.get("GEMINI_PROMPT") or cls.prompt,
-            path_form=(env.get("EAG_PATH_FORM") or "auto").strip().lower(),
+            path_form=(env.get("GATEWAY_PATH_FORM") or "auto").strip().lower(),
         )
 
     def display(self) -> dict[str, Any]:
@@ -971,11 +971,11 @@ def env_warnings(env: dict[str, str]) -> list[str]:
     without VERTEX_MODEL moves the chat's Vertex calls onto it."""
     out = []
     if env.get("GEMINI_MODEL") and not (env.get("VERTEX_MODEL")
-                                         or env.get("LUMI_VERTEX_MODEL")):
+                                         or env.get("SYNAPSE_VERTEX_MODEL")):
         out.append(f"GEMINI_MODEL={env['GEMINI_MODEL']} is set and "
                    "VERTEX_MODEL is not: the Vertex plane (the chat) reads "
                    "GEMINI_MODEL as a fallback and would run on it too — "
-                   "use EAG_MODEL for this check, or set VERTEX_MODEL "
+                   "use GATEWAY_MODEL for this check, or set VERTEX_MODEL "
                    "explicitly")
     return out
 

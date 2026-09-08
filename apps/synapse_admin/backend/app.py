@@ -101,14 +101,14 @@ def create_app() -> FastAPI:
 
         return {
             "bq": {
-                "key": _set("LUMI_BQ_SA_KEY",
+                "key": _set("SYNAPSE_BQ_SA_KEY",
                             "GOOGLE_APPLICATION_CREDENTIALS"),
-                "project": _set("LUMI_BQ_PROJECT",
+                "project": _set("SYNAPSE_BQ_PROJECT",
                                 "GOOGLE_CLOUD_PROJECT"),
-                "endpoint": _set("LUMI_BQ_API_BASE_URL"),
+                "endpoint": _set("SYNAPSE_BQ_API_BASE_URL"),
             },
             "vertex": {
-                "key": _set("LUMI_VERTEX_SA_KEY",
+                "key": _set("SYNAPSE_VERTEX_SA_KEY",
                             "GOOGLE_APPLICATION_CREDENTIALS"),
                 "project": _set("VERTEX_PROJECT_ID",
                                 "GOOGLE_CLOUD_PROJECT"),

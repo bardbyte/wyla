@@ -278,7 +278,7 @@ def test_run_sql_run_mode_under_the_limits(compiled, tmp_path,
     # a data project left in the process by an earlier test would
     # qualify the SQL and move it off the static substrate's key
     monkeypatch.delenv("BQ_DATA_PROJECT", raising=False)
-    monkeypatch.delenv("LUMI_BQ_DATA_PROJECT", raising=False)
+    monkeypatch.delenv("SYNAPSE_BQ_DATA_PROJECT", raising=False)
     sql = ("SELECT country_cd, sum(trans_usd_am) AS spend FROM "
            "dw.gms_transaction GROUP BY country_cd")
     runner = _Runner()

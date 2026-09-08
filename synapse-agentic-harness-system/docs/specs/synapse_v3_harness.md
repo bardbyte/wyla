@@ -210,7 +210,7 @@ path.
 - Chips: model-authored, at most three, optional. (Decision below.)
 - **The ask starts the way Claude's does (BUILT 2026-09-03).** A
   greeting for the time of day (the person's first name when
-  `LUMI_USER_NAME` is set), a centered composer ("Type / for skills"),
+  `SYNAPSE_USER_NAME` is set), a centered composer ("Type / for skills"),
   the + menu (skills, memory, a new chat), the Chat | Autopilot
   toggle, the model and the depth. The first message turns it into
   the conversation: the title (a click renames it) and Share at the
@@ -370,7 +370,7 @@ handoff, the eval suites.
 
 What v3 is actually built against — not the fixture.
 
-- **Vertex, confirmed for Stage 1:** project prj-d-ea-poc, location
+- **Vertex, confirmed for Stage 1:** project demo-vertex, location
   global, `gemini-3.1-pro-preview` behind the proxy with truststore.
   Native function calling works on our REST client and the
   `functionCall` part comes back WITH a thought signature; thinking

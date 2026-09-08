@@ -1,11 +1,11 @@
 """Table qualification: the graph says ``dw.gms_transaction``; the
-warehouse wants ``axp-lumi.dw.gms_transaction``.
+warehouse wants ``demo-warehouse.dw.gms_transaction``.
 
 The cards, the digest, and every tool name tables ``dataset.table``,
 and the model writes SQL in that vocabulary. BigQuery resolves a
 two-part name against the project that RUNS the query — which on the
-laptop is the billing project (prj-p-lumi-gpt), not the one that
-hosts the data (axp-lumi). So the sandbox qualifies every table the
+laptop is the billing project (demo-billing), not the one that
+hosts the data (demo-warehouse). So the sandbox qualifies every table the
 build knows with the data project before any dry run or execution.
 Deterministic, in code, never a prose rule the model has to follow:
 a query written from the cards resolves where the data lives.

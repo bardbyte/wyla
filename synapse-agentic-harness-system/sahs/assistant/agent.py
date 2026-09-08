@@ -38,7 +38,7 @@ class VertexAgent:
         except AuthError as e:
             raise ModelUnavailable(
                 f"{e}: the chat needs the Vertex contract in the silo "
-                ".env (LUMI_VERTEX_SA_KEY, VERTEX_PROJECT_ID, "
+                ".env (SYNAPSE_VERTEX_SA_KEY, VERTEX_PROJECT_ID, "
                 "VERTEX_LOCATION, VERTEX_MODEL)") from e
         return VertexAgent(VertexClient(connection, log=log), budget)
 

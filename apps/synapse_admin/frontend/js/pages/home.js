@@ -47,7 +47,7 @@ function groupByFamily(sources) {
 const BUCKETS = [
   ["The official records",
    "what the company has written down about its data",
-   ["atlas_catalog", "atlas_mdm", "acropedia"]],
+   ["atlas_catalog", "atlas_mdm", "glossary"]],
   ["What stewards have approved",
    "definitions people signed their names to",
    ["marketplace", "domain_map", "steward"]],

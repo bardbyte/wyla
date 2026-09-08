@@ -78,7 +78,7 @@ def test_display_registry_and_ledger_grouping():
                    if v["family"] == "marketplace"}
     assert marketplace == {"metrics_dmp", "extended_gmns",
                            "studio_queries"}
-    assert display_for("glossary")["display"] == "Acropedia"
+    assert display_for("glossary")["display"] == "Glossary"
     assert display_for("measures_catalog")["display"] \
         == "Metric Mining: BQ Query History"
     assert display_for("bq")["display"] \

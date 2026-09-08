@@ -7,7 +7,7 @@
  },
  "tech_metadata_list": [
   {
-   "datasource": "axp-lumi",
+   "datasource": "demo-warehouse",
    "technology": "BigQuery",
    "isActive": true,
    "isLatest": true,
@@ -66,7 +66,7 @@
    "datasetGroup": "data",
    "dataserver": "Lumi",
    "isLineageExist": "Y",
-   "datasystem": "NGBD - Lumi Metadata Management"
+   "datasystem": "Metadata Management"
   },
   {
    "datasource": "atlas-secondary-registration",
@@ -128,7 +128,7 @@
    "datasetGroup": "data",
    "dataserver": "Lumi",
    "isLineageExist": "Y",
-   "datasystem": "NGBD - Lumi Metadata Management"
+   "datasystem": "Metadata Management"
   }
  ]
 }

@@ -94,7 +94,7 @@
   "g19_dotted_table": {
    "fp_expr": "d99200cdf262",
    "fp_template": "6a31b1640599",
-   "canonical_sql": "SELECT x FROM `axp-lumi`.dw.wwcas_authorization WHERE part_dt = '2026-08-01'"
+   "canonical_sql": "SELECT x FROM `demo-warehouse`.dw.wwcas_authorization WHERE part_dt = '2026-08-01'"
   },
   "g20_between": {
    "fp_expr": "b9619f54692f",

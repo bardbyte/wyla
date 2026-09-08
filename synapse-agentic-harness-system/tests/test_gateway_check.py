@@ -367,7 +367,7 @@ def test_the_route_is_decided_by_the_first_real_request():
 
 
 def test_the_model_comes_from_eag_model_and_gemini_model_is_warned_about():
-    assert Config.from_env({"EAG_MODEL": "gemini-2.5-flash",
+    assert Config.from_env({"GATEWAY_MODEL": "gemini-2.5-flash",
                             "GEMINI_MODEL": "x"}).model == "gemini-2.5-flash"
     assert Config.from_env({"GEMINI_MODEL": "gemini-2.5-pro"}).model == \
         "gemini-2.5-pro"
@@ -375,7 +375,7 @@ def test_the_model_comes_from_eag_model_and_gemini_model_is_warned_about():
     assert env_warnings({"GEMINI_MODEL": "gemini-2.5-pro"})[0].startswith(
         "GEMINI_MODEL=gemini-2.5-pro is set and VERTEX_MODEL is not")
     assert env_warnings({"GEMINI_MODEL": "x", "VERTEX_MODEL": "y"}) == []
-    assert env_warnings({"EAG_MODEL": "x"}) == []
+    assert env_warnings({"GATEWAY_MODEL": "x"}) == []
     text = render_report({"config": {}, "checks": [],
                           "warnings": ["GEMINI_MODEL=x is set …"]})
     assert "! warning GEMINI_MODEL=x is set" in text
@@ -407,7 +407,7 @@ def test_a_gateway_that_wants_the_colon_form_is_found_and_the_refusal_explained(
 
 
 def test_a_pinned_path_form_is_not_second_guessed():
-    """EAG_PATH_FORM=colon against a slash-only gateway: one form, one
+    """GATEWAY_PATH_FORM=colon against a slash-only gateway: one form, one
     refusal, reported as the gateway's answer, no fallback."""
     gw = Gateway(path_form="slash")
     report = run_checks(Config(app_id="app", secret=SECRET, path_form="colon"),

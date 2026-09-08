@@ -34,27 +34,27 @@ def teach(message, sql=SQL, **kw):
 
 
 def test_a_known_table_in_the_wrong_project_is_configuration():
-    got = teach("Not found: Table prj-p-lumi-gpt:dw.gms_transaction was "
+    got = teach("Not found: Table demo-billing:dw.gms_transaction was "
                 "not found in location US", data_project="", location="US")
     assert got["kind"] == "environment" and got["yours_to_fix"] is False
-    assert "prj-p-lumi-gpt" in got["hint"] and "not your SQL" in got["hint"]
-    assert "LUMI_BQ_DATA_PROJECT" in got["hint"]
+    assert "demo-billing" in got["hint"] and "not your SQL" in got["hint"]
+    assert "SYNAPSE_BQ_DATA_PROJECT" in got["hint"]
     assert got["fix_env"]["BQ_LOCATION"] == "US"
     assert got["smoke"] == "python scripts/bq_check.py --table dw.gms_transaction"
     assert "Do not retry" in got["hint"]
     # a dataset the build uses, missing → the same verdict
-    got = teach("Not found: Dataset prj-p-lumi-gpt:dw was not found in "
+    got = teach("Not found: Dataset demo-billing:dw was not found in "
                 "location US")
     assert got["kind"] == "environment" and got["yours_to_fix"] is False
 
 
 def test_an_unknown_table_or_dataset_is_the_models_slip():
-    got = teach("Not found: Table prj-p-lumi-gpt:dw.gms_transactions was "
+    got = teach("Not found: Table demo-billing:dw.gms_transactions was "
                 "not found in location US")
     assert got["kind"] == "sql" and got["yours_to_fix"] is True
     assert got["closest"] == ["dw.gms_transaction"]
     assert "did you mean dw.gms_transaction" in got["hint"]
-    got = teach("Not found: Dataset prj-p-lumi-gpt:warehouse")
+    got = teach("Not found: Dataset demo-billing:warehouse")
     assert got["kind"] == "sql" and "dw" in got["closest"]
 
 
@@ -74,7 +74,7 @@ def test_an_unrecognized_column_names_the_closest_real_ones():
 
 
 def test_partition_filter_and_types_are_the_models_to_fix():
-    got = teach("Cannot query over table 'axp-lumi.dw.gms_transaction' "
+    got = teach("Cannot query over table 'demo-warehouse.dw.gms_transaction' "
                 "without a filter over column(s) 'part_dt' that can be "
                 "used for partition elimination")
     assert got["kind"] == "sql" and got["closest"] == ["part_dt"]
@@ -97,7 +97,7 @@ def test_a_syntax_error_shows_the_spot():
 
 
 def test_access_quota_transport_are_not_the_models():
-    got = teach("Access Denied: Table axp-lumi:dw.gms_transaction: User "
+    got = teach("Access Denied: Table demo-warehouse:dw.gms_transaction: User "
                 "does not have permission to query table")
     assert got["kind"] == "access" and got["yours_to_fix"] is False
     assert got["tables"] == ["dw.gms_transaction"]
