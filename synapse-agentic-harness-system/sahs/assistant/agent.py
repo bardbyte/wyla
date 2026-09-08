@@ -90,6 +90,38 @@ class VertexAgent:
             max_tokens=max_tokens)
 
 
+class GatewayAgent(VertexAgent):
+    """The same agent over Gemini through the gateway: the client delivers each
+    call in one burst (the gateway serves no stream), the retry-once rule
+    therefore always applies, and the budget is charged from the same
+    usage counters."""
+
+    @staticmethod
+    def from_env(budget: Budget | None = None,
+                 log: Any = None) -> "GatewayAgent":
+        from sahs.enrich.gateway_client import GatewayClient
+        from sahs.util.gateway import GatewayError
+        try:
+            client = GatewayClient.from_env(log=log)
+        except GatewayError as e:
+            raise ModelUnavailable(
+                f"{e}: the gateway plane needs APP_ID and APP_SECRET (or "
+                "AUTH_MODE=env with GEMINI_BEARER_TOKEN) in the silo .env; "
+                "python scripts/gateway_check.py proves the path") from e
+        return GatewayAgent(client, budget)
+
+
+def agent_from_env(budget: Budget | None = None,
+                   log: Any = None) -> VertexAgent:
+    """The chat's model, on whichever plane the environment names:
+    SAHS_MODEL_PLANE=vertex|gateway, or auto — the gateway when its credentials
+    are present, Vertex otherwise."""
+    from sahs.util.gateway import model_plane
+    if model_plane() == "gateway":
+        return GatewayAgent.from_env(budget, log)
+    return VertexAgent.from_env(budget, log)
+
+
 @dataclass
 class ScriptedAgent:
     """Scripted PARTS per model call: each step is a list of
@@ -154,5 +186,5 @@ def declarations(kit: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-__all__ = ["ROUTING_KEY", "VertexAgent", "ScriptedAgent",
-           "declarations", "json"]
+__all__ = ["ROUTING_KEY", "VertexAgent", "GatewayAgent", "agent_from_env",
+           "ScriptedAgent", "declarations", "json"]

@@ -138,3 +138,23 @@ carrying a personal cloud-drive path were removed from
 Mystify removes identifiers, not obligations: confirm you have the right to
 publish this code, and that nowhere you publish it requires disclosing tool
 use.
+
+## Second sweep: the EAG plane from #124
+
+After the pass above, `main` merged #124 (the chat's second model plane
+through the gateway). The merge was taken into this branch and the same
+rules were applied to what arrived, in one batch:
+
+| from | to |
+|---|---|
+| `sahs/enrich/eag_client.py`, `tests/test_eag_plane.py` | `gateway_client.py`, `test_gateway_plane.py` |
+| `EagClient`, `EagAgent`, `EagError` | `GatewayClient`, `GatewayAgent`, `GatewayError` |
+| `EAG_THINKING_BUDGETS`, `EAG_JSON_THINKING_BUDGET`, `EAG_MODEL` | `GATEWAY_*` |
+| plane value `"eag"` (`SAHS_MODEL_PLANE`, `/api/synapse/planes`, `model_plane()`, log prefix) | `"gateway"` |
+| prose: EAG, OneIdentity | the gateway, the identity service |
+
+The plane value is a runtime string: `SAHS_MODEL_PLANE=gateway` is what a
+`.env` written against #124 must now say, and the planes endpoint reports a
+`gateway` key where it reported `eag`. The one merge conflict (the planes
+assertion in the admin app test) was resolved by taking #124's assertion
+with the renamed route and plane key. Suites re-run green after the merge.
