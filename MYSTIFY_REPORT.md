@@ -157,4 +157,5 @@ The plane value is a runtime string: `SAHS_MODEL_PLANE=gateway` is what a
 `.env` written against #124 must now say, and the planes endpoint reports a
 `gateway` key where it reported `eag`. The one merge conflict (the planes
 assertion in the admin app test) was resolved by taking #124's assertion
-with the renamed route and plane key. Suites re-run green after the merge.
+with the renamed route and plane key. After the merge the full silo suite is
+402 green (394 plus the eight #124 brought) and the admin app is 65 green.
