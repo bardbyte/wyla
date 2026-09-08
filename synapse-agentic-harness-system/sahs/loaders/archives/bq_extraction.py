@@ -519,15 +519,15 @@ def load_bq_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
         estimates: dict[str, dict] = {}
         if manifest_path.exists():
             for r in _csv_rows(track(manifest_path)):
-                name = (r.get("column_name") or "").strip().lower()
-                if not name:
+                col_name = (r.get("column_name") or "").strip().lower()
+                if not col_name:
                     continue
                 raw = (r.get("distinct_estimate") or "").strip()
                 try:
                     estimate = int(float(raw)) if raw else None
                 except ValueError:
                     estimate = None
-                estimates[name] = {
+                estimates[col_name] = {
                     "profiled": (r.get("profiled") or "").strip().upper()
                     in ("YES", "TRUE", "1"),
                     "distinct_estimate": estimate}

@@ -1,0 +1,93 @@
+# Warehouse extraction scope — read by scripts/bq_warehouse_extract.py.
+#
+# Three identities, kept apart on purpose (the same short name lives in
+# several layers and several projects):
+#
+#   billing project   prj-p-lumi-gpt   runs and bills every job. Its
+#                                      JOBS_BY_PROJECT holds OUR jobs only —
+#                                      this is why the earlier runs saw no
+#                                      analyst queries.
+#   logical dataset   axp-lumi.dw      the curated view layer analysts query
+#   physical dataset  axp-lumi.data    the storage layer the views wrap —
+#                                      partitions, TABLESAMPLE, real bytes
+#
+# The 30-day history is pulled from EVERY project listed under job_projects
+# (the data project first: that is where analysts' jobs run) plus, when
+# the identity may see it, JOBS_BY_ORGANIZATION and the data-access audit
+# sink — the one source that records a query from ANY project, because
+# data-access logs land on the project that owns the table.
+#
+# Add tables at the bottom: `- name: <table>` is enough. Per-table keys
+# override any default (physical_dataset, physical_name, profile,
+# low_card_threshold, profile_budget, domain_budget, notes).
+
+version: 2
+
+defaults:
+  data_project: axp-lumi            # or LUMI_BQ_DATA_PROJECT in .env
+  logical_dataset: dw
+  physical_dataset: data
+  billing_project: prj-p-lumi-gpt   # or BQ_PROJECT_ID in .env
+  region: us
+
+  # Job-history sources, scanned one UTC day at a time (resumable).
+  job_projects:
+    - axp-lumi
+    - prj-p-lumi-gpt
+  scan_organization_jobs: true
+  audit_log_table: axp-lumi.data_backup.cloudaudit_googleapis_com_data_access
+  audit_log_partition_column: timestamp
+  history_days: 30
+
+  output_dir: ./data/real_extractions_production
+
+  # Parallelism. Shared metadata runs alone; per-table phases and history
+  # days fan out. 6 keeps a comfortable margin under the per-project
+  # concurrent-query quota alongside analysts' own work.
+  concurrency: 6
+  history_concurrency: 3
+
+  # Scan guards. Every statement that reads DATA is dry-run first; an
+  # estimate over its budget is BUDGET_SKIPPED (recorded, never silent),
+  # and maximumBytesBilled caps the job server-side as well. The run
+  # budget is the hard ceiling for everything together.
+  run_budget: 5 TiB
+  profile_budget: 200 GiB           # per table, all profile chunks
+  domain_budget: 100 GiB            # per table, per value-domain group
+  history_day_budget: 50 GiB        # per source per day (the audit sink)
+
+  # Profiling shape. Wide tables (1,400 columns) go in chunks; value
+  # domains for low-cardinality candidates are grouped per statement.
+  profile_chunk_columns: 80
+  domain_group_columns: 16
+  low_card_threshold: 1000
+
+  # Digest sizes in 17_queries_30d/.
+  failed_queries_retained: 200
+  templates_retained: 500
+  top_users_retained: 50
+  co_queried_retained: 100
+
+  # Identities whose jobs never enter a usage digest (the extractor's own
+  # service account is added automatically).
+  exclude_users: []
+
+  table_metrics_routine: get_table_metrics   # dw.get_table_metrics('<t>')
+
+tables:
+  - name: gms_transaction
+  - name: wwcas_authorization
+  - name: custins_customer_insights_cardmember
+  - name: custins_customer_insights_product
+  - name: risk_pers_acct
+  - name: risk_pers_acct_history
+  - name: risk_indv_cust_hist
+  - name: risk_new_acct
+  - name: gms_merchant_full_hier
+  - name: fin_ar_acct_daily_balance
+  - name: fin_consumer_business_card_member_status
+  - name: sbs_new_accounts
+  - name: us_daily_rr_smry_data
+  - name: roll_rate_calc
+    logical_dataset: common          # per the skill FQN common.roll_rate_calc
+    notes: verify the dataset on the laptop

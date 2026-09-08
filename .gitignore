@@ -114,3 +114,6 @@ node_modules/
 
 # laptop input data — never commit
 meridian-data/
+
+# warehouse extraction outputs (query text, user emails) — never committed
+**/data/real_extractions*/
