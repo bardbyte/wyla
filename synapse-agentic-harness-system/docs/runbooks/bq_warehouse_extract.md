@@ -109,8 +109,8 @@ Exit codes: `0` complete · `1` completed with `ERROR`s · `2` config ·
 |---|---|---|---|
 | shared | INFORMATION_SCHEMA TABLES / COLUMNS / COLUMN_FIELD_PATHS / TABLE_OPTIONS / VIEWS / PARTITIONS / constraints / ROUTINES / TABLE_STORAGE — **one statement per view for all tables**, split per table into `01–12` | ~15 | metadata |
 | resources | `tables.get` on both layers, the physical table behind each view (the view's own dry run names what it reads; a partition-filter refusal names it too), `rowAccessPolicies.list`, `dw.get_table_metrics('<t>')` | 3–5 / table | metadata |
+| history | one statement per source per UTC day into `_history/`, then the local indexer routes the corpus into every table's `17_queries_30d/`. Runs **before** profiling so the one real scan can never starve it of budget | 30 × sources | JOBS views are metadata; the audit sink is a real scan, per-day capped |
 | profile | per table: **cost plan by dry run** → coverage mode → column statistics in chunks of 80 columns → exact value domains for low-cardinality candidates, over full history when the narrow scan fits `domain_budget` | 2–10 / table | the only real scan |
-| history | one statement per source per UTC day into `_history/`, then the local indexer routes the corpus into every table's `17_queries_30d/` | 30 × sources | JOBS views are metadata; the audit sink is a real scan, per-day capped |
 | report | `_summary.json` per table, `_batch_summary.*`, `_run_report.json/.md` | — | — |
 
 Coverage modes written to `14_profile_coverage.json` and onto every
@@ -142,8 +142,11 @@ something actually broke (exit 1).
 
 ## 7 · Resuming, forcing, forgetting
 
-* a rerun reuses every finished task in `_state.json`; today's partial
-  history day is always re-fetched;
+* a rerun reuses every finished task in `_state.json` **whose signature
+  still matches**: a history day is re-fetched when the table list changed
+  (it was filtered server-side by the old list — a new table must get its
+  history), a profile when its columns or budget changed, a domain when
+  the threshold changed. Today's partial history day is always re-fetched;
 * `--force a,b` re-extracts named tables; `--fresh` forgets everything;
 * `--no-profile` / `--no-history` skip a phase for a metadata-only pass;
 * `index` re-derives the digests from `_history/` with no network — change

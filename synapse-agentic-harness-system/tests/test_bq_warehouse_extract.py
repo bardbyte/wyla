@@ -637,6 +637,38 @@ def test_resume_reuses_finished_work(cfg):
     assert [c for c in fake.calls if c[1].startswith("profile chunk")]
 
 
+def test_adding_a_table_refetches_history_but_not_profiles(cfg, tmp_path):
+    fake = FakeBQ()
+    _run(cfg, fake)
+    fake.calls.clear()
+    path = tmp_path / "tables2.yaml"
+    path.write_text(CONFIG + "  - name: gms_merchant_char\n")
+    cfg2 = load_config(path, output_dir=cfg.output_dir)
+    _, report = _run(cfg2, fake)
+    # every history day was filtered by the OLD table set: refetched
+    days = [c for c in fake.calls
+            if c[0] == "query" and c[1].startswith("jobs_by_project/axp-lumi")]
+    assert len(days) == 3
+    # the existing tables' profiles are untouched
+    assert not [c for c in fake.calls if c[0] == "query"
+                and c[1].startswith("profile chunk")]
+    assert (cfg.output_dir / "gms_merchant_char" / "_summary.json").exists()
+    state = json.loads((cfg.output_dir / "_state.json").read_text())
+    assert all("signature" in v for k, v in state["tasks"].items()
+               if k.startswith("_history:jobs"))
+
+
+def test_history_lands_before_the_profile_spends(cfg):
+    fake = FakeBQ()
+    _run(cfg, fake)
+    order = [c[1] for c in fake.calls if c[0] == "query"]
+    first_history = next(i for i, o in enumerate(order)
+                         if o.startswith("jobs_by_project"))
+    first_profile = next(i for i, o in enumerate(order)
+                         if o.startswith("profile chunk"))
+    assert first_history < first_profile
+
+
 def test_plan_mode_never_bills(cfg):
     fake = FakeBQ()
     _, report = _run(cfg, fake, plan_only=True)

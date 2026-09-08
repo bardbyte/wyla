@@ -5,13 +5,14 @@
                           in one statement per view, split per table
     phase 2  resources    tables.get on both layers, the physical table
                           behind each view, row policies, table metrics
-    phase 3  profile      budget-planned column statistics on the physical
+    phase 3  history      one statement per source per UTC day into
+                          _history/, then the local indexer routes the
+                          corpus into every table's 17_queries_30d/
+                          (before profiling: it must never be starved)
+    phase 4  profile      budget-planned column statistics on the physical
                           table (or the view with a partition window),
                           then exact value domains for low-cardinality
                           columns — full history where it is affordable
-    phase 4  history      one statement per source per UTC day into
-                          _history/, then the local indexer routes the
-                          corpus into every table's 17_queries_30d/
     phase 5  report       _summary.json per table, _batch_summary.*,
                           _run_report.json/.md
 
@@ -190,9 +191,18 @@ class State:
             except (ValueError, OSError):
                 pass
 
-    def done(self, key: str) -> dict | None:
+    def done(self, key: str, signature: str = "") -> dict | None:
+        """The finished task, or None — also None when the caller's
+        ``signature`` (what produced the artifact: the table set a
+        history day was filtered by, a profile's columns and budget, a
+        domain's threshold) differs from the recorded one."""
         with self._lock:
-            return self.data["tasks"].get(key)
+            info = self.data["tasks"].get(key)
+            if info is None:
+                return None
+            if signature and info.get("signature", "") != signature:
+                return None
+            return info
 
     def mark(self, key: str, **info: Any) -> None:
         with self._lock:
@@ -338,6 +348,10 @@ class WarehouseExtractor:
         self.sa_email = ""
         self.interrupted = False
         self._lock = threading.Lock()
+        # what a shared pull or a history day was filtered by: a changed
+        # table list invalidates them (a new table must get its history)
+        self.scope_signature = _signature(sorted(
+            n for t in cfg.tables for n in t.match_names))
 
     # ── helpers ──
     def _record(self, ctx: TableContext | None, outcome: Outcome) -> Outcome:
@@ -418,8 +432,8 @@ class WarehouseExtractor:
                                bytes_billed=result.bytes_billed)
 
     def _cached(self, ctx: TableContext | None, key: str, operation: str,
-                artifact: Path | None) -> bool:
-        done = self.state.done(key)
+                artifact: Path | None, signature: str = "") -> bool:
+        done = self.state.done(key, signature)
         if done and (artifact is None or artifact.exists()):
             self._record(ctx, Outcome(CACHED, key.split(":")[0], operation,
                                       done.get("message", ""),
@@ -501,7 +515,7 @@ class WarehouseExtractor:
     def _shared_pull(self, name: str, sql: str, params: list[dict]) -> None:
         key = f"_shared:{name}"
         artifact = self.shared_dir / f"{name}.json"
-        if self._cached(None, key, name, artifact):
+        if self._cached(None, key, name, artifact, self.scope_signature):
             return
         result, outcome = self._run_query(sql, params, scope="_shared",
                                           operation=name)
@@ -510,7 +524,8 @@ class WarehouseExtractor:
             write_csv(self.shared_dir / f"{name}.csv", result.rows)
             outcome.artifact = str(artifact)
             self.state.mark(key, job_id=result.job_id,
-                            message=f"{len(result.rows)} rows")
+                            message=f"{len(result.rows)} rows",
+                            signature=self.scope_signature)
         self._record(None, outcome)
 
     def _shared_rows(self, name: str) -> list[dict]:
@@ -960,7 +975,9 @@ class WarehouseExtractor:
         key = f"{ctx.name}:profile"
         profile_csv = ctx.dir / "14_column_profile.csv"
         t0 = time.monotonic()
-        if self._cached(ctx, key, "profile", profile_csv):
+        profile_sig = _signature([c.get("column_name") for c in supported],
+                                 budget, self.cfg.profile_chunk_columns)
+        if self._cached(ctx, key, "profile", profile_csv, profile_sig):
             summary_path = ctx.dir / "_profile_summary.json"
             if summary_path.exists():
                 try:
@@ -1051,7 +1068,8 @@ class WarehouseExtractor:
         write_json(ctx.dir / "_profile_summary.json", summary)
         if profile_rows and len(profile_rows) == len(supported):
             self.state.mark(key, message=f"{len(profile_rows)} columns "
-                                         f"{target.coverage_mode}")
+                                         f"{target.coverage_mode}",
+                            signature=profile_sig)
         self._table_domains(ctx, supported, layer, target=target)
 
     def _table_domains(self, ctx: TableContext, supported: list[dict],
@@ -1070,12 +1088,17 @@ class WarehouseExtractor:
                       <= threshold * 1.2]      # HLL++ error margin
         manifest_path = ctx.dir / "15_low_cardinality_manifest.csv"
         key = f"{ctx.name}:domains"
-        if self._cached(ctx, key, "value domains", manifest_path):
+        budget = spec.domain_budget_bytes or self.cfg.domain_budget_bytes
+        domain_sig = _signature([r["column_name"] for r in candidates],
+                                threshold, budget)
+        if self._cached(ctx, key, "value domains", manifest_path,
+                        domain_sig):
             return
         if not candidates:
             write_csv(manifest_path, [], _MANIFEST_FIELDS)
             write_json(ctx.dir / "15_low_cardinality_manifest.json", [])
-            self.state.mark(key, message="no candidates")
+            self.state.mark(key, message="no candidates",
+                            signature=domain_sig)
             self._record(ctx, Outcome(EMPTY, ctx.name, "value domains",
                                       "no low-cardinality candidates"))
             return
@@ -1094,7 +1117,6 @@ class WarehouseExtractor:
                 self._record(ctx, Outcome(ERROR, ctx.name, "value domains",
                                           "no profile coverage on disk"))
                 return
-        budget = spec.domain_budget_bytes or self.cfg.domain_budget_bytes
         # full history for the narrow columns when it fits (section 22
         # of the contract): a categorical domain observed over every
         # partition, without paying for the wide profile at that depth
@@ -1196,7 +1218,7 @@ class WarehouseExtractor:
             write_json(ctx.dir / "_profile_summary.json", ctx.profile_summary)
         if all(m["status"] in (FETCHED, EMPTY) for m in manifest):
             self.state.mark(key, message=f"{confirmed}/{len(candidates)} "
-                                         "confirmed")
+                                         "confirmed", signature=domain_sig)
         self._record(ctx, Outcome(FETCHED if confirmed else EMPTY, ctx.name,
                                   "value domains",
                                   f"{confirmed} of {len(candidates)} "
@@ -1313,7 +1335,7 @@ class WarehouseExtractor:
         state_key = f"_history:{key}:{day_str}"
         if key in dead:
             return
-        done = self.state.done(state_key)
+        done = self.state.done(state_key, self.scope_signature)
         if done and path.exists() and not done.get("partial"):
             self._record(None, Outcome(CACHED, scope, operation,
                                        done.get("message", "")))
@@ -1333,7 +1355,8 @@ class WarehouseExtractor:
             return
         n = write_jsonl_gz(path, result.rows)
         self.state.mark(state_key, job_id=result.job_id, rows=n,
-                        message=f"{n} rows", partial=(day_str == today))
+                        message=f"{n} rows", partial=(day_str == today),
+                        signature=self.scope_signature)
 
     def _index_history(self) -> None:
         start, end = self.history_window()
@@ -1521,8 +1544,11 @@ class WarehouseExtractor:
             else:
                 self._split_shared()
             self.phase_resources()
-            self.phase_profile()
+            # history BEFORE profiling: the JOBS views are metadata and the
+            # audit sink is cheap per day; the profile is the one real
+            # scan and must never starve the 30-day corpus of budget
             self.phase_history()
+            self.phase_profile()
             return self.phase_report("complete")
         except KeyboardInterrupt:
             self.interrupted = True
@@ -1588,6 +1614,13 @@ def _constraints_payload(rows: list[dict]) -> dict:
     return {"primary_key": {"columns": pk},
             "foreign_keys": list(fks.values()),
             "rows": rows}
+
+
+def _signature(*parts: Any) -> str:
+    """A short stable hash of what produced an artifact."""
+    import hashlib
+    return hashlib.sha256(json.dumps(parts, sort_keys=True, default=str)
+                          .encode("utf-8")).hexdigest()[:16]
 
 
 def _ms_iso(value: Any) -> str | None:
