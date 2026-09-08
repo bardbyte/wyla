@@ -82,7 +82,7 @@ def test_the_shell_offers_the_door():
     assert 'wanted === "new"' in CHAT_JS
 
 
-def test_the_claude_shape_is_present():
+def test_the_assistant_shape_is_present():
     for piece in ("chat-panel", "chat-thread", "chat-chiprow",
                   "panel-version", "panel-export", "pingShelf"):
         assert piece in CHAT_JS, piece

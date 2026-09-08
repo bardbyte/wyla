@@ -34,7 +34,7 @@ def compiled(tmp_path_factory) -> dict:
          "--sources-dir", str(FX / "sources"),
          "--registry", str(FX / "sources" / "tables_registry.txt"),
          "--out", str(tmp / "run"), "--plain",
-         "--run-id", "lumi_r1"],
+         "--run-id", "synapse_r1"],
         capture_output=True, text=True, cwd=SILO)
     assert result.returncode == 0, result.stderr[-800:]
     sys.path.insert(0, str(SILO))

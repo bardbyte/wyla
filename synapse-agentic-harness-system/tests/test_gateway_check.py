@@ -366,7 +366,7 @@ def test_the_route_is_decided_by_the_first_real_request():
         raise AssertionError("no route should have raised")
 
 
-def test_the_model_comes_from_eag_model_and_gemini_model_is_warned_about():
+def test_the_model_comes_from_gateway_model_and_gemini_model_is_warned_about():
     assert Config.from_env({"GATEWAY_MODEL": "gemini-2.5-flash",
                             "GEMINI_MODEL": "x"}).model == "gemini-2.5-flash"
     assert Config.from_env({"GEMINI_MODEL": "gemini-2.5-pro"}).model == \
