@@ -381,6 +381,20 @@ handoff, the eval suites.
    the sanctioned path, and the harness's contract with the model is
    the event stream, which a burst satisfies.
 
+16. The model is a dial on the chat, not a setting on the machine
+   (2026-09-08). The composer's label became a select over both
+   planes, remembered per chat and riding from the next message; the
+   `.env` only names where a new chat starts. A plane the machine
+   cannot ride is shown greyed with the reason and refused when
+   picked, never swapped for another model in silence. Beside the
+   dials a "?" explains every stop of every dial from one backend
+   catalog (`/api/chat/dials`): the modes, the depths with what each
+   does on each plane, and the models with whether each is
+   configured here. Reason: a person comparing 2.5 through EAG with
+   3.1 on Vertex needs to switch mid-conversation and to know what
+   Quick, Standard and Deep actually change (the thinking, nothing
+   else); the history is text, so a switch mid-chat is safe.
+
 ## 12 · The laptop, measured (state report of 2026-09-02)
 
 What v3 is actually built against — not the fixture.

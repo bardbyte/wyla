@@ -1187,6 +1187,39 @@ table.result tr:last-child td { border-bottom: none; }
   box-shadow: var(--shadow);
 }
 .chat-model { font-size: var(--fs-13, 0.8125rem); color: var(--ink-3, #5b6b8f); }
+/* the model switch and the "?" that explains every dial */
+.chat-plane { max-width: 240px; text-overflow: ellipsis; }
+.chat-help {
+  width: 26px; height: 26px; border-radius: 999px; padding: 0;
+  font-size: var(--fs-12, 0.75rem); color: var(--ink-3, #5b6b8f);
+}
+.chat-help[aria-expanded="true"] {
+  background: var(--accent-soft, #eaf2fb); color: var(--accent, #2f6feb);
+  border-color: var(--accent, #2f6feb);
+}
+.chat-help-pop {
+  position: absolute; z-index: 30; right: 12px; bottom: calc(100% - 4px);
+  width: min(640px, calc(100vw - 48px)); max-height: 70vh; overflow-y: auto;
+  background: var(--surface, #fff); border: 1px solid var(--line, #d5d2ca);
+  border-radius: 12px; box-shadow: var(--shadow-lift); padding: 12px 14px;
+  font-size: var(--fs-12, 0.75rem); color: var(--ink-2, #3a3a36);
+  text-align: left; line-height: 1.4;
+}
+.chat-help-pop.below { top: calc(100% + 6px); bottom: auto; }
+.help-group + .help-group {
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line, #d5d2ca);
+}
+.help-head { font-weight: 600; color: var(--ink, #222018); margin-bottom: 4px; }
+.help-head span { font-weight: 400; color: var(--ink-3, #5b6b8f); margin-left: 6px; }
+.help-row {
+  display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px;
+  padding: 3px 0;
+}
+.help-row b { font-weight: 600; color: var(--ink, #222018); }
+.help-fact {
+  display: block; font-style: normal; color: var(--ink-3, #5b6b8f);
+  font-size: var(--fs-11, 0.6875rem); margin-top: 1px;
+}
 .chat-send { width: 32px; height: 32px; border-radius: 999px; padding: 0; font-size: 16px; }
 .chat-foot {
   max-width: 860px; margin: 8px auto 0; text-align: center;

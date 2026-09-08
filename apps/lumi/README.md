@@ -102,3 +102,9 @@ puts an image in the second surface's left header in place of the
 words (`/api/lumi/logo` serves it; `/api/lumi/brand` says whether one
 is configured).
 
+On both surfaces the composer's model label is a select over the two
+model planes (Gemini 3.1 Pro on Vertex, Gemini 2.5 Pro through EAG),
+remembered per chat (`POST /api/chat/sessions/{id}/model`), and the
+"?" beside the dials explains Chat/Autopilot, Quick/Standard/Deep and
+both models from `GET /api/chat/dials`.
+

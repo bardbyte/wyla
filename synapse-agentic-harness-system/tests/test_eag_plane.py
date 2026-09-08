@@ -315,3 +315,123 @@ def test_a_whole_turn_rides_the_eag_plane(compiled):
     stored = runtime.store.messages(session["id"])[-1]
     assert stored["payload"]["trace"][0]["kind"] == "thought"
     assert runtime.model_label == "scripted"     # a factory is a factory
+
+
+def test_the_plane_catalog_names_both_planes_and_why_one_cannot_be_ridden(
+        monkeypatch, tmp_path):
+    """The composer's catalog: both planes always listed, availability
+    read from the environment each time, the reason when a plane is
+    not configured, and which one a new chat starts on."""
+    from sahs.assistant.agent import agent_for, plane_catalog
+    from sahs.ask.model import ModelUnavailable
+    for var in ("APP_ID", "APP_SECRET", "GEMINI_BEARER_TOKEN",
+                "SAHS_MODEL_PLANE", "VERTEX_PROJECT_ID",
+                "LUMI_VERTEX_PROJECT", "GOOGLE_CLOUD_PROJECT",
+                "LUMI_VERTEX_SA_KEY", "GOOGLE_APPLICATION_CREDENTIALS",
+                "VERTEX_MODEL", "LUMI_VERTEX_MODEL", "GEMINI_MODEL",
+                "EAG_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+    rows = {r["id"]: r for r in plane_catalog()}
+    assert list(rows) == ["vertex", "eag"]
+    assert rows["vertex"]["label"] == "Gemini 3.1 Pro Preview via Vertex"
+    assert rows["eag"]["label"] == "Gemini 2.5 Pro via EAG"
+    assert not rows["vertex"]["available"] and "LUMI_VERTEX_SA_KEY" in \
+        rows["vertex"]["reason"]
+    assert not rows["eag"]["available"] and "APP_ID" in rows["eag"]["reason"]
+    assert rows["vertex"]["default"] and not rows["eag"]["default"]
+    assert rows["vertex"]["feel"] == "streams"
+    assert rows["eag"]["feel"] == "whole calls"
+    # EAG configured: available, and the default for a new chat
+    monkeypatch.setenv("APP_ID", "app")
+    monkeypatch.setenv("APP_SECRET", SECRET)
+    rows = {r["id"]: r for r in plane_catalog()}
+    assert rows["eag"]["available"] and rows["eag"]["default"]
+    assert not rows["vertex"]["default"]
+    # Vertex configured too (a key file that exists): both available,
+    # the .env still names the default
+    key = tmp_path / "sa.json"
+    key.write_text("{}")
+    monkeypatch.setenv("LUMI_VERTEX_SA_KEY", str(key))
+    monkeypatch.setenv("VERTEX_PROJECT_ID", "prj")
+    monkeypatch.setenv("SAHS_MODEL_PLANE", "vertex")
+    rows = {r["id"]: r for r in plane_catalog()}
+    assert rows["vertex"]["available"] and rows["vertex"]["default"]
+    assert rows["eag"]["available"] and not rows["eag"]["default"]
+    # the factory by name: an unknown plane is a typed refusal
+    with pytest.raises(ModelUnavailable) as err:
+        agent_for("gpt")
+    assert "vertex and eag" in str(err.value)
+    assert agent_for("eag").client.plane == "eag"
+
+
+def test_a_chat_switches_planes_from_the_composer(compiled, monkeypatch,
+                                                  tmp_path):
+    """The switch is remembered on the chat and rides the next message;
+    a message can name a plane for itself; the turn record says which
+    plane served it; the dials catalog explains all three dials; and a
+    plane this machine cannot ride is refused with the reason before
+    anything is stored."""
+    from sahs.ask.model import ModelUnavailable
+    from sahs.assistant import AssistantRuntime
+    from sahs.assistant.agent import ScriptedAgent
+    build, tmp = compiled
+    monkeypatch.setenv("APP_ID", "app")
+    monkeypatch.setenv("APP_SECRET", SECRET)
+    monkeypatch.setenv("SAHS_MODEL_PLANE", "auto")
+    heard: list[str] = []
+
+    def factory(budget, plane):        # a factory that hears the switch
+        heard.append(plane)
+        return ScriptedAgent(steps=[[{"text": f"answered on {plane}"}]])
+
+    runtime = AssistantRuntime(
+        builds_root=build.root.parent, graph_root=tmp / "graph",
+        store_path=tmp_path / "chat.sqlite3", model_factory=factory)
+    session = runtime.create_session()
+    assert session["model"] == ""                  # the .env default
+    assert runtime.plane_for(session) == "eag"     # auto → EAG here
+    dials = runtime.dials()
+    assert [d["id"] for d in dials["depths"]] == ["quick", "standard",
+                                                  "deep"]
+    assert dials["depths"][2]["on"] == {"vertex": "thinking level high",
+                                        "eag": "16,384 thinking tokens "
+                                               "per call"}
+    assert [m["id"] for m in dials["modes"]] == ["chat", "autopilot"]
+    assert [p["id"] for p in dials["planes"]] == ["vertex", "eag"]
+    # the first message names Vertex for itself: remembered
+    started = runtime.start_turn(session["id"], "hello", model="vertex")
+    assert started["plane"] == "vertex"
+    assert runtime.wait(session["id"], 30)
+    assert runtime.store.get_session(session["id"])["model"] == "vertex"
+    events = runtime.runtime(session["id"]).bus.since(0)
+    assert events[0]["ev"] == "turn_started" and events[0]["plane"] == "vertex"
+    assert "answered on vertex" in "".join(
+        e.get("delta", "") for e in events if e["ev"] == "say_token")
+    # the next message names nothing: it rides the remembered plane
+    runtime.start_turn(session["id"], "again")
+    assert runtime.wait(session["id"], 30)
+    assert heard == ["vertex", "vertex"]
+    # the switch from the composer, then a message on the new plane
+    assert runtime.set_session_model(session["id"], "eag") == {
+        "ok": True, "plane": "eag", "model": "scripted"}
+    runtime.start_turn(session["id"], "and now")
+    assert runtime.wait(session["id"], 30)
+    assert heard[-1] == "eag"
+    # '' forgets the switch: back to the .env default (EAG here)
+    assert runtime.set_session_model(session["id"], "")["plane"] == "eag"
+    assert runtime.store.get_session(session["id"])["model"] == ""
+    # an unknown plane is refused before anything is stored
+    before = len(runtime.store.messages(session["id"]))
+    with pytest.raises(ModelUnavailable):
+        runtime.start_turn(session["id"], "on gpt", model="gpt")
+    assert len(runtime.store.messages(session["id"])) == before
+    # without a factory the environment decides: Vertex is not
+    # configured on this machine, so picking it is refused with why
+    runtime._model_factory = None
+    monkeypatch.delenv("LUMI_VERTEX_SA_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    with pytest.raises(ModelUnavailable) as err:
+        runtime.set_session_model(session["id"], "vertex")
+    assert "not configured on this machine" in str(err.value)
+    assert runtime.label_for("eag") == "Gemini 2.5 Pro via EAG"
+    assert runtime.model_label == "Gemini 2.5 Pro via EAG"

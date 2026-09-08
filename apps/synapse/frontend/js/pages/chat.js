@@ -61,13 +61,18 @@ export async function renderChat(outlet, wanted = "") {
                   title="Synapse runs the query under the limits and builds the deliverable">Autopilot</button>
               </div>
               <span class="spacer"></span>
-              <span class="chat-model" id="chat-model"></span>
+              <select id="chat-model" class="chat-depth chat-plane"
+                title="Which model answers this chat"></select>
               <select id="chat-depth" class="chat-depth"
                 title="How deeply Synapse thinks on this ask">
                 <option value="quick">Quick</option>
                 <option value="standard" selected>Standard</option>
                 <option value="deep">Deep</option>
               </select>
+              <button class="icon-btn chat-help" id="chat-help"
+                title="What Chat, Autopilot, Quick, Standard, Deep and the models mean"
+                aria-label="Explain the dials" aria-expanded="false">?</button>
+              <div class="chat-help-pop" id="chat-help-pop" hidden></div>
               <button class="btn" id="chat-stop" hidden>stop</button>
               <button class="btn primary chat-send" id="chat-send"
                 title="Send · Enter">↑</button>
@@ -129,7 +134,92 @@ export async function renderChat(outlet, wanted = "") {
   const first = String(boot.user_name || "").trim().split(/\s+/)[0];
   el("chat-greet").textContent = first
     ? `${dayPart}, ${first}.` : `${dayPart}, how are things?`;
-  el("chat-model").textContent = boot.model || "";
+  // ── the dials, explained: the model switch shows the chat's plane
+  //    now; one catalog from the backend then fills the switch, the
+  //    option titles and the "?" popover — one source for both surfaces
+  const planeSel = el("chat-model");
+  state.plane = boot.plane || "";
+  planeSel.innerHTML = `<option value="${esc(state.plane)}" selected>${
+    esc(boot.model || "")}</option>`;
+  const helpPop = el("chat-help-pop");
+  const helpRow = (label, text, fact = "") => `
+    <div class="help-row"><b>${esc(label)}</b><span>${esc(text)}${
+      fact ? `<i class="help-fact">${esc(fact)}</i>` : ""}</span></div>`;
+  async function loadDials() {
+    let dials = null;
+    try { dials = await api.chatDials(); } catch { dials = null; }
+    if (!dials || !dials.available) return;
+    const planes = dials.planes || [];
+    planeSel.innerHTML = planes.map((p) => `
+      <option value="${esc(p.id)}"${p.id === state.plane ? " selected" : ""}${
+        p.available ? "" : " disabled"} title="${
+        esc(p.available ? p.means : p.reason)}">${esc(p.label)}${
+        p.available ? "" : " · not configured"}</option>`).join("");
+    for (const o of el("chat-depth").options) {
+      const d = (dials.depths || []).find((x) => x.id === o.value);
+      if (d) o.title = `${d.means} (${d.on.vertex} on Vertex, ${d.on.eag} on EAG)`;
+    }
+    for (const b of document.querySelectorAll(".chat-mode")) {
+      const m = (dials.modes || []).find((x) => x.id === b.dataset.mode);
+      if (m) b.title = m.means;
+    }
+    const notes = dials.notes || {};
+    helpPop.innerHTML = `
+      <div class="help-group">
+        <div class="help-head">Mode <span>how far Synapse goes on its own</span></div>
+        ${(dials.modes || []).map((m) => helpRow(m.label, m.means)).join("")}
+      </div>
+      <div class="help-group">
+        <div class="help-head">Depth <span>${esc(notes.depth || "")}</span></div>
+        ${(dials.depths || []).map((d) => helpRow(d.label, d.means,
+          `${d.on.vertex} on Vertex · ${d.on.eag} on EAG`)).join("")}
+      </div>
+      <div class="help-group">
+        <div class="help-head">Model <span>${esc(notes.plane || "")}</span></div>
+        ${planes.map((p) => helpRow(p.label, p.means, p.available
+          ? (p.default ? "configured here · where a new chat starts"
+                       : "configured here")
+          : `not configured here: ${p.reason}`)).join("")}
+      </div>`;
+  }
+  loadDials();
+  // above the composer when it is docked at the bottom, below it while
+  // the chat is empty and the composer sits mid-screen; never past the
+  // edge of the window — it scrolls inside instead
+  function placeHelp() {
+    const box = (helpPop.offsetParent || helpPop.parentElement)
+      .getBoundingClientRect();
+    const below = shell.classList.contains("empty");
+    helpPop.classList.toggle("below", below);
+    const room = below ? window.innerHeight - box.bottom - 16 : box.top - 16;
+    helpPop.style.maxHeight =
+      `${Math.max(180, Math.min(room, window.innerHeight * 0.8))}px`;
+  }
+  el("chat-help").addEventListener("click", () => {
+    helpPop.hidden = !helpPop.hidden;
+    el("chat-help").setAttribute("aria-expanded", String(!helpPop.hidden));
+    if (!helpPop.hidden) placeHelp();
+  });
+  // the switch is remembered on the chat and rides the next message;
+  // a plane this machine cannot ride is refused with the reason and
+  // the switch goes back to the one that works
+  planeSel.addEventListener("change", async () => {
+    const wanted = planeSel.value;
+    const got = await api.chatSetModel(state.session.id, wanted);
+    if (!got.available) {
+      setEmpty(false);                 // the refusal must be seen
+      say(`<b>model not switched.</b> ${esc(got.reason || "")}`, "error");
+      planeSel.value = state.plane;
+      return;
+    }
+    state.plane = got.plane || wanted;
+    // before the first message the select itself is the confirmation;
+    // mid-conversation the thread says so, where the person is looking
+    if (!shell.classList.contains("empty")) {
+      const shown = planeSel.selectedOptions[0]?.textContent || got.model || wanted;
+      say(`Switched to <b>${esc(shown)}</b> from the next message on.`);
+    }
+  });
   function setEmpty(empty) {
     shell.classList.toggle("empty", empty);
     input.placeholder = empty ? "Type / for skills" : "Write a message…";
@@ -255,6 +345,11 @@ export async function renderChat(outlet, wanted = "") {
   document.addEventListener("click", (e) => {
     if (!plusPop.hidden && !plusPop.contains(e.target)
         && e.target !== el("chat-plus")) plusPop.hidden = true;
+    if (!helpPop.hidden && !helpPop.contains(e.target)
+        && e.target !== el("chat-help")) {
+      helpPop.hidden = true;
+      el("chat-help").setAttribute("aria-expanded", "false");
+    }
     if (!slash.hidden && !slash.contains(e.target)
         && e.target !== input) slash.hidden = true;
   });
@@ -1520,7 +1615,7 @@ export async function renderChat(outlet, wanted = "") {
     input.value = "";
     const accepted = await api.chatSend(state.session.id, text,
                                         el("chat-depth").value,
-                                        state.mode);
+                                        state.mode, state.plane);
     if (!accepted.available) {
       say(`<b>not sent.</b> ${esc(accepted.reason || "")}`, "error");
     }

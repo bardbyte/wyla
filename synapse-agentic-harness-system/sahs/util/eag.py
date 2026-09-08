@@ -1038,17 +1038,25 @@ def render_report(report: dict[str, Any]) -> str:
 PLANE_VAR = "SAHS_MODEL_PLANE"
 
 
+def eag_configured(env: dict[str, str] | None = None) -> bool:
+    """The EAG plane's credentials are present: APP_ID with APP_SECRET
+    (OneIdentity mints the token), or a bearer handed in as it is."""
+    env = dict(os.environ if env is None else env)
+    return bool((env.get("APP_ID") and env.get("APP_SECRET"))
+                or env.get("GEMINI_BEARER_TOKEN"))
+
+
 def model_plane(env: dict[str, str] | None = None) -> str:
-    """Which plane the chat's model calls ride: ``vertex`` or ``eag``.
-    SAHS_MODEL_PLANE names one; ``auto`` (the default) picks EAG when
-    its credentials are in the environment and Vertex otherwise."""
+    """Which plane the chat's model calls ride by default: ``vertex``
+    or ``eag``. SAHS_MODEL_PLANE names one; ``auto`` (the default)
+    picks EAG when its credentials are in the environment and Vertex
+    otherwise. A chat can switch from the composer; this is the plane
+    a new chat starts on."""
     env = dict(os.environ if env is None else env)
     wanted = (env.get(PLANE_VAR) or "auto").strip().lower()
     if wanted in ("vertex", "eag"):
         return wanted
-    has_eag = bool((env.get("APP_ID") and env.get("APP_SECRET"))
-                   or env.get("GEMINI_BEARER_TOKEN"))
-    return "eag" if has_eag else "vertex"
+    return "eag" if eag_configured(env) else "vertex"
 
 
 def plane_note(env: dict[str, str] | None = None) -> str:

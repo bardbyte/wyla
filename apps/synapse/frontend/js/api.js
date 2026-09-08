@@ -84,9 +84,13 @@ export const api = {
     get(`/api/chat/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   chatNewSession: () => post("/api/chat/sessions", {}),
   chatSession: (id) => get(`/api/chat/sessions/${encodeURIComponent(id)}`),
-  chatSend: (id, text, depth = "", mode = "") =>
+  chatSend: (id, text, depth = "", mode = "", model = "") =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/messages`,
-         { text, depth, mode }),
+         { text, depth, mode, model }),
+  // the dials explained, and the model switch remembered on the chat
+  chatDials: () => get("/api/chat/dials"),
+  chatSetModel: (id, model) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/model`, { model }),
   // the person pressed Run on a proposed query: no model call
   chatRun: (id, body) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/run`, body),

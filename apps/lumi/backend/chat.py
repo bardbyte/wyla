@@ -6,7 +6,9 @@ key, never calls a model.
     POST /api/chat/sessions                        → session
     GET  /api/chat/sessions                        → the sidebar
     GET  /api/chat/sessions/{id}                   → transcript + artifacts (+ turn_after when a turn is running)
-    POST /api/chat/sessions/{id}/messages          {text, depth?, mode?} → turn_id
+    POST /api/chat/sessions/{id}/messages          {text, depth?, mode?, model?} → turn_id
+    GET  /api/chat/dials                           the modes, depths and planes, explained
+    POST /api/chat/sessions/{id}/model             {model} → the plane this chat rides
     POST /api/chat/sessions/{id}/run               {message_id?, sql?, limit?, dashboard?} → turn_id (no model call)
     POST /api/chat/sessions/{id}/chart             {saved_as?, kind?, x?, y?} → turn_id (no model call)
     GET  /api/chat/sessions/{id}/stream            → SSE (meridian.event/1)
@@ -66,6 +68,13 @@ class NewMessage(BaseModel):
     # the autonomy slider (v3 §5): chat hands queries over for the
     # person to run; autopilot runs and builds without stopping
     mode: str = Field(default="", max_length=12)
+    # the model switch: vertex | eag, or empty for the chat's own
+    model: str = Field(default="", max_length=12)
+
+
+class SessionModel(BaseModel):
+    """The composer's model switch, remembered on the chat."""
+    model: str = Field(default="", max_length=12)
 
 
 class RunProposal(BaseModel):
@@ -152,6 +161,10 @@ def get_session(session_id: str) -> dict:
         return _unavailable(f"no session {session_id}")
     rt = runtime.runtime(session_id)
     window = runtime.turn_window(session_id)
+    # the chat's plane, configured here or not: the composer shows it
+    # greyed with the reason when it is not, and the switch is right
+    # beside it
+    plane = runtime.plane_of(session)
     return {"available": True, "session": session,
             "messages": runtime.store.messages(session_id),
             "artifacts": runtime.store.list_artifacts(session_id),
@@ -159,8 +172,32 @@ def get_session(session_id: str) -> dict:
             # an in-flight turn: the page replays it from here
             "turn_id": window["turn_id"], "turn_after": window["after"],
             "budget": rt.budget.tick(),
-            # the composer's greeting and its model label
-            "user_name": runtime.user_name, "model": runtime.model_label}
+            # the composer's greeting, and the plane this chat rides
+            # with its label
+            "user_name": runtime.user_name,
+            "plane": plane, "model": runtime.label_for(plane)}
+
+
+@router.get("/dials")
+def dials() -> dict:
+    """Everything the composer lets a person set, explained: the
+    modes, the depths and the model planes — one source for both
+    surfaces, read from the environment each time."""
+    runtime, _ = _chat()
+    return {"available": True, **runtime.dials()}
+
+
+@router.post("/sessions/{session_id}/model")
+def set_model(session_id: str, req: SessionModel) -> dict:
+    runtime, _ = _chat()
+    from sahs.ask.model import ModelUnavailable
+    try:
+        return {"available": True,
+                **runtime.set_session_model(session_id, req.model)}
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+    except ModelUnavailable as e:
+        return _unavailable(str(e))
 
 
 @router.post("/sessions/{session_id}/messages", status_code=202)
@@ -171,7 +208,8 @@ def post_message(session_id: str, req: NewMessage) -> dict:
     try:
         return {"available": True,
                 **runtime.start_turn(session_id, req.text,
-                                     depth=req.depth, mode=req.mode)}
+                                     depth=req.depth, mode=req.mode,
+                                     model=req.model)}
     except KeyError:
         return _unavailable(f"no session {session_id}")
     except TurnBusy as e:

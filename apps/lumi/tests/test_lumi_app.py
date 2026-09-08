@@ -266,3 +266,59 @@ def test_no_build_is_honest(tmp_path):
     payload = empty.get("/api/meridian/home").json()
     assert payload["available"] is False
     assert "laptop.py compile" in payload["reason"]
+
+
+def test_the_dials_catalog_and_the_model_switch(client):
+    """One catalog explains every dial (modes, depths with what each
+    does on each plane, and the two planes with availability and the
+    reason when not); the switch is remembered on the chat and rides
+    the next message; a plane this machine cannot ride is refused with
+    the reason, never swapped for another model in silence."""
+    dials = client.get("/api/chat/dials").json()
+    assert dials["available"]
+    assert [m["id"] for m in dials["modes"]] == ["chat", "autopilot"]
+    assert [d["id"] for d in dials["depths"]] == ["quick", "standard",
+                                                  "deep"]
+    for d in dials["depths"]:
+        assert d["means"] and d["level"] in ("low", "medium", "high")
+        assert d["on"]["vertex"].startswith("thinking level ")
+        assert d["on"]["eag"].endswith(" thinking tokens per call")
+    assert [d["default"] for d in dials["depths"]] == [False, True, False]
+    assert [p["id"] for p in dials["planes"]] == ["vertex", "eag"]
+    for p in dials["planes"]:
+        assert p["label"].endswith(" via " + {"vertex": "Vertex",
+                                              "eag": "EAG"}[p["id"]])
+        assert p["means"] and isinstance(p["available"], bool)
+        assert p["available"] or p["reason"]
+    assert sum(p["default"] for p in dials["planes"]) == 1
+    assert "nothing else" in dials["notes"]["depth"]
+    assert "next message" in dials["notes"]["plane"]
+    # the chat opens on a plane, configured here or not, with its label
+    made = client.post("/api/chat/sessions", json={}).json()["session"]
+    assert made["model"] == ""
+    boot = client.get(f"/api/chat/sessions/{made['id']}").json()
+    assert boot["plane"] in ("vertex", "eag")
+    assert boot["model"] == next(p["label"] for p in dials["planes"]
+                                 if p["id"] == boot["plane"])
+    nope = client.post(f"/api/chat/sessions/{made['id']}/model",
+                       json={"model": "nope"}).json()
+    assert nope["available"] is False and "vertex and eag" in nope["reason"]
+    for p in dials["planes"]:
+        got = client.post(f"/api/chat/sessions/{made['id']}/model",
+                          json={"model": p["id"]}).json()
+        if p["available"]:
+            assert got["available"] and got["plane"] == p["id"]
+            assert got["model"] == p["label"]
+            again = client.get(f"/api/chat/sessions/{made['id']}").json()
+            assert again["plane"] == p["id"]
+            assert again["session"]["model"] == p["id"]
+        else:
+            assert got["available"] is False
+            assert p["reason"] in got["reason"]
+            assert "not configured on this machine" in got["reason"]
+    # '' forgets the switch: the chat is back on the .env default
+    back = client.post(f"/api/chat/sessions/{made['id']}/model",
+                       json={"model": ""}).json()
+    assert back["available"] and back["plane"] == boot["plane"]
+    assert client.get(f"/api/chat/sessions/{made['id']}").json()[
+        "session"]["model"] == ""

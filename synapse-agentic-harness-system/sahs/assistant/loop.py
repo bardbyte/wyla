@@ -46,6 +46,28 @@ WALL_SECONDS = 600.0
 MAX_OUTPUT_TOKENS = 16384
 HISTORY_MESSAGES = 30      # stored messages replayed into the interaction
 THINKING_LEVELS = {"quick": "low", "standard": "medium", "deep": "high"}
+# the depth dial as the composer explains it (§5): each stop changes
+# how much the model thinks before every step — nothing else. The
+# call ceiling and the wall clock are the same at every depth.
+DEPTHS: dict[str, dict[str, str]] = {
+    "quick": {
+        "label": "Quick", "level": "low",
+        "means": "A short think before each step. Right for a lookup, "
+                 "a definition, a rename, or a follow-up on rows "
+                 "already here.",
+    },
+    "standard": {
+        "label": "Standard", "level": "medium",
+        "means": "The default. Enough thinking to find the right "
+                 "metric, prove the query and hand it over.",
+    },
+    "deep": {
+        "label": "Deep", "level": "high",
+        "means": "The most thinking per step: a multi-step analysis, "
+                 "an unfamiliar join, or a question with several ways "
+                 "to read it. Slower, and it costs more.",
+    },
+}
 DEFAULT_THINKING = "medium"
 
 # the first sentence is the transport routing key (agent.ROUTING_KEY)
@@ -120,6 +142,21 @@ MODES: dict[str, str] = {
         "and stop."),
 }
 DEFAULT_MODE = "chat"
+# the autonomy slider as the composer explains it
+MODE_MEANS: dict[str, dict[str, str]] = {
+    "chat": {
+        "label": "Chat",
+        "means": "Synapse finds the definition, proves the query with "
+                 "a dry run and hands it over on a card. You press Run. "
+                 "Nothing is scanned until you do.",
+    },
+    "autopilot": {
+        "label": "Autopilot",
+        "means": "Synapse runs the query itself under the limits, "
+                 "checks the rows and builds the deliverable without "
+                 "stopping to hand over.",
+    },
+}
 
 _DIGEST_CACHE: dict[str, str] = {}
 
@@ -464,7 +501,8 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                        user_name: str = "",
                        max_calls: int = MAX_CALLS,
                        wall_seconds: float = WALL_SECONDS,
-                       mode: str = DEFAULT_MODE) -> str:
+                       mode: str = DEFAULT_MODE,
+                       plane: str = "") -> str:
     session_id = session["id"]
     started = time.perf_counter()
     mode = mode if mode in MODES else DEFAULT_MODE
@@ -473,7 +511,7 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
              skills=[s.name for s in (skills or [])],
              memories=len(memories or []),
              project=(project or {}).get("name", ""),
-             thinking_level=thinking_level, mode=mode)
+             thinking_level=thinking_level, mode=mode, plane=plane)
     budget.start_turn()
     prepare_workspace(workspace, build.root)
 
@@ -1126,7 +1164,8 @@ def _finish(bus: EventBus, budget: Any, turn_id: str, status: str,
              **extra, **budget.tick())
 
 
-__all__ = ["ASSISTANT_VERSION", "IDENTITY", "THINKING_LEVELS",
+__all__ = ["ASSISTANT_VERSION", "IDENTITY", "THINKING_LEVELS", "DEPTHS",
+           "MODE_MEANS",
            "DEFAULT_THINKING", "MODES", "DEFAULT_MODE", "system_prompt",
            "summarize", "run_assistant_turn", "run_proposal_turn",
            "chart_rows_turn"]

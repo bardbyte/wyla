@@ -426,6 +426,21 @@ minted again at 80% of that or on the first 401, with the call
 retried once. The prompt is unchanged; where 2.5 slips is a matter
 for the evals, not for guessing.
 
+**Switching models from the composer.** The label by the composer is
+a select: "Gemini 3.1 Pro Preview via Vertex" or "Gemini 2.5 Pro via
+EAG", both surfaces. A plane the machine cannot ride is listed greyed
+with "not configured" and the reason in its tooltip; picking one that
+can be ridden is remembered on that chat, rides from the next message
+on, and survives a reload (`SAHS_MODEL_PLANE` only says where a new
+chat starts). The conversation carries over as text, so a chat can
+change model mid-way. The "?" beside the dials opens the explanation:
+Chat and Autopilot; Quick, Standard and Deep with what each does on
+each plane (a thinking level on Vertex, a thinking budget on EAG;
+depth changes nothing but the thinking); and both models with whether
+each is configured here. `GET /api/chat/dials` is the one source, and
+`python scripts/turn_doctor.py` prints the plane and the depth on
+every turn's line.
+
 **Before the first query:** the graph names tables `dw.<table>`, and
 BigQuery resolves that against the project that runs the query
 (`prj-p-lumi-gpt`), not the one that hosts the data. Set

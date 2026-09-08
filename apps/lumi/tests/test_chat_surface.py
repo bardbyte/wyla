@@ -238,10 +238,10 @@ def test_the_ask_starts_like_claude_and_hands_queries_over():
                   "Writing the query for you to run",
                   "state.mode", "dashboard, depth"):
         assert piece in CHAT_JS, piece
-    assert "chatRun" in API_JS and "{ text, depth, mode }" in API_JS
+    assert "chatRun" in API_JS and "{ text, depth, mode, model }" in API_JS
     for piece in ("/run\"", "run_proposal", "RunProposal",
                   "mode=req.mode", "dashboard", '"user_name"',
-                  '"model": runtime.model_label'):
+                  '"model": runtime.label_for(plane)'):
         assert piece in BACKEND, piece
     # the mode and the slash command are the runtime's, not the page's
     runtime_py = (SILO / "sahs" / "assistant" / "runtime.py").read_text(
@@ -298,3 +298,25 @@ def test_metric_status_reads_published_on_every_chip():
         assert 'certified: "certified"' not in text, page
     assert ".status-chip.s-certified" in CSS
 
+
+
+def test_the_composer_switches_models_and_explains_every_dial():
+    """The model switch and the "?" beside the dials, on the page: the
+    select that is the model label, the popover with its three groups,
+    the send that carries the chat's plane, and the refusal wording.
+    The catalog and the switch itself are pinned against the running
+    app in test_lumi_app."""
+    for piece in ('id="chat-model"', 'id="chat-help"', "chat-help-pop",
+                  "api.chatDials()", "api.chatSetModel(",
+                  "state.mode, state.plane", "model not switched",
+                  "help-row", "help-group", "not configured",
+                  "Mode <span>", "Depth <span>", "Model <span>",
+                  "from the next message on"):
+        assert piece in CHAT_JS, piece
+    for cls in (".chat-plane", ".chat-help", ".chat-help-pop",
+                ".help-group + .help-group", ".help-row", ".help-fact"):
+        assert cls in CSS, cls
+    assert "chatDials" in API_JS and "chatSetModel" in API_JS
+    for piece in ('"/dials"', "SessionModel", "set_session_model",
+                  "model=req.model", '"plane": plane'):
+        assert piece in BACKEND, piece

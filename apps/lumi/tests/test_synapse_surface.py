@@ -220,3 +220,21 @@ def test_logo_from_the_env_replaces_the_words(client, tmp_path, monkeypatch):
     assert "brandLogo" in MAIN and "/api/lumi/brand" in MAIN
     assert "img.onload" in MAIN and "replaceChildren" in MAIN
     assert ".brand-logo" in CSS
+
+
+def test_the_second_surface_switches_models_and_explains_the_dials(client):
+    """The same switch and the same "?" as the admin console, from the
+    same catalog: the composer's model select, the popover with the
+    three groups, and the send that carries the chat's plane."""
+    for piece in ('id="chat-model"', 'id="chat-help"', "chat-help-pop",
+                  "api.chatDials()", "api.chatSetModel(",
+                  "state.mode, state.plane", "help-group",
+                  "Mode <span>", "Depth <span>", "Model <span>"):
+        assert piece in CHAT, piece
+    app_css = (FRONT / "styles" / "app.css").read_text(encoding="utf-8")
+    for cls in (".chat-plane", ".chat-help", ".chat-help-pop",
+                ".help-group + .help-group", ".help-row"):
+        assert cls in app_css, cls
+    dials = client.get("/api/chat/dials").json()
+    assert len(dials["planes"]) == 2 and len(dials["depths"]) == 3
+    assert client.get("/synapse/js/api.js").text.count("chatSetModel") == 1
