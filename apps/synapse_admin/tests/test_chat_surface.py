@@ -209,7 +209,7 @@ def test_governance_is_visible_not_just_enforced():
     assert "provenanceLine" in CHAT_JS
 
 
-def test_the_ask_starts_like_claude_and_hands_queries_over():
+def test_the_ask_starts_like_a_chat_assistant_and_hands_queries_over():
     # the empty state: a greeting and the composer, nothing else; the
     # first message turns it into the conversation with its title,
     # a Share door, the composer docked, the disclaimer under it
