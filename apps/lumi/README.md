@@ -2,7 +2,7 @@
 
 The freshly-built admin surface over the Meridian context graph,
 authored directly from the Lumi design canvas
-(`apps/console/design/wireframes/`). One process, **zero build
+(`apps/lumi/design/wireframes/`). One process, **zero build
 steps**: FastAPI serves the Meridian read plane and a hand-authored
 ES-module frontend (no bundler, no node; three.js vendored locally so
 the Cosmos renders offline).
@@ -72,7 +72,7 @@ labeled door — never an unlabeled fake.
   authority. Tiers render ● ◆ ◐ ○; crimson is definition conflict —
   only, ever.
 
-`apps/console` remains the legacy shell (agent theater, scripted
+`archive/apps/console` is the legacy shell (agent theater, scripted
 runner); this app is the product and its copy of the read plane
 (`backend/meridian.py`) is the canonical one.
 

@@ -1,88 +1,43 @@
-# wyla — enterprise semantic layer PoC
+# wyla — Synapse by Lumi
 
-Five signal sources ("witnesses") fused into one provenance-typed knowledge
-graph, compiled into a versioned snapshot, served to agents over MCP and
-Google ADK, and consumed by a guardrail-enforcing analyst agent with a
-python sandbox.
+The repo has two halves: the product, and the archive of everything that
+came before it.
 
-**Read first:** [`docs/SEMANTIC_LAYER_BLUEPRINT.md`](docs/SEMANTIC_LAYER_BLUEPRINT.md)
-(system design) · [`docs/SECURITY_AUDIT.md`](docs/SECURITY_AUDIT.md)
-(risk register) · [`synapse/docs/MCP_SERVER_SPEC.md`](synapse/docs/MCP_SERVER_SPEC.md)
-· [`synapse/docs/DEEP_RESEARCH_AGENT_SPEC.md`](synapse/docs/DEEP_RESEARCH_AGENT_SPEC.md)
+```
+synapse-agentic-harness-system/   SAHS — the Meridian silo: census → ground →
+                                  truth graph → compiled builds → serving tools,
+                                  the agent loop, evals, the laptop scripts
+apps/lumi/                        Synapse by Lumi — FastAPI read plane + the
+                                  hand-authored ES-module frontend (one process,
+                                  zero build); apps/lumi/design/ holds the Lumi
+                                  wireframes and mocks the product was built from
+apps/synapse/                     Synapse Semantic Intelligence — the second
+                                  frontend, served by the same Lumi server at /synapse/
+docs/design_inventory.md          the design-file sweep the UI skill keeps current
+archive/                          the pre-SAHS platform, kept whole for reference
+```
 
-## Five-minute offline demo (no credentials, no network)
+## Run
 
 ```bash
-pip install -e synapse pydantic pyyaml sqlglot pytest
-python synapse/scripts/pipeline.py --demo         # witnesses → compiled graph snapshot
-pip install "mcp"                                 # optional: the MCP surface
-SYNAPSE_GRAPH_PATH=synapse/data/cache/graph_snapshot.json \
-  python -m synapse.mcp.server                    # 15 tools for any MCP host
-pytest synapse/tests/ -q                          # 188 tests
+pip install -e "synapse-agentic-harness-system[sql,dev]" fastapi uvicorn
+cp synapse-agentic-harness-system/.env.example synapse-agentic-harness-system/.env  # fill in paths
+uvicorn apps.lumi.backend.app:app --port 8400        # from the repo root
+python -m pytest synapse-agentic-harness-system/tests apps/lumi/tests -q
 ```
 
-Real runs point `pipeline.py` at the real witnesses instead:
-`--skills-dir ~/Downloads/skills --gold-sql-dir … --bq-extract-dir …
---lumi-session … --mdm-cache-dir …` (any subset works).
+The silo's runbooks are the operating manual:
+`synapse-agentic-harness-system/docs/runbooks/laptop_end_to_end.md` first,
+then `e18_ask.md` for the conversational surface. Meridian data (sources,
+archives, `graph/`, `builds/`) lives outside git at the `MERIDIAN_*` paths in
+the silo `.env`; only the test fixtures are checked in.
 
-## Layout
+## The archive
 
-```
-synapse/            THE PLATFORM — provenance-typed graph + loaders + MCP
-├── synapse/graph/      GraphStore (confidence fusion), builder, inspector, viz
-├── synapse/loaders/    mdm · bq · lumi · skills (NEW) · gold_sql (NEW)
-├── synapse/mcp/        GraphService + MCP server + ADK adapter (NEW)
-├── synapse/utils/      auth, dotenv, sandbox (NEW)
-├── scripts/pipeline.py one-trigger compile: sources → snapshot (NEW)
-└── docs/               MCP server / deep-research / UX specs
-
-apps/               ADK agents (adk web apps/)
-├── analyst/            the Data/Business Analyst agent + sandbox (NEW)
-└── curator/            gold-query Excel auditor
-
-semantic-graph/     BQ extraction scripts (capabilities probe, 12-probe batch
-                    extractor), 13-tool consumer agent, Obsidian viz, KC docs
-
-lumi_final/         LookML enrichment pipeline + the richest SQL extractor
-                    (sql_to_context) + event-sourced ontology store (AGE path)
-
-docs/               blueprint + security audit (repo-wide)
-```
-
-## The five witnesses
-
-| Witness | Kind | Adapter |
-|---|---|---|
-| MDM API | declared metadata | `synapse/loaders/mdm_loader.py` |
-| BigQuery (SVC ID) | observed behavior | `semantic-graph/scripts/bq_batch_extract.py` → `bq_loader.py` |
-| Skills library | expert playbooks + guardrails | `synapse/loaders/skills_loader.py` |
-| Gold-SQL corpus | proven analyst usage | `synapse/loaders/gold_sql_loader.py` |
-| LLM enrichment (Vertex) | labeled inference | `synapse/curation/` · `semantic-graph/enrichment/` |
-
-Everything lands as provenance-stamped assertions; the graph is **compiled,
-not written** — delete the snapshot and recompile any time.
-
-## The agent
-
-One implementation (`synapse/mcp/service.py`), two hosts:
-
-- **MCP** — Claude Desktop / Claude Code / any MCP client: `python -m synapse.mcp.server`
-- **ADK** — Gemini on Vertex: `adk web apps/` → `warehouse_analyst`
-
-The analyst fetches the covering **skill** before designing a query, treats
-graph **guardrails** as law, statically **validates SQL** before a human sees
-it, computes in a scrubbed **sandbox**, and answers with citations +
-confidence tiers + a status stamp. It does not execute warehouse SQL.
-
-## lumi_final pipeline (unchanged usage)
-
-```bash
-pip install -e lumi_final
-cd lumi_final
-LUMI_AGE_ENABLED=1 python scripts/probe_corpus_phase012.py \
-    --from-excel ~/path/to/gold_queries.xlsx --refresh-mdm --fresh
-pytest lumi_final/tests/ -v
-```
-
-Env vars: see `lumi_final/lumi/config.py` (`LUMI_VERTEX_PROJECT`,
-`LUMI_BQ_PROJECT`, `LUMI_MDM_API_BASE`, `GOOGLE_APPLICATION_CREDENTIALS`, …).
+Everything under `archive/` predates the SAHS scaffold (commit `9f9ef7a`,
+2026-08-25) and nothing in the product imports from it: the `synapse/`
+platform, `lumi_final/`, `semantic-graph/`, the legacy `apps/console` shell
+and the ADK agents it hosted, the root probe scripts, and the old
+blueprint, audit, and session docs. `archive/README.md` is the README that
+described that world. It is kept so it can be mined or deleted deliberately,
+not because anything runs from it.

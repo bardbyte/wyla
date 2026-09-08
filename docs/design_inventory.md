@@ -1,6 +1,6 @@
 # Synapse by Lumi — design inventory (draft, staged for docs/design_inventory.md at go-ahead)
 
-> Sweep of apps/console/design/** on 2026-08-30 (branch tip e0067f4). Two visual systems
+> Sweep of apps/console/design/** (now `apps/lumi/design/`; the console itself is under `archive/apps/console`) on 2026-08-30 (branch tip e0067f4). Two visual systems
 > run through the set; **Lumi is canonical**, Synapse-branded twins are superseded.
 
 ## Format
