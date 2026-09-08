@@ -61,10 +61,14 @@ def test_shell_and_planes(client):
     assert "Saheb Singh" in page.text  # logged-in identity, no build chip
     assert client.get("/health").json()["app"] == "synapse-by-lumi"
     planes = client.get("/api/lumi/planes").json()
-    assert set(planes) == {"bq", "vertex"}
-    for plane in ("bq", "vertex"):
+    # three planes as booleans, and which model plane the chat rides
+    assert set(planes) == {"bq", "vertex", "eag", "plane"}
+    for plane in ("bq", "vertex", "eag"):
         for value in planes[plane].values():
             assert isinstance(value, (bool, str))
+    assert planes["plane"] in ("vertex", "eag")
+    assert planes["eag"]["model"] == os.environ.get("EAG_MODEL",
+                                                    "gemini-2.5-pro")
     vendor = client.get("/vendor/three.module.min.js")
     assert vendor.status_code == 200        # the sky renders offline
 

@@ -90,6 +90,38 @@ class VertexAgent:
             max_tokens=max_tokens)
 
 
+class EagAgent(VertexAgent):
+    """The same agent over Gemini through EAG: the client delivers each
+    call in one burst (EAG serves no stream), the retry-once rule
+    therefore always applies, and the budget is charged from the same
+    usage counters."""
+
+    @staticmethod
+    def from_env(budget: Budget | None = None,
+                 log: Any = None) -> "EagAgent":
+        from sahs.enrich.eag_client import EagClient
+        from sahs.util.eag import EagError
+        try:
+            client = EagClient.from_env(log=log)
+        except EagError as e:
+            raise ModelUnavailable(
+                f"{e}: the EAG plane needs APP_ID and APP_SECRET (or "
+                "AUTH_MODE=env with GEMINI_BEARER_TOKEN) in the silo .env; "
+                "python scripts/eag_check.py proves the path") from e
+        return EagAgent(client, budget)
+
+
+def agent_from_env(budget: Budget | None = None,
+                   log: Any = None) -> VertexAgent:
+    """The chat's model, on whichever plane the environment names:
+    SAHS_MODEL_PLANE=vertex|eag, or auto — EAG when its credentials
+    are present, Vertex otherwise."""
+    from sahs.util.eag import model_plane
+    if model_plane() == "eag":
+        return EagAgent.from_env(budget, log)
+    return VertexAgent.from_env(budget, log)
+
+
 @dataclass
 class ScriptedAgent:
     """Scripted PARTS per model call: each step is a list of
@@ -154,5 +186,5 @@ def declarations(kit: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-__all__ = ["ROUTING_KEY", "VertexAgent", "ScriptedAgent",
-           "declarations", "json"]
+__all__ = ["ROUTING_KEY", "VertexAgent", "EagAgent", "agent_from_env",
+           "ScriptedAgent", "declarations", "json"]

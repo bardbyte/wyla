@@ -366,6 +366,21 @@ handoff, the eval suites.
    page swaps the words for it once it has loaded, and the words stay
    when there is none.
 
+15. A second model plane, Gemini 2.5 Pro through EAG (2026-09-05),
+   behind a OneIdentity token, chosen by `SAHS_MODEL_PLANE` (auto:
+   EAG when its credentials are present). Built from the laptop's
+   check, not the guide: the token is a JWT that lives 599 s and is
+   minted again at 80% of that or on a 401 with one retry; the model
+   is addressed with a slash; thinking is a budget under a cap raised
+   by the budget, because 2.5 counts the thinking against it; no
+   stream is served, so the client delivers each call as the loop's
+   events in one burst and nothing above the client changes; no
+   prompt cache is seen, so nothing leans on one. The prompt is not
+   touched: the model moves, the evals measure, and only then does a
+   sentence change where 2.5 slips. Reason: the corporate gateway is
+   the sanctioned path, and the harness's contract with the model is
+   the event stream, which a burst satisfies.
+
 ## 12 · The laptop, measured (state report of 2026-09-02)
 
 What v3 is actually built against — not the fixture.
