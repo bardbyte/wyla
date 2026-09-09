@@ -434,6 +434,22 @@ handoff, the eval suites.
    packs; the model's rewrite makes the format consistent without
    making the facts up.
 
+20. The schema for leaving the laptop (2026-09-09), in
+   `db/spanner/` with its reasoning in `docs/specs/spanner_schema.md`:
+   identity with roles as rows that name the surface each may open
+   (admin the Lumi console, analyst Synapse, the steward's set to be
+   decided), credentials as Argon2id strings with a pepper outside
+   the database, sessions and one-shot tokens as hashes, an
+   append-only audit on a change stream; the chat store as the
+   SQLite tables with an owner, interleaved in the chat, memory in
+   the person; the graph as append-only assertions plus a folded
+   current state with a property graph over it, the CHECK lists held
+   equal to the Python registries by a lint. Reason: the stores are
+   designed before a line of auth code, so the login pages and the
+   Spanner move have a contract to build against; nothing in the
+   laptop's discipline (append-only, provenance, one writer, the E14
+   door) is given up to get there.
+
 ## 12 · The laptop, measured (state report of 2026-09-02)
 
 What v3 is actually built against — not the fixture.
