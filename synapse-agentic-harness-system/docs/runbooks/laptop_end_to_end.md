@@ -271,6 +271,18 @@ the silo `.env` (png, jpg, svg, webp or gif) and restart the app: the
 image replaces the words, and the words stay when the file is not
 there.
 
+When the words stay, open `http://localhost:8400/api/lumi/brand`: it
+says which `.env` was read (`env_file` — the silo's `.env` wins, and a
+line in any other `.env` is never read), the value as read, the path
+tried, whether a file is there, and what its bytes are. The three
+usual causes: the app was not restarted after the `.env` changed
+(the file is read once, at start); a note after the path on the same
+line without a space before the `#`; and a `.png` that is not a PNG
+(a HEIC or WebP export renamed, or an SVG saved with the wrong
+suffix), which the browser drops in silence — the brand page names
+the bytes, and the page's console carries the same line. The logo
+shows on `/synapse/` only.
+
 **The query comes first.** In Chat mode a data question ends with the
 query on a card — the SQL, what it will scan, its status and meridian
 line — and three buttons: **Run query** executes it with no model call

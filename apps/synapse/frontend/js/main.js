@@ -83,10 +83,18 @@ async function brandLogo() {
   try {
     got = await fetch("/api/lumi/brand").then((r) => r.json());
   } catch { return; }
-  if (!got.logo) return;
+  if (!got.logo) {
+    // the words stay; the reason is a page away (/api/lumi/brand)
+    // and in the console, never a broken image in the header
+    if (got.configured) console.warn(`SYNAPSE_LOGO: ${got.reason}`);
+    return;
+  }
   const img = new Image();
   img.className = "brand-logo";
   img.alt = "Synapse Semantic Intelligence";
+  img.onerror = () => console.warn(
+    "SYNAPSE_LOGO: the browser could not decode the image the server "
+    + "sent; open /api/lumi/brand for what the file's bytes are");
   img.onload = () => {
     const link = document.createElement("a");
     link.className = "brand-link";

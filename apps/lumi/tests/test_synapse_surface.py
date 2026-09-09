@@ -197,8 +197,46 @@ def test_logo_from_the_env_replaces_the_words(client, tmp_path, monkeypatch):
     swaps its words for the image only when one is served. A missing
     file or a non-image is refused with a reason, and the words stay."""
     monkeypatch.delenv("SYNAPSE_LOGO", raising=False)
-    assert client.get("/api/lumi/brand").json() == {
-        "logo": False, "configured": False, "reason": "", "stamp": ""}
+    bare = client.get("/api/lumi/brand").json()
+    assert {k: bare[k] for k in ("logo", "configured", "reason", "stamp")} \
+        == {"logo": False, "configured": False, "reason": "", "stamp": ""}
+    assert {"env_file", "path", "exists", "looks_like"} <= set(bare)
+    # a path with nothing at it: the exact path tried, and the note
+    # about inline comments
+    monkeypatch.setenv("SYNAPSE_LOGO", str(tmp_path / "missing.png"))
+    lost = client.get("/api/lumi/brand").json()
+    assert lost["configured"] and not lost["logo"] and not lost["exists"]
+    assert str(tmp_path / "missing.png") in lost["reason"]
+    assert "' #'" in lost["reason"]
+    # a .png that is not a PNG (an export gone wrong): refused, the
+    # bytes named, never served for the browser to drop in silence
+    fake = tmp_path / "logo.png"
+    fake.write_bytes(b"\x00\x00\x00\x18ftypheic")
+    monkeypatch.setenv("SYNAPSE_LOGO", str(fake))
+    wrong = client.get("/api/lumi/brand").json()
+    assert wrong["exists"] and not wrong["logo"]
+    assert "named .png but its bytes" in wrong["reason"]
+    assert client.get("/api/lumi/logo").status_code == 404
+    # a real PNG: served as image/png
+    import struct
+    import zlib
+    def chunk(kind, body):
+        return (struct.pack(">I", len(body)) + kind + body
+                + struct.pack(">I", zlib.crc32(kind + body) & 0xffffffff))
+    png = (b"\x89PNG\r\n\x1a\n"
+           + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(b"\x00\xff\x00\x00"))
+           + chunk(b"IEND", b""))
+    real = tmp_path / "real.PNG"
+    real.write_bytes(png)
+    monkeypatch.setenv("SYNAPSE_LOGO", str(real))
+    good = client.get("/api/lumi/brand").json()
+    assert good["logo"] and good["looks_like"] == ".png" and good["stamp"]
+    served = client.get("/api/lumi/logo")
+    assert served.status_code == 200
+    assert served.headers["content-type"].startswith("image/png")
+    assert served.content == png
+    monkeypatch.delenv("SYNAPSE_LOGO", raising=False)   # back to unset
     refused = client.get("/api/lumi/logo")
     assert refused.status_code == 404
     assert "SYNAPSE_LOGO" in refused.json()["reason"]
@@ -226,6 +264,7 @@ def test_logo_from_the_env_replaces_the_words(client, tmp_path, monkeypatch):
     assert 'id="brand"' in INDEX and "Semantic Intelligence" in INDEX
     assert "brandLogo" in MAIN and "/api/lumi/brand" in MAIN
     assert "img.onload" in MAIN and "replaceChildren" in MAIN
+    assert "img.onerror" in MAIN and "console.warn(`SYNAPSE_LOGO" in MAIN
     assert ".brand-logo" in CSS
 
 
