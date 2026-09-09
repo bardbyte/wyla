@@ -111,6 +111,16 @@ export const api = {
   chatRename: (id, title) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/rename`, { title }),
   chatSkills: () => get("/api/chat/skills"),
+  // the creators: a draft in the house format, a saved own skill, a
+  // file as text to draft from
+  chatDraft: (body) => post("/api/chat/skills/draft", body),
+  chatSaveSkill: (name, text) => post("/api/chat/skills/mine", { name, text }),
+  chatDeleteSkill: async (name) => {
+    const r = await fetch(`/api/chat/skills/mine/${encodeURIComponent(name)}`,
+                          { method: "DELETE" });
+    return r.json();
+  },
+  chatFileText: (name, data_b64) => post("/api/chat/files/text", { name, data_b64 }),
   chatSetSkills: (id, names) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/skills`, { names }),
   chatProjects: () => get("/api/chat/projects"),

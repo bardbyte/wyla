@@ -295,12 +295,40 @@ class AssistantRuntime:
     # ── skills: both shelves, browsable (§13.3/V2.7) ─────────
     # the agent loads packs itself by intent; this listing feeds the
     # Skills page where people READ them, full text included
+    @property
+    def owner(self) -> str:
+        """Whose own packs load: the configured person today, the
+        signed-in one once identity lands (the same seam)."""
+        from .skills_loader import owner_slug
+        return owner_slug(self.user_name) or "anon"
+
     def skills(self) -> list[dict]:
         from .skills_loader import all_skills
         return [{"name": p.name, "title": p.title,
                  "description": p.description, "origin": p.origin,
+                 "owner": p.owner, "mine": bool(p.owner),
                  "text": p.text}
-                for p in all_skills(self.graph_root)]
+                for p in all_skills(self.graph_root, self.owner)]
+
+    # ── authoring: a skill or a knowledge file, drafted and saved ──
+    def draft(self, kind: str, title: str, material: str,
+              hint: str = "", plane: str = "") -> dict:
+        """The model rewrites the person's material into the house
+        format; the person reads it before anything is saved."""
+        from . import authoring
+        if kind not in authoring.KINDS:
+            return {"ok": False, "reason": "kind is skill or knowledge"}
+        agent = self.model_for(Budget(**CHAT_BUDGET),
+                               self.plane_for(None, plane))
+        return authoring.draft(agent, kind, title, material, hint)
+
+    def save_my_skill(self, name: str, text: str) -> dict:
+        from . import authoring
+        return authoring.save_skill(self.graph_root, self.owner, name, text)
+
+    def delete_my_skill(self, name: str) -> bool:
+        from . import authoring
+        return authoring.delete_skill(self.graph_root, self.owner, name)
 
     def set_skills(self, session_id: str, names: list[str]) -> dict:
         from sahs.loop.skills import MAX_LOADED
@@ -313,7 +341,8 @@ class AssistantRuntime:
             return {"ok": False,
                     "reason": f"at most {MAX_LOADED} skills load at "
                               "once"}
-        loaded, missing = load_packs(self.graph_root, list(names))
+        loaded, missing = load_packs(self.graph_root, list(names),
+                                     owner=self.owner)
         if missing:
             return {"ok": False,
                     "reason": "no such skill: " + ", ".join(missing)}
@@ -378,7 +407,8 @@ class AssistantRuntime:
         names = list(dict.fromkeys(
             ((project or {}).get("skills") or [])
             + list(session.get("skills") or []) + slashed))
-        loaded, _missing = load_packs(self.graph_root, names)
+        loaded, _missing = load_packs(self.graph_root, names,
+                                      owner=self.owner)
         memories = self.store.list_memories(
             project_id=(project or {}).get("id", ""))
         level = self.thinking_level(depth)
@@ -399,7 +429,8 @@ class AssistantRuntime:
                     thinking_level=level, user_name=self.user_name,
                     mode=chosen, plane=plane,
                     attachments=attachments or [],
-                    file_names=file_names or [])
+                    file_names=file_names or [],
+                    owner=self.owner)
             except ModelUnavailable as e:
                 rt.bus.emit("error", turn_id=turn_id,
                             code="model_unavailable",

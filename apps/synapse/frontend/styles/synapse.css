@@ -262,3 +262,26 @@
 .chat-user-files { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
 .file-chip.sent { background: transparent; }
 .plus-note { font-size: var(--fs-11); padding: 0 10px 6px; max-width: 260px; }
+
+/* ── the creators: material in, a draft in the house format out ── */
+.library-page .shelf-head { padding: 12px 0 6px; }
+.creator { margin-top: var(--s-4); display: flex; flex-direction: column; gap: 8px; }
+.creator-note { margin: 0; max-width: 820px; }
+.creator-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.creator-row .search { flex: 1; min-width: 180px; }
+.creator-material, .creator-text {
+  width: 100%; min-height: 140px; font: inherit; font-size: var(--fs-13);
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); color: var(--ink); resize: vertical;
+}
+.creator-text { min-height: 260px; font-family: var(--mono, ui-monospace, monospace); font-size: var(--fs-12); }
+.creator-draft {
+  border-top: 1px solid var(--line); padding-top: 10px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.creator-notes { margin: 0; padding-left: 18px; font-size: var(--fs-12); }
+.creator-rendered {
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
+  background: var(--surface-2); font-size: var(--fs-13); max-height: 480px; overflow: auto;
+}
+.origin-tag.o-mine { background: var(--accent-soft, #eaf2fb); color: var(--accent, #2f6feb); }

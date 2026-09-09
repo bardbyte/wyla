@@ -72,8 +72,9 @@ def test_shell_is_stripped_and_renamed():
                  ">Home<", ">Artifacts<", "chats-search"):
         assert gone not in INDEX, gone
     explore = INDEX.split('aria-label="Explore"')[1].split("</nav>")[0]
-    for kept in ("Data Products", "Metrics Explorer", "Skills"):
+    for kept in ("Data Products", "Metrics Explorer", "Skills", "Knowledge"):
         assert kept in explore, kept
+    assert explore.index("Skills") < explore.index("Knowledge")
     order = [INDEX.index('href="#/chat/new"'), INDEX.index('href="#/search"'),
              INDEX.index('class="chats"'), INDEX.index('aria-label="Explore"'),
              INDEX.index('class="account"')]
@@ -86,15 +87,18 @@ def test_shell_is_stripped_and_renamed():
     for page in ("cosmos", "operate", "home", "ask"):
         assert not (FRONT / "js" / "pages" / f"{page}.js").exists(), page
     assert (FRONT / "js" / "pages" / "skills.js").exists()
+    assert (FRONT / "js" / "pages" / "knowledge.js").exists()
+    assert not (FRONT / "js" / "pages" / "artifacts.js").exists()
 
 
 def test_routes_are_the_new_surface_and_chat_is_the_door():
     for route in ("chat:", "search:", "products:", "product:", "metrics:",
-                  "metric:", "skills:", "artifacts:"):
-        assert route in MAIN, route            # artifacts: by URL only
+                  "metric:", "skills:", "knowledge:", "artifacts:"):
+        assert route in MAIN, route            # artifacts: the old name
     assert '|| "chat"' in MAIN                     # the default route
     assert "renderSearch" in MAIN and "renderProducts" in MAIN
-    assert "renderSkills" in MAIN
+    assert "renderSkills" in MAIN and "renderKnowledge" in MAIN
+    assert "renderArtifacts" not in MAIN
     for gone in ("renderHome", "renderCosmos", "renderOperate", "renderAsk"):
         assert gone not in MAIN, gone
     for page in ("metric.js", "table.js"):
@@ -357,3 +361,79 @@ def test_skills_showcase_what_the_agent_knows(client):
     for cls in (".skills-how", ".skill-actions", ".slash-name"):
         assert cls in CSS, cls
     assert 'href="#/skills"' in INDEX
+
+
+def test_short_table_names_on_the_face(client):
+    """The pages name a table by its short name; the physical name
+    stays in the tooltip, the link and the API."""
+    products = (FRONT / "js" / "pages" / "tables.js").read_text(encoding="utf-8")
+    assert "product-physical" not in products
+    page = (FRONT / "js" / "pages" / "table.js").read_text(encoding="utf-8")
+    assert 'title="${esc(physical)}">${\n          esc(physical.split(".").pop())}' in page
+    assert 'title="${esc(t)}">${esc(t.split(".").pop())}' in page
+    metrics = (FRONT / "js" / "pages" / "semantics.js").read_text(encoding="utf-8")
+    assert 'esc(r.table.split(".").pop())' in metrics
+    rows = client.get("/api/meridian/explorer/tables").json()["rows"]
+    assert all(r["physical"].startswith("dw.") for r in rows)     # unchanged
+
+
+def test_own_skills_and_the_creators(client):
+    """Skills marks the person's own packs; a pack saves for the
+    configured person and loads for them; the draft needs a model and
+    says so here; a file becomes text for the creators (a Word file
+    converted, a PDF refused with where to take it)."""
+    import base64
+    import io
+    import zipfile
+    shelf = client.get("/api/chat/skills").json()
+    assert shelf["available"] and shelf["owner"]
+    assert all("mine" in s and "owner" in s for s in shelf["skills"])
+    text = ("# Churn triage\n\nThe moves for a churn question.\n\n"
+            "## Split rate from mix\n1. search first.\n")
+    saved = client.post("/api/chat/skills/mine",
+                        json={"name": "Churn Triage", "text": text}).json()
+    assert saved["available"] and saved["skill"]["name"] == "churn-triage"
+    assert saved["skill"]["owner"] == shelf["owner"]
+    mine = next(s for s in client.get("/api/chat/skills").json()["skills"]
+                if s["name"] == "churn-triage")
+    assert mine["mine"] and mine["origin"] == "unreviewed"
+    refused = client.post("/api/chat/skills/mine", json={
+        "name": "analysis-playbooks", "text": text}).json()
+    assert refused["available"] is False and "built-in" in refused["reason"]
+    gone = client.delete("/api/chat/skills/mine/churn-triage").json()
+    assert gone["removed"] is True
+    assert not any(s["name"] == "churn-triage" for s in
+                   client.get("/api/chat/skills").json()["skills"])
+    draft = client.post("/api/chat/skills/draft", json={
+        "kind": "skill", "title": "Churn triage",
+        "material": "rate vs mix first"}).json()
+    assert draft["available"] is False and "not configured" in draft["reason"]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("word/document.xml", '<?xml version="1.0"?><w:document '
+                   'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml'
+                   '/2006/main"><w:body><w:p><w:r><w:t>Approvals are counted '
+                   'at decision time.</w:t></w:r></w:p></w:body></w:document>')
+    got = client.post("/api/chat/files/text", json={
+        "name": "memo.docx",
+        "data_b64": base64.b64encode(buf.getvalue()).decode()}).json()
+    assert got["available"] and got["converted"]
+    assert got["text"] == "Approvals are counted at decision time."
+    pdf = client.post("/api/chat/files/text", json={
+        "name": "memo.pdf", "data_b64": base64.b64encode(b"%PDF-1.4").decode()}
+        ).json()
+    assert pdf["available"] is False and "attach it in a chat" in pdf["reason"]
+    skills_js = (FRONT / "js" / "pages" / "skills.js").read_text(encoding="utf-8")
+    for piece in ("creatorPanel", "wireCreator", "Draft with the model",
+                  "Save as my skill", "api.chatDraft(", "api.chatSaveSkill(",
+                  "api.chatDeleteSkill(", "api.chatFileText(", "skill-delete",
+                  ">Yours<", ">Shared<", ">Built in<"):
+        assert piece in skills_js, piece
+    knowledge_js = (FRONT / "js" / "pages" / "knowledge.js").read_text(
+        encoding="utf-8")
+    for piece in ("renderKnowledge", 'creatorPanel("knowledge")',
+                  "Stage as a knowledge file", "api.stageArtifact(",
+                  'startsWith("skills/")'):
+        assert piece in knowledge_js, piece
+    for cls in (".creator", ".creator-rendered", ".origin-tag.o-mine"):
+        assert cls in CSS, cls

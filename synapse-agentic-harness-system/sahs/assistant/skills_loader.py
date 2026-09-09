@@ -12,6 +12,12 @@ Two shelves, one index:
     ``unreviewed`` everywhere they appear. A user pack cannot shadow
     a built-in name — the built-in wins and the user copy is ignored,
     so nobody smuggles new doctrine under a trusted label.
+  * **a person's own packs** live in ``<graph>/skills/users/<owner>/``
+    and load only for that owner (the runtime names the owner; today
+    the configured user, tomorrow the signed-in one). They are
+    unreviewed like any user pack, carry ``owner``, and shadow a
+    shared user pack of the same name for their owner alone — never
+    a built-in.
 
 Progressive disclosure is the point: the system prompt carries only
 names and one-liners (``render_skill_index``); the full text enters a
@@ -35,17 +41,30 @@ UNREVIEWED = "unreviewed"      # the E14 door: usable now, labeled
 @dataclass(frozen=True)
 class Pack(Skill):
     origin: str = BUILTIN
+    owner: str = ""             # a person's own pack: the owner's slug
 
 
 def builtin_root() -> Path:
     return Path(__file__).parent / "skills"
 
 
-def _packs(root: Path, origin: str) -> list[Pack]:
+def owner_slug(owner: str) -> str:
+    """The folder a person's packs live in: letters, digits, dashes."""
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "-", (owner or "").strip().lower())
+    return slug.strip("-")[:60]
+
+
+def user_root(graph_root: Path, owner: str) -> Path:
+    return skills_root(Path(graph_root)) / "users" / owner_slug(owner)
+
+
+def _packs(root: Path, origin: str, owner: str = "") -> list[Pack]:
     if not root.exists():
         return []
     return [Pack(name=s.name, title=s.title,
-                 description=s.description, text=s.text, origin=origin)
+                 description=s.description, text=s.text, origin=origin,
+                 owner=owner)
             for s in (_parse(p) for p in sorted(root.glob("*.md")))]
 
 
@@ -53,28 +72,36 @@ def builtin_skills() -> list[Pack]:
     return _packs(builtin_root(), BUILTIN)
 
 
-def all_skills(graph_root: Path | None = None) -> list[Pack]:
-    """Built-in packs first, then the analyst's own; built-in names
-    win collisions (see the module docstring for why)."""
+def all_skills(graph_root: Path | None = None,
+               owner: str = "") -> list[Pack]:
+    """Built-in packs first, then the owner's own, then the shared
+    user packs; built-in names win every collision, an own pack wins
+    over a shared one for its owner (see the module docstring)."""
     merged: dict[str, Pack] = {p.name: p for p in builtin_skills()}
     if graph_root is not None:
+        if owner_slug(owner):
+            for pack in _packs(user_root(Path(graph_root), owner),
+                               UNREVIEWED, owner_slug(owner)):
+                merged.setdefault(pack.name, pack)
         for pack in _packs(skills_root(Path(graph_root)), UNREVIEWED):
             merged.setdefault(pack.name, pack)
     return list(merged.values())
 
 
-def get_skill(graph_root: Path | None, name: str) -> Pack | None:
-    for pack in all_skills(graph_root):
+def get_skill(graph_root: Path | None, name: str,
+              owner: str = "") -> Pack | None:
+    for pack in all_skills(graph_root, owner):
         if pack.name == name:
             return pack
     return None
 
 
 def load_packs(graph_root: Path | None,
-               names: list[str]) -> tuple[list[Pack], list[str]]:
-    """(loaded, missing) across both shelves — the session-preload
+               names: list[str],
+               owner: str = "") -> tuple[list[Pack], list[str]]:
+    """(loaded, missing) across the shelves — the session-preload
     resolver. Missing names are reported, never invented."""
-    available = {p.name: p for p in all_skills(graph_root)}
+    available = {p.name: p for p in all_skills(graph_root, owner)}
     loaded, missing = [], []
     for name in names[:MAX_LOADED]:
         pack = available.get(name)
@@ -106,6 +133,6 @@ def render_skill_index(packs: list[Pack],
     return "\n".join(lines)
 
 
-__all__ = ["BUILTIN", "UNREVIEWED", "Pack", "builtin_root",
-           "builtin_skills", "all_skills", "get_skill", "load_packs",
-           "render_skill_index"]
+__all__ = ["BUILTIN", "UNREVIEWED", "Pack", "builtin_root", "owner_slug",
+           "user_root", "builtin_skills", "all_skills", "get_skill",
+           "load_packs", "render_skill_index"]

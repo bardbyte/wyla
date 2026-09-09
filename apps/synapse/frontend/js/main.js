@@ -2,7 +2,7 @@
  * it. A hash router over the left sidebar, a theme toggle.
  * Routes: #/chat #/chat/<session> #/search #/products
  *         #/product/<physical> #/metrics #/metric/<id> #/skills
- *         (#/artifacts stays reachable by URL: the shelf lives in the chat)
+ *         #/knowledge (#/artifacts is its old name and still answers)
  * Deep links work: a metric profile is a URL you can send someone. */
 
 import { renderChat } from "./pages/chat.js";
@@ -11,7 +11,7 @@ import { renderProducts } from "./pages/tables.js";
 import { renderTable } from "./pages/table.js";
 import { renderMetrics } from "./pages/semantics.js";
 import { renderMetric } from "./pages/metric.js";
-import { renderArtifacts } from "./pages/artifacts.js";
+import { renderKnowledge } from "./pages/knowledge.js";
 import { renderSkills } from "./pages/skills.js";
 import { refreshChats } from "./chats.js";
 
@@ -29,7 +29,8 @@ async function route() {
   teardown = null;
   const { page, arg } = parseRoute();
   const tab = page === "metric" ? "metrics"
-    : page === "product" ? "products" : page;
+    : page === "product" ? "products"
+    : page === "artifacts" ? "knowledge" : page;
   document.querySelectorAll(".navlist a[data-tab]").forEach((a) =>
     a.classList.toggle("active", a.dataset.tab === tab));
   outlet.classList.toggle("chatv2page", page === "chat");
@@ -41,7 +42,8 @@ async function route() {
     product: () => renderTable(outlet, arg),
     metrics: () => renderMetrics(outlet),
     metric: () => renderMetric(outlet, arg),
-    artifacts: () => renderArtifacts(outlet),
+    knowledge: () => renderKnowledge(outlet),
+    artifacts: () => renderKnowledge(outlet),      // the old name
     skills: () => renderSkills(outlet),
   };
   const render = pages[page] ?? pages.chat;

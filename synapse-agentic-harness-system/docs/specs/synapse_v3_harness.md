@@ -418,6 +418,22 @@ handoff, the eval suites.
    each plane, and re-sending bytes every turn would spend the
    context on what the answer already said.
 
+19. A person teaches the agent (2026-09-09). A skill or a knowledge
+   file is drafted by the model from the person's material in the
+   house format — a skill is doctrine (moves and checks, steering,
+   never facts), a knowledge file is reference (definitions, tables,
+   metrics, caveats, owner, every fact traceable to the material) —
+   read by the person before it is saved. An own pack lives under
+   `skills/users/<owner>/`, loads for that owner alone through the
+   same loader, index and `load_skill` tool as every pack, shadows a
+   shared pack of the same name for its owner and never a built-in;
+   a knowledge file is staged for a business unit and enters the
+   graph on the next build. The owner is a seam: the configured
+   person today, the signed-in one once identity lands. Reason: the
+   E14 door (usable now, labelled unreviewed) already held for user
+   packs; the model's rewrite makes the format consistent without
+   making the facts up.
+
 ## 12 · The laptop, measured (state report of 2026-09-02)
 
 What v3 is actually built against — not the fixture.

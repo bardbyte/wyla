@@ -18,7 +18,11 @@ key, never calls a model.
     GET  /api/chat/sessions/{id}/stream            → SSE (meridian.event/1)
     POST /api/chat/sessions/{id}/stop
     POST /api/chat/sessions/{id}/rename            {title}
-    GET  /api/chat/skills                          → both shelves
+    GET  /api/chat/skills                          → the shelves, the person's own marked
+    POST /api/chat/skills/draft                    {kind, title, material, hint?} → the model's draft
+    POST /api/chat/skills/mine                     {name, text} → the person's own pack, saved
+    DELETE /api/chat/skills/mine/{name}
+    POST /api/chat/files/text                      {name, data_b64} → a file as text (for the creators)
     POST /api/chat/sessions/{id}/skills            {names}
     GET  /api/chat/projects · POST /api/chat/projects
     POST /api/chat/projects/{id}                   {…updates}
@@ -84,6 +88,20 @@ class FileUpload(BaseModel):
     a 10 MB file is 14 MB of JSON, within the app's body limit."""
     name: str = Field(min_length=1, max_length=200)
     data_b64: str = Field(min_length=1, max_length=15_000_000)
+
+
+class DraftRequest(BaseModel):
+    """The creators: the model rewrites material into the house format."""
+    kind: str = Field(pattern=r"^(skill|knowledge)$")
+    title: str = Field(default="", max_length=200)
+    hint: str = Field(default="", max_length=1000)
+    material: str = Field(min_length=1, max_length=60_000)
+    model: str = Field(default="", max_length=12)
+
+
+class SaveSkill(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    text: str = Field(min_length=1, max_length=12_000)
 
 
 class SessionModel(BaseModel):
@@ -341,7 +359,69 @@ def rename(session_id: str, req: Rename) -> dict:
 @router.get("/skills")
 def list_skills() -> dict:
     runtime, _ = _chat()
-    return {"available": True, "skills": runtime.skills()}
+    return {"available": True, "skills": runtime.skills(),
+            "owner": runtime.owner}
+
+
+@router.post("/skills/draft")
+def draft_skill(req: DraftRequest) -> dict:
+    runtime, _ = _chat()
+    from sahs.ask.model import ModelUnavailable
+    try:
+        got = runtime.draft(req.kind, req.title, req.material, req.hint,
+                            plane=req.model)
+    except ModelUnavailable as e:
+        return _unavailable(str(e))
+    if not got.get("ok"):
+        return _unavailable(got.get("reason") or "no draft")
+    return {"available": True, "draft": got}
+
+
+@router.post("/skills/mine", status_code=201)
+def save_my_skill(req: SaveSkill) -> dict:
+    runtime, _ = _chat()
+    got = runtime.save_my_skill(req.name, req.text)
+    if not got.get("ok"):
+        return _unavailable(got.get("reason") or "not saved")
+    return {"available": True, "skill": got}
+
+
+@router.delete("/skills/mine/{name}")
+def delete_my_skill(name: str) -> dict:
+    runtime, _ = _chat()
+    return {"available": True, "removed": runtime.delete_my_skill(name)}
+
+
+@router.post("/files/text")
+def file_as_text(req: FileUpload) -> dict:
+    """A file as text for the creators: text files as they are, a
+    workbook, a Word file or a deck converted the way the chat does;
+    a PDF is refused here (attach it in a chat instead)."""
+    import base64
+    import binascii
+    from sahs.assistant import files as files_mod
+    try:
+        data = base64.b64decode(req.data_b64, validate=True)
+    except (binascii.Error, ValueError):
+        return _unavailable("the file bytes were not valid base64")
+    try:
+        suffix, _mime, how, _family = files_mod.check(req.name, len(data))
+    except files_mod.FileRefused as e:
+        return _unavailable(str(e))
+    if how == files_mod.INLINE:
+        return _unavailable(f"{req.name}: a {suffix} has no text to draft "
+                            "from here; attach it in a chat and ask "
+                            "there, or paste the words")
+    try:
+        if how == files_mod.CONVERT:
+            text = files_mod.CONVERTERS[suffix](data)
+        else:
+            text = data.decode("utf-8", errors="replace")
+    except files_mod.FileRefused as e:
+        return _unavailable(str(e))
+    return {"available": True, "name": req.name,
+            "text": text[:files_mod.MAX_TEXT_CHARS],
+            "converted": how == files_mod.CONVERT}
 
 
 @router.post("/sessions/{session_id}/skills")

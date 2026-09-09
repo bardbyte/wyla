@@ -516,7 +516,8 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                        mode: str = DEFAULT_MODE,
                        plane: str = "",
                        attachments: list[dict[str, Any]] | None = None,
-                       file_names: list[str] | None = None) -> str:
+                       file_names: list[str] | None = None,
+                       owner: str = "") -> str:
     session_id = session["id"]
     started = time.perf_counter()
     mode = mode if mode in MODES else DEFAULT_MODE
@@ -536,10 +537,11 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                     turn_id=turn_id, workspace=workspace, model=model,
                     substrate=substrate, snapshot_runner=snapshot_runner,
                     runner=runner, graph_root=graph_root,
-                    project_id=(project or {}).get("id", ""))
+                    project_id=(project or {}).get("id", ""),
+                    owner=owner)
     tools = declarations(kit)
     system = system_prompt(
-        build, skills, skill_index=all_skills(graph_root),
+        build, skills, skill_index=all_skills(graph_root, owner),
         memories=memories, project=project,
         artifacts=store.list_artifacts(session_id), notes=state.notes,
         user_name=user_name, mode=mode)
