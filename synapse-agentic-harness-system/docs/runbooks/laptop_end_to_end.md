@@ -458,6 +458,24 @@ columns they read. Skills replaces Artifacts in the nav: the doctrine
 packs the agent loads by itself, each with its slash command and a
 Use-in-chat door; `#/artifacts` still answers by URL.
 
+**Files in the chat.** The composer's "+" offers Add files. What the
+model reads natively rides as itself, inline on the user turn: PDF
+and images (PNG, JPEG, WEBP, HEIC). Text in its suffixes (txt, md,
+csv, tsv, json, xml, html, sql, py, yaml) rides as a text part. A
+workbook, a Word file or a deck is not native: it is converted to
+text here (sheets to CSV, paragraphs to text; a deck needs
+python-pptx from the assistant extra) and rides as text, disclosed
+as such. Old Office formats, archives, audio and video are refused
+with the reason. Limits: 10 MB a file, 18 MB of inline bytes on one
+message, 10 files a message. A file rides the message it is sent
+with; the conversation remembers that it was sent, by name, not its
+bytes: attach it again to ask more. `python scripts/files_check.py`
+proves what the machine's plane actually reads: it builds a PDF, a
+PNG, a CSV, a text file, a workbook and a Word file here, sends each
+on one call the way the chat would, and reads the answer for the
+token. Run it once on each plane before trusting a kind of file in
+the chat; the report is the answer to "what files are supported".
+
 **Before the first query:** the graph names tables `dw.<table>`, and
 BigQuery resolves that against the project that runs the query
 (`prj-p-lumi-gpt`), not the one that hosts the data. Set

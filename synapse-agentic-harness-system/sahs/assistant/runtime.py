@@ -175,6 +175,42 @@ class AssistantRuntime:
         now = self.plane_of(session)
         return {"ok": True, "plane": now, "model": self.label_for(now)}
 
+    # ── files on a chat (the composer's Add files) ────────────
+    def files(self, session_id: str) -> list[dict[str, Any]]:
+        from . import files as files_mod
+        if self.store.get_session(session_id) is None:
+            raise KeyError(session_id)
+        return files_mod.manifest(self.workspace(session_id))
+
+    def add_file(self, session_id: str, name: str,
+                 data: bytes) -> dict[str, Any]:
+        """Keep a file on the chat for its next message; a refusal
+        (type, size, a deck without its reader) is the reason."""
+        from . import files as files_mod
+        if self.store.get_session(session_id) is None:
+            raise KeyError(session_id)
+        return files_mod.store(self.workspace(session_id), name,
+                               data).row()
+
+    def remove_file(self, session_id: str, file_id: str) -> bool:
+        from . import files as files_mod
+        if self.store.get_session(session_id) is None:
+            raise KeyError(session_id)
+        return files_mod.remove(self.workspace(session_id), file_id)
+
+    @staticmethod
+    def file_support() -> dict[str, Any]:
+        from . import files as files_mod
+        return {"accepted": files_mod.support_table(),
+                "not_offered": [{"suffix": k, "reason": v}
+                                for k, v in files_mod.NOT_OFFERED.items()],
+                "max_file_mb": files_mod.MAX_FILE_BYTES // 1048576,
+                "max_inline_mb": files_mod.MAX_INLINE_BYTES // 1048576,
+                "max_files_per_message": files_mod.MAX_FILES_PER_TURN,
+                "note": "A file rides the message it is sent with; the "
+                        "conversation remembers that it was sent, not "
+                        "its bytes. Attach it again to ask more."}
+
     def dials(self) -> dict[str, Any]:
         """Everything the composer lets a person set, explained in one
         place: the modes, the depths (with what each does on each
@@ -327,7 +363,9 @@ class AssistantRuntime:
     def _model_turn(self, session_id: str, session: dict, rt: Any,
                     build: Build, turn_id: str, text: str, *,
                     depth: str = "", mode: str = "",
-                    plane: str = "") -> Any:
+                    plane: str = "",
+                    attachments: list[dict] | None = None,
+                    file_names: list[str] | None = None) -> Any:
         """One model turn as a callable: start_turn runs it on a
         thread; a run with dashboard=true chains it after the rows."""
         model = LazyModel(lambda: self.model_for(rt.budget, plane))
@@ -359,7 +397,9 @@ class AssistantRuntime:
                     runner=self.runner,
                     substrate=self.substrate,
                     thinking_level=level, user_name=self.user_name,
-                    mode=chosen, plane=plane)
+                    mode=chosen, plane=plane,
+                    attachments=attachments or [],
+                    file_names=file_names or [])
             except ModelUnavailable as e:
                 rt.bus.emit("error", turn_id=turn_id,
                             code="model_unavailable",
@@ -394,7 +434,8 @@ class AssistantRuntime:
 
     def start_turn(self, session_id: str, text: str,
                    depth: str = "", mode: str = "",
-                   model: str = "") -> dict:
+                   model: str = "",
+                   files: list[str] | None = None) -> dict:
         session = self.store.get_session(session_id)
         if session is None:
             raise KeyError(session_id)
@@ -409,19 +450,38 @@ class AssistantRuntime:
         if (model or "").strip().lower() and plane != (
                 session.get("model") or ""):
             self.store.set_model(session_id, plane)   # remembered
+        # the files ride this message: their parts are built before
+        # anything is stored, so an over-budget attachment is refused
+        # with the reason and the chat stays as it was
+        from . import files as files_mod
+        attachments: list[dict] = []
+        used: list[dict] = []
+        if files:
+            attachments, used = files_mod.parts_for(
+                self.workspace(session_id), list(files))
         turn_id = f"t_{uuid.uuid4().hex[:10]}"
         rt.abort = Abort()
         rt.current_turn = turn_id
-        self.store.add_message(session_id, "user", text,
-                               turn_id=turn_id)
+        names = [r["name"] for r in used]
+        self.store.add_message(
+            session_id, "user", text, turn_id=turn_id,
+            payload={"files": [{"id": r["id"], "name": r["name"],
+                                "family": r["family"], "size": r["size"],
+                                "rides": r["rides"]} for r in used]}
+            if used else None)
+        if used:
+            files_mod.mark_sent(self.workspace(session_id),
+                                [r["id"] for r in used], turn_id)
         worker = self._model_turn(session_id, session, rt, build,
                                   turn_id, text, depth=depth, mode=mode,
-                                  plane=plane)
+                                  plane=plane, attachments=attachments,
+                                  file_names=names)
         rt.thread = threading.Thread(target=worker, daemon=True,
                                      name=f"chat-{turn_id}")
         rt.thread.start()
         return {"turn_id": turn_id, "session_id": session_id,
-                "mode": self.mode_for(mode), "plane": plane}
+                "mode": self.mode_for(mode), "plane": plane,
+                "files": names}
 
     def find_proposal(self, session_id: str,
                       message_id: str = "") -> dict:

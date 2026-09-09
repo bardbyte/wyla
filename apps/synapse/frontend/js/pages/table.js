@@ -99,8 +99,8 @@ export async function renderTable(outlet, physical) {
   const pick = outlet.querySelector("#t-pick");
   if (all.length) {
     pick.innerHTML = all.map((t) => `
-      <option value="${esc(t)}" ${t === physical ? "selected" : ""}>${
-      esc(t)}</option>`).join("");
+      <option value="${esc(t)}" ${t === physical ? "selected" : ""}
+        title="${esc(t)}">${esc(t.split(".").pop())}</option>`).join("");
     const jump = (t) => { location.hash = `#/product/${
       encodeURIComponent(t)}`; };
     pick.addEventListener("change", () => jump(pick.value));
@@ -151,7 +151,8 @@ export async function renderTable(outlet, physical) {
   host.innerHTML = `
     <div class="card">
       <div class="profile-head">
-        <span class="profile-title mono">${esc(physical)}</span>
+        <span class="profile-title mono" title="${esc(physical)}">${
+          esc(physical.split(".").pop())}</span>
         ${detail.lob ? `<span class="chip" title="${esc(detail.lob_name
           || detail.lob)}">${esc(detail.lob)}</span>` : ""}
         <span class="muted">${columns.length} columns servable</span>
@@ -195,8 +196,9 @@ export async function renderTable(outlet, physical) {
           : (detail.joins ?? []).map((j) => `
             <div class="joinrow">
               <a class="linklike mono" href="#/product/${
-                encodeURIComponent(j.a === physical ? j.b : j.a)}">${
-                esc(j.a === physical ? j.b : j.a)}</a>
+                encodeURIComponent(j.a === physical ? j.b : j.a)}"
+                title="${esc(j.a === physical ? j.b : j.a)}">${
+                esc((j.a === physical ? j.b : j.a).split(".").pop())}</a>
               <span class="chip">${esc(j.source)}</span>
               ${j.scope === "scoped_only"
                 ? `<span class="warn">◐ CTE-scoped: NOT raw-safe</span>`

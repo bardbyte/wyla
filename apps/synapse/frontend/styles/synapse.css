@@ -236,3 +236,29 @@
 .skill-moves .pill { cursor: default; font-size: var(--fs-11); }
 .skill-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .skill-read { flex: 1 1 100%; }
+
+/* ── files on a message ── */
+.chat-files {
+  display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 0 6px;
+}
+.file-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 320px;
+  padding: 3px 6px 3px 4px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface-2); font-size: var(--fs-12); color: var(--ink-2);
+}
+.file-chip .file-kind {
+  font-family: var(--mono, ui-monospace, monospace); font-size: 10px;
+  text-transform: uppercase; padding: 1px 5px; border-radius: 5px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.file-chip .file-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.file-chip .file-x {
+  border: 0; background: transparent; color: var(--ink-3); cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0 2px;
+}
+.file-chip .file-x:hover { color: var(--ink); }
+.chat-user-files { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.file-chip.sent { background: transparent; }
+.plus-note { font-size: var(--fs-11); padding: 0 10px 6px; max-width: 260px; }

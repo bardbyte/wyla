@@ -47,6 +47,8 @@ export async function renderChat(outlet, wanted = "") {
             <textarea id="chat-input" rows="1"
               placeholder="Type / for skills"></textarea>
             <div class="chat-slash" id="chat-slash" hidden></div>
+            <div class="chat-files" id="chat-files" hidden></div>
+            <input type="file" id="chat-file-input" multiple hidden />
             <div class="chat-actions">
               <button class="icon-btn chat-plus" id="chat-plus"
                 title="More" aria-expanded="false">+</button>
@@ -279,17 +281,85 @@ export async function renderChat(outlet, wanted = "") {
   // the + menu: the real doors, never a dead control
   const plusPop = el("chat-plus-pop");
   plusPop.innerHTML = `
-    <button class="plus-item" id="plus-memory">⊚ Memory</button>
-    <a class="plus-item" href="#/chat/new">✳ New chat</a>`;
+    <button class="plus-item" id="plus-files">⊕ Add files</button>
+    <span class="plus-note muted" id="plus-files-note">PDF, images, text,
+      CSV, JSON, workbooks, Word files, decks</span>`;
   el("chat-plus").addEventListener("click", () => {
     plusPop.hidden = !plusPop.hidden;
     el("chat-plus").setAttribute("aria-expanded",
                                  String(!plusPop.hidden));
   });
-  plusPop.querySelector("#plus-memory").addEventListener("click", () => {
+  // ── files: added from the plus menu, shown as chips, riding the
+  //    next message; a refused file says why and leaves nothing behind
+  const fileInput = el("chat-file-input");
+  const filesRow = el("chat-files");
+  state.files = [];                       // pending, in order
+  const fmtSize = (n) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB`
+    : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`;
+  function paintFiles() {
+    filesRow.hidden = state.files.length === 0;
+    filesRow.innerHTML = state.files.map((f) => `
+      <span class="file-chip" data-id="${esc(f.id)}" title="${esc(
+        f.note || `${f.family} · rides ${f.rides === "inline" ? "as itself"
+                   : "as text"}`)}">
+        <span class="file-kind">${esc(f.suffix)}</span>
+        <span class="file-name">${esc(f.name)}</span>
+        <span class="muted">${fmtSize(f.size)}</span>
+        <button class="file-x" type="button" title="remove">×</button>
+      </span>`).join("");
+  }
+  api.chatFileSupport().then((got) => {
+    if (got && got.available) {
+      const kinds = [...new Set(got.accepted.map((a) => a.suffix))];
+      el("plus-files-note").textContent =
+        `${kinds.join(", ")} · up to ${got.max_file_mb} MB each`;
+      fileInput.accept = kinds.map((k) => `.${k}`).join(",");
+    }
+  }).catch(() => {});
+  plusPop.querySelector("#plus-files").addEventListener("click", () => {
     plusPop.hidden = true;
-    el("chat-memory-btn").click();
+    fileInput.click();
   });
+  const readB64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  fileInput.addEventListener("change", async () => {
+    const picked = [...fileInput.files];
+    fileInput.value = "";
+    for (const file of picked) {
+      let got;
+      try {
+        got = await api.chatUpload(state.session.id, file.name,
+                                   await readB64(file));
+      } catch (e) {
+        got = { available: false, reason: String(e) };
+      }
+      if (!got.available) {
+        setEmpty(false);
+        say(`<b>not attached.</b> ${esc(got.reason || file.name)}`, "error");
+        continue;
+      }
+      state.files.push(got.file);
+      paintFiles();
+    }
+  });
+  filesRow.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".file-x");
+    if (!btn) return;
+    const chip = btn.closest(".file-chip");
+    const id = chip.dataset.id;
+    state.files = state.files.filter((f) => f.id !== id);
+    paintFiles();
+    api.chatRemoveFile(state.session.id, id).catch(() => {});
+  });
+  // files uploaded before a reload are still pending on the chat
+  for (const f of (boot.files || [])) {
+    if (!f.sent_turn) state.files.push(f);
+  }
+  paintFiles();
   // the mode (§5): Chat hands queries over for you to run; Autopilot
   // runs and builds without stopping. Kept per browser.
   const MODE_KEY = "synapse-chat-mode";
@@ -1228,10 +1298,19 @@ export async function renderChat(outlet, wanted = "") {
     scroll();
   }
 
-  function userBubble(text, before = null) {
+  function userBubble(text, before = null, files = []) {
     const div = document.createElement("div");
     div.className = "chat-user";
     div.textContent = text;
+    if (files && files.length) {
+      const row = document.createElement("div");
+      row.className = "chat-user-files";
+      row.innerHTML = files.map((f) => `<span class="file-chip sent"
+        title="${esc(f.rides === "convert" ? "converted to text" : f.family || "")}">
+        <span class="file-kind">${esc(f.suffix || (f.name || "").split(".").pop())}</span>
+        <span class="file-name">${esc(f.name)}</span></span>`).join("");
+      div.appendChild(row);
+    }
     if (before) thread.insertBefore(div, before);
     else thread.appendChild(div);
     scroll();
@@ -1574,7 +1653,9 @@ export async function renderChat(outlet, wanted = "") {
     state.artifacts.set(row.artifact_id, row);
   }
   for (const message of boot.messages || []) {
-    if (message.role === "user") userBubble(message.text);
+    if (message.role === "user") {
+      userBubble(message.text, null, (message.payload || {}).files || []);
+    }
     else {
       const div = document.createElement("div");
       div.className = "chat-turn";
@@ -1624,14 +1705,19 @@ export async function renderChat(outlet, wanted = "") {
     el("chat-chiprow").innerHTML = "";
     slash.hidden = true;
     setEmpty(false);
-    userBubble(text);
+    const files = state.files.slice();
+    userBubble(text, null, files);
     input.value = "";
     const accepted = await api.chatSend(state.session.id, text,
                                         el("chat-depth").value,
-                                        state.mode, state.plane);
+                                        state.mode, state.plane,
+                                        files.map((f) => f.id));
     if (!accepted.available) {
       say(`<b>not sent.</b> ${esc(accepted.reason || "")}`, "error");
+      return;
     }
+    state.files = [];                    // they rode this message
+    paintFiles();
   }
   el("chat-send").addEventListener("click", () => send(input.value));
   input.addEventListener("keydown", (e) => {

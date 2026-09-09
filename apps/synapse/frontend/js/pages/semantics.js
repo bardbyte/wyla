@@ -107,7 +107,8 @@ function metricDetail(r, m, t) {
       ${r.table ? `
         <div class="metric-table">
           <a class="linklike mono" href="#/product/${
-            encodeURIComponent(r.table)}">${esc(r.table)}</a>
+            encodeURIComponent(r.table)}" title="${esc(r.table)}">${
+            esc(r.table.split(".").pop())}</a>
           ${t?.lob ? `<span class="chip" title="${esc(t.lob_name || t.lob)}">${
             esc(t.lob)}</span>` : ""}
           ${t?.description ? `<span class="muted">${esc(t.description)}</span>`

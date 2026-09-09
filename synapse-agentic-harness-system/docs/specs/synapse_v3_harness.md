@@ -407,6 +407,17 @@ handoff, the eval suites.
    a person choosing a column needs to know what it is before they
    ask, and the build already knew.
 
+18. Files ride the message (2026-09-09). Add files in the composer:
+   what Gemini reads natively (PDF, images) rides inline on the user
+   turn; text rides as a text part; Office files are converted to
+   text here and disclosed as converted; the rest is refused with the
+   reason. A file rides one message and the history keeps its name,
+   never its bytes; the transcript record names the inline part by
+   type and size, never its content. Reason: the model's own file
+   support is the contract, measured by `scripts/files_check.py` on
+   each plane, and re-sending bytes every turn would spend the
+   context on what the answer already said.
+
 ## 12 · The laptop, measured (state report of 2026-09-02)
 
 What v3 is actually built against — not the fixture.

@@ -6,7 +6,11 @@ key, never calls a model.
     POST /api/chat/sessions                        → session
     GET  /api/chat/sessions                        → the sidebar
     GET  /api/chat/sessions/{id}                   → transcript + artifacts (+ turn_after when a turn is running)
-    POST /api/chat/sessions/{id}/messages          {text, depth?, mode?, model?} → turn_id
+    POST /api/chat/sessions/{id}/messages          {text, depth?, mode?, model?, files?} → turn_id
+    GET  /api/chat/files/support                   what a person may attach, and how it rides
+    GET  /api/chat/sessions/{id}/files             the files on this chat (pending and sent)
+    POST /api/chat/sessions/{id}/files             {name, data_b64} → the stored file, or why not
+    DELETE /api/chat/sessions/{id}/files/{file_id}
     GET  /api/chat/dials                           the modes, depths and planes, explained
     POST /api/chat/sessions/{id}/model             {model} → the plane this chat rides
     POST /api/chat/sessions/{id}/run               {message_id?, sql?, limit?, dashboard?} → turn_id (no model call)
@@ -70,6 +74,16 @@ class NewMessage(BaseModel):
     mode: str = Field(default="", max_length=12)
     # the model switch: vertex | eag, or empty for the chat's own
     model: str = Field(default="", max_length=12)
+    # the files that ride this message (ids from POST …/files)
+    files: list[str] = Field(default_factory=list, max_length=10)
+
+
+class FileUpload(BaseModel):
+    """One file for the chat: the bytes base64, the name for its type.
+    JSON rather than multipart so the laptop needs no extra package;
+    a 10 MB file is 14 MB of JSON, within the app's body limit."""
+    name: str = Field(min_length=1, max_length=200)
+    data_b64: str = Field(min_length=1, max_length=15_000_000)
 
 
 class SessionModel(BaseModel):
@@ -175,7 +189,53 @@ def get_session(session_id: str) -> dict:
             # the composer's greeting, and the plane this chat rides
             # with its label
             "user_name": runtime.user_name,
-            "plane": plane, "model": runtime.label_for(plane)}
+            "plane": plane, "model": runtime.label_for(plane),
+            # the files on this chat: the composer shows the pending ones
+            "files": runtime.files(session_id)}
+
+
+@router.get("/files/support")
+def file_support() -> dict:
+    runtime, _ = _chat()
+    return {"available": True, **runtime.file_support()}
+
+
+@router.get("/sessions/{session_id}/files")
+def list_files(session_id: str) -> dict:
+    runtime, _ = _chat()
+    try:
+        return {"available": True, "files": runtime.files(session_id)}
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+
+
+@router.post("/sessions/{session_id}/files", status_code=201)
+def add_file(session_id: str, req: FileUpload) -> dict:
+    runtime, _ = _chat()
+    import base64
+    import binascii
+    from sahs.assistant.files import FileRefused
+    try:
+        data = base64.b64decode(req.data_b64, validate=True)
+    except (binascii.Error, ValueError):
+        return _unavailable("the file bytes were not valid base64")
+    try:
+        return {"available": True,
+                "file": runtime.add_file(session_id, req.name, data)}
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+    except FileRefused as e:
+        return _unavailable(str(e))
+
+
+@router.delete("/sessions/{session_id}/files/{file_id}")
+def remove_file(session_id: str, file_id: str) -> dict:
+    runtime, _ = _chat()
+    try:
+        gone = runtime.remove_file(session_id, file_id)
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+    return {"available": True, "removed": gone}
 
 
 @router.get("/dials")
@@ -205,16 +265,17 @@ def post_message(session_id: str, req: NewMessage) -> dict:
     runtime, _ = _chat()
     from sahs.ask.model import ModelUnavailable
     from sahs.ask.runtime import BuildUnavailable, TurnBusy
+    from sahs.assistant.files import FileRefused
     try:
         return {"available": True,
                 **runtime.start_turn(session_id, req.text,
                                      depth=req.depth, mode=req.mode,
-                                     model=req.model)}
+                                     model=req.model, files=req.files)}
     except KeyError:
         return _unavailable(f"no session {session_id}")
     except TurnBusy as e:
         return {"available": False, "reason": str(e), "busy": True}
-    except (BuildUnavailable, ModelUnavailable) as e:
+    except (BuildUnavailable, ModelUnavailable, FileRefused) as e:
         return _unavailable(str(e))
 
 

@@ -300,6 +300,13 @@ def _history(store: AssistantStore, session_id: str, turn_id: str,
             continue                         # this turn's ask goes last
         text = (row.get("text") or "").strip()
         payload = row.get("payload") or {}
+        if row["role"] == "user" and isinstance(payload, dict) \
+                and payload.get("files"):
+            # the bytes rode their own turn; later turns know a file
+            # was sent, by name, not its contents
+            text += ("\n(attached files on that message: "
+                     + ", ".join(f.get("name", "") for f in payload["files"])
+                     + ")")
         if row["role"] != "user" and isinstance(payload, dict):
             if payload.get("clarify") and not text:
                 text = str(payload["clarify"].get("question", ""))
@@ -330,6 +337,11 @@ def _tail(contents: list[dict[str, Any]], cap: int = 8000) -> str:
                 fc = part["functionCall"]
                 lines.append(f"[{content['role']}] call {fc.get('name')}"
                              f"({_short(fc.get('args'), 300)})")
+            elif "inlineData" in part:
+                blob = part["inlineData"]
+                lines.append(f"[{content['role']}] inline "
+                             f"{blob.get('mimeType', '?')} · "
+                             f"{len(blob.get('data', '')) * 3 // 4:,} bytes")
             elif part.get("text") and not part.get("thought"):
                 lines.append(f"[{content['role']}] "
                              + str(part["text"])[:1500])
@@ -502,7 +514,9 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                        max_calls: int = MAX_CALLS,
                        wall_seconds: float = WALL_SECONDS,
                        mode: str = DEFAULT_MODE,
-                       plane: str = "") -> str:
+                       plane: str = "",
+                       attachments: list[dict[str, Any]] | None = None,
+                       file_names: list[str] | None = None) -> str:
     session_id = session["id"]
     started = time.perf_counter()
     mode = mode if mode in MODES else DEFAULT_MODE
@@ -511,7 +525,8 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
              skills=[s.name for s in (skills or [])],
              memories=len(memories or []),
              project=(project or {}).get("name", ""),
-             thinking_level=thinking_level, mode=mode, plane=plane)
+             thinking_level=thinking_level, mode=mode, plane=plane,
+             files=list(file_names or []))
     budget.start_turn()
     prepare_workspace(workspace, build.root)
 
@@ -531,7 +546,10 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
     bus.emit("model_prompt", turn_id=turn_id, n=0, kind="system",
              content=system[:12000])
     contents = _history(store, session_id, turn_id)
-    contents.append({"role": "user", "parts": [{"text": text}]})
+    # the files ride this ask, before the words: the model reads them
+    # as part of the same turn
+    contents.append({"role": "user",
+                     "parts": [*(attachments or []), {"text": text}]})
 
     said: list[str] = []
     calls = 0

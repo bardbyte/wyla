@@ -35,7 +35,6 @@ export function productCard(r) {
                     esc(r.lob)}</span>`
                 : `<span class="chip muted">unmapped</span>`}
       </div>
-      <span class="mono muted product-physical">${esc(r.physical)}</span>
       <p class="product-desc">${esc(r.description
         || "No description on record yet: the archive and the "
            + "stewards have not described this table.")}</p>

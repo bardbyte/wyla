@@ -84,9 +84,19 @@ export const api = {
     get(`/api/chat/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   chatNewSession: () => post("/api/chat/sessions", {}),
   chatSession: (id) => get(`/api/chat/sessions/${encodeURIComponent(id)}`),
-  chatSend: (id, text, depth = "", mode = "", model = "") =>
+  chatSend: (id, text, depth = "", mode = "", model = "", files = []) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/messages`,
-         { text, depth, mode, model }),
+         { text, depth, mode, model, files }),
+  // files on a chat: what may be attached, add one (base64), drop one
+  chatFileSupport: () => get("/api/chat/files/support"),
+  chatUpload: (id, name, data_b64) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/files`,
+         { name, data_b64 }),
+  chatRemoveFile: async (id, fileId) => {
+    const r = await fetch(`/api/chat/sessions/${encodeURIComponent(id)
+      }/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
+    return r.json();
+  },
   // the dials explained, and the model switch remembered on the chat
   chatDials: () => get("/api/chat/dials"),
   chatSetModel: (id, model) =>
