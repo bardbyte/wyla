@@ -333,8 +333,10 @@ def test_the_plane_catalog_names_both_planes_and_why_one_cannot_be_ridden(
         monkeypatch.delenv(var, raising=False)
     rows = {r["id"]: r for r in plane_catalog()}
     assert list(rows) == ["vertex", "eag"]
-    assert rows["vertex"]["label"] == "Gemini 3.1 Pro Preview via Vertex"
-    assert rows["eag"]["label"] == "Gemini 2.5 Pro via EAG"
+    assert rows["vertex"]["label"] == "Gemini 3.1 Pro Preview"
+    assert rows["eag"]["label"] == "Gemini 2.5 Pro"
+    assert rows["vertex"]["plane_name"] == "Vertex"
+    assert rows["eag"]["plane_name"] == "EAG"
     assert not rows["vertex"]["available"] and "LUMI_VERTEX_SA_KEY" in \
         rows["vertex"]["reason"]
     assert not rows["eag"]["available"] and "APP_ID" in rows["eag"]["reason"]
@@ -433,5 +435,5 @@ def test_a_chat_switches_planes_from_the_composer(compiled, monkeypatch,
     with pytest.raises(ModelUnavailable) as err:
         runtime.set_session_model(session["id"], "vertex")
     assert "not configured on this machine" in str(err.value)
-    assert runtime.label_for("eag") == "Gemini 2.5 Pro via EAG"
-    assert runtime.model_label == "Gemini 2.5 Pro via EAG"
+    assert runtime.label_for("eag") == "Gemini 2.5 Pro"
+    assert runtime.model_label == "Gemini 2.5 Pro"

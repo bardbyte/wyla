@@ -61,18 +61,18 @@ def client(compiled) -> TestClient:
 def test_shell_is_stripped_and_renamed():
     """The left header says Synapse Semantic Intelligence; Home, Cosmos
     and Operate are gone; New chat and Search chats sit at the top, the
-    chats under them, and Data Products, Metrics Explorer and Skills in
+    chats under them, and Data Products, Semantics Explorer and Skills in
     their own section at the bottom above the account (Artifacts left
     the nav: the shelf lives in the chat, the Skills page showcases
     what the agent knows how to do)."""
     assert "<title>Synapse Semantic Intelligence</title>" in INDEX
     assert ">Synapse</a>" in INDEX and "Semantic Intelligence" in INDEX
     for gone in ("#/home", "#/cosmos", "#/operate", "#/ask", "#/artifacts",
-                 "powered by Lumi", "Semantics Explorer", ">Tables<",
+                 "powered by Lumi", "Metrics Explorer", ">Tables<",
                  ">Home<", ">Artifacts<", "chats-search"):
         assert gone not in INDEX, gone
     explore = INDEX.split('aria-label="Explore"')[1].split("</nav>")[0]
-    for kept in ("Data Products", "Metrics Explorer", "Skills", "Knowledge"):
+    for kept in ("Data Products", "Semantics Explorer", "Skills", "Knowledge"):
         assert kept in explore, kept
     assert explore.index("Skills") < explore.index("Knowledge")
     order = [INDEX.index('href="#/chat/new"'), INDEX.index('href="#/search"'),
@@ -125,7 +125,7 @@ def test_library_pages_are_cards():
     for field in ("r.description", "r.rows", "r.latest_partition",
                   "r.metric_names", "r.join_partners", "r.owner"):
         assert field in products, field
-    assert "Metrics Explorer" in metrics and "metric-card" in metrics
+    assert "Semantics Explorer" in metrics and "metric-card" in metrics
     for field in ("r.question", "r.grain", "r.dimensions", "r.execution_count",
                   "r.description", "statusLabel(r.status_served)"):
         assert field in metrics, field
@@ -275,7 +275,7 @@ def test_the_second_surface_switches_models_and_explains_the_dials(client):
     for piece in ('id="chat-model"', 'id="chat-help"', "chat-help-pop",
                   "api.chatDials()", "api.chatSetModel(",
                   "state.mode, state.plane", "help-group",
-                  "Mode <span>", "Depth <span>", "Model <span>"):
+                  "Depth <span>", "Model <span>"):
         assert piece in CHAT, piece
     app_css = (FRONT / "styles" / "app.css").read_text(encoding="utf-8")
     for cls in (".chat-plane", ".chat-help", ".chat-help-pop",
@@ -296,10 +296,22 @@ def test_data_products_filter_by_line_of_business(client):
     assert gms["lob_name"] == "Global Merchant & Network Services"
     assert all("lob_name" in r for r in rows)
     products = (FRONT / "js" / "pages" / "tables.js").read_text(encoding="utf-8")
-    for piece in ('id="p-lob"', "all lines of business", "unmapped",
-                  "r.lob_name", "state.lob === \"unmapped\"", "lob-filter"):
+    for piece in ('id="p-filter"', "filterBar(", "optionsFrom(",
+                  '"Line of business"', '"Layer"', '"Lifecycle"', "unmapped",
+                  "r.lob_name", 'picks.lob === "unmapped"'):
         assert piece in products, piece
-    assert ".lob-filter" in CSS
+    assert "p-lob" not in products and "<select" not in products
+    metrics = (FRONT / "js" / "pages" / "semantics.js").read_text(encoding="utf-8")
+    for piece in ('id="m-filter"', "filterBar(", '"Data product"',
+                  "lob: picks.lob", "table: picks.table"):
+        assert piece in metrics, piece
+    assert "table-filter" not in metrics and "<select" not in metrics
+    filters = (FRONT / "js" / "filters.js").read_text(encoding="utf-8")
+    for piece in ("export function filterBar", "export function optionsFrom",
+                  "filter-chip", "filter-opt", 'data-value=""'):
+        assert piece in filters, piece
+    for cls in (".filter-bar", ".filter-pop", ".filter-chip", ".filter-opt.on"):
+        assert cls in CSS, cls
 
 
 def test_the_product_page_explains_every_column(client):
@@ -476,3 +488,16 @@ def test_own_skills_and_the_creators(client):
     assert "Stage as a knowledge file" in skills_js     # the shared panel
     for cls in (".creator", ".creator-rendered", ".origin-tag.o-mine"):
         assert cls in CSS, cls
+
+
+def test_the_shelf_and_the_help_read_plainly():
+    """An empty chat stays off Recent and is reused by New chat; the
+    "?" explains Depth and Model only, in plain words, and the model
+    is named without its plane."""
+    chats = (FRONT / "js" / "chats.js").read_text(encoding="utf-8")
+    assert "(row.messages ?? 1) > 0" in chats
+    assert 'find((r) => r.messages === 0)' in CHAT
+    assert "Mode <span>" not in CHAT and "on Vertex" not in CHAT
+    assert "Depth <span>how much Synapse thinks before each step" in CHAT
+    assert 'if (d) o.title = d.means;' in CHAT
+    assert "Semantics Explorer" in INDEX and "Metrics Explorer" not in INDEX

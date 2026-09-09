@@ -11,7 +11,7 @@ import {
 export async function renderMetric(outlet, id) {
   outlet.innerHTML = `
     <div class="masthead" style="padding:0">
-      <a class="linklike" href="#/metrics">← Metrics Explorer</a>
+      <a class="linklike" href="#/metrics">← Semantics Explorer</a>
       <span class="muted">› Metric Profile</span>
     </div>
     <div id="siblings"></div>

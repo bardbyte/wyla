@@ -143,8 +143,44 @@
 }
 .artifact-body > .watermark-band + svg.chartv2 { max-width: 720px; }
 
-/* ── the line-of-business filter ── */
-.lob-filter { max-width: 340px; }
+/* ── the filter icon: a funnel, a panel of groups, the picks as chips ── */
+.filter-bar { position: relative; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filter-btn { display: inline-flex; align-items: center; gap: 6px; }
+.filter-btn.on { border-color: var(--accent); color: var(--accent); }
+.filter-btn .funnel { font-size: 12px; }
+.filter-count {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-size: 11px; line-height: 18px;
+  text-align: center;
+}
+.filter-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.filter-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px 3px 8px;
+  border: 1px solid var(--line); border-radius: 999px; font-size: var(--fs-12);
+  background: var(--surface-2);
+}
+.filter-chip .chip-x {
+  border: 0; background: transparent; color: var(--ink-3); cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0 2px;
+}
+.filter-pop {
+  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0;
+  min-width: 260px; max-width: 420px; max-height: 60vh; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: var(--shadow-lift); padding: 8px; display: flex; flex-direction: column; gap: 8px;
+}
+.filter-group { display: flex; flex-direction: column; gap: 1px; }
+.filter-head {
+  font-size: var(--fs-11); text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--ink-3); padding: 4px 8px 2px;
+}
+.filter-opt {
+  display: flex; justify-content: space-between; gap: 12px; width: 100%;
+  padding: 6px 10px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--ink); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer;
+}
+.filter-opt:hover { background: var(--surface-2); }
+.filter-opt.on { background: var(--accent-soft); color: var(--accent); }
 
 /* ── the product profile: what it is, then the columns as a list ── */
 .product-desc-full {

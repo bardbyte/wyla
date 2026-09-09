@@ -151,7 +151,8 @@ class AssistantRuntime:
 
     def label_for(self, plane: str = "") -> str:
         """The model as the composer names it, for a plane: "Gemini
-        2.5 Pro via EAG"; a scripted transport says so."""
+        2.5 Pro" (the plane is the catalog's business, not the
+        label's); a scripted transport says so."""
         if self._model_factory is not None:
             return "scripted"
         from sahs.util.eag import model_plane
@@ -371,7 +372,7 @@ class AssistantRuntime:
     @property
     def model_label(self) -> str:
         """The model a new chat starts on, as the composer names it
-        ("Gemini 2.5 Pro via EAG"); a scripted transport says so."""
+        ("Gemini 2.5 Pro"); a scripted transport says so."""
         return self.label_for("")
 
     def slash_skill(self, text: str) -> tuple[str, list[str]]:

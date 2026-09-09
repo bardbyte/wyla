@@ -140,7 +140,8 @@ def plane_catalog() -> list[dict[str, Any]]:
     eag_model = Config.from_env().model
     return [
         {"id": "vertex",
-         "label": f"{pretty_model(vertex_model)} via Vertex",
+         "label": pretty_model(vertex_model),
+         "plane_name": "Vertex",
          "model": vertex_model,
          "available": vertex_ok,
          "reason": "" if vertex_ok else
@@ -152,7 +153,8 @@ def plane_catalog() -> list[dict[str, Any]]:
          "feel": "streams",
          "default": default == "vertex"},
         {"id": "eag",
-         "label": f"{pretty_model(eag_model)} via EAG",
+         "label": pretty_model(eag_model),
+         "plane_name": "EAG",
          "model": eag_model,
          "available": eag_configured(),
          "reason": "" if eag_configured() else

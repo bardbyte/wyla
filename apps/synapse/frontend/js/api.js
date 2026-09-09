@@ -42,6 +42,7 @@ export const api = {
     if (params.status) search.set("status", params.status);
     if (params.lob) search.set("lob", params.lob);
     if (params.table) search.set("table", params.table);
+    if (params.limit) search.set("limit", String(params.limit));
     return get(`/api/meridian/explorer/metrics?${search}`);
   },
   artifactFile: (rel) =>

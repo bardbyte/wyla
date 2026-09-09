@@ -422,7 +422,7 @@ JSON) back.
 **The chat on EAG (Gemini 2.5 Pro).** With `APP_ID` and `APP_SECRET`
 in the silo `.env` the chat's model calls ride EAG (`SAHS_MODEL_PLANE`
 is `auto`; set it to `vertex` to go back, `eag` to insist). Restart
-the app: the composer's model label reads "Gemini 2.5 Pro via EAG",
+the app: the composer's model label reads "Gemini 2.5 Pro",
 `python scripts/turn_doctor.py` prints the plane and why, and
 `python scripts/planes_check.py` proves it in one process after a dry
 run: the token minted, its remaining life, one model answer. What
@@ -439,17 +439,18 @@ retried once. The prompt is unchanged; where 2.5 slips is a matter
 for the evals, not for guessing.
 
 **Switching models from the composer.** The label by the composer is
-a select: "Gemini 3.1 Pro Preview via Vertex" or "Gemini 2.5 Pro via
-EAG", both surfaces. A plane the machine cannot ride is listed greyed
-with "not configured" and the reason in its tooltip; picking one that
+a select: "Gemini 3.1 Pro Preview" or "Gemini 2.5 Pro" (the plane
+each rides is the "?"'s business, not the label's), both surfaces. A
+plane the machine cannot ride is listed greyed with "not configured"
+and the reason in its tooltip; picking one that
 can be ridden is remembered on that chat, rides from the next message
 on, and survives a reload (`SAHS_MODEL_PLANE` only says where a new
 chat starts). The conversation carries over as text, so a chat can
-change model mid-way. The "?" beside the dials opens the explanation:
-Chat and Autopilot; Quick, Standard and Deep with what each does on
-each plane (a thinking level on Vertex, a thinking budget on EAG;
-depth changes nothing but the thinking); and both models with whether
-each is configured here. `GET /api/chat/dials` is the one source, and
+change model mid-way. The "?" beside the dials opens the explanation
+in plain words: Quick, Standard and Deep (how much Synapse thinks
+before each step), and both models with whether each is available
+here. The per-plane facts (a thinking level on Vertex, a thinking
+budget on EAG) stay in `GET /api/chat/dials` for the curious. `GET /api/chat/dials` is the one source, and
 `python scripts/turn_doctor.py` prints the plane and the depth on
 every turn's line.
 
