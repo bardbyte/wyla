@@ -880,7 +880,7 @@ def test_the_composer_names_the_model_the_client_will_use(compiled,
     assert DEFAULT_VERTEX_MODEL.split("-")[0].capitalize() \
         in runtime.model_label
     monkeypatch.setenv("VERTEX_MODEL", "gemini-2.5-pro")
-    assert runtime.model_label == "Gemini 2.5 Pro"
+    assert runtime.model_label == "Gemini 2.5 Pro via Vertex"
 
 
 def test_chart_rows_draws_the_saved_rows_without_the_model(

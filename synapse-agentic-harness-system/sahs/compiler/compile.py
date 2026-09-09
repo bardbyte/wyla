@@ -648,6 +648,27 @@ def compile_build(graph_root: Path, builds_root: Path
     (build_dir / "schema.json").write_text(
         json.dumps(schema, indent=1, sort_keys=True) + "\n",
         encoding="utf-8")
+    # the same columns with their meaning: what each one is, from
+    # where, how sensitive, how agreed — complete, where the served
+    # card is budgeted and may drop columns past the twelfth
+    columns_index = {
+        c.physical: [
+            {"name": column.name, "type": column.data_type,
+             "type_source": column.type_source,
+             "description": column.description,
+             "description_source": column.description_source,
+             "supplementary": column.description_supplementary,
+             "business_name": column.business_name,
+             "sensitive": bool(column.sensitive),
+             "sensitivity_sources": list(column.sensitivity_sources),
+             "ungoverned": bool(column.ungoverned),
+             "agreement": int(column.agreement_count),
+             "flags": list(column.flags)}
+            for column in c.columns.values()]
+        for c in consensus.values()}
+    (build_dir / "columns.json").write_text(
+        json.dumps(columns_index, indent=1, sort_keys=True) + "\n",
+        encoding="utf-8")
     # five join-knowledge families, each named: co-query digests say
     # tables appear together, jobs ON-clauses say HOW (measured),
     # declared constraints say HOW by fiat, studio witnesses say HOW

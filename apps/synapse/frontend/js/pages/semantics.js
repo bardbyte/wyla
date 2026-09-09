@@ -3,7 +3,10 @@
  * data product, searchable. A card shows the name, the exact
  * calculation, the question it answers, where it is computed, its
  * grain and usual dimensions, and how much real use stands behind
- * it. A card opens the metric profile. */
+ * it. A click opens the card in place: the full definition, the
+ * data product it is computed on with the columns it reads, the
+ * filters that are part of its identity, and the receipts; the full
+ * profile is one more link. */
 
 import { api } from "../api.js";
 import {
@@ -18,6 +21,10 @@ const STATUS_LABEL = {
 };
 const fmt = (n) => new Intl.NumberFormat().format(n);
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const mentions = (text, name) =>
+  new RegExp(`(^|[^A-Za-z0-9_])${escapeRe(name)}($|[^A-Za-z0-9_])`)
+    .test(String(text || ""));
 
 export function metricCard(r) {
   const usedBy = Object.keys(r.used_by || {});
@@ -44,8 +51,8 @@ export function metricCard(r) {
     ? r.description.slice(0, 160) + (r.description.length > 160 ? "…" : "")
     : "";
   return `
-    <a class="card metric-card" href="#/metric/${
-      encodeURIComponent(r.id)}" title="${esc(r.label || r.id)}">
+    <div class="card metric-card" data-id="${esc(r.id)}" role="button"
+      tabindex="0" aria-expanded="false" title="${esc(r.label || r.id)}">
       <div class="metric-head">
         <span class="metric-name">${esc(r.label)
           || `${esc((r.fp || r.id).slice(0, 12))}… “?”`}</span>
@@ -59,7 +66,73 @@ export function metricCard(r) {
       <div class="product-stats">${stats.join("")}</div>
       ${guidance ? `<p class="metric-guidance muted">${esc(guidance)}</p>`
                  : ""}
-    </a>`;
+      <div class="metric-foot">
+        <span class="muted metric-hint">click for the definition and the table</span>
+        <a class="linklike metric-open" href="#/metric/${
+          encodeURIComponent(r.id)}">full profile →</a>
+      </div>
+      <div class="metric-detail" hidden></div>
+    </div>`;
+}
+
+// the open card: everything the build says about the metric, and the
+// data product under it with the columns the calculation reads
+function metricDetail(r, m, t) {
+  const sql = m.canonical_sql || r.expr || "";
+  const tableColumns = Object.keys((t && t.columns) || {});
+  const reads = tableColumns.filter((name) => mentions(sql, name));
+  const dims = m.approved_dimensions || m.group_by_patterns
+    || r.dimensions || [];
+  const filters = m.common_filters || [];
+  const partners = [...new Set((t?.joins || []).map((j) =>
+    j.a === r.table ? j.b : j.a).filter((x) => x && x !== r.table))];
+  return `
+    <div class="metric-def">
+      <div class="card-label">DEFINITION</div>
+      <pre class="md-code">${esc(sql || "no calculation on record")}</pre>
+      ${m.description ? `<p>${esc(m.description)}</p>` : ""}
+      <div class="product-meta muted">
+        ${m.question ? `<span>answers “${esc(m.question)}”${m.question_source
+          ? ` (${esc(m.question_source)})` : ""}</span>` : ""}
+        ${(m.grain || m.grain_observed) ? `<span>grain ${
+          esc(m.grain || m.grain_observed)}${!m.grain && m.grain_observed
+            ? " (observed)" : ""}</span>` : ""}
+        ${dims.length ? `<span>by ${esc(dims.slice(0, 6).join(", "))}</span>` : ""}
+        ${filters.length ? `<span>filters: <span class="mono">${
+          esc(filters.join(" · "))}</span></span>` : ""}
+      </div>
+    </div>
+    <div class="metric-where">
+      <div class="card-label">COMPUTED ON</div>
+      ${r.table ? `
+        <div class="metric-table">
+          <a class="linklike mono" href="#/product/${
+            encodeURIComponent(r.table)}" title="${esc(r.table)}">${
+            esc(r.table.split(".").pop())}</a>
+          ${t?.lob ? `<span class="chip" title="${esc(t.lob_name || t.lob)}">${
+            esc(t.lob)}</span>` : ""}
+          ${t?.description ? `<span class="muted">${esc(t.description)}</span>`
+                           : ""}
+        </div>
+        ${reads.length ? `<div class="col-uses"><span class="muted">reads</span>${
+          reads.map((c) => `<span class="pill mono">${esc(c)}</span>`).join("")
+          }</div>` : ""}
+        ${partners.length ? `<div class="col-uses"><span class="muted">joins
+          on record with</span>${partners.slice(0, 4).map((p) => `
+          <a class="pill" href="#/product/${encodeURIComponent(p)}">${
+            esc(p.split(".").pop())}</a>`).join("")}</div>` : ""}`
+        : `<span class="muted">no table binding on record</span>`}
+    </div>
+    <div class="metric-proof muted">
+      ${esc(statusLabel(m.status_served || m.status || r.status_served))}
+      · ${r.support} uses · witness agreement ${
+        m.witness_agreement ?? r.agreement ?? 0}
+      ${r.execution_count ? ` · ${fmt(r.execution_count)} executions` : ""}
+      ${m.evidence_origin ? ` · evidence ${esc(m.evidence_origin)}` : ""}
+      ${Object.keys(m.used_by || {}).length ? ` · used by ${
+        esc(Object.entries(m.used_by).map(([u, n]) => `${u} ${n}`)
+          .join(", "))}` : ""}
+    </div>`;
 }
 
 export async function renderMetrics(outlet) {
@@ -70,7 +143,8 @@ export async function renderMetrics(outlet) {
         <h1>Metrics Explorer</h1>
         <p class="muted">Every metric the build holds, published first.
         Each card shows the exact calculation and the real use behind
-        it; open one for its full definition, lineage and receipts.</p>
+        it; click one for its full definition and the data product it
+        is computed on, or open the profile for lineage and receipts.</p>
       </div>
       <div class="library-tools">
         <input class="search" id="search"
@@ -111,10 +185,46 @@ export async function renderMetrics(outlet) {
     };
   };
 
+  // the open card: fetched once per metric (the profile row and the
+  // table under it), then kept
+  const rowsById = new Map();
+  const details = new Map();
+  const list = outlet.querySelector("#list");
+  async function openCard(el) {
+    const id = el.dataset.id;
+    const r = rowsById.get(id);
+    const detail = el.querySelector(".metric-detail");
+    const on = !el.classList.contains("open");
+    el.classList.toggle("open", on);
+    el.setAttribute("aria-expanded", String(on));
+    detail.hidden = !on;
+    if (!on || !r) return;
+    if (!details.has(id)) {
+      detail.innerHTML = loading();
+      const [m, t] = await Promise.all([
+        api.metric(id).catch(() => ({})),
+        r.table ? api.table(r.table).catch(() => null) : Promise.resolve(null),
+      ]);
+      details.set(id, metricDetail(
+        r, (m && m.metric) || {}, t && t.found ? t : null));
+    }
+    if (!detail.isConnected) return;
+    detail.innerHTML = details.get(id);
+  }
+  list.addEventListener("click", (e) => {
+    if (e.target.closest("a")) return;        // links navigate
+    const el = e.target.closest(".metric-card");
+    if (el && !e.target.closest(".metric-detail")) openCard(el);
+  });
+  list.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const el = e.target.closest(".metric-card");
+    if (el && e.target === el) { e.preventDefault(); openCard(el); }
+  });
+
   async function draw() {
     pills(outlet.querySelector("#status-pills"), STATUSES, state.status,
       (v) => { state.status = v; draw(); }, STATUS_LABEL);
-    const list = outlet.querySelector("#list");
     list.innerHTML = loading();
     const data = await api.metrics(
       { q: state.q, status: state.status, table: state.table });
@@ -122,6 +232,8 @@ export async function renderMetrics(outlet) {
     if (!data.available) { list.innerHTML = unavailable(data.reason); return; }
     outlet.querySelector("#count").textContent =
       `${data.shown} of ${plural(data.total, "metric")}`;
+    rowsById.clear();
+    for (const r of data.rows) rowsById.set(r.id, r);
     list.innerHTML = data.rows.length
       ? data.rows.map(metricCard).join("")
       : card("", `<p class="muted">no metric matches. A narrower filter,

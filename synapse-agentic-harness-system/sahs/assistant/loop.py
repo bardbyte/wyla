@@ -46,6 +46,28 @@ WALL_SECONDS = 600.0
 MAX_OUTPUT_TOKENS = 16384
 HISTORY_MESSAGES = 30      # stored messages replayed into the interaction
 THINKING_LEVELS = {"quick": "low", "standard": "medium", "deep": "high"}
+# the depth dial as the composer explains it (§5): each stop changes
+# how much the model thinks before every step — nothing else. The
+# call ceiling and the wall clock are the same at every depth.
+DEPTHS: dict[str, dict[str, str]] = {
+    "quick": {
+        "label": "Quick", "level": "low",
+        "means": "A short think before each step. Right for a lookup, "
+                 "a definition, a rename, or a follow-up on rows "
+                 "already here.",
+    },
+    "standard": {
+        "label": "Standard", "level": "medium",
+        "means": "The default. Enough thinking to find the right "
+                 "metric, prove the query and hand it over.",
+    },
+    "deep": {
+        "label": "Deep", "level": "high",
+        "means": "The most thinking per step: a multi-step analysis, "
+                 "an unfamiliar join, or a question with several ways "
+                 "to read it. Slower, and it costs more.",
+    },
+}
 DEFAULT_THINKING = "medium"
 
 # the first sentence is the transport routing key (agent.ROUTING_KEY)
@@ -120,6 +142,21 @@ MODES: dict[str, str] = {
         "and stop."),
 }
 DEFAULT_MODE = "chat"
+# the autonomy slider as the composer explains it
+MODE_MEANS: dict[str, dict[str, str]] = {
+    "chat": {
+        "label": "Chat",
+        "means": "Synapse finds the definition, proves the query with "
+                 "a dry run and hands it over on a card. You press Run. "
+                 "Nothing is scanned until you do.",
+    },
+    "autopilot": {
+        "label": "Autopilot",
+        "means": "Synapse runs the query itself under the limits, "
+                 "checks the rows and builds the deliverable without "
+                 "stopping to hand over.",
+    },
+}
 
 _DIGEST_CACHE: dict[str, str] = {}
 
@@ -263,6 +300,13 @@ def _history(store: AssistantStore, session_id: str, turn_id: str,
             continue                         # this turn's ask goes last
         text = (row.get("text") or "").strip()
         payload = row.get("payload") or {}
+        if row["role"] == "user" and isinstance(payload, dict) \
+                and payload.get("files"):
+            # the bytes rode their own turn; later turns know a file
+            # was sent, by name, not its contents
+            text += ("\n(attached files on that message: "
+                     + ", ".join(f.get("name", "") for f in payload["files"])
+                     + ")")
         if row["role"] != "user" and isinstance(payload, dict):
             if payload.get("clarify") and not text:
                 text = str(payload["clarify"].get("question", ""))
@@ -293,6 +337,11 @@ def _tail(contents: list[dict[str, Any]], cap: int = 8000) -> str:
                 fc = part["functionCall"]
                 lines.append(f"[{content['role']}] call {fc.get('name')}"
                              f"({_short(fc.get('args'), 300)})")
+            elif "inlineData" in part:
+                blob = part["inlineData"]
+                lines.append(f"[{content['role']}] inline "
+                             f"{blob.get('mimeType', '?')} · "
+                             f"{len(blob.get('data', '')) * 3 // 4:,} bytes")
             elif part.get("text") and not part.get("thought"):
                 lines.append(f"[{content['role']}] "
                              + str(part["text"])[:1500])
@@ -464,7 +513,11 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                        user_name: str = "",
                        max_calls: int = MAX_CALLS,
                        wall_seconds: float = WALL_SECONDS,
-                       mode: str = DEFAULT_MODE) -> str:
+                       mode: str = DEFAULT_MODE,
+                       plane: str = "",
+                       attachments: list[dict[str, Any]] | None = None,
+                       file_names: list[str] | None = None,
+                       owner: str = "") -> str:
     session_id = session["id"]
     started = time.perf_counter()
     mode = mode if mode in MODES else DEFAULT_MODE
@@ -473,7 +526,8 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
              skills=[s.name for s in (skills or [])],
              memories=len(memories or []),
              project=(project or {}).get("name", ""),
-             thinking_level=thinking_level, mode=mode)
+             thinking_level=thinking_level, mode=mode, plane=plane,
+             files=list(file_names or []))
     budget.start_turn()
     prepare_workspace(workspace, build.root)
 
@@ -483,17 +537,21 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                     turn_id=turn_id, workspace=workspace, model=model,
                     substrate=substrate, snapshot_runner=snapshot_runner,
                     runner=runner, graph_root=graph_root,
-                    project_id=(project or {}).get("id", ""))
+                    project_id=(project or {}).get("id", ""),
+                    owner=owner)
     tools = declarations(kit)
     system = system_prompt(
-        build, skills, skill_index=all_skills(graph_root),
+        build, skills, skill_index=all_skills(graph_root, owner),
         memories=memories, project=project,
         artifacts=store.list_artifacts(session_id), notes=state.notes,
         user_name=user_name, mode=mode)
     bus.emit("model_prompt", turn_id=turn_id, n=0, kind="system",
              content=system[:12000])
     contents = _history(store, session_id, turn_id)
-    contents.append({"role": "user", "parts": [{"text": text}]})
+    # the files ride this ask, before the words: the model reads them
+    # as part of the same turn
+    contents.append({"role": "user",
+                     "parts": [*(attachments or []), {"text": text}]})
 
     said: list[str] = []
     calls = 0
@@ -1126,7 +1184,8 @@ def _finish(bus: EventBus, budget: Any, turn_id: str, status: str,
              **extra, **budget.tick())
 
 
-__all__ = ["ASSISTANT_VERSION", "IDENTITY", "THINKING_LEVELS",
+__all__ = ["ASSISTANT_VERSION", "IDENTITY", "THINKING_LEVELS", "DEPTHS",
+           "MODE_MEANS",
            "DEFAULT_THINKING", "MODES", "DEFAULT_MODE", "system_prompt",
            "summarize", "run_assistant_turn", "run_proposal_turn",
            "chart_rows_turn"]

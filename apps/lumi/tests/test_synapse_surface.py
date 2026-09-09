@@ -59,19 +59,22 @@ def client(compiled) -> TestClient:
 
 
 def test_shell_is_stripped_and_renamed():
-    """The left header says Synapse Semantic Intelligence; Home, Skills,
-    Cosmos and Operate are gone; New chat and Search chats sit at the
-    top, the chats under them, and Data Products, Metrics Explorer and
-    Artifacts in their own section at the bottom above the account."""
+    """The left header says Synapse Semantic Intelligence; Home, Cosmos
+    and Operate are gone; New chat and Search chats sit at the top, the
+    chats under them, and Data Products, Metrics Explorer and Skills in
+    their own section at the bottom above the account (Artifacts left
+    the nav: the shelf lives in the chat, the Skills page showcases
+    what the agent knows how to do)."""
     assert "<title>Synapse Semantic Intelligence</title>" in INDEX
     assert ">Synapse</a>" in INDEX and "Semantic Intelligence" in INDEX
-    for gone in ("#/home", "#/skills", "#/cosmos", "#/operate", "#/ask",
+    for gone in ("#/home", "#/cosmos", "#/operate", "#/ask", "#/artifacts",
                  "powered by Lumi", "Semantics Explorer", ">Tables<",
-                 ">Home<", ">Skills<", "chats-search"):
+                 ">Home<", ">Artifacts<", "chats-search"):
         assert gone not in INDEX, gone
     explore = INDEX.split('aria-label="Explore"')[1].split("</nav>")[0]
-    for kept in ("Data Products", "Metrics Explorer", "Artifacts"):
+    for kept in ("Data Products", "Metrics Explorer", "Skills", "Knowledge"):
         assert kept in explore, kept
+    assert explore.index("Skills") < explore.index("Knowledge")
     order = [INDEX.index('href="#/chat/new"'), INDEX.index('href="#/search"'),
              INDEX.index('class="chats"'), INDEX.index('aria-label="Explore"'),
              INDEX.index('class="account"')]
@@ -81,18 +84,22 @@ def test_shell_is_stripped_and_renamed():
     assert 'src="js/main.js"' in INDEX and 'href="styles/synapse.css"' in INDEX
     assert 'href="/styles' not in INDEX and 'src="/js' not in INDEX
     assert not (FRONT / "vendor").exists()
-    for page in ("cosmos", "operate", "home", "skills", "ask"):
+    for page in ("cosmos", "operate", "home", "ask"):
         assert not (FRONT / "js" / "pages" / f"{page}.js").exists(), page
+    assert (FRONT / "js" / "pages" / "skills.js").exists()
+    assert (FRONT / "js" / "pages" / "knowledge.js").exists()
+    assert not (FRONT / "js" / "pages" / "artifacts.js").exists()
 
 
 def test_routes_are_the_new_surface_and_chat_is_the_door():
     for route in ("chat:", "search:", "products:", "product:", "metrics:",
-                  "metric:", "artifacts:"):
-        assert route in MAIN, route
+                  "metric:", "skills:", "knowledge:", "artifacts:"):
+        assert route in MAIN, route            # artifacts: the old name
     assert '|| "chat"' in MAIN                     # the default route
     assert "renderSearch" in MAIN and "renderProducts" in MAIN
-    for gone in ("renderHome", "renderCosmos", "renderOperate",
-                 "renderSkills", "renderAsk"):
+    assert "renderSkills" in MAIN and "renderKnowledge" in MAIN
+    assert "renderArtifacts" not in MAIN
+    for gone in ("renderHome", "renderCosmos", "renderOperate", "renderAsk"):
         assert gone not in MAIN, gone
     for page in ("metric.js", "table.js"):
         text = (FRONT / "js" / "pages" / page).read_text(encoding="utf-8")
@@ -190,8 +197,46 @@ def test_logo_from_the_env_replaces_the_words(client, tmp_path, monkeypatch):
     swaps its words for the image only when one is served. A missing
     file or a non-image is refused with a reason, and the words stay."""
     monkeypatch.delenv("SYNAPSE_LOGO", raising=False)
-    assert client.get("/api/lumi/brand").json() == {
-        "logo": False, "configured": False, "reason": "", "stamp": ""}
+    bare = client.get("/api/lumi/brand").json()
+    assert {k: bare[k] for k in ("logo", "configured", "reason", "stamp")} \
+        == {"logo": False, "configured": False, "reason": "", "stamp": ""}
+    assert {"env_file", "path", "exists", "looks_like"} <= set(bare)
+    # a path with nothing at it: the exact path tried, and the note
+    # about inline comments
+    monkeypatch.setenv("SYNAPSE_LOGO", str(tmp_path / "missing.png"))
+    lost = client.get("/api/lumi/brand").json()
+    assert lost["configured"] and not lost["logo"] and not lost["exists"]
+    assert str(tmp_path / "missing.png") in lost["reason"]
+    assert "' #'" in lost["reason"]
+    # a .png that is not a PNG (an export gone wrong): refused, the
+    # bytes named, never served for the browser to drop in silence
+    fake = tmp_path / "logo.png"
+    fake.write_bytes(b"\x00\x00\x00\x18ftypheic")
+    monkeypatch.setenv("SYNAPSE_LOGO", str(fake))
+    wrong = client.get("/api/lumi/brand").json()
+    assert wrong["exists"] and not wrong["logo"]
+    assert "named .png but its bytes" in wrong["reason"]
+    assert client.get("/api/lumi/logo").status_code == 404
+    # a real PNG: served as image/png
+    import struct
+    import zlib
+    def chunk(kind, body):
+        return (struct.pack(">I", len(body)) + kind + body
+                + struct.pack(">I", zlib.crc32(kind + body) & 0xffffffff))
+    png = (b"\x89PNG\r\n\x1a\n"
+           + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(b"\x00\xff\x00\x00"))
+           + chunk(b"IEND", b""))
+    real = tmp_path / "real.PNG"
+    real.write_bytes(png)
+    monkeypatch.setenv("SYNAPSE_LOGO", str(real))
+    good = client.get("/api/lumi/brand").json()
+    assert good["logo"] and good["looks_like"] == ".png" and good["stamp"]
+    served = client.get("/api/lumi/logo")
+    assert served.status_code == 200
+    assert served.headers["content-type"].startswith("image/png")
+    assert served.content == png
+    monkeypatch.delenv("SYNAPSE_LOGO", raising=False)   # back to unset
     refused = client.get("/api/lumi/logo")
     assert refused.status_code == 404
     assert "SYNAPSE_LOGO" in refused.json()["reason"]
@@ -219,4 +264,215 @@ def test_logo_from_the_env_replaces_the_words(client, tmp_path, monkeypatch):
     assert 'id="brand"' in INDEX and "Semantic Intelligence" in INDEX
     assert "brandLogo" in MAIN and "/api/lumi/brand" in MAIN
     assert "img.onload" in MAIN and "replaceChildren" in MAIN
+    assert "img.onerror" in MAIN and "console.warn(`SYNAPSE_LOGO" in MAIN
     assert ".brand-logo" in CSS
+
+
+def test_the_second_surface_switches_models_and_explains_the_dials(client):
+    """The same switch and the same "?" as the admin console, from the
+    same catalog: the composer's model select, the popover with the
+    three groups, and the send that carries the chat's plane."""
+    for piece in ('id="chat-model"', 'id="chat-help"', "chat-help-pop",
+                  "api.chatDials()", "api.chatSetModel(",
+                  "state.mode, state.plane", "help-group",
+                  "Mode <span>", "Depth <span>", "Model <span>"):
+        assert piece in CHAT, piece
+    app_css = (FRONT / "styles" / "app.css").read_text(encoding="utf-8")
+    for cls in (".chat-plane", ".chat-help", ".chat-help-pop",
+                ".help-group + .help-group", ".help-row"):
+        assert cls in app_css, cls
+    dials = client.get("/api/chat/dials").json()
+    assert len(dials["planes"]) == 2 and len(dials["depths"]) == 3
+    assert client.get("/synapse/js/api.js").text.count("chatSetModel") == 1
+
+
+def test_data_products_filter_by_line_of_business(client):
+    """The explorer rows name the line of business by code and by name,
+    and the page filters on it beside the search: every code the build
+    maps a table to, with its count, and "unmapped" for the rest."""
+    rows = client.get("/api/meridian/explorer/tables").json()["rows"]
+    gms = next(r for r in rows if r["physical"] == "dw.gms_transaction")
+    assert gms["lob"] == "GMNS"
+    assert gms["lob_name"] == "Global Merchant & Network Services"
+    assert all("lob_name" in r for r in rows)
+    products = (FRONT / "js" / "pages" / "tables.js").read_text(encoding="utf-8")
+    for piece in ('id="p-lob"', "all lines of business", "unmapped",
+                  "r.lob_name", "state.lob === \"unmapped\"", "lob-filter"):
+        assert piece in products, piece
+    assert ".lob-filter" in CSS
+
+
+def test_the_product_page_explains_every_column(client):
+    """Every servable column with what it is: the compiler's columns
+    index served on the table detail (description, Lumi's supplementary
+    meaning, sensitivity, agreement), the product's own description and
+    line of business beside it, and a page that searches the columns,
+    shows the first twelve, and opens a row to its meaning and its
+    uses in joins and metrics."""
+    detail = client.get("/api/meridian/table/dw.gms_transaction").json()
+    assert detail["found"]
+    assert detail["description"] == "Global merchant transaction spine."
+    assert detail["lob"] == "GMNS" and detail["business_unit"] == "GMNS"
+    cols = {c["name"]: c for c in detail["columns_detail"]}
+    assert set(cols) == set(detail["columns"])            # complete
+    assert cols["cm13"]["sensitive"]
+    assert cols["cm13"]["description"] == "Card member number."
+    assert cols["trans_usd_am"]["supplementary"] \
+        == "Signed transaction amount in US dollars."
+    assert cols["bq_only_col"]["ungoverned"]
+    assert cols["cm13"]["type"] == "STRING"          # typed by BigQuery
+    assert cols["txn_uid"]["type"] == ""              # atlas-only: no type
+    assert cols["txn_uid"]["type_source"] == "atlas"
+    assert any(m["expr"] for m in detail["metrics_here"])
+    page = (FRONT / "js" / "pages" / "table.js").read_text(encoding="utf-8")
+    for piece in ("const FIRST = 12", 'id="col-search"', "columns_detail",
+                  "col-detail", "c.supplementary", "c.description_source",
+                  "in joins:", "in metrics:", "search for the rest",
+                  "show all ${hits.length} columns", "product-desc-full",
+                  "detail.lob_name"):
+        assert piece in page, piece
+    for cls in (".col-row", ".col-head", ".col-detail", ".col-uses",
+                ".product-desc-full"):
+        assert cls in CSS, cls
+
+
+def test_the_column_detail_falls_back_to_the_served_card():
+    """A build compiled before columns.json existed: the served card's
+    column lines carry the meaning, merged with the schema so no
+    servable column is missing (past the card's budget a column keeps
+    its type and an empty description)."""
+    from apps.lumi.backend.meridian import _DATA
+
+    class Stub:
+        columns = {}
+        schema = {"dw.t": {"cm13": "STRING", "amt": "FLOAT64",
+                           "late": "DATE", "nested.x": "STRING"}}
+    text = ("# table dw.t\n## columns\n"
+            "- cm13 string (SENSITIVE): Card member number. "
+            "[prov:bq·agree=3]\n"
+            "- amt float64: Amount. | lumi: Signed amount. [prov:bq·agree=2]\n"
+            "- nested.x string (ungoverned, no business meaning on record) "
+            "[prov:bq·agree=1]\n"
+            "## joined with (observed)\n- dw.u · 3 co-queries [prov:bq]\n")
+    rows = {r["name"]: r for r in _DATA._columns_detail(Stub(), "dw.t", text)}
+    assert list(rows) == ["cm13", "amt", "late", "nested.x"]
+    assert rows["cm13"]["sensitive"] and rows["cm13"]["description"] \
+        == "Card member number." and rows["cm13"]["agreement"] == 3
+    assert rows["amt"]["description"] == "Amount."
+    assert rows["amt"]["supplementary"] == "Signed amount."
+    assert rows["nested.x"]["ungoverned"] and not rows["nested.x"]["description"]
+    assert rows["late"] == {
+        "name": "late", "type": "DATE", "type_source": "",
+        "description": "", "description_source": "", "supplementary": "",
+        "business_name": "", "sensitive": False, "sensitivity_sources": [],
+        "ungoverned": False, "agreement": 1, "flags": []}
+
+
+def test_metric_cards_open_in_place_with_the_definition_and_the_table():
+    metrics = (FRONT / "js" / "pages" / "semantics.js").read_text(encoding="utf-8")
+    for piece in ('role="button"', "metric-detail", "api.metric(id)",
+                  "api.table(r.table)", "COMPUTED ON", "DEFINITION",
+                  "m.canonical_sql", "m.common_filters", "reads",
+                  "full profile →", "openCard(el)", "e.key !== \"Enter\""):
+        assert piece in metrics, piece
+    for cls in (".metric-card.open", ".metric-detail", ".metric-foot"):
+        assert cls in CSS, cls
+
+
+def test_skills_showcase_what_the_agent_knows(client):
+    """Skills in place of Artifacts: the doctrine packs the agent loads
+    by itself, each with its slash command, its moves, the full text a
+    click away, and a Use-in-chat door that opens a new chat with the
+    slash command in the composer."""
+    got = client.get("/api/chat/skills").json()
+    assert got["available"] and len(got["skills"]) >= 4
+    names = {s["name"] for s in got["skills"]}
+    assert {"analysis-playbooks", "dashboard-design", "executive-summary",
+            "lumi-data-connect"} <= names
+    assert all(s["text"] and s["origin"] for s in got["skills"])
+    page = (FRONT / "js" / "pages" / "skills.js").read_text(encoding="utf-8")
+    for piece in ("Use in chat", "synapse.prefill", "read the doctrine",
+                  "skills-how", "slash-name", "skill-moves",
+                  'location.hash = "#/chat/new"', "api.chatSkills()"):
+        assert piece in page, piece
+    assert 'sessionStorage.getItem("synapse.prefill")' in CHAT
+    assert "paintSlash();" in CHAT
+    for cls in (".skills-how", ".skill-actions", ".slash-name"):
+        assert cls in CSS, cls
+    assert 'href="#/skills"' in INDEX
+
+
+def test_short_table_names_on_the_face(client):
+    """The pages name a table by its short name; the physical name
+    stays in the tooltip, the link and the API."""
+    products = (FRONT / "js" / "pages" / "tables.js").read_text(encoding="utf-8")
+    assert "product-physical" not in products
+    page = (FRONT / "js" / "pages" / "table.js").read_text(encoding="utf-8")
+    assert 'title="${esc(physical)}">${\n          esc(physical.split(".").pop())}' in page
+    assert 'title="${esc(t)}">${esc(t.split(".").pop())}' in page
+    metrics = (FRONT / "js" / "pages" / "semantics.js").read_text(encoding="utf-8")
+    assert 'esc(r.table.split(".").pop())' in metrics
+    rows = client.get("/api/meridian/explorer/tables").json()["rows"]
+    assert all(r["physical"].startswith("dw.") for r in rows)     # unchanged
+
+
+def test_own_skills_and_the_creators(client):
+    """Skills marks the person's own packs; a pack saves for the
+    configured person and loads for them; the draft needs a model and
+    says so here; a file becomes text for the creators (a Word file
+    converted, a PDF refused with where to take it)."""
+    import base64
+    import io
+    import zipfile
+    shelf = client.get("/api/chat/skills").json()
+    assert shelf["available"] and shelf["owner"]
+    assert all("mine" in s and "owner" in s for s in shelf["skills"])
+    text = ("# Churn triage\n\nThe moves for a churn question.\n\n"
+            "## Split rate from mix\n1. search first.\n")
+    saved = client.post("/api/chat/skills/mine",
+                        json={"name": "Churn Triage", "text": text}).json()
+    assert saved["available"] and saved["skill"]["name"] == "churn-triage"
+    assert saved["skill"]["owner"] == shelf["owner"]
+    mine = next(s for s in client.get("/api/chat/skills").json()["skills"]
+                if s["name"] == "churn-triage")
+    assert mine["mine"] and mine["origin"] == "unreviewed"
+    refused = client.post("/api/chat/skills/mine", json={
+        "name": "analysis-playbooks", "text": text}).json()
+    assert refused["available"] is False and "built-in" in refused["reason"]
+    gone = client.delete("/api/chat/skills/mine/churn-triage").json()
+    assert gone["removed"] is True
+    assert not any(s["name"] == "churn-triage" for s in
+                   client.get("/api/chat/skills").json()["skills"])
+    draft = client.post("/api/chat/skills/draft", json={
+        "kind": "skill", "title": "Churn triage",
+        "material": "rate vs mix first"}).json()
+    assert draft["available"] is False and "not configured" in draft["reason"]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("word/document.xml", '<?xml version="1.0"?><w:document '
+                   'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml'
+                   '/2006/main"><w:body><w:p><w:r><w:t>Approvals are counted '
+                   'at decision time.</w:t></w:r></w:p></w:body></w:document>')
+    got = client.post("/api/chat/files/text", json={
+        "name": "memo.docx",
+        "data_b64": base64.b64encode(buf.getvalue()).decode()}).json()
+    assert got["available"] and got["converted"]
+    assert got["text"] == "Approvals are counted at decision time."
+    pdf = client.post("/api/chat/files/text", json={
+        "name": "memo.pdf", "data_b64": base64.b64encode(b"%PDF-1.4").decode()}
+        ).json()
+    assert pdf["available"] is False and "attach it in a chat" in pdf["reason"]
+    skills_js = (FRONT / "js" / "pages" / "skills.js").read_text(encoding="utf-8")
+    for piece in ("creatorPanel", "wireCreator", "Draft with the model",
+                  "Save as my skill", "api.chatDraft(", "api.chatSaveSkill(",
+                  "api.chatDeleteSkill(", "api.chatFileText(", "skill-delete",
+                  ">Yours<", ">Shared<", ">Built in<"):
+        assert piece in skills_js, piece
+    knowledge_js = (FRONT / "js" / "pages" / "knowledge.js").read_text(
+        encoding="utf-8")
+    for piece in ("renderKnowledge", 'creatorPanel("knowledge")',
+                  "api.stageArtifact(", 'startsWith("skills/")'):
+        assert piece in knowledge_js, piece
+    assert "Stage as a knowledge file" in skills_js     # the shared panel
+    for cls in (".creator", ".creator-rendered", ".origin-tag.o-mine"):
+        assert cls in CSS, cls

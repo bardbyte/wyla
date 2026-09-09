@@ -111,15 +111,84 @@ class EagAgent(VertexAgent):
         return EagAgent(client, budget)
 
 
+# ── the planes as the composer lists them ─────────────────────
+PLANE_IDS = ("vertex", "eag")
+
+
+def pretty_model(raw: str) -> str:
+    """gemini-2.5-pro → Gemini 2.5 Pro; gemini-3.1-pro-preview →
+    Gemini 3.1 Pro Preview."""
+    return " ".join(w.capitalize() if w.isalpha() else w
+                    for w in (raw or "").replace("_", "-").split("-")
+                    if w)
+
+
+def plane_catalog() -> list[dict[str, Any]]:
+    """Both model planes, whether or not this machine can ride them:
+    id, the label the composer shows, the model id, availability with
+    the reason when not, what choosing it means for the person, and
+    which one a new chat starts on. Read from the environment each
+    time, never cached: the .env is the switchboard."""
+    from sahs.util.auth import (resolve_vertex_key_path,
+                                resolve_vertex_model,
+                                resolve_vertex_project)
+    from sahs.util.eag import Config, eag_configured, model_plane
+    default = model_plane()
+    key = resolve_vertex_key_path()
+    vertex_ok = bool(resolve_vertex_project() and key and key.exists())
+    vertex_model = resolve_vertex_model()
+    eag_model = Config.from_env().model
+    return [
+        {"id": "vertex",
+         "label": f"{pretty_model(vertex_model)} via Vertex",
+         "model": vertex_model,
+         "available": vertex_ok,
+         "reason": "" if vertex_ok else
+         "needs the Vertex contract in the silo .env: LUMI_VERTEX_SA_KEY "
+         "(a key file that exists) and VERTEX_PROJECT_ID",
+         "means": "Google Cloud's Vertex AI with the service-account "
+                  "key. Thinking streams as it happens and the answer "
+                  "arrives word by word.",
+         "feel": "streams",
+         "default": default == "vertex"},
+        {"id": "eag",
+         "label": f"{pretty_model(eag_model)} via EAG",
+         "model": eag_model,
+         "available": eag_configured(),
+         "reason": "" if eag_configured() else
+         "needs APP_ID and APP_SECRET (or GEMINI_BEARER_TOKEN) in the "
+         "silo .env; python scripts/eag_check.py proves the path",
+         "means": "The enterprise AI gateway with a OneIdentity token "
+                  "that renews itself every ten minutes. Each call "
+                  "lands whole: a thinking pause, then the text at "
+                  "once. No streaming.",
+         "feel": "whole calls",
+         "default": default == "eag"},
+    ]
+
+
+def agent_for(plane: str = "", budget: Budget | None = None,
+              log: Any = None) -> VertexAgent:
+    """The chat's model on a named plane — ``vertex`` or ``eag`` — or
+    on the environment's default when the name is empty. An unknown
+    name is a typed error, not a silent fallback: the composer only
+    ever sends the two ids."""
+    from sahs.util.eag import model_plane
+    plane = (plane or "").strip().lower() or model_plane()
+    if plane == "eag":
+        return EagAgent.from_env(budget, log)
+    if plane == "vertex":
+        return VertexAgent.from_env(budget, log)
+    raise ModelUnavailable(f"no model plane called {plane!r}: the "
+                           "planes are vertex and eag")
+
+
 def agent_from_env(budget: Budget | None = None,
                    log: Any = None) -> VertexAgent:
     """The chat's model, on whichever plane the environment names:
     SAHS_MODEL_PLANE=vertex|eag, or auto — EAG when its credentials
     are present, Vertex otherwise."""
-    from sahs.util.eag import model_plane
-    if model_plane() == "eag":
-        return EagAgent.from_env(budget, log)
-    return VertexAgent.from_env(budget, log)
+    return agent_for("", budget, log)
 
 
 @dataclass
@@ -187,4 +256,5 @@ def declarations(kit: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 __all__ = ["ROUTING_KEY", "VertexAgent", "EagAgent", "agent_from_env",
+           "agent_for", "plane_catalog", "pretty_model", "PLANE_IDS",
            "ScriptedAgent", "declarations", "json"]

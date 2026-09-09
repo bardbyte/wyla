@@ -122,7 +122,8 @@ export async function renderMetric(outlet, id) {
     <div class="grid2">
       ${card("BINDING", m.table
         ? `<a class="linklike mono" href="#/product/${
-            encodeURIComponent(m.table)}">${esc(m.table)}</a>`
+            encodeURIComponent(m.table)}" title="${esc(m.table)}">${
+            esc(m.table.split(".").pop())}</a>`
         : `<span class="muted">no table binding on record</span>`)}
       ${card("WHO USES", Object.keys(m.used_by ?? {}).length
         ? `<span>${Object.entries(m.used_by)

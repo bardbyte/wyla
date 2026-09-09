@@ -271,6 +271,18 @@ the silo `.env` (png, jpg, svg, webp or gif) and restart the app: the
 image replaces the words, and the words stay when the file is not
 there.
 
+When the words stay, open `http://localhost:8400/api/lumi/brand`: it
+says which `.env` was read (`env_file` — the silo's `.env` wins, and a
+line in any other `.env` is never read), the value as read, the path
+tried, whether a file is there, and what its bytes are. The three
+usual causes: the app was not restarted after the `.env` changed
+(the file is read once, at start); a note after the path on the same
+line without a space before the `#`; and a `.png` that is not a PNG
+(a HEIC or WebP export renamed, or an SVG saved with the wrong
+suffix), which the browser drops in silence — the brand page names
+the bytes, and the page's console carries the same line. The logo
+shows on `/synapse/` only.
+
 **The query comes first.** In Chat mode a data question ends with the
 query on a card — the SQL, what it will scan, its status and meridian
 line — and three buttons: **Run query** executes it with no model call
@@ -425,6 +437,75 @@ the client raises the cap by the budget. The token lives 599 s and is
 minted again at 80% of that or on the first 401, with the call
 retried once. The prompt is unchanged; where 2.5 slips is a matter
 for the evals, not for guessing.
+
+**Switching models from the composer.** The label by the composer is
+a select: "Gemini 3.1 Pro Preview via Vertex" or "Gemini 2.5 Pro via
+EAG", both surfaces. A plane the machine cannot ride is listed greyed
+with "not configured" and the reason in its tooltip; picking one that
+can be ridden is remembered on that chat, rides from the next message
+on, and survives a reload (`SAHS_MODEL_PLANE` only says where a new
+chat starts). The conversation carries over as text, so a chat can
+change model mid-way. The "?" beside the dials opens the explanation:
+Chat and Autopilot; Quick, Standard and Deep with what each does on
+each plane (a thinking level on Vertex, a thinking budget on EAG;
+depth changes nothing but the thinking); and both models with whether
+each is configured here. `GET /api/chat/dials` is the one source, and
+`python scripts/turn_doctor.py` prints the plane and the depth on
+every turn's line.
+
+**The library on the second surface.** Data Products filters by line
+of business beside the search (every code the build maps a table to,
+by name, with its count; "unmapped" for the rest). A product page
+says what the product is and lists its columns as a searchable list:
+the first twelve open, the rest a search away, and a row opens to
+what the column is (the description on record, Lumi's supplementary
+meaning, sensitivity, how many sources agree) and where it is used
+(joins, metrics). The meaning comes from `columns.json`, an index the
+compiler writes beside `schema.json` since this change: run
+`python scripts/laptop.py compile` once after pulling, or the page
+falls back to the served card, which is budgeted and may carry no
+meaning past the twelfth column. Metric cards open in place with the
+full definition, the data product they are computed on and the
+columns they read. Skills replaces Artifacts in the nav: the doctrine
+packs the agent loads by itself, each with its slash command and a
+Use-in-chat door; `#/artifacts` still answers by URL.
+
+**Files in the chat.** The composer's "+" offers Add files. What the
+model reads natively rides as itself, inline on the user turn: PDF
+and images (PNG, JPEG, WEBP, HEIC). Text in its suffixes (txt, md,
+csv, tsv, json, xml, html, sql, py, yaml) rides as a text part. A
+workbook, a Word file or a deck is not native: it is converted to
+text here (sheets to CSV, paragraphs to text; a deck needs
+python-pptx from the assistant extra) and rides as text, disclosed
+as such. Old Office formats, archives, audio and video are refused
+with the reason. Limits: 10 MB a file, 18 MB of inline bytes on one
+message, 10 files a message. A file rides the message it is sent
+with; the conversation remembers that it was sent, by name, not its
+bytes: attach it again to ask more. `python scripts/files_check.py`
+proves what the machine's plane actually reads: it builds a PDF, a
+PNG, a CSV, a text file, a workbook and a Word file here, sends each
+on one call the way the chat would, and reads the answer for the
+token. Run it once on each plane before trusting a kind of file in
+the chat; the report is the answer to "what files are supported".
+
+**Teaching Synapse a skill; adding knowledge.** The Skills page has
+three shelves: built in, yours, shared. Yours live in
+`graph/skills/users/<you>/` (LUMI_USER_NAME names you until sign-in
+lands) and load for you alone, wearing unreviewed; the agent offers
+them by name in its prompt and loads them with `load_skill` like any
+pack. The creator under the shelves takes your material — pasted
+notes, a text file as it is, a workbook or a Word file converted to
+text — and asks the model to rewrite it in the house format (the
+moves and the checks for a kind of ask; nothing invented, the model's
+own notes on what was unclear); you read the draft, edit it, then
+Save as my skill. Without a model configured the draft is refused
+with the reason and the editor still opens: a hand-written pack
+saves the same way. The Knowledge page (the old Artifacts page, under
+Skills in the nav) does the same for a knowledge file — definitions,
+tables and columns, metrics, caveats, the owner — staged for a
+business unit into `sources/artifacts/` and ingested on the next
+build; typed drops and dumped text files stage as they are, as
+before.
 
 **Before the first query:** the graph names tables `dw.<table>`, and
 BigQuery resolves that against the project that runs the query

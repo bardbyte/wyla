@@ -1,15 +1,18 @@
-/** Artifacts: the knowledge shelf as a Finder-style folder tree.
- * Folders open and close with disclosure triangles (native
- * details/summary, any nesting: skills/CFR/TLS/...); clicking a file
- * slides the pullout reader in from the right (rendered Markdown,
- * copy, ✕/Esc). The creator below takes typed knowledge, dumped
- * files, or the SharePoint MCP connector door; other connectors sit
- * visibly disabled, never fake. */
+/** Knowledge: the knowledge files as a Finder-style folder tree —
+ * the staged drops and the reference docs the graph is built from
+ * (skills have their own page). Folders open and close with
+ * disclosure triangles; clicking a file slides the pullout reader in
+ * from the right. The creator below turns your material into a
+ * knowledge file in the house format with the model's help — you
+ * read it before it is staged — or takes typed knowledge and dumped
+ * files as they are; the SharePoint MCP connector door stays honest,
+ * other connectors sit visibly disabled, never fake. */
 
 import { api } from "../api.js";
 import { renderMarkdown } from "../md.js";
 import { createPullout } from "../pullout.js";
 import { card, esc, loading } from "../ui.js";
+import { creatorPanel, wireCreator } from "./skills.js";
 
 const fmtSize = (n) =>
   n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`;
@@ -56,23 +59,34 @@ function countFiles(node) {
     .reduce((n, child) => n + countFiles(child), 0);
 }
 
-export async function renderArtifacts(outlet) {
+export async function renderKnowledge(outlet) {
   outlet.innerHTML = `
-    <div class="masthead" style="padding:0">
-      <span class="muted">Understand · Artifacts (Knowledge Files)</span>
-      <span class="spacer"></span><span class="muted" id="a-count"></span>
-    </div>
-    <div class="artifact-list card" id="a-list">${loading()}</div>
-    <div id="a-stage-card"></div>`;
+    <div class="library-page">
+      <div class="page-head">
+        <h1>Knowledge</h1>
+        <p class="muted">The knowledge files the graph is built from:
+        the reference docs and the files people stage here. A staged
+        file enters the graph on the next build, with who staged it
+        and for which business unit. Skills have their own page.</p>
+      </div>
+      <div class="library-tools">
+        <span class="muted" id="a-count"></span>
+      </div>
+      <div class="artifact-list card" id="a-list">${loading()}</div>
+      <div id="a-draft-card"></div>
+      <div id="a-stage-card"></div>
+    </div>`;
   const pullout = createPullout(outlet);
 
   const payload = await api.artifacts();
   const listHost = outlet.querySelector("#a-list");
   if (!listHost) return;
 
-  const files = payload.files ?? [];
+  // the skills live on their own page: the tree shows the rest
+  const files = (payload.files ?? []).filter((f) =>
+    !String(f.rel || "").startsWith("skills/"));
   outlet.querySelector("#a-count").textContent =
-    `${files.length} files on the shelf`;
+    `${files.length} knowledge files on the shelf`;
 
   if (!files.length) {
     listHost.innerHTML = card("THE SHELF", `<p class="muted">${
@@ -107,9 +121,27 @@ export async function renderArtifacts(outlet) {
     });
   }
 
-  // ── the creator: type it, dump files, or connect a system ──
+  // ── the creator with the model: material in, a knowledge file in
+  //    the house format out, staged only after the person read it ──
+  outlet.querySelector("#a-draft-card").innerHTML = creatorPanel("knowledge");
+  wireCreator(outlet, "knowledge", async (name, text, fields) => {
+    const unit = (fields.business_unit || "").trim();
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(unit)) {
+      return { ok: false, reason: "a business unit names the file: letters, digits, dashes" };
+    }
+    const body = await api.stageArtifact({
+      business_unit: unit, name: name || fields.title || "knowledge",
+      content: text, ext: "md" });
+    if (body.ok && body.staged) {
+      return { ok: true, note: `staged as ${body.file}. ${body.note ?? ""}` };
+    }
+    return { ok: false, reason: body.reason
+      ?? (body.detail ? JSON.stringify(body.detail) : "refused") };
+  }, () => { pullout.teardown(); renderKnowledge(outlet); });
+
+  // ── the plain creator: type it, dump files, or connect a system ──
   outlet.querySelector("#a-stage-card").innerHTML = card(
-    "ADD KNOWLEDGE · a source drop, named from the domain", `
+    "OR STAGE IT AS IT IS · a source drop, named from the domain", `
     <div class="legend">
       <input class="search" id="a-bu" placeholder="business unit (e.g. USCS)" />
       <input class="search" id="a-name"
@@ -160,7 +192,7 @@ export async function renderArtifacts(outlet) {
     if (body.ok && body.staged) {
       result.textContent = `staged as ${body.file}. ${body.note ?? ""}`;
       pullout.teardown();
-      renderArtifacts(outlet);            // re-list with the new file
+      renderKnowledge(outlet);            // re-list with the new file
     } else {
       result.textContent = body.reason
         ?? (body.detail ? JSON.stringify(body.detail) : "refused");
@@ -194,7 +226,7 @@ export async function renderArtifacts(outlet) {
       result.textContent = outcomes.join(" · ");
       if (outcomes.some((o) => o.includes("staged as"))) {
         pullout.teardown();
-        renderArtifacts(outlet);
+        renderKnowledge(outlet);
       }
     });
 

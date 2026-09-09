@@ -102,3 +102,22 @@ puts an image in the second surface's left header in place of the
 words (`/api/lumi/logo` serves it; `/api/lumi/brand` says whether one
 is configured).
 
+On the second surface the library reads deeper: Data Products filters
+by line of business, a product page lists its columns as a search
+with expandable rows that say what each column is (from the
+compiler's `columns.json`, or the served card on an older build) and
+where it is used, metric cards open in place with the definition and
+the table, and Skills (in place of Artifacts) showcases the doctrine
+packs with a Use-in-chat door. Skills also lets a person teach one:
+material in, the model's draft in the house format out, saved under
+`graph/skills/users/<owner>/` and loaded for that person alone; the
+Knowledge page (under Skills) does the same for a knowledge file
+staged for a business unit. The chat's "+" offers Add files: PDF and
+images ride inline, text as text, Office files converted here.
+
+On both surfaces the composer's model label is a select over the two
+model planes (Gemini 3.1 Pro on Vertex, Gemini 2.5 Pro through EAG),
+remembered per chat (`POST /api/chat/sessions/{id}/model`), and the
+"?" beside the dials explains Chat/Autopilot, Quick/Standard/Deep and
+both models from `GET /api/chat/dials`.
+

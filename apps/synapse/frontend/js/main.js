@@ -1,7 +1,8 @@
 /** Synapse Semantic Intelligence: the chat first, the library under
  * it. A hash router over the left sidebar, a theme toggle.
  * Routes: #/chat #/chat/<session> #/search #/products
- *         #/product/<physical> #/metrics #/metric/<id> #/artifacts
+ *         #/product/<physical> #/metrics #/metric/<id> #/skills
+ *         #/knowledge (#/artifacts is its old name and still answers)
  * Deep links work: a metric profile is a URL you can send someone. */
 
 import { renderChat } from "./pages/chat.js";
@@ -10,7 +11,8 @@ import { renderProducts } from "./pages/tables.js";
 import { renderTable } from "./pages/table.js";
 import { renderMetrics } from "./pages/semantics.js";
 import { renderMetric } from "./pages/metric.js";
-import { renderArtifacts } from "./pages/artifacts.js";
+import { renderKnowledge } from "./pages/knowledge.js";
+import { renderSkills } from "./pages/skills.js";
 import { refreshChats } from "./chats.js";
 
 const outlet = document.getElementById("outlet");
@@ -27,7 +29,8 @@ async function route() {
   teardown = null;
   const { page, arg } = parseRoute();
   const tab = page === "metric" ? "metrics"
-    : page === "product" ? "products" : page;
+    : page === "product" ? "products"
+    : page === "artifacts" ? "knowledge" : page;
   document.querySelectorAll(".navlist a[data-tab]").forEach((a) =>
     a.classList.toggle("active", a.dataset.tab === tab));
   outlet.classList.toggle("chatv2page", page === "chat");
@@ -39,7 +42,9 @@ async function route() {
     product: () => renderTable(outlet, arg),
     metrics: () => renderMetrics(outlet),
     metric: () => renderMetric(outlet, arg),
-    artifacts: () => renderArtifacts(outlet),
+    knowledge: () => renderKnowledge(outlet),
+    artifacts: () => renderKnowledge(outlet),      // the old name
+    skills: () => renderSkills(outlet),
   };
   const render = pages[page] ?? pages.chat;
   teardown = await render() ?? null;
@@ -78,10 +83,18 @@ async function brandLogo() {
   try {
     got = await fetch("/api/lumi/brand").then((r) => r.json());
   } catch { return; }
-  if (!got.logo) return;
+  if (!got.logo) {
+    // the words stay; the reason is a page away (/api/lumi/brand)
+    // and in the console, never a broken image in the header
+    if (got.configured) console.warn(`SYNAPSE_LOGO: ${got.reason}`);
+    return;
+  }
   const img = new Image();
   img.className = "brand-logo";
   img.alt = "Synapse Semantic Intelligence";
+  img.onerror = () => console.warn(
+    "SYNAPSE_LOGO: the browser could not decode the image the server "
+    + "sent; open /api/lumi/brand for what the file's bytes are");
   img.onload = () => {
     const link = document.createElement("a");
     link.className = "brand-link";

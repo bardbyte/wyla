@@ -58,7 +58,8 @@ def build_kit(build: Build, state: AssistantState, *,
               workspace: Path, model: Any = None, substrate: Any = None,
               snapshot_runner: Any = None, runner: Any = None,
               graph_root: Path | None = None,
-              project_id: str = "") -> dict[str, ToolSpec]:
+              project_id: str = "",
+              owner: str = "") -> dict[str, ToolSpec]:
     v1 = v1_toolkit(build, state, substrate=substrate,
                     snapshot_runner=snapshot_runner)
     base = {name: v1[name].fn for name in (
@@ -370,10 +371,11 @@ def build_kit(build: Build, state: AssistantState, *,
         if name in state.skills_loaded:
             return {"ok": True, "name": name,
                     "note": f"{name!r} is already loaded this turn"}
-        pack = get_skill(graph_root, name)
+        pack = get_skill(graph_root, name, owner)
         if pack is None:
             names = ", ".join(f"{p.name} ({p.origin})"
-                              for p in all_skills(graph_root)) or "none"
+                              for p in all_skills(graph_root, owner)) \
+                or "none"
             return {"error": f"no skill named {name!r}",
                     "hint": f"available: {names}"}
         state.skills_loaded.append(name)
