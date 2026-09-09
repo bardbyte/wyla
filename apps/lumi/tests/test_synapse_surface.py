@@ -432,8 +432,8 @@ def test_own_skills_and_the_creators(client):
     knowledge_js = (FRONT / "js" / "pages" / "knowledge.js").read_text(
         encoding="utf-8")
     for piece in ("renderKnowledge", 'creatorPanel("knowledge")',
-                  "Stage as a knowledge file", "api.stageArtifact(",
-                  'startsWith("skills/")'):
+                  "api.stageArtifact(", 'startsWith("skills/")'):
         assert piece in knowledge_js, piece
+    assert "Stage as a knowledge file" in skills_js     # the shared panel
     for cls in (".creator", ".creator-rendered", ".origin-tag.o-mine"):
         assert cls in CSS, cls
