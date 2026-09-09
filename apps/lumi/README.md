@@ -113,9 +113,11 @@ material in, the model's draft in the house format out, saved under
 `graph/skills/users/<owner>/` and loaded for that person alone. The
 same page lists the knowledge files the graph is built from (the
 folders under the skills root, the staged drops, the reference docs)
-with their authors and last writes, and adds one staged for a
-business unit. The chat's "+" offers Add files: PDF and images ride
-inline, text as text, Office files converted here.
+with their authors and last writes; Browse and Add open one pop-up
+(bring a file, write a skill, Draft with Synapse). Memory, under
+Customize, is `memory.md`: what Synapse remembers, editable. The
+chat's "+" offers Add files: PDF and images ride inline, text as
+text, Office files converted here.
 
 On both surfaces the composer's model label is a select over the two
 model planes (Gemini 3.1 Pro on Vertex, Gemini 2.5 Pro through EAG),

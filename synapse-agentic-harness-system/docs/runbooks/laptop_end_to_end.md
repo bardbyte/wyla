@@ -498,15 +498,24 @@ carries) and the knowledge files (the folders under the skills root
 such as `CFR/` and `TLS/`, author from the file's own `author:` line
 or its folder; the staged drops in `sources/artifacts/` by business
 unit; the reference docs in `sources/*.md`), each with its last
-write. Search from the toolbar; Browse brings a markdown file of
-yours as a skill; Add uploads one, writes one from the house template,
-drafts one with the model from your material (paste it, or add a text
-file, a workbook or a Word file), or adds a knowledge file staged for
-a business unit and ingested on the next build. A row opens in the
-reader on the right, a pack with Use in chat (and Delete for yours).
-Without a model the draft is refused with the reason and the editor
-still opens. `#/knowledge` and `#/artifacts` still answer, on this
-page.
+write. Search from the toolbar. Browse and Add open one pop-up with
+three ways in: bring a markdown file (it becomes a skill of yours),
+write one from the house template, or Draft with Synapse — a guided
+flow: your material in (paste it, or add a text file, a workbook or a
+Word file), the draft out with Synapse's notes on what was unclear,
+read and edit, name, save. Without a model the draft is refused with
+the reason and the Write tab is the way on. A row opens in the reader
+on the right, a pack with Use in chat (and Delete for yours). A
+knowledge file is still staged through `POST /api/meridian/artifacts`;
+the page no longer offers it. `#/knowledge` and `#/artifacts` still
+answer, on this page.
+
+**Memory under Customize.** `memory.md`: what Synapse remembers about
+you as a document, one line per memory. Edit the lines and save — a
+line you add is remembered, a line you remove is retired, the rest
+stay — and the next chat reads it. Synapse adds a line itself when
+you settle a preference in chat and says so inline with an undo; the
+header's memory button shows the same list in the chat.
 
 **Before the first query:** the graph names tables `dw.<table>`, and
 BigQuery resolves that against the project that runs the query

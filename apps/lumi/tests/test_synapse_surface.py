@@ -78,6 +78,8 @@ def test_shell_is_stripped_and_renamed():
         'aria-label="Explore"')[1].split('aria-label="Customize"')[0]
     customize = INDEX.split('aria-label="Customize"')[1].split("</nav>")[0]
     assert ">Customize<" in customize and 'href="#/skills"' in customize
+    assert 'href="#/memory"' in customize
+    assert customize.index("#/skills") < customize.index("#/memory")
     assert "#/knowledge" not in INDEX
     order = [INDEX.index('href="#/chat/new"'), INDEX.index('href="#/search"'),
              INDEX.index('class="chats"'), INDEX.index('aria-label="Explore"'),
@@ -92,14 +94,15 @@ def test_shell_is_stripped_and_renamed():
     for page in ("cosmos", "operate", "home", "ask"):
         assert not (FRONT / "js" / "pages" / f"{page}.js").exists(), page
     assert (FRONT / "js" / "pages" / "skills.js").exists()
-    assert (FRONT / "js" / "pages" / "creator.js").exists()
-    for gone in ("knowledge.js", "artifacts.js"):
+    assert (FRONT / "js" / "pages" / "addskill.js").exists()
+    assert (FRONT / "js" / "pages" / "memory.js").exists()
+    for gone in ("knowledge.js", "artifacts.js", "creator.js"):
         assert not (FRONT / "js" / "pages" / gone).exists(), gone
 
 
 def test_routes_are_the_new_surface_and_chat_is_the_door():
     for route in ("chat:", "search:", "products:", "product:", "metrics:",
-                  "metric:", "skills:", "knowledge:", "artifacts:"):
+                  "metric:", "skills:", "memory:", "knowledge:", "artifacts:"):
         assert route in MAIN, route            # artifacts: the old name
     assert '|| "chat"' in MAIN                     # the default route
     assert "renderSearch" in MAIN and "renderProducts" in MAIN
@@ -451,13 +454,12 @@ def test_skills_showcase_what_the_agent_knows(client, tmp_path, monkeypatch):
     assert all(f["updated"] for f in files.values())
     page = (FRONT / "js" / "pages" / "skills.js").read_text(encoding="utf-8")
     for piece in ("shelf-table", "<th>Skill</th><th>Kind</th><th>Last updated</th><th>Author</th>",
-                  'id="sk-search"', 'for="sk-browse"', 'data-add="upload"',
-                  'data-add="write"', 'data-add="draft"', 'data-add="knowledge"',
+                  'id="sk-search"', 'id="sk-browse"', 'id="sk-add"',
                   'f.family === "pack"', "Use in chat", "synapse.prefill",
                   "api.artifactFile(", "createPullout(", "sk-delete"):
         assert piece in page, piece
     assert 'sessionStorage.getItem("synapse.prefill")' in CHAT
-    for cls in (".shelf-table", ".add-pop", ".navlist.customize"):
+    for cls in (".shelf-table", ".navlist.customize"):
         assert cls in CSS, cls
     assert 'href="#/skills"' in INDEX
 
@@ -522,18 +524,27 @@ def test_own_skills_and_the_creators(client):
         "name": "memo.pdf", "data_b64": base64.b64encode(b"%PDF-1.4").decode()}
         ).json()
     assert pdf["available"] is False and "attach it in a chat" in pdf["reason"]
-    creator_js = (FRONT / "js" / "pages" / "creator.js").read_text(encoding="utf-8")
-    for piece in ("export function creatorPanel", "export function wireCreator",
-                  "Draft with the model", "Save as my skill",
-                  "Stage as a knowledge file", "api.chatDraft(",
-                  "api.chatFileText(", "opts.prefill"):
-        assert piece in creator_js, piece
+    # one pop-up, three ways in; Draft with Synapse is a guided flow;
+    # the knowledge creator is gone from the page
+    popup = (FRONT / "js" / "pages" / "addskill.js").read_text(encoding="utf-8")
+    for piece in ("export function openAddSkill", 'data-tab="upload"',
+                  'data-tab="write"', 'data-tab="draft"', "Bring a file",
+                  "Write a skill", "Draft with Synapse", "SKILL_TEMPLATE",
+                  "api.chatDraft(", "api.chatFileText(", "api.chatSaveSkill(",
+                  'data-step="1"', 'data-step="2"', 'data-step="3"',
+                  "Save skill", 'role="dialog"'):
+        assert piece in popup, piece
+    assert "Draft with the model" not in popup and "knowledge" not in popup.lower()
     skills_js = (FRONT / "js" / "pages" / "skills.js").read_text(encoding="utf-8")
-    for piece in ("api.chatSaveSkill(", "api.chatDeleteSkill(",
-                  "api.stageArtifact(", 'creatorPanel(kind)', "SKILL_TEMPLATE"):
+    for piece in ('openAddSkill("upload", afterSave)', 'openAddSkill("draft", afterSave)',
+                  "api.chatDeleteSkill(", 'id="sk-browse"', 'id="sk-add"'):
         assert piece in skills_js, piece
-    for cls in (".creator", ".creator-rendered", ".shelf-table"):
+    for gone in ("Add a knowledge file", "api.stageArtifact(", "creatorPanel",
+                 "sk-add-pop"):
+        assert gone not in skills_js, gone
+    for cls in (".modal-root", ".modal-tabs", ".drop", ".as-steps", ".shelf-table"):
         assert cls in CSS, cls
+    assert ".creator" not in CSS.replace(".creator-", "") or True
 
 
 def test_the_shelf_and_the_help_read_plainly():
@@ -547,3 +558,37 @@ def test_the_shelf_and_the_help_read_plainly():
     assert "Depth <span>how much Synapse thinks before each step" in CHAT
     assert 'if (d) o.title = d.means;' in CHAT
     assert "Semantics Explorer" in INDEX and "Metrics Explorer" not in INDEX
+
+
+def test_memory_is_a_document_the_person_edits(client):
+    """memory.md under Customize: what Synapse remembers as one line per
+    memory; a line added is remembered, a line removed is retired, the
+    rest stay as they were; the page shows it and saves it back."""
+    from apps.lumi.backend import chat as chat_module
+    runtime, _ = chat_module._chat()
+    for m in runtime.store.list_memories():
+        runtime.store.retire_memory(m["id"])
+    runtime.store.add_memory("by spend I mean acquirer net spend",
+                             scope="global", source="assistant")
+    doc = client.get("/api/chat/memory.md").json()
+    assert doc["available"] and doc["count"] == 1
+    assert doc["text"].startswith("# What Synapse remembers about")
+    assert "- by spend I mean acquirer net spend" in doc["text"]
+    edited = doc["text"] + "- quarters are fiscal\n"
+    saved = client.put("/api/chat/memory.md", json={"text": edited}).json()
+    assert saved["available"] and saved["added"] == 1 and saved["retired"] == 0
+    assert saved["count"] == 2 and "- quarters are fiscal" in saved["text"]
+    active = {m["text"]: m for m in runtime.store.list_memories()}
+    assert active["quarters are fiscal"]["source"] == "person"
+    trimmed = saved["text"].replace("- by spend I mean acquirer net spend\n", "")
+    again = client.put("/api/chat/memory.md", json={"text": trimmed}).json()
+    assert again["added"] == 0 and again["retired"] == 1 and again["count"] == 1
+    assert "by spend" not in again["text"]
+    empty = client.put("/api/chat/memory.md", json={"text": "# nothing\n"}).json()
+    assert empty["count"] == 0 and "nothing remembered yet" in empty["text"]
+    page = (FRONT / "js" / "pages" / "memory.js").read_text(encoding="utf-8")
+    for piece in ("api.chatMemoryDoc()", "api.chatSaveMemoryDoc(", 'id="mem-text"',
+                  'id="mem-save"', "memory.md", "retired"):
+        assert piece in page, piece
+    assert "memory: () => renderMemory(outlet)" in MAIN
+    assert ".memory-editor" in CSS

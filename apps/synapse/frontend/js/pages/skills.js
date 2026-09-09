@@ -6,16 +6,16 @@
  * written and who wrote it — Synapse for what ships with the
  * assistant, You for your own, a file's own author line, the
  * business unit a staged file was dropped for, or its folder. Search
- * from the toolbar; Browse brings a markdown file of your own; Add
- * uploads one, writes one from the house template, drafts one with
- * Synapse from your material, or adds a knowledge file. A row opens
- * in the reader on the right, with Use in chat for a pack. */
+ * from the toolbar; Browse and Add open one pop-up with three ways
+ * in: bring a file, write one from the house template, or Draft with
+ * Synapse from your material. A row opens in the reader on the right,
+ * with Use in chat for a pack. */
 
 import { api } from "../api.js";
 import { renderMarkdown } from "../md.js";
 import { createPullout } from "../pullout.js";
 import { esc, loading } from "../ui.js";
-import { creatorPanel, slugOf, wireCreator } from "./creator.js";
+import { openAddSkill } from "./addskill.js";
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const when = (iso) => {
@@ -27,18 +27,6 @@ const when = (iso) => {
 const KIND_LABEL = { skill: "skill", knowledge: "knowledge",
                      reference: "reference" };
 
-export const SKILL_TEMPLATE = `# <Title: the kind of ask this is for>
-
-<One line: what this pack is for and when it applies.>
-
-## <A move: the first thing to do for this kind of ask>
-1. <A step, naming the tool when one is implied: search(...),
-   run_sql(mode="dry_run"), check(kind=...), propose_sql, artifact.>
-2. <The next step.>
-
-## Never
-- <A rule the material implies, stated as a prohibition.>
-`;
 
 // the rows of the shelf, from the two shelves the server keeps
 function shelfRows(packs, files) {
@@ -89,19 +77,9 @@ export async function renderSkills(outlet) {
           aria-expanded="false">⌕</button>
         <input class="search" id="sk-search"
           placeholder="search skills and knowledge…" hidden />
-        <label class="btn" for="sk-browse"
-          title="bring a markdown file of your own: it becomes a skill of yours">Browse</label>
-        <input type="file" id="sk-browse" hidden multiple accept=".md,.txt,.markdown" />
-        <div class="add-menu">
-          <button class="btn primary" id="sk-add" aria-expanded="false">Add ▾</button>
-          <div class="add-pop" id="sk-add-pop" hidden>
-            <button type="button" data-add="upload">⇧ Upload a skill</button>
-            <button type="button" data-add="write">✎ Write a skill</button>
-            <button type="button" data-add="draft">✳ Draft with Synapse</button>
-            <hr />
-            <button type="button" data-add="knowledge">▤ Add a knowledge file</button>
-          </div>
-        </div>
+        <button class="btn" id="sk-browse"
+          title="bring a markdown file of your own: it becomes a skill of yours">Browse</button>
+        <button class="btn primary" id="sk-add">Add</button>
       </div>
       <p class="muted shelf-intro">What Synapse knows how to do, and what
         it knows about. A <b>skill</b> is doctrine: the moves for a kind
@@ -114,7 +92,6 @@ export async function renderSkills(outlet) {
         <tbody id="sk-rows"><tr><td colspan="4">${loading()}</td></tr></tbody>
       </table>
       <p class="muted" id="sk-note"></p>
-      <div id="sk-creator"></div>
     </div>`;
   const pullout = createPullout(outlet);
   const $ = (id) => outlet.querySelector(`#${id}`);
@@ -221,70 +198,13 @@ export async function renderSkills(outlet) {
   });
   $("sk-search").addEventListener("input", (e) => { needle = e.target.value; paint(); });
 
-  // ── Browse and Upload: a markdown file of yours becomes a skill of yours ──
-  $("sk-browse").addEventListener("change", async (e) => {
-    const picked = [...e.target.files];
-    e.target.value = "";
-    const outcomes = [];
-    for (const file of picked) {
-      const text = await file.text();
-      const name = slugOf(file.name.replace(/\.[^.]+$/, ""));
-      const got = await api.chatSaveSkill(name, text)
-        .catch((err) => ({ available: false, reason: String(err) }));
-      outcomes.push(got.available
-        ? `${file.name} → /${got.skill.name}${got.skill.replaced ? " (replaced)" : ""}`
-        : `${file.name}: ${got.reason || "refused"}`);
-    }
-    note.textContent = outcomes.join(" · ");
-    await load();
-  });
-
-  // ── Add: upload, write, draft, knowledge ──
-  const addPop = $("sk-add-pop");
-  $("sk-add").addEventListener("click", () => {
-    addPop.hidden = !addPop.hidden;
-    $("sk-add").setAttribute("aria-expanded", String(!addPop.hidden));
-  });
-  document.addEventListener("click", (e) => {
-    if (!addPop.hidden && !e.target.closest(".add-menu")) addPop.hidden = true;
-  });
-  const creatorHost = $("sk-creator");
-  function openCreator(kind, opts = {}) {
-    creatorHost.innerHTML = creatorPanel(kind);
-    const onSave = kind === "skill"
-      ? async (name, text) => {
-          const got = await api.chatSaveSkill(name, text)
-            .catch((err) => ({ available: false, reason: String(err) }));
-          if (!got.available) return { ok: false, reason: got.reason };
-          return { ok: true, note: `saved as /${got.skill.name}: it loads for you from the next chat on` };
-        }
-      : async (name, text, fields) => {
-          const unit = (fields.business_unit || "").trim();
-          if (!/^[A-Za-z0-9_-]{1,40}$/.test(unit)) {
-            return { ok: false, reason: "a business unit names the file: letters, digits, dashes" };
-          }
-          const body = await api.stageArtifact({
-            business_unit: unit, name: name || fields.title || "knowledge",
-            content: text, ext: "md" });
-          if (body.ok && body.staged) {
-            return { ok: true, note: `staged as ${body.file}: it enters the graph on the next build` };
-          }
-          return { ok: false, reason: body.reason
-            ?? (body.detail ? JSON.stringify(body.detail) : "refused") };
-        };
-    wireCreator(creatorHost, kind, onSave, () => load(), opts);
-    creatorHost.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-  addPop.addEventListener("click", (e) => {
-    const item = e.target.closest("[data-add]");
-    if (!item) return;
-    addPop.hidden = true;
-    const what = item.dataset.add;
-    if (what === "upload") $("sk-browse").click();
-    else if (what === "write") openCreator("skill", { prefill: SKILL_TEMPLATE });
-    else if (what === "draft") openCreator("skill");
-    else if (what === "knowledge") openCreator("knowledge");
-  });
+  // ── Browse and Add: one pop-up, three ways in ──
+  const afterSave = (skill) => {
+    note.textContent = `saved as /${skill.name}: it loads for you from the next chat on`;
+    load();
+  };
+  $("sk-browse").addEventListener("click", () => openAddSkill("upload", afterSave));
+  $("sk-add").addEventListener("click", () => openAddSkill("draft", afterSave));
 
   await load();
   return pullout.teardown;
