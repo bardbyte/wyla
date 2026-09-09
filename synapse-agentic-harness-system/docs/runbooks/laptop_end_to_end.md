@@ -441,6 +441,23 @@ each is configured here. `GET /api/chat/dials` is the one source, and
 `python scripts/turn_doctor.py` prints the plane and the depth on
 every turn's line.
 
+**The library on the second surface.** Data Products filters by line
+of business beside the search (every code the build maps a table to,
+by name, with its count; "unmapped" for the rest). A product page
+says what the product is and lists its columns as a searchable list:
+the first twelve open, the rest a search away, and a row opens to
+what the column is (the description on record, Lumi's supplementary
+meaning, sensitivity, how many sources agree) and where it is used
+(joins, metrics). The meaning comes from `columns.json`, an index the
+compiler writes beside `schema.json` since this change: run
+`python scripts/laptop.py compile` once after pulling, or the page
+falls back to the served card, which is budgeted and may carry no
+meaning past the twelfth column. Metric cards open in place with the
+full definition, the data product they are computed on and the
+columns they read. Skills replaces Artifacts in the nav: the doctrine
+packs the agent loads by itself, each with its slash command and a
+Use-in-chat door; `#/artifacts` still answers by URL.
+
 **Before the first query:** the graph names tables `dw.<table>`, and
 BigQuery resolves that against the project that runs the query
 (`prj-p-lumi-gpt`), not the one that hosts the data. Set

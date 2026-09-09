@@ -395,6 +395,18 @@ handoff, the eval suites.
    Quick, Standard and Deep actually change (the thinking, nothing
    else); the history is text, so a switch mid-chat is safe.
 
+17. The columns get their meaning served (2026-09-09). The compiler
+   writes `columns.json` beside `schema.json`: every consensus column
+   with its description and source, Lumi's supplementary meaning,
+   its business name, sensitivity, governance and agreement — the
+   same facts the served card renders, complete where the card is
+   budgeted. The table detail serves it (falling back to the card's
+   lines on an older build) and the second surface lists columns as
+   a search with expandable rows instead of a wall of chips; metric
+   cards open in place; Skills replaces Artifacts in the nav. Reason:
+   a person choosing a column needs to know what it is before they
+   ask, and the build already knew.
+
 ## 12 · The laptop, measured (state report of 2026-09-02)
 
 What v3 is actually built against — not the fixture.

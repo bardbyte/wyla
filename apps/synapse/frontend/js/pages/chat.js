@@ -342,6 +342,19 @@ export async function renderChat(outlet, wanted = "") {
     }
   }
   input.addEventListener("input", paintSlash);
+  // the Skills page hands a slash command over: it lands in the
+  // composer, ready to finish, and the slash menu shows the pack
+  let prefill = "";
+  try {
+    prefill = sessionStorage.getItem("synapse.prefill") || "";
+    sessionStorage.removeItem("synapse.prefill");
+  } catch { prefill = ""; }
+  if (prefill && !state.running) {
+    input.value = prefill;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    paintSlash();
+  }
   document.addEventListener("click", (e) => {
     if (!plusPop.hidden && !plusPop.contains(e.target)
         && e.target !== el("chat-plus")) plusPop.hidden = true;

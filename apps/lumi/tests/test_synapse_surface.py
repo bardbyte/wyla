@@ -59,18 +59,20 @@ def client(compiled) -> TestClient:
 
 
 def test_shell_is_stripped_and_renamed():
-    """The left header says Synapse Semantic Intelligence; Home, Skills,
-    Cosmos and Operate are gone; New chat and Search chats sit at the
-    top, the chats under them, and Data Products, Metrics Explorer and
-    Artifacts in their own section at the bottom above the account."""
+    """The left header says Synapse Semantic Intelligence; Home, Cosmos
+    and Operate are gone; New chat and Search chats sit at the top, the
+    chats under them, and Data Products, Metrics Explorer and Skills in
+    their own section at the bottom above the account (Artifacts left
+    the nav: the shelf lives in the chat, the Skills page showcases
+    what the agent knows how to do)."""
     assert "<title>Synapse Semantic Intelligence</title>" in INDEX
     assert ">Synapse</a>" in INDEX and "Semantic Intelligence" in INDEX
-    for gone in ("#/home", "#/skills", "#/cosmos", "#/operate", "#/ask",
+    for gone in ("#/home", "#/cosmos", "#/operate", "#/ask", "#/artifacts",
                  "powered by Lumi", "Semantics Explorer", ">Tables<",
-                 ">Home<", ">Skills<", "chats-search"):
+                 ">Home<", ">Artifacts<", "chats-search"):
         assert gone not in INDEX, gone
     explore = INDEX.split('aria-label="Explore"')[1].split("</nav>")[0]
-    for kept in ("Data Products", "Metrics Explorer", "Artifacts"):
+    for kept in ("Data Products", "Metrics Explorer", "Skills"):
         assert kept in explore, kept
     order = [INDEX.index('href="#/chat/new"'), INDEX.index('href="#/search"'),
              INDEX.index('class="chats"'), INDEX.index('aria-label="Explore"'),
@@ -81,18 +83,19 @@ def test_shell_is_stripped_and_renamed():
     assert 'src="js/main.js"' in INDEX and 'href="styles/synapse.css"' in INDEX
     assert 'href="/styles' not in INDEX and 'src="/js' not in INDEX
     assert not (FRONT / "vendor").exists()
-    for page in ("cosmos", "operate", "home", "skills", "ask"):
+    for page in ("cosmos", "operate", "home", "ask"):
         assert not (FRONT / "js" / "pages" / f"{page}.js").exists(), page
+    assert (FRONT / "js" / "pages" / "skills.js").exists()
 
 
 def test_routes_are_the_new_surface_and_chat_is_the_door():
     for route in ("chat:", "search:", "products:", "product:", "metrics:",
-                  "metric:", "artifacts:"):
-        assert route in MAIN, route
+                  "metric:", "skills:", "artifacts:"):
+        assert route in MAIN, route            # artifacts: by URL only
     assert '|| "chat"' in MAIN                     # the default route
     assert "renderSearch" in MAIN and "renderProducts" in MAIN
-    for gone in ("renderHome", "renderCosmos", "renderOperate",
-                 "renderSkills", "renderAsk"):
+    assert "renderSkills" in MAIN
+    for gone in ("renderHome", "renderCosmos", "renderOperate", "renderAsk"):
         assert gone not in MAIN, gone
     for page in ("metric.js", "table.js"):
         text = (FRONT / "js" / "pages" / page).read_text(encoding="utf-8")
@@ -238,3 +241,119 @@ def test_the_second_surface_switches_models_and_explains_the_dials(client):
     dials = client.get("/api/chat/dials").json()
     assert len(dials["planes"]) == 2 and len(dials["depths"]) == 3
     assert client.get("/synapse/js/api.js").text.count("chatSetModel") == 1
+
+
+def test_data_products_filter_by_line_of_business(client):
+    """The explorer rows name the line of business by code and by name,
+    and the page filters on it beside the search: every code the build
+    maps a table to, with its count, and "unmapped" for the rest."""
+    rows = client.get("/api/meridian/explorer/tables").json()["rows"]
+    gms = next(r for r in rows if r["physical"] == "dw.gms_transaction")
+    assert gms["lob"] == "GMNS"
+    assert gms["lob_name"] == "Global Merchant & Network Services"
+    assert all("lob_name" in r for r in rows)
+    products = (FRONT / "js" / "pages" / "tables.js").read_text(encoding="utf-8")
+    for piece in ('id="p-lob"', "all lines of business", "unmapped",
+                  "r.lob_name", "state.lob === \"unmapped\"", "lob-filter"):
+        assert piece in products, piece
+    assert ".lob-filter" in CSS
+
+
+def test_the_product_page_explains_every_column(client):
+    """Every servable column with what it is: the compiler's columns
+    index served on the table detail (description, Lumi's supplementary
+    meaning, sensitivity, agreement), the product's own description and
+    line of business beside it, and a page that searches the columns,
+    shows the first twelve, and opens a row to its meaning and its
+    uses in joins and metrics."""
+    detail = client.get("/api/meridian/table/dw.gms_transaction").json()
+    assert detail["found"]
+    assert detail["description"] == "Global merchant transaction spine."
+    assert detail["lob"] == "GMNS" and detail["business_unit"] == "GMNS"
+    cols = {c["name"]: c for c in detail["columns_detail"]}
+    assert set(cols) == set(detail["columns"])            # complete
+    assert cols["cm13"]["sensitive"]
+    assert cols["cm13"]["description"] == "Card member number."
+    assert cols["trans_usd_am"]["supplementary"] \
+        == "Signed transaction amount in US dollars."
+    assert cols["bq_only_col"]["ungoverned"]
+    assert cols["cm13"]["type"] == "STRING"          # typed by BigQuery
+    assert cols["txn_uid"]["type"] == ""              # atlas-only: no type
+    assert cols["txn_uid"]["type_source"] == "atlas"
+    assert any(m["expr"] for m in detail["metrics_here"])
+    page = (FRONT / "js" / "pages" / "table.js").read_text(encoding="utf-8")
+    for piece in ("const FIRST = 12", 'id="col-search"', "columns_detail",
+                  "col-detail", "c.supplementary", "c.description_source",
+                  "in joins:", "in metrics:", "search for the rest",
+                  "show all ${hits.length} columns", "product-desc-full",
+                  "detail.lob_name"):
+        assert piece in page, piece
+    for cls in (".col-row", ".col-head", ".col-detail", ".col-uses",
+                ".product-desc-full"):
+        assert cls in CSS, cls
+
+
+def test_the_column_detail_falls_back_to_the_served_card():
+    """A build compiled before columns.json existed: the served card's
+    column lines carry the meaning, merged with the schema so no
+    servable column is missing (past the card's budget a column keeps
+    its type and an empty description)."""
+    from apps.lumi.backend.meridian import _DATA
+
+    class Stub:
+        columns = {}
+        schema = {"dw.t": {"cm13": "STRING", "amt": "FLOAT64",
+                           "late": "DATE", "nested.x": "STRING"}}
+    text = ("# table dw.t\n## columns\n"
+            "- cm13 string (SENSITIVE): Card member number. "
+            "[prov:bq·agree=3]\n"
+            "- amt float64: Amount. | lumi: Signed amount. [prov:bq·agree=2]\n"
+            "- nested.x string (ungoverned, no business meaning on record) "
+            "[prov:bq·agree=1]\n"
+            "## joined with (observed)\n- dw.u · 3 co-queries [prov:bq]\n")
+    rows = {r["name"]: r for r in _DATA._columns_detail(Stub(), "dw.t", text)}
+    assert list(rows) == ["cm13", "amt", "late", "nested.x"]
+    assert rows["cm13"]["sensitive"] and rows["cm13"]["description"] \
+        == "Card member number." and rows["cm13"]["agreement"] == 3
+    assert rows["amt"]["description"] == "Amount."
+    assert rows["amt"]["supplementary"] == "Signed amount."
+    assert rows["nested.x"]["ungoverned"] and not rows["nested.x"]["description"]
+    assert rows["late"] == {
+        "name": "late", "type": "DATE", "type_source": "",
+        "description": "", "description_source": "", "supplementary": "",
+        "business_name": "", "sensitive": False, "sensitivity_sources": [],
+        "ungoverned": False, "agreement": 1, "flags": []}
+
+
+def test_metric_cards_open_in_place_with_the_definition_and_the_table():
+    metrics = (FRONT / "js" / "pages" / "semantics.js").read_text(encoding="utf-8")
+    for piece in ('role="button"', "metric-detail", "api.metric(id)",
+                  "api.table(r.table)", "COMPUTED ON", "DEFINITION",
+                  "m.canonical_sql", "m.common_filters", "reads",
+                  "full profile →", "openCard(el)", "e.key !== \"Enter\""):
+        assert piece in metrics, piece
+    for cls in (".metric-card.open", ".metric-detail", ".metric-foot"):
+        assert cls in CSS, cls
+
+
+def test_skills_showcase_what_the_agent_knows(client):
+    """Skills in place of Artifacts: the doctrine packs the agent loads
+    by itself, each with its slash command, its moves, the full text a
+    click away, and a Use-in-chat door that opens a new chat with the
+    slash command in the composer."""
+    got = client.get("/api/chat/skills").json()
+    assert got["available"] and len(got["skills"]) >= 4
+    names = {s["name"] for s in got["skills"]}
+    assert {"analysis-playbooks", "dashboard-design", "executive-summary",
+            "lumi-data-connect"} <= names
+    assert all(s["text"] and s["origin"] for s in got["skills"])
+    page = (FRONT / "js" / "pages" / "skills.js").read_text(encoding="utf-8")
+    for piece in ("Use in chat", "synapse.prefill", "read the doctrine",
+                  "skills-how", "slash-name", "skill-moves",
+                  'location.hash = "#/chat/new"', "api.chatSkills()"):
+        assert piece in page, piece
+    assert 'sessionStorage.getItem("synapse.prefill")' in CHAT
+    assert "paintSlash();" in CHAT
+    for cls in (".skills-how", ".skill-actions", ".slash-name"):
+        assert cls in CSS, cls
+    assert 'href="#/skills"' in INDEX

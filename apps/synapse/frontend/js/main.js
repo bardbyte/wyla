@@ -1,7 +1,8 @@
 /** Synapse Semantic Intelligence: the chat first, the library under
  * it. A hash router over the left sidebar, a theme toggle.
  * Routes: #/chat #/chat/<session> #/search #/products
- *         #/product/<physical> #/metrics #/metric/<id> #/artifacts
+ *         #/product/<physical> #/metrics #/metric/<id> #/skills
+ *         (#/artifacts stays reachable by URL: the shelf lives in the chat)
  * Deep links work: a metric profile is a URL you can send someone. */
 
 import { renderChat } from "./pages/chat.js";
@@ -11,6 +12,7 @@ import { renderTable } from "./pages/table.js";
 import { renderMetrics } from "./pages/semantics.js";
 import { renderMetric } from "./pages/metric.js";
 import { renderArtifacts } from "./pages/artifacts.js";
+import { renderSkills } from "./pages/skills.js";
 import { refreshChats } from "./chats.js";
 
 const outlet = document.getElementById("outlet");
@@ -40,6 +42,7 @@ async function route() {
     metrics: () => renderMetrics(outlet),
     metric: () => renderMetric(outlet, arg),
     artifacts: () => renderArtifacts(outlet),
+    skills: () => renderSkills(outlet),
   };
   const render = pages[page] ?? pages.chat;
   teardown = await render() ?? null;

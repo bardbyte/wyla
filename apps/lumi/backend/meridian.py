@@ -279,8 +279,10 @@ class MeridianData:
                 if end:
                     joins_by_table[end] = joins_by_table.get(end, 0) + 1
         lob_of: dict[str, str] = {}
+        lob_name: dict[str, str] = {}
         for lrow in build.lob:
             code = str(lrow.get("code") or lrow.get("lob") or "")
+            lob_name.setdefault(code, str(lrow.get("name") or ""))
             for physical in lrow.get("tables", []):
                 lob_of.setdefault(physical, code)
         tickets = self._aux("tickets.jsonl") or []
@@ -294,6 +296,7 @@ class MeridianData:
                  "short": physical.split(".")[-1],
                  "columns": len(columns),
                  "lob": lob_of.get(physical, ""),
+                 "lob_name": lob_name.get(lob_of.get(physical, ""), ""),
                  "metrics_here": metrics_by_table.get(physical, 0),
                  "joins": joins_by_table.get(physical, 0),
                  "tickets": tickets_by_table.get(physical, 0),
@@ -389,23 +392,86 @@ class MeridianData:
                     "physical": physical}
         card = (build.root / "cards" / "tables"
                 / f"{physical.replace('.', '__')}.md")
+        text = card.read_text(encoding="utf-8") if card.exists() else ""
         joins = [j for j in build.joins
                  if physical in (j.get("a"), j.get("b"))]
         metrics_here = [
             {"id": r["id"], "label": r.get("label") or "",
              "status_served": r.get("status_served"),
-             "support": r.get("support", 0)}
+             "support": r.get("support", 0),
+             "expr": (r.get("canonical_sql") or "")[:400]}
             for r in build.metrics if r.get("table") == physical]
+        lob_code, lob_name = "", ""
+        for lrow in build.lob:
+            if physical in (lrow.get("tables") or []):
+                lob_code = str(lrow.get("code") or lrow.get("lob") or "")
+                lob_name = str(lrow.get("name") or "")
+                break
         return {"available": True, "found": True,
                 "physical": physical,
                 "columns": build.schema.get(physical, {}),
-                "card": card.read_text(encoding="utf-8")
-                if card.exists() else "",
+                "columns_detail": self._columns_detail(
+                    build, physical, text),
+                "lob": lob_code, "lob_name": lob_name,
+                **self._table_texture(build, physical),
+                "card": text,
                 "joins": joins,
                 "metrics_here": sorted(
                     metrics_here,
                     key=lambda m: -m["support"])[:50],
                 "cost_prior": build.cost_priors.get(physical)}
+
+    # a card's column line: "- name type (SENSITIVE; ungoverned, …):
+    # meaning | lumi: more [prov:src·agree=n]" — the fallback for a
+    # build compiled before columns.json existed
+    _CARD_COLUMN = re.compile(
+        r"^- (?P<name>\S+) (?P<type>[^ (:\[]*)(?: \((?P<flags>[^)]*)\))?"
+        r"(?:: (?P<meaning>.*?))? \[prov:(?P<src>[^·\]]*)"
+        r"(?:·agree=(?P<agree>\d+))?\]$")
+
+    def _columns_detail(self, build: Any, physical: str,
+                        card_text: str) -> list[dict]:
+        """Every servable column with what it is: the compiler's
+        columns index when the build has one; else the served card's
+        column lines (budgeted: past the twelfth a column may carry
+        no meaning), always merged with the schema so no servable
+        column is missing."""
+        rows: dict[str, dict] = {}
+        for row in build.columns.get(physical) or []:
+            rows[row["name"]] = dict(row)
+        if not rows and card_text:
+            section = card_text.split("## columns", 1)
+            body = section[1].split("\n## ", 1)[0] if len(section) > 1 \
+                else ""
+            for line in body.splitlines():
+                m = self._CARD_COLUMN.match(line.strip())
+                if not m:
+                    continue
+                flags = (m.group("flags") or "")
+                meaning = (m.group("meaning") or "")
+                desc, _sep, supp = meaning.partition(" | lumi: ")
+                rows[m.group("name")] = {
+                    "name": m.group("name"), "type": m.group("type") or "",
+                    "type_source": m.group("src") or "",
+                    "description": desc.strip(),
+                    "description_source": "",
+                    "supplementary": supp.strip(), "business_name": "",
+                    "sensitive": "SENSITIVE" in flags,
+                    "sensitivity_sources": [],
+                    "ungoverned": "ungoverned" in flags,
+                    "agreement": int(m.group("agree") or 1),
+                    "flags": []}
+        out = []
+        for name, dtype in (build.schema.get(physical) or {}).items():
+            row = rows.get(name) or {
+                "name": name, "type": dtype, "type_source": "",
+                "description": "", "description_source": "",
+                "supplementary": "", "business_name": "",
+                "sensitive": False, "sensitivity_sources": [],
+                "ungoverned": False, "agreement": 1, "flags": []}
+            row["type"] = row.get("type") or dtype
+            out.append(row)
+        return out
 
     def graph_map(self) -> dict:
         build, reason = self._load()

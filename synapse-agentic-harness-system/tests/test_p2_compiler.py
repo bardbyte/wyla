@@ -425,3 +425,30 @@ def test_catalog_joins_are_the_fifth_family_and_never_tier_above_candidate(
     assert f"- {label} [" in digest
     assert " · usually by part_dt" in digest
 
+
+
+def test_columns_index_carries_every_columns_meaning(tmp_path):
+    """columns.json: the consensus columns with what each one is —
+    complete where the served card is budgeted — and the build loader
+    carries it; a build without the file loads with {} (the readers
+    fall back to the card)."""
+    from sahs.tools.api import Build
+    _graph_dir, build_dir, _manifest = _compiled(tmp_path)
+    index = json.loads((build_dir / "columns.json").read_text())
+    schema = json.loads((build_dir / "schema.json").read_text())
+    assert set(index) == set(schema)
+    for physical, rows in index.items():
+        assert [r["name"] for r in rows] == list(schema[physical])
+        assert all(r["type"] == schema[physical][r["name"]] for r in rows)
+    gms = {r["name"]: r for r in index["dw.gms_transaction"]}
+    assert gms["cm13"]["sensitive"] and gms["cm13"]["description"] \
+        == "Card member number."
+    assert gms["trans_usd_am"]["supplementary"] \
+        == "Signed transaction amount in US dollars."
+    assert gms["bq_only_col"]["ungoverned"] and not gms["bq_only_col"][
+        "description"]
+    assert gms["country_cd"]["description_source"]
+    build = Build.open(tmp_path / "builds")
+    assert build.columns == index
+    (build_dir / "columns.json").unlink()
+    assert Build.open(tmp_path / "builds").columns == {}
