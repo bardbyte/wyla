@@ -266,3 +266,118 @@ def test_no_build_is_honest(tmp_path):
     payload = empty.get("/api/meridian/home").json()
     assert payload["available"] is False
     assert "laptop.py compile" in payload["reason"]
+
+
+def test_the_dials_catalog_and_the_model_switch(client):
+    """One catalog explains every dial (modes, depths with what each
+    does on each plane, and the two planes with availability and the
+    reason when not); the switch is remembered on the chat and rides
+    the next message; a plane this machine cannot ride is refused with
+    the reason, never swapped for another model in silence."""
+    dials = client.get("/api/chat/dials").json()
+    assert dials["available"]
+    assert [m["id"] for m in dials["modes"]] == ["chat", "autopilot"]
+    assert [d["id"] for d in dials["depths"]] == ["quick", "standard",
+                                                  "deep"]
+    for d in dials["depths"]:
+        assert d["means"] and d["level"] in ("low", "medium", "high")
+        assert d["on"]["vertex"].startswith("thinking level ")
+        assert d["on"]["gateway"].endswith(" thinking tokens per call")
+    assert [d["default"] for d in dials["depths"]] == [False, True, False]
+    assert [p["id"] for p in dials["planes"]] == ["vertex", "gateway"]
+    for p in dials["planes"]:
+        assert " via " not in p["label"]          # the model, nothing more
+        assert p["plane_name"] == {"vertex": "Vertex", "gateway": "Gateway"}[p["id"]]
+        assert p["means"] and isinstance(p["available"], bool)
+        assert p["available"] or p["reason"]
+    assert sum(p["default"] for p in dials["planes"]) == 1
+    assert "nothing else" in dials["notes"]["depth"]
+    assert "next message" in dials["notes"]["plane"]
+    # the chat opens on a plane, configured here or not, with its label
+    made = client.post("/api/chat/sessions", json={}).json()["session"]
+    assert made["model"] == ""
+    boot = client.get(f"/api/chat/sessions/{made['id']}").json()
+    assert boot["plane"] in ("vertex", "gateway")
+    assert boot["model"] == next(p["label"] for p in dials["planes"]
+                                 if p["id"] == boot["plane"])
+    nope = client.post(f"/api/chat/sessions/{made['id']}/model",
+                       json={"model": "nope"}).json()
+    assert nope["available"] is False and "vertex and gateway" in nope["reason"]
+    for p in dials["planes"]:
+        got = client.post(f"/api/chat/sessions/{made['id']}/model",
+                          json={"model": p["id"]}).json()
+        if p["available"]:
+            assert got["available"] and got["plane"] == p["id"]
+            assert got["model"] == p["label"]
+            again = client.get(f"/api/chat/sessions/{made['id']}").json()
+            assert again["plane"] == p["id"]
+            assert again["session"]["model"] == p["id"]
+        else:
+            assert got["available"] is False
+            assert p["reason"] in got["reason"]
+            assert "not configured on this machine" in got["reason"]
+    # '' forgets the switch: the chat is back on the .env default
+    back = client.post(f"/api/chat/sessions/{made['id']}/model",
+                       json={"model": ""}).json()
+    assert back["available"] and back["plane"] == boot["plane"]
+    assert client.get(f"/api/chat/sessions/{made['id']}").json()[
+        "session"]["model"] == ""
+
+
+def test_files_ride_the_message(client):
+    """Add files: the support table, an upload kept on the chat and
+    shown pending on the boot, a refusal with its reason, removal, and
+    a message that carries the file (stored with its name even when
+    the model is not configured here)."""
+    import base64
+    support = client.get("/api/chat/files/support").json()
+    assert support["available"] and support["max_file_mb"] == 10
+    assert {r["suffix"] for r in support["accepted"]} >= {
+        "pdf", "png", "csv", "xlsx", "docx"}
+    assert any(r["suffix"] == "xls" for r in support["not_offered"])
+    made = client.post("/api/chat/sessions", json={}).json()["session"]
+    sid = made["id"]
+    up = client.post(f"/api/chat/sessions/{sid}/files", json={
+        "name": "rows.csv",
+        "data_b64": base64.b64encode(b"a,b\n1,2\n").decode()}).json()
+    assert up["available"] and up["file"]["rides"] == "text"
+    fid = up["file"]["id"]
+    refused = client.post(f"/api/chat/sessions/{sid}/files", json={
+        "name": "tool.exe", "data_b64": base64.b64encode(b"MZ").decode()}
+        ).json()
+    assert refused["available"] is False and "not a data file" in refused[
+        "reason"]
+    bad = client.post(f"/api/chat/sessions/{sid}/files", json={
+        "name": "x.csv", "data_b64": "not base64!!"}).json()
+    assert bad["available"] is False and "base64" in bad["reason"]
+    boot = client.get(f"/api/chat/sessions/{sid}").json()
+    assert [f["id"] for f in boot["files"]] == [fid]
+    assert not boot["files"][0].get("sent_turn")
+    assert client.get(f"/api/chat/sessions/{sid}/files").json()["files"][0][
+        "name"] == "rows.csv"
+    # no model plane is configured here: the send is refused with the
+    # plane's reason before anything lands, and the file stays pending
+    # (the turn that carries a file to the model is pinned in the silo:
+    # tests/test_chat_files.py)
+    sent = client.post(f"/api/chat/sessions/{sid}/messages", json={
+        "text": "sum column b", "files": [fid]}).json()
+    assert sent["available"] is False
+    assert "not configured on this machine" in sent["reason"]
+    boot = client.get(f"/api/chat/sessions/{sid}").json()
+    assert boot["messages"] == [] and not boot["files"][0].get("sent_turn")
+    gone = client.delete(f"/api/chat/sessions/{sid}/files/{fid}").json()
+    assert gone["removed"] is True
+    assert client.get(f"/api/chat/sessions/{sid}/files").json()["files"] == []
+    assert client.delete(f"/api/chat/sessions/{sid}/files/{fid}").json()[
+        "removed"] is False
+
+
+def test_an_untouched_new_chat_stays_off_the_shelf(client):
+    """A session carries how many messages it holds; the shelf lists
+    only those with one, so New chat without a word never shows under
+    Recent, and the next New chat reuses the empty one."""
+    made = client.post("/api/chat/sessions", json={}).json()["session"]
+    rows = client.get("/api/chat/sessions?limit=50").json()["sessions"]
+    mine = next(r for r in rows if r["id"] == made["id"])
+    assert mine["messages"] == 0
+    assert all(isinstance(r["messages"], int) for r in rows)

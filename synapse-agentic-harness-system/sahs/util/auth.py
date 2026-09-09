@@ -63,32 +63,59 @@ class AuthError(RuntimeError):
     """Environment/auth misconfiguration — maps to exit code 3."""
 
 
+def dotenv_candidates(path: Path | None = None) -> list[Path]:
+    """The search order, first found wins: explicit path →
+    $SAHS_ENV_FILE → <silo root>/.env → ./.env."""
+    candidates = [path] if path else []
+    if os.environ.get("SAHS_ENV_FILE"):
+        candidates.append(Path(os.environ["SAHS_ENV_FILE"]))
+    candidates += [Path(__file__).resolve().parents[2] / ".env",
+                   Path(".env")]
+    return [c for c in candidates if c is not None]
+
+
+def dotenv_path(path: Path | None = None) -> Path | None:
+    """The one ``.env`` the loader reads on this machine, or None:
+    the answer to "which file is it reading?"."""
+    for candidate in dotenv_candidates(path):
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def dotenv_value(raw: str) -> str:
+    """One value as the file means it: quotes removed when the value
+    is quoted, otherwise an inline comment (" #…") dropped and the
+    ends trimmed — a path followed by a note stays a path."""
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        return value[1:-1]
+    cut = value.find(" #")
+    if cut >= 0:
+        value = value[:cut]
+    return value.strip()
+
+
 def load_dotenv(path: Path | None = None) -> list[str]:
     """Read a ``.env`` file into ``os.environ`` (the laptop keeps its
     three BQ variables there — same flow as the proven bq_connect.py).
     NEVER overrides variables already exported in the shell. Search
     order: explicit path → $SAHS_ENV_FILE → <silo root>/.env → ./.env.
     Returns the variable names that were loaded."""
-    candidates = [path] if path else []
-    if os.environ.get("SAHS_ENV_FILE"):
-        candidates.append(Path(os.environ["SAHS_ENV_FILE"]))
-    candidates += [Path(__file__).resolve().parents[2] / ".env",
-                   Path(".env")]
     loaded: list[str] = []
-    for candidate in candidates:
-        if candidate is None or not candidate.is_file():
+    candidate = dotenv_path(path)
+    if candidate is None:
+        return loaded
+    for line in candidate.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
             continue
-        for line in candidate.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key = key.strip().removeprefix("export ").strip()
-            value = value.strip().strip("'\"")
-            if key and key not in os.environ:
-                os.environ[key] = value
-                loaded.append(key)
-        break                       # first .env found wins
+        key, _, value = line.partition("=")
+        key = key.strip().removeprefix("export ").strip()
+        value = dotenv_value(value)
+        if key and key not in os.environ:
+            os.environ[key] = value
+            loaded.append(key)
     return loaded
 
 

@@ -66,6 +66,9 @@ _SESSION_COLUMNS = (
     ("archived", "INTEGER NOT NULL DEFAULT 0"),
     ("handoff", "TEXT NOT NULL DEFAULT ''"),   # JSON or ''
     ("notes", "TEXT NOT NULL DEFAULT '[]'"),   # working notes, JSON
+    ("model", "TEXT NOT NULL DEFAULT ''"),     # the plane this chat
+                                               # rides: vertex | gateway |
+                                               # '' (the .env default)
 )
 
 
@@ -103,6 +106,7 @@ class AssistantStore(SessionStore):
         out["notes"] = list(notes) if isinstance(notes, list) else []
         out["starred"] = bool(out.get("starred"))
         out["archived"] = bool(out.get("archived"))
+        out["model"] = str(out.get("model") or "").strip().lower()
         return out
 
     def set_flag(self, session_id: str, flag: str, on: bool) -> None:
@@ -111,6 +115,15 @@ class AssistantStore(SessionStore):
             conn.execute(f"UPDATE sessions SET {flag}=?, updated_at=?"
                          " WHERE id=?",
                          (1 if on else 0, now_iso(), session_id))
+
+    def set_model(self, session_id: str, plane: str) -> None:
+        """The plane a chat rides from its next message on (the
+        composer's model switch); '' goes back to the .env default."""
+        with self._conn() as conn:
+            conn.execute("UPDATE sessions SET model=?, updated_at=? "
+                         "WHERE id=?",
+                         ((plane or "").strip().lower(), now_iso(),
+                          session_id))
 
     def set_project(self, session_id: str, project_id: str) -> None:
         with self._conn() as conn:

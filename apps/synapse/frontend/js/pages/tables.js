@@ -6,6 +6,7 @@
  * invented here. */
 
 import { api } from "../api.js";
+import { filterBar, optionsFrom } from "../filters.js";
 import { card, esc, loading, unavailable } from "../ui.js";
 
 const fmt = (n) => (n === null || n === undefined || n === "")
@@ -31,10 +32,10 @@ export function productCard(r) {
       <div class="product-head">
         <span class="product-name">${esc(r.short
           || r.physical.split(".").pop())}</span>
-        ${r.lob ? `<span class="chip">${esc(r.lob)}</span>`
+        ${r.lob ? `<span class="chip" title="${esc(r.lob_name || r.lob)}">${
+                    esc(r.lob)}</span>`
                 : `<span class="chip muted">unmapped</span>`}
       </div>
-      <span class="mono muted product-physical">${esc(r.physical)}</span>
       <p class="product-desc">${esc(r.description
         || "No description on record yet: the archive and the "
            + "stewards have not described this table.")}</p>
@@ -66,6 +67,7 @@ export async function renderProducts(outlet) {
       <div class="library-tools">
         <input class="search" id="p-search"
           placeholder="search name, line of business, description…" />
+        <div id="p-filter"></div>
         <span class="muted" id="p-count"></span>
       </div>
       <div class="card-grid" id="p-grid">${loading()}</div>
@@ -78,23 +80,48 @@ export async function renderProducts(outlet) {
     grid.innerHTML = unavailable(payload.reason);
     return;
   }
-  const draw = (needle = "") => {
-    const q = needle.trim().toLowerCase();
-    const rows = payload.rows.filter((r) => !q
-      || [r.physical, r.lob, r.description, r.business_unit, r.owner,
-          ...(r.metric_names || [])]
-        .some((v) => (v || "").toLowerCase().includes(q)));
+  // the filters, from what the rows carry: line of business (by name,
+  // "unmapped" for the tables no line claims), layer, lifecycle — more
+  // groups slot in here as the rows learn more
+  const rows0 = payload.rows;
+  const lobName = (code) => {
+    const hit = rows0.find((r) => r.lob === code && r.lob_name);
+    return hit ? `${code} · ${hit.lob_name}` : code;
+  };
+  const groups = [
+    { key: "lob", label: "Line of business",
+      options: optionsFrom(rows0, (r) => r.lob || "unmapped",
+        (v) => (v === "unmapped" ? "unmapped" : lobName(v))) },
+    { key: "layer", label: "Layer",
+      options: optionsFrom(rows0, (r) => r.layer || "") },
+    { key: "lifecycle", label: "Lifecycle",
+      options: optionsFrom(rows0, (r) =>
+        r.lifecycle && r.lifecycle !== "unknown" ? r.lifecycle : "") },
+  ].filter((g) => g.options.length > 0);
+  const state = { q: "" };
+  const picks = {};
+  const draw = () => {
+    const q = state.q.trim().toLowerCase();
+    const rows = rows0.filter((r) =>
+      (!picks.lob || (picks.lob === "unmapped" ? !r.lob : r.lob === picks.lob))
+      && (!picks.layer || r.layer === picks.layer)
+      && (!picks.lifecycle || r.lifecycle === picks.lifecycle)
+      && (!q || [r.physical, r.lob, r.lob_name, r.description,
+                 r.business_unit, r.owner, ...(r.metric_names || [])]
+        .some((v) => (v || "").toLowerCase().includes(q))));
     outlet.querySelector("#p-count").textContent =
-      `${rows.length} of ${plural(payload.rows.length, "data product")}`;
+      `${rows.length} of ${plural(rows0.length, "data product")}`;
     grid.innerHTML = rows.length
       ? rows.map(productCard).join("")
-      : card("", `<p class="muted">no data product matches
-          "${esc(needle)}"</p>`, "empty");
+      : card("", `<p class="muted">no data product matches${
+          state.q ? ` "${esc(state.q)}"` : ""}${
+          Object.keys(picks).length ? " these filters" : ""}</p>`, "empty");
   };
+  filterBar(outlet.querySelector("#p-filter"), groups, picks, draw);
   let debounce = 0;
   outlet.querySelector("#p-search").addEventListener("input", (e) => {
     clearTimeout(debounce);
-    debounce = setTimeout(() => draw(e.target.value), 200);
+    debounce = setTimeout(() => { state.q = e.target.value; draw(); }, 200);
   });
   draw();
 }

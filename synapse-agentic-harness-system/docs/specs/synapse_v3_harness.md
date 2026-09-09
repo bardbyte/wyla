@@ -381,6 +381,92 @@ handoff, the eval suites.
    the sanctioned path, and the harness's contract with the model is
    the event stream, which a burst satisfies.
 
+16. The model is a dial on the chat, not a setting on the machine
+   (2026-09-08). The composer's label became a select over both
+   planes, remembered per chat and riding from the next message; the
+   `.env` only names where a new chat starts. A plane the machine
+   cannot ride is shown greyed with the reason and refused when
+   picked, never swapped for another model in silence. Beside the
+   dials a "?" explains every stop of every dial from one backend
+   catalog (`/api/chat/dials`): the modes, the depths with what each
+   does on each plane, and the models with whether each is
+   configured here. Reason: a person comparing 2.5 through the gateway with
+   3.1 on Vertex needs to switch mid-conversation and to know what
+   Quick, Standard and Deep actually change (the thinking, nothing
+   else); the history is text, so a switch mid-chat is safe.
+
+17. The columns get their meaning served (2026-09-09). The compiler
+   writes `columns.json` beside `schema.json`: every consensus column
+   with its description and source, the MDM's supplementary meaning,
+   its business name, sensitivity, governance and agreement — the
+   same facts the served card renders, complete where the card is
+   budgeted. The table detail serves it (falling back to the card's
+   lines on an older build) and the second surface lists columns as
+   a search with expandable rows instead of a wall of chips; metric
+   cards open in place; Skills replaces Artifacts in the nav. Reason:
+   a person choosing a column needs to know what it is before they
+   ask, and the build already knew.
+
+18. Files ride the message (2026-09-09). Add files in the composer:
+   what Gemini reads natively (PDF, images) rides inline on the user
+   turn; text rides as a text part; Office files are converted to
+   text here and disclosed as converted; the rest is refused with the
+   reason. A file rides one message and the history keeps its name,
+   never its bytes; the transcript record names the inline part by
+   type and size, never its content. Reason: the model's own file
+   support is the contract, measured by `scripts/files_check.py` on
+   each plane, and re-sending bytes every turn would spend the
+   context on what the answer already said.
+
+19. A person teaches the agent (2026-09-09). A skill or a knowledge
+   file is drafted by the model from the person's material in the
+   house format — a skill is doctrine (moves and checks, steering,
+   never facts), a knowledge file is reference (definitions, tables,
+   metrics, caveats, owner, every fact traceable to the material) —
+   read by the person before it is saved. An own pack lives under
+   `skills/users/<owner>/`, loads for that owner alone through the
+   same loader, index and `load_skill` tool as every pack, shadows a
+   shared pack of the same name for its owner and never a built-in;
+   a knowledge file is staged for a business unit and enters the
+   graph on the next build. The owner is a seam: the configured
+   person today, the signed-in one once identity lands. Reason: the
+   E14 door (usable now, labelled unreviewed) already held for user
+   packs; the model's rewrite makes the format consistent without
+   making the facts up.
+
+20. The schema for leaving the laptop (2026-09-09), in
+   `db/spanner/` with its reasoning in `docs/spanner_schema.md`:
+   identity with roles as rows that name the surface each may open
+   (admin the admin console, analyst Synapse, the steward's set to be
+   decided), credentials as Argon2id strings with a pepper outside
+   the database, sessions and one-shot tokens as hashes, an
+   append-only audit on a change stream; the chat store as the
+   SQLite tables with an owner, interleaved in the chat, memory in
+   the person; the graph as append-only assertions plus a folded
+   current state with a property graph over it, the CHECK lists held
+   equal to the Python registries by a lint. Reason: the stores are
+   designed before a line of auth code, so the login pages and the
+   Spanner move have a contract to build against; nothing in the
+   laptop's discipline (append-only, provenance, one writer, the E14
+   door) is given up to get there.
+
+21. The first rollout off the laptop (2026-09-09), decided in
+   `docs/spanner_schema.md`: people sign up with an email and a
+   password and sign in with them — no second factor, no mail, no
+   invitations, no refresh tokens; those five tables stay in the DDL,
+   marked and empty. A role names the surfaces it opens. Every chat,
+   message, file, artifact, plan, vote, event, memory, skill and
+   knowledge file is a row with its person; the search index
+   partitions by the person; a file's bytes stay outside the
+   database. The graph stays on the filesystem. There is no SQLite
+   identity store in between: the laptop runs `SAHS_STORE=local`, as
+   it does today, and the deployment `SAHS_STORE=spanner`, with the
+   block the store reads in `.env.example`, unread until the store
+   lands. Reason: the product asked for the simplest thing that lets
+   people in and tracks everything; because the schema was designed
+   whole, simplifying is a choice of which tables to write, not a
+   second schema.
+
 ## 12 · The laptop, measured (state report of 2026-09-02)
 
 What v3 is actually built against — not the fixture.

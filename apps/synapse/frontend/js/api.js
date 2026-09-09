@@ -42,6 +42,7 @@ export const api = {
     if (params.status) search.set("status", params.status);
     if (params.lob) search.set("lob", params.lob);
     if (params.table) search.set("table", params.table);
+    if (params.limit) search.set("limit", String(params.limit));
     return get(`/api/meridian/explorer/metrics?${search}`);
   },
   artifactFile: (rel) =>
@@ -84,9 +85,23 @@ export const api = {
     get(`/api/chat/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   chatNewSession: () => post("/api/chat/sessions", {}),
   chatSession: (id) => get(`/api/chat/sessions/${encodeURIComponent(id)}`),
-  chatSend: (id, text, depth = "", mode = "") =>
+  chatSend: (id, text, depth = "", mode = "", model = "", files = []) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/messages`,
-         { text, depth, mode }),
+         { text, depth, mode, model, files }),
+  // files on a chat: what may be attached, add one (base64), drop one
+  chatFileSupport: () => get("/api/chat/files/support"),
+  chatUpload: (id, name, data_b64) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/files`,
+         { name, data_b64 }),
+  chatRemoveFile: async (id, fileId) => {
+    const r = await fetch(`/api/chat/sessions/${encodeURIComponent(id)
+      }/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
+    return r.json();
+  },
+  // the dials explained, and the model switch remembered on the chat
+  chatDials: () => get("/api/chat/dials"),
+  chatSetModel: (id, model) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/model`, { model }),
   // the person pressed Run on a proposed query: no model call
   chatRun: (id, body) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/run`, body),
@@ -97,6 +112,16 @@ export const api = {
   chatRename: (id, title) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/rename`, { title }),
   chatSkills: () => get("/api/chat/skills"),
+  // the creators: a draft in the house format, a saved own skill, a
+  // file as text to draft from
+  chatDraft: (body) => post("/api/chat/skills/draft", body),
+  chatSaveSkill: (name, text) => post("/api/chat/skills/mine", { name, text }),
+  chatDeleteSkill: async (name) => {
+    const r = await fetch(`/api/chat/skills/mine/${encodeURIComponent(name)}`,
+                          { method: "DELETE" });
+    return r.json();
+  },
+  chatFileText: (name, data_b64) => post("/api/chat/files/text", { name, data_b64 }),
   chatSetSkills: (id, names) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/skills`, { names }),
   chatProjects: () => get("/api/chat/projects"),
@@ -109,6 +134,14 @@ export const api = {
     post(`/api/chat/sessions/${encodeURIComponent(id)}/star`, { on }),
   chatArchive: (id, on) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/archive`, { on }),
+  // memory.md: the document, and the document back
+  chatMemoryDoc: () => get("/api/chat/memory.md"),
+  chatSaveMemoryDoc: async (text) => {
+    const r = await fetch("/api/chat/memory.md", { method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }) });
+    return r.json();
+  },
   chatMemories: (projectId = "") =>
     get(`/api/chat/memories?project_id=${encodeURIComponent(projectId)}`),
   chatRetireMemory: (id) =>

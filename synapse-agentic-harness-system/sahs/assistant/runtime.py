@@ -9,6 +9,7 @@ a call ceiling in the loop, a session token ceiling here.
 
 from __future__ import annotations
 
+import inspect
 import os
 import re
 import threading
@@ -23,7 +24,8 @@ from sahs.ask.runtime import BuildUnavailable, LazyModel, TurnBusy
 from sahs.tools.api import Build
 
 from .events import ASSISTANT_EVENTS, EventBus
-from .loop import (DEFAULT_MODE, DEFAULT_THINKING, MAX_CALLS, MODES,
+from .loop import (DEFAULT_MODE, DEFAULT_THINKING, DEPTHS, MAX_CALLS,
+                   MODE_MEANS, MODES,
                    THINKING_LEVELS, chart_rows_turn, run_assistant_turn,
                    run_proposal_turn)
 from .skills_loader import all_skills, load_packs
@@ -80,6 +82,15 @@ class AssistantRuntime:
         self.snapshot_runner = snapshot_runner
         self.runner = runner          # live rows; None = BQ jobs.query
         self._model_factory = model_factory
+        # a factory that takes (budget, plane) hears the composer's
+        # switch; the older (budget) shape serves every plane
+        self._factory_hears_plane = False
+        if model_factory is not None:
+            try:
+                self._factory_hears_plane = len(
+                    inspect.signature(model_factory).parameters) >= 2
+            except (TypeError, ValueError):
+                self._factory_hears_plane = False
         self._runtimes: dict[str, _SessionRuntime] = {}
         self._lock = threading.Lock()
         self._build: Build | None = None
@@ -98,11 +109,185 @@ class AssistantRuntime:
             self._build_stamp = stamp
         return self._build
 
-    def model_for(self, budget: Budget) -> Any:
+    def model_for(self, budget: Budget, plane: str = "") -> Any:
         if self._model_factory is not None:
+            if self._factory_hears_plane:
+                return self._model_factory(budget, plane)
             return self._model_factory(budget)
-        from .agent import agent_from_env       # env-bound, late: the
-        return agent_from_env(budget)           # plane is the .env's
+        from .agent import agent_for            # env-bound, late: the
+        return agent_for(plane, budget)         # .env is the switchboard
+
+    # ── the planes and the dials, as the composer shows them ──
+    def planes(self) -> list[dict[str, Any]]:
+        from .agent import plane_catalog
+        return plane_catalog()
+
+    @staticmethod
+    def plane_of(session: dict[str, Any] | None) -> str:
+        """The plane a chat is on: its remembered switch, else the
+        .env default — the id, whether or not this machine can ride
+        it (the composer shows it greyed when it cannot)."""
+        from sahs.util.gateway import model_plane
+        return (((session or {}).get("model") or "").strip().lower()
+                or model_plane())
+
+    def plane_for(self, session: dict[str, Any] | None,
+                  wanted: str = "") -> str:
+        """The plane a turn rides: the composer's choice for this
+        message, else the chat's remembered one, else the .env
+        default. A name that is not a plane, or a plane this machine
+        cannot ride, is a typed refusal with the reason — never a
+        silent fallback to a different model than the one picked."""
+        plane = (wanted or "").strip().lower() or self.plane_of(session)
+        rows = {row["id"]: row for row in self.planes()}
+        if plane not in rows:
+            raise ModelUnavailable(f"no model plane called {plane!r}: "
+                                   "the planes are vertex and gateway")
+        if not rows[plane]["available"] and self._model_factory is None:
+            raise ModelUnavailable(
+                f"the {rows[plane]['label']} plane is not configured on "
+                f"this machine: {rows[plane]['reason']}")
+        return plane
+
+    def label_for(self, plane: str = "") -> str:
+        """The model as the composer names it, for a plane: "Gemini
+        2.5 Pro" (the plane is the catalog's business, not the
+        label's); a scripted transport says so."""
+        if self._model_factory is not None:
+            return "scripted"
+        from sahs.util.gateway import model_plane
+        plane = (plane or "").strip().lower() or model_plane()
+        for row in self.planes():
+            if row["id"] == plane:
+                return row["label"]
+        return plane
+
+    def set_session_model(self, session_id: str, plane: str) -> dict:
+        """The composer's model switch: remembered on the chat, so it
+        rides the next message and survives a reload. '' forgets it."""
+        session = self.store.get_session(session_id)
+        if session is None:
+            raise KeyError(session_id)
+        plane = (plane or "").strip().lower()
+        if plane:
+            plane = self.plane_for(session, plane)     # validated
+        self.store.set_model(session_id, plane)
+        session["model"] = plane
+        now = self.plane_of(session)
+        return {"ok": True, "plane": now, "model": self.label_for(now)}
+
+    # ── files on a chat (the composer's Add files) ────────────
+    def files(self, session_id: str) -> list[dict[str, Any]]:
+        from . import files as files_mod
+        if self.store.get_session(session_id) is None:
+            raise KeyError(session_id)
+        return files_mod.manifest(self.workspace(session_id))
+
+    def add_file(self, session_id: str, name: str,
+                 data: bytes) -> dict[str, Any]:
+        """Keep a file on the chat for its next message; a refusal
+        (type, size, a deck without its reader) is the reason."""
+        from . import files as files_mod
+        if self.store.get_session(session_id) is None:
+            raise KeyError(session_id)
+        return files_mod.store(self.workspace(session_id), name,
+                               data).row()
+
+    def remove_file(self, session_id: str, file_id: str) -> bool:
+        from . import files as files_mod
+        if self.store.get_session(session_id) is None:
+            raise KeyError(session_id)
+        return files_mod.remove(self.workspace(session_id), file_id)
+
+    @staticmethod
+    def file_support() -> dict[str, Any]:
+        from . import files as files_mod
+        return {"accepted": files_mod.support_table(),
+                "not_offered": [{"suffix": k, "reason": v}
+                                for k, v in files_mod.NOT_OFFERED.items()],
+                "max_file_mb": files_mod.MAX_FILE_BYTES // 1048576,
+                "max_inline_mb": files_mod.MAX_INLINE_BYTES // 1048576,
+                "max_files_per_message": files_mod.MAX_FILES_PER_TURN,
+                "note": "A file rides the message it is sent with; the "
+                        "conversation remembers that it was sent, not "
+                        "its bytes. Attach it again to ask more."}
+
+    # ── memory.md: what Synapse remembers, as a document a person
+    #    can read and edit; a line is a memory ──────────────────
+    MEMORY_HEAD = ("# What Synapse remembers about {name}\n\n"
+                   "One line per memory: a preference or a choice you "
+                   "settled in chat. Edit the list and save — a line you "
+                   "add is remembered, a line you remove is retired. "
+                   "Never a metric definition or a number: those live in "
+                   "the graph.\n\n")
+
+    def memory_markdown(self) -> dict[str, Any]:
+        rows = self.store.list_memories()
+        name = self.user_name or "you"
+        lines = [self.MEMORY_HEAD.format(name=name)]
+        lines.append("## Everywhere\n")
+        everywhere = [m for m in rows if m.get("scope") == "global"]
+        lines.extend(f"- {m['text']}" for m in everywhere)
+        if not everywhere:
+            lines.append("<!-- nothing remembered yet: settle a preference "
+                         "in chat, or add a line here -->")
+        return {"text": "\n".join(lines).rstrip() + "\n",
+                "count": len(everywhere)}
+
+    def save_memory_markdown(self, text: str) -> dict[str, Any]:
+        """The document back to rows: bullets are the memories; a line
+        no longer present retires its memory, a new line becomes one.
+        Matching is by the text, which is what a memory is."""
+        import re
+        wanted: list[str] = []
+        for line in (text or "").splitlines():
+            m = re.match(r"^\s*[-*]\s+(.+?)\s*$", line)
+            if m and not m.group(1).startswith("<!--"):
+                item = m.group(1).strip()[:400]
+                if item and item not in wanted:
+                    wanted.append(item)
+        current = {m["text"]: m for m in self.store.list_memories()
+                   if m.get("scope") == "global"}
+        added, retired = 0, 0
+        for item in wanted:
+            if item not in current:
+                self.store.add_memory(item, scope="global", source="person")
+                added += 1
+        for item, row in current.items():
+            if item not in wanted:
+                self.store.retire_memory(row["id"])
+                retired += 1
+        out = self.memory_markdown()
+        return {"added": added, "retired": retired, **out}
+
+    def dials(self) -> dict[str, Any]:
+        """Everything the composer lets a person set, explained in one
+        place: the modes, the depths (with what each does on each
+        plane), and the planes. One source for both surfaces."""
+        from sahs.util.gateway import thinking_budgets
+        budgets = thinking_budgets()
+        depths = []
+        for key, row in DEPTHS.items():
+            level = THINKING_LEVELS[key]
+            depths.append({
+                "id": key, "label": row["label"], "level": level,
+                "means": row["means"],
+                "on": {"vertex": f"thinking level {level}",
+                       "gateway": f"{budgets.get(level, 0):,} thinking "
+                              "tokens per call"},
+                "default": level == DEFAULT_THINKING})
+        modes = [{"id": key, "label": row["label"], "means": row["means"],
+                  "default": key == DEFAULT_MODE}
+                 for key, row in MODE_MEANS.items()]
+        return {"modes": modes, "depths": depths, "planes": self.planes(),
+                "notes": {
+                    "depth": "Depth changes how much the model thinks "
+                             "before each step, nothing else: the call "
+                             f"ceiling ({MAX_CALLS} per turn) and the "
+                             "clock are the same at every depth.",
+                    "plane": "A switch applies from the next message. "
+                             "The conversation carries over as text, so "
+                             "a chat can change model mid-way."}}
 
     def workspace(self, session_id: str) -> Path:
         return (self.graph_root / "runs" / "chat" / "workspaces"
@@ -159,12 +344,47 @@ class AssistantRuntime:
     # ── skills: both shelves, browsable (§13.3/V2.7) ─────────
     # the agent loads packs itself by intent; this listing feeds the
     # Skills page where people READ them, full text included
+    @property
+    def owner(self) -> str:
+        """Whose own packs load: the configured person today, the
+        signed-in one once identity lands (the same seam)."""
+        from .skills_loader import owner_slug
+        return owner_slug(self.user_name) or "anon"
+
     def skills(self) -> list[dict]:
-        from .skills_loader import all_skills
+        from .skills_loader import all_skills, author_of
         return [{"name": p.name, "title": p.title,
                  "description": p.description, "origin": p.origin,
+                 "owner": p.owner, "mine": bool(p.owner),
+                 "updated": p.updated,
+                 # the author as the shelf shows it: Synapse for what
+                 # ships with the assistant, You for your own, and a
+                 # shared pack's own word for itself (an author line)
+                 "author": ("Synapse" if p.origin == "built-in"
+                            else "You" if p.owner
+                            else author_of(p.text) or "Shared"),
                  "text": p.text}
-                for p in all_skills(self.graph_root)]
+                for p in all_skills(self.graph_root, self.owner)]
+
+    # ── authoring: a skill or a knowledge file, drafted and saved ──
+    def draft(self, kind: str, title: str, material: str,
+              hint: str = "", plane: str = "") -> dict:
+        """The model rewrites the person's material into the house
+        format; the person reads it before anything is saved."""
+        from . import authoring
+        if kind not in authoring.KINDS:
+            return {"ok": False, "reason": "kind is skill or knowledge"}
+        agent = self.model_for(Budget(**CHAT_BUDGET),
+                               self.plane_for(None, plane))
+        return authoring.draft(agent, kind, title, material, hint)
+
+    def save_my_skill(self, name: str, text: str) -> dict:
+        from . import authoring
+        return authoring.save_skill(self.graph_root, self.owner, name, text)
+
+    def delete_my_skill(self, name: str) -> bool:
+        from . import authoring
+        return authoring.delete_skill(self.graph_root, self.owner, name)
 
     def set_skills(self, session_id: str, names: list[str]) -> dict:
         from sahs.loop.skills import MAX_LOADED
@@ -177,7 +397,8 @@ class AssistantRuntime:
             return {"ok": False,
                     "reason": f"at most {MAX_LOADED} skills load at "
                               "once"}
-        loaded, missing = load_packs(self.graph_root, list(names))
+        loaded, missing = load_packs(self.graph_root, list(names),
+                                     owner=self.owner)
         if missing:
             return {"ok": False,
                     "reason": "no such skill: " + ", ".join(missing)}
@@ -205,23 +426,9 @@ class AssistantRuntime:
 
     @property
     def model_label(self) -> str:
-        """The model as the composer names it: the Vertex model id
-        prettified (gemini-2.5-pro → Gemini 2.5 Pro); a scripted
-        transport says so."""
-        if self._model_factory is not None:
-            return "scripted"
-        from sahs.util.gateway import Config, model_plane
-        pretty = lambda raw: " ".join(                       # noqa: E731
-            w.capitalize() if w.isalpha() else w
-            for w in raw.replace("_", "-").split("-") if w)
-        if model_plane() == "gateway":
-            return pretty(Config.from_env().model) + " via the gateway"
-        from sahs.util.auth import DEFAULT_VERTEX_MODEL
-        raw = (os.environ.get("VERTEX_MODEL")
-               or os.environ.get("SYNAPSE_VERTEX_MODEL")
-               or os.environ.get("GEMINI_MODEL")
-               or DEFAULT_VERTEX_MODEL).strip()
-        return pretty(raw)
+        """The model a new chat starts on, as the composer names it
+        ("Gemini 2.5 Pro"); a scripted transport says so."""
+        return self.label_for("")
 
     def slash_skill(self, text: str) -> tuple[str, list[str]]:
         """"/synapse-data-connect how do I …" loads that pack for this
@@ -240,10 +447,13 @@ class AssistantRuntime:
 
     def _model_turn(self, session_id: str, session: dict, rt: Any,
                     build: Build, turn_id: str, text: str, *,
-                    depth: str = "", mode: str = "") -> Any:
+                    depth: str = "", mode: str = "",
+                    plane: str = "",
+                    attachments: list[dict] | None = None,
+                    file_names: list[str] | None = None) -> Any:
         """One model turn as a callable: start_turn runs it on a
         thread; a run with dashboard=true chains it after the rows."""
-        model = LazyModel(lambda: self.model_for(rt.budget))
+        model = LazyModel(lambda: self.model_for(rt.budget, plane))
         project = self.store.get_project(
             session.get("project_id") or "") \
             if session.get("project_id") else None
@@ -253,7 +463,8 @@ class AssistantRuntime:
         names = list(dict.fromkeys(
             ((project or {}).get("skills") or [])
             + list(session.get("skills") or []) + slashed))
-        loaded, _missing = load_packs(self.graph_root, names)
+        loaded, _missing = load_packs(self.graph_root, names,
+                                      owner=self.owner)
         memories = self.store.list_memories(
             project_id=(project or {}).get("id", ""))
         level = self.thinking_level(depth)
@@ -272,7 +483,10 @@ class AssistantRuntime:
                     runner=self.runner,
                     substrate=self.substrate,
                     thinking_level=level, user_name=self.user_name,
-                    mode=chosen)
+                    mode=chosen, plane=plane,
+                    attachments=attachments or [],
+                    file_names=file_names or [],
+                    owner=self.owner)
             except ModelUnavailable as e:
                 rt.bus.emit("error", turn_id=turn_id,
                             code="model_unavailable",
@@ -280,9 +494,14 @@ class AssistantRuntime:
                                     + str(e),
                             retryable=False,
                             next_actions=[
+                                "check the gateway contract in the silo "
+                                ".env" if plane == "gateway" else
                                 "check the Vertex contract in the "
                                 "silo .env",
-                                "python scripts/vertex_check.py"])
+                                "python scripts/gateway_check.py"
+                                if plane == "gateway" else
+                                "python scripts/vertex_check.py",
+                                "or switch the model in the composer"])
                 rt.bus.emit("turn_done", turn_id=turn_id,
                             status="error", **rt.budget.tick())
             except Exception as e:       # never a silent dead turn
@@ -301,7 +520,9 @@ class AssistantRuntime:
         return worker
 
     def start_turn(self, session_id: str, text: str,
-                   depth: str = "", mode: str = "") -> dict:
+                   depth: str = "", mode: str = "",
+                   model: str = "",
+                   files: list[str] | None = None) -> dict:
         session = self.store.get_session(session_id)
         if session is None:
             raise KeyError(session_id)
@@ -310,18 +531,44 @@ class AssistantRuntime:
             raise TurnBusy("a turn is already running in this "
                            "session: stop it before sending another")
         build = self.build()
+        # the plane is settled before anything is stored: a refusal
+        # (an unconfigured plane) leaves the chat as it was
+        plane = self.plane_for(session, model)
+        if (model or "").strip().lower() and plane != (
+                session.get("model") or ""):
+            self.store.set_model(session_id, plane)   # remembered
+        # the files ride this message: their parts are built before
+        # anything is stored, so an over-budget attachment is refused
+        # with the reason and the chat stays as it was
+        from . import files as files_mod
+        attachments: list[dict] = []
+        used: list[dict] = []
+        if files:
+            attachments, used = files_mod.parts_for(
+                self.workspace(session_id), list(files))
         turn_id = f"t_{uuid.uuid4().hex[:10]}"
         rt.abort = Abort()
         rt.current_turn = turn_id
-        self.store.add_message(session_id, "user", text,
-                               turn_id=turn_id)
+        names = [r["name"] for r in used]
+        self.store.add_message(
+            session_id, "user", text, turn_id=turn_id,
+            payload={"files": [{"id": r["id"], "name": r["name"],
+                                "family": r["family"], "size": r["size"],
+                                "rides": r["rides"]} for r in used]}
+            if used else None)
+        if used:
+            files_mod.mark_sent(self.workspace(session_id),
+                                [r["id"] for r in used], turn_id)
         worker = self._model_turn(session_id, session, rt, build,
-                                  turn_id, text, depth=depth, mode=mode)
+                                  turn_id, text, depth=depth, mode=mode,
+                                  plane=plane, attachments=attachments,
+                                  file_names=names)
         rt.thread = threading.Thread(target=worker, daemon=True,
                                      name=f"chat-{turn_id}")
         rt.thread.start()
         return {"turn_id": turn_id, "session_id": session_id,
-                "mode": self.mode_for(mode)}
+                "mode": self.mode_for(mode), "plane": plane,
+                "files": names}
 
     def find_proposal(self, session_id: str,
                       message_id: str = "") -> dict:
@@ -400,7 +647,8 @@ class AssistantRuntime:
                 self.store.add_message(session_id, "user", ask,
                                        turn_id=follow)
                 self._model_turn(session_id, session, rt, build, follow,
-                                 ask, depth=depth, mode="autopilot")()
+                                 ask, depth=depth, mode="autopilot",
+                                 plane=self.plane_for(session, ""))()
 
         rt.thread = threading.Thread(target=worker, daemon=True,
                                      name=f"chat-run-{turn_id}")

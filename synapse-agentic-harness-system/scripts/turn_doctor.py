@@ -57,7 +57,8 @@ def timeline(events: list[dict[str, Any]], *,
         if tid not in turns:
             turns[tid] = {"turn_id": tid, "text": "", "segments": [],
                           "status": "", "open": None, "started": "",
-                          "ended": "", "tokens": None, "thought": ""}
+                          "ended": "", "tokens": None, "thought": "",
+                          "plane": "", "level": ""}
             order.append(tid)
         t = turns[tid]
         ev = e.get("ev")
@@ -65,6 +66,8 @@ def timeline(events: list[dict[str, Any]], *,
         if ev == "turn_started":
             t["text"] = e.get("text", "")
             t["started"] = ts
+            t["plane"] = e.get("plane", "")        # the model plane
+            t["level"] = e.get("thinking_level", "")
         elif ev == "model_prompt" and e.get("kind") == "call":
             t["open"] = {"what": f"model call #{e.get('n')}", "since": ts,
                          "first_sign": None}
@@ -119,6 +122,9 @@ def render(turns: list[dict[str, Any]]) -> str:
     lines = []
     for t in turns:
         head = f"turn {t['turn_id']} · {t['text'][:70]!r}"
+        if t["plane"] or t["level"]:
+            head += " · " + " ".join(x for x in (t["plane"], t["level"])
+                                     if x)
         if t["status"]:
             head += f" · {t['status']}"
             if t["started"] and t["ended"]:

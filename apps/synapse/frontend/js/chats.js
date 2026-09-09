@@ -1,9 +1,9 @@
 /** The chats shelf in the sidebar (§8): one nav, not two. Starred
  * chats, then recents — newest first, searchable, star and archive
  * on hover. "New ask" in the navlist starts a fresh conversation; a
- * row reopens a kept one with its artifacts. A session appears the
- * moment it is created and earns its name from the first thing you
- * asked. (Projects exist in the store and API but stay out of the
+ * row reopens a kept one with its artifacts. A session appears once
+ * it holds a message and earns its name from the first thing you
+ * asked; an untouched New chat stays off the shelf. (Projects exist in the store and API but stay out of the
  * surface for now — deliberately.) */
 
 import { api } from "./api.js";
@@ -52,8 +52,11 @@ export async function refreshChats() {
     return;
   }
   const needle = (search?.value || "").trim().toLowerCase();
-  const kept = rows.filter((row) => !needle
-    || (row.title || "untitled").toLowerCase().includes(needle));
+  // a chat earns its place with its first message: New chat left
+  // untouched stays off the shelf (and is reused by the next New chat)
+  const kept = rows.filter((row) => (row.messages ?? 1) > 0)
+    .filter((row) => !needle
+      || (row.title || "untitled").toLowerCase().includes(needle));
   const current = localStorage.getItem("synapse-chat-session");
 
   const parts = [];

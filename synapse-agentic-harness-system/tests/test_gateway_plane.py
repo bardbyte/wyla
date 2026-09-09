@@ -30,7 +30,7 @@ def _jwt(claims: dict) -> str:
     return f"{seg({'alg': 'HS256'})}.{seg(claims)}.sig"
 
 
-class FakeEag:
+class FakeGateway:
     """The identity service + the gateway as the laptop showed them: a token that lives
     599 s, the slash path, answers scripted per model call (a list of
     parts, or a callable of the request body)."""
@@ -76,14 +76,14 @@ class FakeEag:
                 "thoughtsTokenCount": 30})}).encode()
 
 
-def _client(fake: FakeEag, **cfg) -> GatewayClient:
+def _client(fake: FakeGateway, **cfg) -> GatewayClient:
     config = Config(app_id="app", secret=SECRET, **cfg)
     return GatewayClient(cfg=config, http=fake.http, sleep=fake.sleep,
                      tokens=TokenManager(config, fake.http, now=fake.clock))
 
 
 def test_token_manager_mints_reuses_refreshes_and_invalidates():
-    fake = FakeEag()
+    fake = FakeGateway()
     cfg = Config(app_id="app", secret=SECRET)
     tokens = TokenManager(cfg, fake.http, now=fake.clock)
     assert tokens.describe().startswith("no token yet")
@@ -111,7 +111,7 @@ def test_token_manager_mints_reuses_refreshes_and_invalidates():
 
 
 def test_converse_delivers_one_call_as_the_loops_events():
-    fake = FakeEag([{"parts": [
+    fake = FakeGateway([{"parts": [
         {"thought": True, "text": "search first"},
         {"text": "Looking that up."},
         {"functionCall": {"name": "search", "args": {"query": "spend"}},
@@ -146,7 +146,7 @@ def test_converse_delivers_one_call_as_the_loops_events():
 
 
 def test_a_dead_token_mid_turn_is_minted_anew_and_the_call_retried_once():
-    fake = FakeEag([{"parts": [{"text": "after the refresh"}]}])
+    fake = FakeGateway([{"parts": [{"text": "after the refresh"}]}])
     client = _client(fake)
     first = client.tokens.token()
     fake.dead.add(first)                            # the gateway says 401
@@ -159,7 +159,7 @@ def test_a_dead_token_mid_turn_is_minted_anew_and_the_call_retried_once():
     # a second 401 in the same call is a refusal, not a loop
     fake.dead.add(client.tokens.token())
     fake.answers = []
-    fake2 = FakeEag()
+    fake2 = FakeGateway()
     client2 = _client(fake2)
     token2 = client2.tokens.token()
     fake2.dead.add(token2)
@@ -176,7 +176,7 @@ def test_a_dead_token_mid_turn_is_minted_anew_and_the_call_retried_once():
 
 
 def test_transient_refusals_back_off_and_max_tokens_grows_the_cap_once():
-    fake = FakeEag([{"parts": [{"thought": True, "text": "…"}],
+    fake = FakeGateway([{"parts": [{"thought": True, "text": "…"}],
                      "finish": "MAX_TOKENS"},
                     {"parts": [{"text": "done"}]}])
     fake.fail_next = [503]
@@ -193,7 +193,7 @@ def test_transient_refusals_back_off_and_max_tokens_grows_the_cap_once():
 
 def test_the_one_shot_json_path_and_the_burst_stream():
     from sahs.ask.model import VertexModel
-    fake = FakeEag([{"parts": [{"text": '{"ok": true}'}]},
+    fake = FakeGateway([{"parts": [{"text": '{"ok": true}'}]},
                     {"parts": [{"text": "A whole answer at once."}]}])
     client = _client(fake)
     assert VertexModel(client).json('Return {"ok": true}') == {"ok": True}
@@ -293,7 +293,7 @@ def test_a_whole_turn_rides_the_gateway_plane(compiled):
             {"functionCall": {"name": "suggest_next", "args": {
                 "options": ["chart it by day"]}}}]}
 
-    fake = FakeEag([first_call, second_call])
+    fake = FakeGateway([first_call, second_call])
     client = _client(fake)
     runtime = AssistantRuntime(
         builds_root=build.root.parent, graph_root=tmp / "graph",
@@ -315,3 +315,125 @@ def test_a_whole_turn_rides_the_gateway_plane(compiled):
     stored = runtime.store.messages(session["id"])[-1]
     assert stored["payload"]["trace"][0]["kind"] == "thought"
     assert runtime.model_label == "scripted"     # a factory is a factory
+
+
+def test_the_plane_catalog_names_both_planes_and_why_one_cannot_be_ridden(
+        monkeypatch, tmp_path):
+    """The composer's catalog: both planes always listed, availability
+    read from the environment each time, the reason when a plane is
+    not configured, and which one a new chat starts on."""
+    from sahs.assistant.agent import agent_for, plane_catalog
+    from sahs.ask.model import ModelUnavailable
+    for var in ("APP_ID", "APP_SECRET", "GEMINI_BEARER_TOKEN",
+                "SAHS_MODEL_PLANE", "VERTEX_PROJECT_ID",
+                "SYNAPSE_VERTEX_PROJECT", "GOOGLE_CLOUD_PROJECT",
+                "SYNAPSE_VERTEX_SA_KEY", "GOOGLE_APPLICATION_CREDENTIALS",
+                "VERTEX_MODEL", "SYNAPSE_VERTEX_MODEL", "GEMINI_MODEL",
+                "GATEWAY_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+    rows = {r["id"]: r for r in plane_catalog()}
+    assert list(rows) == ["vertex", "gateway"]
+    assert rows["vertex"]["label"] == "Gemini 3.1 Pro Preview"
+    assert rows["gateway"]["label"] == "Gemini 2.5 Pro"
+    assert rows["vertex"]["plane_name"] == "Vertex"
+    assert rows["gateway"]["plane_name"] == "Gateway"
+    assert not rows["vertex"]["available"] and "SYNAPSE_VERTEX_SA_KEY" in \
+        rows["vertex"]["reason"]
+    assert not rows["gateway"]["available"] and "APP_ID" in rows["gateway"]["reason"]
+    assert rows["vertex"]["default"] and not rows["gateway"]["default"]
+    assert rows["vertex"]["feel"] == "streams"
+    assert rows["gateway"]["feel"] == "whole calls"
+    # the gateway configured: available, and the default for a new chat
+    monkeypatch.setenv("APP_ID", "app")
+    monkeypatch.setenv("APP_SECRET", SECRET)
+    rows = {r["id"]: r for r in plane_catalog()}
+    assert rows["gateway"]["available"] and rows["gateway"]["default"]
+    assert not rows["vertex"]["default"]
+    # Vertex configured too (a key file that exists): both available,
+    # the .env still names the default
+    key = tmp_path / "sa.json"
+    key.write_text("{}")
+    monkeypatch.setenv("SYNAPSE_VERTEX_SA_KEY", str(key))
+    monkeypatch.setenv("VERTEX_PROJECT_ID", "prj")
+    monkeypatch.setenv("SAHS_MODEL_PLANE", "vertex")
+    rows = {r["id"]: r for r in plane_catalog()}
+    assert rows["vertex"]["available"] and rows["vertex"]["default"]
+    assert rows["gateway"]["available"] and not rows["gateway"]["default"]
+    # the factory by name: an unknown plane is a typed refusal
+    with pytest.raises(ModelUnavailable) as err:
+        agent_for("gpt")
+    assert "vertex and gateway" in str(err.value)
+    assert agent_for("gateway").client.plane == "gateway"
+
+
+def test_a_chat_switches_planes_from_the_composer(compiled, monkeypatch,
+                                                  tmp_path):
+    """The switch is remembered on the chat and rides the next message;
+    a message can name a plane for itself; the turn record says which
+    plane served it; the dials catalog explains all three dials; and a
+    plane this machine cannot ride is refused with the reason before
+    anything is stored."""
+    from sahs.ask.model import ModelUnavailable
+    from sahs.assistant import AssistantRuntime
+    from sahs.assistant.agent import ScriptedAgent
+    build, tmp = compiled
+    monkeypatch.setenv("APP_ID", "app")
+    monkeypatch.setenv("APP_SECRET", SECRET)
+    monkeypatch.setenv("SAHS_MODEL_PLANE", "auto")
+    heard: list[str] = []
+
+    def factory(budget, plane):        # a factory that hears the switch
+        heard.append(plane)
+        return ScriptedAgent(steps=[[{"text": f"answered on {plane}"}]])
+
+    runtime = AssistantRuntime(
+        builds_root=build.root.parent, graph_root=tmp / "graph",
+        store_path=tmp_path / "chat.sqlite3", model_factory=factory)
+    session = runtime.create_session()
+    assert session["model"] == ""                  # the .env default
+    assert runtime.plane_for(session) == "gateway"     # auto → the gateway here
+    dials = runtime.dials()
+    assert [d["id"] for d in dials["depths"]] == ["quick", "standard",
+                                                  "deep"]
+    assert dials["depths"][2]["on"] == {"vertex": "thinking level high",
+                                        "gateway": "16,384 thinking tokens "
+                                               "per call"}
+    assert [m["id"] for m in dials["modes"]] == ["chat", "autopilot"]
+    assert [p["id"] for p in dials["planes"]] == ["vertex", "gateway"]
+    # the first message names Vertex for itself: remembered
+    started = runtime.start_turn(session["id"], "hello", model="vertex")
+    assert started["plane"] == "vertex"
+    assert runtime.wait(session["id"], 30)
+    assert runtime.store.get_session(session["id"])["model"] == "vertex"
+    events = runtime.runtime(session["id"]).bus.since(0)
+    assert events[0]["ev"] == "turn_started" and events[0]["plane"] == "vertex"
+    assert "answered on vertex" in "".join(
+        e.get("delta", "") for e in events if e["ev"] == "say_token")
+    # the next message names nothing: it rides the remembered plane
+    runtime.start_turn(session["id"], "again")
+    assert runtime.wait(session["id"], 30)
+    assert heard == ["vertex", "vertex"]
+    # the switch from the composer, then a message on the new plane
+    assert runtime.set_session_model(session["id"], "gateway") == {
+        "ok": True, "plane": "gateway", "model": "scripted"}
+    runtime.start_turn(session["id"], "and now")
+    assert runtime.wait(session["id"], 30)
+    assert heard[-1] == "gateway"
+    # '' forgets the switch: back to the .env default (the gateway here)
+    assert runtime.set_session_model(session["id"], "")["plane"] == "gateway"
+    assert runtime.store.get_session(session["id"])["model"] == ""
+    # an unknown plane is refused before anything is stored
+    before = len(runtime.store.messages(session["id"]))
+    with pytest.raises(ModelUnavailable):
+        runtime.start_turn(session["id"], "on gpt", model="gpt")
+    assert len(runtime.store.messages(session["id"])) == before
+    # without a factory the environment decides: Vertex is not
+    # configured on this machine, so picking it is refused with why
+    runtime._model_factory = None
+    monkeypatch.delenv("SYNAPSE_VERTEX_SA_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    with pytest.raises(ModelUnavailable) as err:
+        runtime.set_session_model(session["id"], "vertex")
+    assert "not configured on this machine" in str(err.value)
+    assert runtime.label_for("gateway") == "Gemini 2.5 Pro"
+    assert runtime.model_label == "Gemini 2.5 Pro"

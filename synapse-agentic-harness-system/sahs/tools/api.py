@@ -36,6 +36,9 @@ class Build:
     joins: list[dict[str, Any]]
     acl: dict[str, Any]
     schema: dict[str, dict[str, str]]
+    # the columns with their meaning (columns.json); {} on a build
+    # compiled before the index existed — readers fall back to the card
+    columns: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     cost_priors: dict[str, dict[str, Any]] = field(default_factory=dict)
     lob: list[dict[str, Any]] = field(default_factory=list)
     tables: list[dict[str, Any]] = field(default_factory=list)
@@ -67,6 +70,8 @@ class Build:
             if (path / "acl.json").exists() else {},
             schema=json.loads((path / "schema.json").read_text())
             if (path / "schema.json").exists() else {},
+            columns=json.loads((path / "columns.json").read_text())
+            if (path / "columns.json").exists() else {},
             cost_priors=json.loads(
                 (path / "indexes" / "cost_priors.json").read_text())
             if (path / "indexes" / "cost_priors.json").exists() else {},

@@ -184,3 +184,31 @@ def test_bq_token_is_cached_per_key_file(monkeypatch, tmp_path):
     auth._BQ_CREDENTIALS[str(conn.key_path)].valid = False   # expired
     assert conn.token(make_credentials=make, refresh=refresh) == "tok2"
     assert made["n"] == 1 and refreshed["n"] == 2
+
+
+def test_dotenv_reads_one_file_and_values_as_the_file_means_them(
+        tmp_path, monkeypatch):
+    """Which .env is read is a question with one answer (dotenv_path);
+    a quoted value keeps everything inside the quotes, an unquoted one
+    drops a note after " #" — so a logo path followed by a comment is
+    still the path, and a proxy password with a # in it is untouched."""
+    from sahs.util.auth import dotenv_path, dotenv_value, load_dotenv
+    env = tmp_path / ".env"
+    env.write_text(
+        "SYNAPSE_LOGO=/Users/me/Desktop/my logo.png  # the brand\n"
+        "QUOTED_NOTE=\"/a/b # c.png\"\n"
+        "PROXY_PW=http://u:p#ss@proxy:8080\n"
+        "export EXPORTED=yes\n", encoding="utf-8")
+    for name in ("SYNAPSE_LOGO", "QUOTED_NOTE", "PROXY_PW", "EXPORTED"):
+        monkeypatch.delenv(name, raising=False)
+    assert dotenv_path(env) == env.resolve()
+    assert set(load_dotenv(env)) == {"SYNAPSE_LOGO", "QUOTED_NOTE",
+                                     "PROXY_PW", "EXPORTED"}
+    import os
+    assert os.environ["SYNAPSE_LOGO"] == "/Users/me/Desktop/my logo.png"
+    assert os.environ["QUOTED_NOTE"] == "/a/b # c.png"
+    assert os.environ["PROXY_PW"] == "http://u:p#ss@proxy:8080"
+    assert os.environ["EXPORTED"] == "yes"
+    assert dotenv_value("'x'") == "x" and dotenv_value("x #y") == "x"
+    assert dotenv_path(tmp_path / "nope.env") in (None,
+                                                  dotenv_path(None))

@@ -6,19 +6,31 @@ key, never calls a model.
     POST /api/chat/sessions                        → session
     GET  /api/chat/sessions                        → the sidebar
     GET  /api/chat/sessions/{id}                   → transcript + artifacts (+ turn_after when a turn is running)
-    POST /api/chat/sessions/{id}/messages          {text, depth?, mode?} → turn_id
+    POST /api/chat/sessions/{id}/messages          {text, depth?, mode?, model?, files?} → turn_id
+    GET  /api/chat/files/support                   what a person may attach, and how it rides
+    GET  /api/chat/sessions/{id}/files             the files on this chat (pending and sent)
+    POST /api/chat/sessions/{id}/files             {name, data_b64} → the stored file, or why not
+    DELETE /api/chat/sessions/{id}/files/{file_id}
+    GET  /api/chat/dials                           the modes, depths and planes, explained
+    POST /api/chat/sessions/{id}/model             {model} → the plane this chat rides
     POST /api/chat/sessions/{id}/run               {message_id?, sql?, limit?, dashboard?} → turn_id (no model call)
     POST /api/chat/sessions/{id}/chart             {saved_as?, kind?, x?, y?} → turn_id (no model call)
     GET  /api/chat/sessions/{id}/stream            → SSE (meridian.event/1)
     POST /api/chat/sessions/{id}/stop
     POST /api/chat/sessions/{id}/rename            {title}
-    GET  /api/chat/skills                          → both shelves
+    GET  /api/chat/skills                          → the shelves, the person's own marked
+    POST /api/chat/skills/draft                    {kind, title, material, hint?} → the model's draft
+    POST /api/chat/skills/mine                     {name, text} → the person's own pack, saved
+    DELETE /api/chat/skills/mine/{name}
+    POST /api/chat/files/text                      {name, data_b64} → a file as text (for the creators)
     POST /api/chat/sessions/{id}/skills            {names}
     GET  /api/chat/projects · POST /api/chat/projects
     POST /api/chat/projects/{id}                   {…updates}
     POST /api/chat/sessions/{id}/project           {project_id}
     POST /api/chat/sessions/{id}/star|archive      {on}
     GET  /api/chat/memories[?project_id=]
+    GET  /api/chat/memory.md                       what Synapse remembers, as a document
+    PUT  /api/chat/memory.md                       {text} → the document back to memories
     POST /api/chat/memories/{id}/retire
     GET  /api/chat/artifacts/{artifact_id}[?version=]
     GET  /api/chat/artifacts/{artifact_id}/versions
@@ -66,6 +78,37 @@ class NewMessage(BaseModel):
     # the autonomy slider (v3 §5): chat hands queries over for the
     # person to run; autopilot runs and builds without stopping
     mode: str = Field(default="", max_length=12)
+    # the model switch: vertex | gateway, or empty for the chat's own
+    model: str = Field(default="", max_length=12)
+    # the files that ride this message (ids from POST …/files)
+    files: list[str] = Field(default_factory=list, max_length=10)
+
+
+class FileUpload(BaseModel):
+    """One file for the chat: the bytes base64, the name for its type.
+    JSON rather than multipart so the laptop needs no extra package;
+    a 10 MB file is 14 MB of JSON, within the app's body limit."""
+    name: str = Field(min_length=1, max_length=200)
+    data_b64: str = Field(min_length=1, max_length=15_000_000)
+
+
+class DraftRequest(BaseModel):
+    """The creators: the model rewrites material into the house format."""
+    kind: str = Field(pattern=r"^(skill|knowledge)$")
+    title: str = Field(default="", max_length=200)
+    hint: str = Field(default="", max_length=1000)
+    material: str = Field(min_length=1, max_length=60_000)
+    model: str = Field(default="", max_length=12)
+
+
+class SaveSkill(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    text: str = Field(min_length=1, max_length=12_000)
+
+
+class SessionModel(BaseModel):
+    """The composer's model switch, remembered on the chat."""
+    model: str = Field(default="", max_length=12)
 
 
 class RunProposal(BaseModel):
@@ -152,6 +195,10 @@ def get_session(session_id: str) -> dict:
         return _unavailable(f"no session {session_id}")
     rt = runtime.runtime(session_id)
     window = runtime.turn_window(session_id)
+    # the chat's plane, configured here or not: the composer shows it
+    # greyed with the reason when it is not, and the switch is right
+    # beside it
+    plane = runtime.plane_of(session)
     return {"available": True, "session": session,
             "messages": runtime.store.messages(session_id),
             "artifacts": runtime.store.list_artifacts(session_id),
@@ -159,8 +206,78 @@ def get_session(session_id: str) -> dict:
             # an in-flight turn: the page replays it from here
             "turn_id": window["turn_id"], "turn_after": window["after"],
             "budget": rt.budget.tick(),
-            # the composer's greeting and its model label
-            "user_name": runtime.user_name, "model": runtime.model_label}
+            # the composer's greeting, and the plane this chat rides
+            # with its label
+            "user_name": runtime.user_name,
+            "plane": plane, "model": runtime.label_for(plane),
+            # the files on this chat: the composer shows the pending ones
+            "files": runtime.files(session_id)}
+
+
+@router.get("/files/support")
+def file_support() -> dict:
+    runtime, _ = _chat()
+    return {"available": True, **runtime.file_support()}
+
+
+@router.get("/sessions/{session_id}/files")
+def list_files(session_id: str) -> dict:
+    runtime, _ = _chat()
+    try:
+        return {"available": True, "files": runtime.files(session_id)}
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+
+
+@router.post("/sessions/{session_id}/files", status_code=201)
+def add_file(session_id: str, req: FileUpload) -> dict:
+    runtime, _ = _chat()
+    import base64
+    import binascii
+    from sahs.assistant.files import FileRefused
+    try:
+        data = base64.b64decode(req.data_b64, validate=True)
+    except (binascii.Error, ValueError):
+        return _unavailable("the file bytes were not valid base64")
+    try:
+        return {"available": True,
+                "file": runtime.add_file(session_id, req.name, data)}
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+    except FileRefused as e:
+        return _unavailable(str(e))
+
+
+@router.delete("/sessions/{session_id}/files/{file_id}")
+def remove_file(session_id: str, file_id: str) -> dict:
+    runtime, _ = _chat()
+    try:
+        gone = runtime.remove_file(session_id, file_id)
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+    return {"available": True, "removed": gone}
+
+
+@router.get("/dials")
+def dials() -> dict:
+    """Everything the composer lets a person set, explained: the
+    modes, the depths and the model planes — one source for both
+    surfaces, read from the environment each time."""
+    runtime, _ = _chat()
+    return {"available": True, **runtime.dials()}
+
+
+@router.post("/sessions/{session_id}/model")
+def set_model(session_id: str, req: SessionModel) -> dict:
+    runtime, _ = _chat()
+    from sahs.ask.model import ModelUnavailable
+    try:
+        return {"available": True,
+                **runtime.set_session_model(session_id, req.model)}
+    except KeyError:
+        return _unavailable(f"no session {session_id}")
+    except ModelUnavailable as e:
+        return _unavailable(str(e))
 
 
 @router.post("/sessions/{session_id}/messages", status_code=202)
@@ -168,15 +285,17 @@ def post_message(session_id: str, req: NewMessage) -> dict:
     runtime, _ = _chat()
     from sahs.ask.model import ModelUnavailable
     from sahs.ask.runtime import BuildUnavailable, TurnBusy
+    from sahs.assistant.files import FileRefused
     try:
         return {"available": True,
                 **runtime.start_turn(session_id, req.text,
-                                     depth=req.depth, mode=req.mode)}
+                                     depth=req.depth, mode=req.mode,
+                                     model=req.model, files=req.files)}
     except KeyError:
         return _unavailable(f"no session {session_id}")
     except TurnBusy as e:
         return {"available": False, "reason": str(e), "busy": True}
-    except (BuildUnavailable, ModelUnavailable) as e:
+    except (BuildUnavailable, ModelUnavailable, FileRefused) as e:
         return _unavailable(str(e))
 
 
@@ -242,7 +361,69 @@ def rename(session_id: str, req: Rename) -> dict:
 @router.get("/skills")
 def list_skills() -> dict:
     runtime, _ = _chat()
-    return {"available": True, "skills": runtime.skills()}
+    return {"available": True, "skills": runtime.skills(),
+            "owner": runtime.owner}
+
+
+@router.post("/skills/draft")
+def draft_skill(req: DraftRequest) -> dict:
+    runtime, _ = _chat()
+    from sahs.ask.model import ModelUnavailable
+    try:
+        got = runtime.draft(req.kind, req.title, req.material, req.hint,
+                            plane=req.model)
+    except ModelUnavailable as e:
+        return _unavailable(str(e))
+    if not got.get("ok"):
+        return _unavailable(got.get("reason") or "no draft")
+    return {"available": True, "draft": got}
+
+
+@router.post("/skills/mine", status_code=201)
+def save_my_skill(req: SaveSkill) -> dict:
+    runtime, _ = _chat()
+    got = runtime.save_my_skill(req.name, req.text)
+    if not got.get("ok"):
+        return _unavailable(got.get("reason") or "not saved")
+    return {"available": True, "skill": got}
+
+
+@router.delete("/skills/mine/{name}")
+def delete_my_skill(name: str) -> dict:
+    runtime, _ = _chat()
+    return {"available": True, "removed": runtime.delete_my_skill(name)}
+
+
+@router.post("/files/text")
+def file_as_text(req: FileUpload) -> dict:
+    """A file as text for the creators: text files as they are, a
+    workbook, a Word file or a deck converted the way the chat does;
+    a PDF is refused here (attach it in a chat instead)."""
+    import base64
+    import binascii
+    from sahs.assistant import files as files_mod
+    try:
+        data = base64.b64decode(req.data_b64, validate=True)
+    except (binascii.Error, ValueError):
+        return _unavailable("the file bytes were not valid base64")
+    try:
+        suffix, _mime, how, _family = files_mod.check(req.name, len(data))
+    except files_mod.FileRefused as e:
+        return _unavailable(str(e))
+    if how == files_mod.INLINE:
+        return _unavailable(f"{req.name}: a {suffix} has no text to draft "
+                            "from here; attach it in a chat and ask "
+                            "there, or paste the words")
+    try:
+        if how == files_mod.CONVERT:
+            text = files_mod.CONVERTERS[suffix](data)
+        else:
+            text = data.decode("utf-8", errors="replace")
+    except files_mod.FileRefused as e:
+        return _unavailable(str(e))
+    return {"available": True, "name": req.name,
+            "text": text[:files_mod.MAX_TEXT_CHARS],
+            "converted": how == files_mod.CONVERT}
 
 
 @router.post("/sessions/{session_id}/skills")
@@ -321,6 +502,22 @@ def list_memories(project_id: str = "") -> dict:
     return {"available": True,
             "memories": runtime.store.list_memories(
                 project_id=project_id)}
+
+
+class MemoryDoc(BaseModel):
+    text: str = Field(default="", max_length=60_000)
+
+
+@router.get("/memory.md")
+def memory_markdown() -> dict:
+    runtime, _ = _chat()
+    return {"available": True, **runtime.memory_markdown()}
+
+
+@router.put("/memory.md")
+def save_memory_markdown(req: MemoryDoc) -> dict:
+    runtime, _ = _chat()
+    return {"available": True, **runtime.save_memory_markdown(req.text)}
 
 
 @router.post("/memories/{memory_id}/retire")

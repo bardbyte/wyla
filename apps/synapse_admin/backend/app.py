@@ -45,16 +45,84 @@ _LOGO_TYPES = {".png": "image/png", ".jpg": "image/jpeg",
 LOGO_VAR = "SYNAPSE_LOGO"
 
 
-def _logo_path() -> Path | None:
-    """The configured logo when it is an image file that exists; None
-    otherwise (unset, missing, or not an image)."""
+# what the first bytes of an image say it is: a .png that is really a
+# HEIC export would be served as image/png and dropped by the browser
+# in silence — so the bytes are read, and the mismatch is the reason
+_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", ".png"), (b"\xff\xd8\xff", ".jpg"),
+    (b"GIF87a", ".gif"), (b"GIF89a", ".gif"), (b"RIFF", ".webp"),
+)
+
+
+def _looks_like(path: Path) -> str:
+    """'.png', '.jpg', '.gif', '.webp', '.svg' from the bytes, or ''."""
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(512)
+    except OSError:
+        return ""
+    for magic, suffix in _SIGNATURES:
+        if head.startswith(magic):
+            if suffix == ".webp" and head[8:12] != b"WEBP":
+                continue
+            return suffix
+    text = head.lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+    if text.startswith(b"<svg") or (text.startswith(b"<?xml")
+                                    and b"<svg" in head.lower()):
+        return ".svg"
+    return ""
+
+
+def _logo_status() -> dict:
+    """Everything the brand endpoint says about the configured logo:
+    which .env was read, the value as read, whether the file exists,
+    whether its suffix is an image type, what its bytes say it is,
+    and the one reason when it will not be served."""
+    try:
+        from sahs.util.auth import dotenv_path
+        env_file = dotenv_path()
+    except ImportError:
+        env_file = None
     raw = (os.environ.get(LOGO_VAR) or "").strip().strip("'\"")
+    status = {"configured": bool(raw), "value": raw,
+              "env_file": str(env_file) if env_file else "",
+              "path": "", "exists": False, "suffix_ok": False,
+              "looks_like": "", "ok": False, "reason": ""}
     if not raw:
-        return None
+        return status
     path = Path(raw).expanduser()
-    if path.suffix.lower() not in _LOGO_TYPES or not path.is_file():
-        return None
-    return path
+    status["path"] = str(path)
+    status["exists"] = path.is_file()
+    suffix = path.suffix.lower()
+    status["suffix_ok"] = suffix in _LOGO_TYPES
+    if not status["exists"]:
+        status["reason"] = (f"{LOGO_VAR} is set but no file is at {path} "
+                            "(check the path as the .env spells it; a "
+                            "note after the path on the same line must "
+                            "start with ' #')")
+        return status
+    if not status["suffix_ok"]:
+        status["reason"] = (f"{path.name} is not an image type: png, jpg, "
+                            "jpeg, svg, webp or gif")
+        return status
+    seen = _looks_like(path)
+    status["looks_like"] = seen
+    expected = {".jpeg": ".jpg"}.get(suffix, suffix)
+    if seen != expected:
+        status["reason"] = (f"{path.name} is named {suffix} but its bytes "
+                            f"are {'not an image the browser knows' if not seen else seen} "
+                            "— export it again as a real "
+                            f"{suffix.lstrip('.').upper()}")
+        return status
+    status["ok"] = True
+    return status
+
+
+def _logo_path() -> Path | None:
+    """The configured logo when it is a real image file that exists;
+    None otherwise (unset, missing, mis-typed, or not what it says)."""
+    status = _logo_status()
+    return Path(status["path"]) if status["ok"] else None
 
 
 def _load_env_file() -> None:
@@ -136,28 +204,34 @@ def create_app() -> FastAPI:
 
     @app.get("/api/synapse/brand")
     def brand() -> dict:
-        """Whether a logo is served, and why not when it is not — the
-        path itself never leaves the machine."""
-        raw = (os.environ.get(LOGO_VAR) or "").strip()
-        path = _logo_path()
+        """Whether a logo is served, and when it is not, exactly why:
+        the .env that was read, the value as read, the path tried,
+        whether it exists, and what its bytes are. This is the local
+        admin's own machine; the path is theirs to see."""
+        status = _logo_status()
+        path = Path(status["path"]) if status["ok"] else None
         return {
             "logo": path is not None,
-            "configured": bool(raw),
-            "reason": ("" if path is not None or not raw else
-                       f"{LOGO_VAR} is set but no image file is at that "
-                       "path (png, jpg, jpeg, svg, webp or gif)"),
+            "configured": status["configured"],
+            "reason": status["reason"],
             # a cache-buster: the file's mtime, so a replaced logo shows
             "stamp": str(int(path.stat().st_mtime)) if path else "",
+            "env_file": status["env_file"],
+            "path": status["path"],
+            "exists": status["exists"],
+            "looks_like": status["looks_like"],
         }
 
     @app.get("/api/synapse/logo")
     def logo():
-        path = _logo_path()
+        status = _logo_status()
+        path = Path(status["path"]) if status["ok"] else None
         if path is None:
             return JSONResponse(
                 {"available": False,
-                 "reason": f"no logo: set {LOGO_VAR}=/path/to/logo.png in "
-                           "the silo .env and restart the app"},
+                 "reason": status["reason"] or
+                 f"no logo: set {LOGO_VAR}=/path/to/logo.png in "
+                 "the silo .env and restart the app"},
                 status_code=404)
         return FileResponse(str(path),
                             media_type=_LOGO_TYPES[path.suffix.lower()])

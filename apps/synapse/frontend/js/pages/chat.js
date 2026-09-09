@@ -47,6 +47,8 @@ export async function renderChat(outlet, wanted = "") {
             <textarea id="chat-input" rows="1"
               placeholder="Type / for skills"></textarea>
             <div class="chat-slash" id="chat-slash" hidden></div>
+            <div class="chat-files" id="chat-files" hidden></div>
+            <input type="file" id="chat-file-input" multiple hidden />
             <div class="chat-actions">
               <button class="icon-btn chat-plus" id="chat-plus"
                 title="More" aria-expanded="false">+</button>
@@ -61,13 +63,18 @@ export async function renderChat(outlet, wanted = "") {
                   title="Synapse runs the query under the limits and builds the deliverable">Autopilot</button>
               </div>
               <span class="spacer"></span>
-              <span class="chat-model" id="chat-model"></span>
+              <select id="chat-model" class="chat-depth chat-plane"
+                title="Which model answers this chat"></select>
               <select id="chat-depth" class="chat-depth"
                 title="How deeply Synapse thinks on this ask">
                 <option value="quick">Quick</option>
                 <option value="standard" selected>Standard</option>
                 <option value="deep">Deep</option>
               </select>
+              <button class="icon-btn chat-help" id="chat-help"
+                title="What Chat, Autopilot, Quick, Standard, Deep and the models mean"
+                aria-label="Explain the dials" aria-expanded="false">?</button>
+              <div class="chat-help-pop" id="chat-help-pop" hidden></div>
               <button class="btn" id="chat-stop" hidden>stop</button>
               <button class="btn primary chat-send" id="chat-send"
                 title="Send · Enter">↑</button>
@@ -102,6 +109,15 @@ export async function renderChat(outlet, wanted = "") {
     boot = await api.chatSession(stored);
     if (!boot.available) boot = null;
   }
+  if (!boot && wanted === "new") {
+    // an empty chat already exists: reuse it rather than pile them up
+    const recent = await api.chatSessions(10).catch(() => ({}));
+    const empty = (recent.sessions || []).find((r) => r.messages === 0);
+    if (empty) {
+      boot = await api.chatSession(empty.id);
+      if (!boot.available) boot = null;
+    }
+  }
   if (!boot) {
     const created = await api.chatNewSession();
     if (!created.available) {
@@ -129,7 +145,87 @@ export async function renderChat(outlet, wanted = "") {
   const first = String(boot.user_name || "").trim().split(/\s+/)[0];
   el("chat-greet").textContent = first
     ? `${dayPart}, ${first}.` : `${dayPart}, how are things?`;
-  el("chat-model").textContent = boot.model || "";
+  // ── the dials, explained: the model switch shows the chat's plane
+  //    now; one catalog from the backend then fills the switch, the
+  //    option titles and the "?" popover — one source for both surfaces
+  const planeSel = el("chat-model");
+  state.plane = boot.plane || "";
+  planeSel.innerHTML = `<option value="${esc(state.plane)}" selected>${
+    esc(boot.model || "")}</option>`;
+  const helpPop = el("chat-help-pop");
+  const helpRow = (label, text, fact = "") => `
+    <div class="help-row"><b>${esc(label)}</b><span>${esc(text)}${
+      fact ? `<i class="help-fact">${esc(fact)}</i>` : ""}</span></div>`;
+  async function loadDials() {
+    let dials = null;
+    try { dials = await api.chatDials(); } catch { dials = null; }
+    if (!dials || !dials.available) return;
+    if (!planeSel.isConnected || !el("chat-depth")) return;   // page left
+    const planes = dials.planes || [];
+    planeSel.innerHTML = planes.map((p) => `
+      <option value="${esc(p.id)}"${p.id === state.plane ? " selected" : ""}${
+        p.available ? "" : " disabled"} title="${
+        esc(p.available ? p.means : p.reason)}">${esc(p.label)}${
+        p.available ? "" : " · not configured"}</option>`).join("");
+    for (const o of el("chat-depth").options) {
+      const d = (dials.depths || []).find((x) => x.id === o.value);
+      if (d) o.title = d.means;
+    }
+    for (const b of document.querySelectorAll(".chat-mode")) {
+      const m = (dials.modes || []).find((x) => x.id === b.dataset.mode);
+      if (m) b.title = m.means;
+    }
+    const notes = dials.notes || {};
+    helpPop.innerHTML = `
+      <div class="help-group">
+        <div class="help-head">Depth <span>how much Synapse thinks before each step</span></div>
+        ${(dials.depths || []).map((d) => helpRow(d.label, d.means)).join("")}
+      </div>
+      <div class="help-group">
+        <div class="help-head">Model <span>${esc(notes.plane || "")}</span></div>
+        ${planes.map((p) => helpRow(p.label, p.means, p.available
+          ? (p.default ? "available · where a new chat starts" : "available")
+          : `not available here: ${p.reason}`)).join("")}
+      </div>`;
+  }
+  loadDials();
+  // above the composer when it is docked at the bottom, below it while
+  // the chat is empty and the composer sits mid-screen; never past the
+  // edge of the window — it scrolls inside instead
+  function placeHelp() {
+    const box = (helpPop.offsetParent || helpPop.parentElement)
+      .getBoundingClientRect();
+    const below = shell.classList.contains("empty");
+    helpPop.classList.toggle("below", below);
+    const room = below ? window.innerHeight - box.bottom - 16 : box.top - 16;
+    helpPop.style.maxHeight =
+      `${Math.max(180, Math.min(room, window.innerHeight * 0.8))}px`;
+  }
+  el("chat-help").addEventListener("click", () => {
+    helpPop.hidden = !helpPop.hidden;
+    el("chat-help").setAttribute("aria-expanded", String(!helpPop.hidden));
+    if (!helpPop.hidden) placeHelp();
+  });
+  // the switch is remembered on the chat and rides the next message;
+  // a plane this machine cannot ride is refused with the reason and
+  // the switch goes back to the one that works
+  planeSel.addEventListener("change", async () => {
+    const wanted = planeSel.value;
+    const got = await api.chatSetModel(state.session.id, wanted);
+    if (!got.available) {
+      setEmpty(false);                 // the refusal must be seen
+      say(`<b>model not switched.</b> ${esc(got.reason || "")}`, "error");
+      planeSel.value = state.plane;
+      return;
+    }
+    state.plane = got.plane || wanted;
+    // before the first message the select itself is the confirmation;
+    // mid-conversation the thread says so, where the person is looking
+    if (!shell.classList.contains("empty")) {
+      const shown = planeSel.selectedOptions[0]?.textContent || got.model || wanted;
+      say(`Switched to <b>${esc(shown)}</b> from the next message on.`);
+    }
+  });
   function setEmpty(empty) {
     shell.classList.toggle("empty", empty);
     input.placeholder = empty ? "Type / for skills" : "Write a message…";
@@ -189,17 +285,85 @@ export async function renderChat(outlet, wanted = "") {
   // the + menu: the real doors, never a dead control
   const plusPop = el("chat-plus-pop");
   plusPop.innerHTML = `
-    <button class="plus-item" id="plus-memory">⊚ Memory</button>
-    <a class="plus-item" href="#/chat/new">✳ New chat</a>`;
+    <button class="plus-item" id="plus-files">⊕ Add files</button>
+    <span class="plus-note muted" id="plus-files-note">PDF, images, text,
+      CSV, JSON, workbooks, Word files, decks</span>`;
   el("chat-plus").addEventListener("click", () => {
     plusPop.hidden = !plusPop.hidden;
     el("chat-plus").setAttribute("aria-expanded",
                                  String(!plusPop.hidden));
   });
-  plusPop.querySelector("#plus-memory").addEventListener("click", () => {
+  // ── files: added from the plus menu, shown as chips, riding the
+  //    next message; a refused file says why and leaves nothing behind
+  const fileInput = el("chat-file-input");
+  const filesRow = el("chat-files");
+  state.files = [];                       // pending, in order
+  const fmtSize = (n) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB`
+    : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`;
+  function paintFiles() {
+    filesRow.hidden = state.files.length === 0;
+    filesRow.innerHTML = state.files.map((f) => `
+      <span class="file-chip" data-id="${esc(f.id)}" title="${esc(
+        f.note || `${f.family} · rides ${f.rides === "inline" ? "as itself"
+                   : "as text"}`)}">
+        <span class="file-kind">${esc(f.suffix)}</span>
+        <span class="file-name">${esc(f.name)}</span>
+        <span class="muted">${fmtSize(f.size)}</span>
+        <button class="file-x" type="button" title="remove">×</button>
+      </span>`).join("");
+  }
+  api.chatFileSupport().then((got) => {
+    if (got && got.available) {
+      const kinds = [...new Set(got.accepted.map((a) => a.suffix))];
+      el("plus-files-note").textContent =
+        `${kinds.join(", ")} · up to ${got.max_file_mb} MB each`;
+      fileInput.accept = kinds.map((k) => `.${k}`).join(",");
+    }
+  }).catch(() => {});
+  plusPop.querySelector("#plus-files").addEventListener("click", () => {
     plusPop.hidden = true;
-    el("chat-memory-btn").click();
+    fileInput.click();
   });
+  const readB64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  fileInput.addEventListener("change", async () => {
+    const picked = [...fileInput.files];
+    fileInput.value = "";
+    for (const file of picked) {
+      let got;
+      try {
+        got = await api.chatUpload(state.session.id, file.name,
+                                   await readB64(file));
+      } catch (e) {
+        got = { available: false, reason: String(e) };
+      }
+      if (!got.available) {
+        setEmpty(false);
+        say(`<b>not attached.</b> ${esc(got.reason || file.name)}`, "error");
+        continue;
+      }
+      state.files.push(got.file);
+      paintFiles();
+    }
+  });
+  filesRow.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".file-x");
+    if (!btn) return;
+    const chip = btn.closest(".file-chip");
+    const id = chip.dataset.id;
+    state.files = state.files.filter((f) => f.id !== id);
+    paintFiles();
+    api.chatRemoveFile(state.session.id, id).catch(() => {});
+  });
+  // files uploaded before a reload are still pending on the chat
+  for (const f of (boot.files || [])) {
+    if (!f.sent_turn) state.files.push(f);
+  }
+  paintFiles();
   // the mode (§5): Chat hands queries over for you to run; Autopilot
   // runs and builds without stopping. Kept per browser.
   const MODE_KEY = "synapse-chat-mode";
@@ -252,9 +416,27 @@ export async function renderChat(outlet, wanted = "") {
     }
   }
   input.addEventListener("input", paintSlash);
+  // the Skills page hands a slash command over: it lands in the
+  // composer, ready to finish, and the slash menu shows the pack
+  let prefill = "";
+  try {
+    prefill = sessionStorage.getItem("synapse.prefill") || "";
+    sessionStorage.removeItem("synapse.prefill");
+  } catch { prefill = ""; }
+  if (prefill && !state.running) {
+    input.value = prefill;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    paintSlash();
+  }
   document.addEventListener("click", (e) => {
     if (!plusPop.hidden && !plusPop.contains(e.target)
         && e.target !== el("chat-plus")) plusPop.hidden = true;
+    if (!helpPop.hidden && !helpPop.contains(e.target)
+        && e.target !== el("chat-help")) {
+      helpPop.hidden = true;
+      el("chat-help").setAttribute("aria-expanded", "false");
+    }
     if (!slash.hidden && !slash.contains(e.target)
         && e.target !== input) slash.hidden = true;
   });
@@ -325,39 +507,66 @@ export async function renderChat(outlet, wanted = "") {
   }
 
   function chartSVG(spec, width = 520, height = 280) {
-    const pad = { l: 46, r: 12, t: 14, b: 34 };
-    const series = spec.series || [];
-    const all = series.flatMap((s) => s.points.map((p) => p[1]));
+    const series = (spec.series || []).map((s) => ({
+      name: s.name, points: (s.points || []).map((p) =>
+        [p[0], Number(p[1])]) }));
+    const all = series.flatMap((s) => s.points.map((p) => p[1]))
+      .filter(Number.isFinite);
     if (!all.length) return "<svg></svg>";
     const yMin = Math.min(0, ...all);
     const yMax = Math.max(...all) || 1;
+    // numbers read as numbers on the axis: compact past ten thousand,
+    // separators below, never a raw 4000000 hanging off the left edge
+    const tickFmt = (v) => Math.abs(v) >= 1e4
+      ? new Intl.NumberFormat(undefined, { notation: "compact",
+          maximumFractionDigits: 1 }).format(v)
+      : new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+          .format(Number(v.toPrecision(3)));
+    const ticks = [0, 1, 2, 3, 4].map((g) => yMin + ((yMax - yMin) * g) / 4);
+    const textW = (s) => String(s).length * 6.2;     // 10.5px, roughly
+    const many = series.length > 1;
+    const isBar = spec.kind === "bar";
     const n = Math.max(...series.map((s) => s.points.length));
-    const px = (i) => pad.l + (n < 2 ? 0
-      : (i * (width - pad.l - pad.r)) / (n - 1));
+    const cats = (series[0]?.points || []).map((p) => String(p[0]));
+    // the frame fits its labels: the left margin from the widest tick,
+    // the bottom from the category labels — rotated when a bar chart's
+    // names would collide, thinned when even that would
+    const padL = Math.ceil(Math.max(...ticks.map((t) => textW(tickFmt(t)))) + 14);
+    const plotW = width - padL - 12;
+    const widest = Math.max(8, ...cats.map(textW));
+    const slot = plotW / Math.max(1, n);
+    const rotate = isBar && widest > slot - 6 && n <= 30;
+    const step = rotate ? Math.max(1, Math.ceil(14 / slot))
+      : Math.max(1, Math.ceil((widest + 10) / slot));
+    const pad = { l: padL, r: 12, t: many ? 30 : 16,
+                  b: rotate ? Math.min(96, 24 + Math.ceil(widest * 0.7)) : 34 };
+    const px = (i) => isBar
+      ? pad.l + ((i + 0.5) * plotW) / Math.max(1, n)
+      : pad.l + (n < 2 ? 0 : (i * plotW) / (n - 1));
     const py = (v) => pad.t + (height - pad.t - pad.b)
       * (1 - (v - yMin) / (yMax - yMin || 1));
     let body = "";
-    // y gridlines + labels
-    for (let g = 0; g <= 4; g++) {
-      const v = yMin + ((yMax - yMin) * g) / 4;
+    for (const v of ticks) {
       const y = py(v);
       body += `<line x1="${pad.l}" y1="${y}" x2="${width - pad.r}"
         y2="${y}" class="grid"/>
         <text x="${pad.l - 6}" y="${y + 4}" class="tick"
-        text-anchor="end">${esc(Number(v.toPrecision(3)))}</text>`;
+        text-anchor="end">${esc(tickFmt(v))}</text>`;
     }
     series.forEach((s, si) => {
       const color = PALETTE[si % PALETTE.length];
-      if (spec.kind === "bar") {
-        const bw = Math.max(4, (width - pad.l - pad.r)
-          / (n * series.length) - 4);
+      if (isBar) {
+        const group = slot * 0.72;
+        const bw = Math.max(3, group / series.length - 2);
         s.points.forEach((p, i) => {
-          const x = px(i) - (bw * series.length) / 2 + si * bw;
-          body += `<rect class="bar" x="${x}" y="${
+          if (!Number.isFinite(p[1])) return;
+          const x = px(i) - group / 2 + si * (group / series.length) + 1;
+          body += `<rect class="chart-bar" x="${x}" y="${
             Math.min(py(p[1]), py(0))}"
-            width="${bw}" height="${Math.abs(py(p[1]) - py(0))}"
+            width="${bw}" height="${Math.max(0.5, Math.abs(py(p[1]) - py(0)))}"
             fill="${color}" opacity="0.85"
-            style="animation-delay:${i * 12}ms"/>`;
+            style="animation-delay:${i * 12}ms"><title>${esc(String(p[0]))}: ${
+            esc(fmtNum(p[1]))}</title></rect>`;
         });
       } else {
         const path = s.points.map((p, i) =>
@@ -374,23 +583,41 @@ export async function renderChat(outlet, wanted = "") {
         s.points.forEach((p, i) => {
           body += `<circle class="dot" cx="${px(i)}" cy="${py(p[1])}"
             r="2.6" fill="${color}"><title>${esc(String(p[0]))}: ${
-            esc(String(p[1]))}</title></circle>`;
+            esc(fmtNum(p[1]))}</title></circle>`;
         });
       }
     });
-    const first = series[0]?.points || [];
-    if (first.length) {
-      body += `<text x="${px(0)}" y="${height - 12}" class="tick"
-        >${esc(String(first[0][0]))}</text>
-        <text x="${px(first.length - 1)}" y="${height - 12}"
-        class="tick" text-anchor="end">${esc(String(
-          first[first.length - 1][0]))}</text>`;
+    // the category labels: every one when they fit, every k-th when
+    // not, the last always on a line chart so the range reads
+    cats.forEach((label, i) => {
+      const drawn = i % step === 0 || (!isBar && i === n - 1);
+      if (!drawn) return;
+      const x = px(i);
+      if (rotate) {
+        body += `<text x="${x}" y="${height - pad.b + 14}" class="tick"
+          text-anchor="end" transform="rotate(-35 ${x} ${height - pad.b + 14})"
+          >${esc(label)}</text>`;
+      } else {
+        const anchor = isBar ? "middle" : (i === 0 ? "start"
+          : i === n - 1 ? "end" : "middle");
+        body += `<text x="${x}" y="${height - 12}" class="tick"
+          text-anchor="${anchor}">${esc(label)}</text>`;
+      }
+    });
+    // the legend only when there is something to tell apart, above the
+    // plot where it covers nothing; the unit top-right either way
+    if (many) {
+      let lx = pad.l;
+      series.forEach((s, si) => {
+        body += `<text x="${lx}" y="${12}" class="tick"><tspan fill="${
+          PALETTE[si % PALETTE.length]}">■</tspan> ${esc(s.name)}</text>`;
+        lx += textW(s.name) + 22;
+      });
     }
-    const legend = series.map((s, si) =>
-      `<tspan fill="${PALETTE[si % PALETTE.length]}">■</tspan> ${
-        esc(s.name)} `).join(" ");
-    body += `<text x="${pad.l}" y="${pad.t - 2}" class="tick"
-      >${legend}${spec.unit ? " · " + esc(spec.unit) : ""}</text>`;
+    if (spec.unit) {
+      body += `<text x="${width - pad.r}" y="${12}" class="tick"
+        text-anchor="end">${esc(spec.unit)}</text>`;
+    }
     if (spec.watermark) {
       body += `<text x="${width / 2}" y="${height / 2}"
         class="watermark" text-anchor="middle"
@@ -1120,10 +1347,19 @@ export async function renderChat(outlet, wanted = "") {
     scroll();
   }
 
-  function userBubble(text, before = null) {
+  function userBubble(text, before = null, files = []) {
     const div = document.createElement("div");
     div.className = "chat-user";
     div.textContent = text;
+    if (files && files.length) {
+      const row = document.createElement("div");
+      row.className = "chat-user-files";
+      row.innerHTML = files.map((f) => `<span class="file-chip sent"
+        title="${esc(f.rides === "convert" ? "converted to text" : f.family || "")}">
+        <span class="file-kind">${esc(f.suffix || (f.name || "").split(".").pop())}</span>
+        <span class="file-name">${esc(f.name)}</span></span>`).join("");
+      div.appendChild(row);
+    }
     if (before) thread.insertBefore(div, before);
     else thread.appendChild(div);
     scroll();
@@ -1466,7 +1702,9 @@ export async function renderChat(outlet, wanted = "") {
     state.artifacts.set(row.artifact_id, row);
   }
   for (const message of boot.messages || []) {
-    if (message.role === "user") userBubble(message.text);
+    if (message.role === "user") {
+      userBubble(message.text, null, (message.payload || {}).files || []);
+    }
     else {
       const div = document.createElement("div");
       div.className = "chat-turn";
@@ -1516,14 +1754,19 @@ export async function renderChat(outlet, wanted = "") {
     el("chat-chiprow").innerHTML = "";
     slash.hidden = true;
     setEmpty(false);
-    userBubble(text);
+    const files = state.files.slice();
+    userBubble(text, null, files);
     input.value = "";
     const accepted = await api.chatSend(state.session.id, text,
                                         el("chat-depth").value,
-                                        state.mode);
+                                        state.mode, state.plane,
+                                        files.map((f) => f.id));
     if (!accepted.available) {
       say(`<b>not sent.</b> ${esc(accepted.reason || "")}`, "error");
+      return;
     }
+    state.files = [];                    // they rode this message
+    paintFiles();
   }
   el("chat-send").addEventListener("click", () => send(input.value));
   input.addEventListener("keydown", (e) => {

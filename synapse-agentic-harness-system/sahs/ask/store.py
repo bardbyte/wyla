@@ -127,7 +127,15 @@ class SessionStore:
             rows = conn.execute(
                 "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?",
                 (limit,)).fetchall()
-        return [self._session_out(dict(r)) for r in rows]
+            counts = dict(conn.execute(
+                "SELECT session_id, COUNT(*) FROM messages "
+                "GROUP BY session_id").fetchall())
+        out = []
+        for r in rows:
+            row = self._session_out(dict(r))
+            row["messages"] = int(counts.get(row["id"], 0))
+            out.append(row)
+        return out
 
     def set_skills(self, session_id: str, names: list[str]) -> None:
         """The session's loaded skills, replaced whole: selection is
