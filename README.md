@@ -29,7 +29,7 @@ http://localhost:8400/synapse/.
 
 To see it full, you need warehouse exports and credentials this repo does not
 ship. The runbook that takes you from exports to a promoted build is
-`synapse-agentic-harness-system/docs/runbooks/laptop_end_to_end.md`; the one
+`synapse-agentic-harness-system/docs/runbooks/pipeline_end_to_end.md`; the one
 for the chat loop is `e18_ask.md` next to it. Both assume a `.env` in the
 silo, copied from `.env.example`.
 
@@ -57,7 +57,7 @@ promoted build.
 Read the code in this order:
 
 ```
-synapse-agentic-harness-system/scripts/laptop.py         the CLI: census, ground, build-graph, compile, promote, enrich
+synapse-agentic-harness-system/scripts/pipeline.py         the CLI: census, ground, build-graph, compile, promote, enrich
 synapse-agentic-harness-system/sahs/canon/canonical.py   c(sql): the canonical form every fingerprint hangs off
 synapse-agentic-harness-system/sahs/graph/quads.py        the quad store and the witness vocabulary
 synapse-agentic-harness-system/sahs/loaders/               one module per source shape; each emits quads, nothing else
@@ -117,7 +117,7 @@ means the sqlglot pin moved.
 ```
 synapse-agentic-harness-system/   the silo: pipeline, graph, compiler, tools, agent, evals
   sahs/                           the package (canon, graph, loaders, compiler, tools, assistant, loop, enrich, evals)
-  scripts/                        laptop.py and the one-off checks (bq, vertex, gateway, planes, transport)
+  scripts/                        pipeline.py and the one-off checks (bq, vertex, gateway, planes, transport)
   tests/                          the suite and its fixtures
   docs/                           runbooks, contracts (export shapes), specs (design notes), evals
 apps/synapse_admin/               the admin surface: FastAPI read plane + ES-module frontend + the wireframes it came from

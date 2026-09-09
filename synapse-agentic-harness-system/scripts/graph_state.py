@@ -51,7 +51,7 @@ def main() -> int:
     current = builds / "CURRENT"
     if not current.exists():
         print(f"no promoted build: {current} missing — "
-              "run `python scripts/laptop.py compile` first")
+              "run `python scripts/pipeline.py compile` first")
         return 1
     build_id = current.read_text(encoding="utf-8").strip()
     bdir = builds / build_id

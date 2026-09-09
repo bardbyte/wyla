@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Meridian laptop CLI — one surface for every runbook (E10).
 
-    python scripts/laptop.py census     --sources-dir <dir> --registry <file> --out <dir>
-    python scripts/laptop.py make-tasks --sources-dir <dir> --registry <file> --out <dir>
+    python scripts/pipeline.py census     --sources-dir <dir> --registry <file> --out <dir>
+    python scripts/pipeline.py make-tasks --sources-dir <dir> --registry <file> --out <dir>
 
 Every subcommand: streams meridian.event/1 to <out>/events.jsonl, renders
 TTY progress (or plain heartbeats; --plain forces), checkpoints long loops
@@ -534,7 +534,7 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="laptop.py", description=__doc__)
+    parser = argparse.ArgumentParser(prog="pipeline.py", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     for name, fn in (("census", cmd_census), ("make-tasks", cmd_make_tasks)):
         p = sub.add_parser(name)
@@ -715,7 +715,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.json_out:
             print(json.dumps(summary))
         return 4
-    next_cmd = ("python scripts/laptop.py make-tasks …"
+    next_cmd = ("python scripts/pipeline.py make-tasks …"
                 if args.command == "census" else
                 "python scripts/run_evals.py …")
     summary = console.finish(code, next_command=next_cmd)

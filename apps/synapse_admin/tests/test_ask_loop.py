@@ -72,7 +72,7 @@ def compiled(tmp_path_factory) -> dict:
     tmp = tmp_path_factory.mktemp("ask")
     graph_dir = tmp / "graph"
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"),
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"),
          "build-graph", "--graph", str(graph_dir),
          "--crosswalk", str(FX / "identity" / "crosswalk.jsonl"),
          "--bq-archive", str(FX / "real_extractions_production"),
@@ -341,4 +341,4 @@ def test_no_build_is_honest(compiled, tmp_path):
     answer = client.post(f"/api/sessions/{session_id}/messages",
                          json={"text": "anything"}).json()
     assert answer["available"] is False
-    assert "laptop.py compile" in answer["reason"]
+    assert "pipeline.py compile" in answer["reason"]

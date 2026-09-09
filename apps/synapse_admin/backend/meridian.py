@@ -82,7 +82,7 @@ def _sources_dir() -> Path:
 
 def _manifest_sources_root() -> Path | None:
     """→ the "sources" root recorded by the newest graph run manifest
-    that carries one (laptop.py build-graph records absolute input
+    that carries one (pipeline.py build-graph records absolute input
     roots), or None."""
     runs = sorted(_graph_root().glob("runs/*/manifest.json"))
     for manifest_path in reversed(runs):
@@ -111,7 +111,7 @@ class MeridianData:
         current = _builds_root() / "CURRENT"
         if not current.exists():
             return None, (f"no compiled build: {current} missing; "
-                          "run `laptop.py compile` on this machine")
+                          "run `pipeline.py compile` on this machine")
         stamp = (current.stat().st_mtime_ns,
                  current.read_text(encoding="utf-8").strip())
         if self._build is not None and stamp == self._stamp:

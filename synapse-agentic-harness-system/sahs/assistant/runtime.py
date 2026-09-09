@@ -104,7 +104,7 @@ class AssistantRuntime:
             if not current.exists():
                 raise BuildUnavailable(
                     f"no compiled build: {current} missing. Run "
-                    "`python scripts/laptop.py compile` first.")
+                    "`python scripts/pipeline.py compile` first.")
             self._build = Build.open(self.builds_root)
             self._build_stamp = stamp
         return self._build

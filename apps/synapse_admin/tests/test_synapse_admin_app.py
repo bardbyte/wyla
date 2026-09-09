@@ -26,7 +26,7 @@ def compiled(tmp_path_factory) -> dict:
     tmp = tmp_path_factory.mktemp("synapse_admin")
     graph_dir = tmp / "graph"
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"),
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"),
          "build-graph", "--graph", str(graph_dir),
          "--crosswalk", str(FX / "identity" / "crosswalk.jsonl"),
          "--bq-archive", str(FX / "real_extractions_production"),
@@ -265,7 +265,7 @@ def test_no_build_is_honest(tmp_path):
     empty = TestClient(create_app())
     payload = empty.get("/api/meridian/home").json()
     assert payload["available"] is False
-    assert "laptop.py compile" in payload["reason"]
+    assert "pipeline.py compile" in payload["reason"]
 
 
 def test_the_dials_catalog_and_the_model_switch(client):

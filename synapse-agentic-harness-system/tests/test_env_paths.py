@@ -1,4 +1,4 @@
-"""Every laptop.py path flag resolves from the environment/.env
+"""Every pipeline.py path flag resolves from the environment/.env
 (paste once, run anywhere), flags still win, and a missing required
 path names BOTH spellings in the error."""
 
@@ -15,7 +15,7 @@ FX = SILO / "tests" / "fixtures"
 
 def _run(args, env):
     return subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"), *args],
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"), *args],
         env=env, capture_output=True, text=True, cwd=SILO)
 
 

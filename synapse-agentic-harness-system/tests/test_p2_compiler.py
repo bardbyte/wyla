@@ -21,7 +21,7 @@ FX = SILO / "tests" / "fixtures"
 
 def _build_graph(graph_dir: Path, out_dir: Path) -> None:
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"), "build-graph",
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"), "build-graph",
          "--graph", str(graph_dir),
          "--crosswalk", str(FX / "identity" / "crosswalk.jsonl"),
          "--bq-archive", str(FX / "real_extractions_production"),

@@ -31,7 +31,7 @@ FX = SILO / "tests" / "fixtures"
 def _compiled(tmp_path: Path) -> tuple[Path, Path]:
     graph_dir = tmp_path / "graph"
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"),
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"),
          "build-graph", "--graph", str(graph_dir),
          "--crosswalk", str(FX / "identity" / "crosswalk.jsonl"),
          "--bq-archive", str(FX / "real_extractions_production"),

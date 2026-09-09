@@ -170,7 +170,7 @@ SVC-ID lacks aiplatform permissions).
 ## 1. Plan first — zero tokens
 
 ```bash
-python scripts/laptop.py enrich \
+python scripts/pipeline.py enrich \
   --graph graph --builds builds \
   --plan --limit 200 \
   --out graph/runs/b1_plan --plain
@@ -180,7 +180,7 @@ python scripts/laptop.py enrich \
 ## 2. Smoke batch, then scale
 
 ```bash
-python scripts/laptop.py enrich \
+python scripts/pipeline.py enrich \
   --graph graph --builds builds \
   --limit 25 \
   --out graph/runs/b1_smoke --plain
@@ -205,7 +205,7 @@ resumes; `--fresh` restarts the batch deliberately. Then raise
 ## 3. Recompile — enrichment reaches the serving layer
 
 ```bash
-python scripts/laptop.py compile \
+python scripts/pipeline.py compile \
   --graph graph --builds builds \
   --out graph/runs/b1_compile --json
 # builds/<id>/DIFF_vs_prev.md is the acceptance record: questions and

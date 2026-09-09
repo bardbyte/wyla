@@ -121,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"✓ CONNECTED — model answered: {text.strip()[:80]}")
     print(f"  usage: {client.usage}")
-    print("B1 is go: python scripts/laptop.py enrich --graph graph "
+    print("B1 is go: python scripts/pipeline.py enrich --graph graph "
           "--builds builds --plan --out graph/runs/b1_plan --plain")
     return 0
 

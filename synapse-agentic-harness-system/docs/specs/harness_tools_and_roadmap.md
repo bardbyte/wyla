@@ -60,7 +60,7 @@ the test refuses a new event without both.
 
 ### 1.4 Deterministic tooling around the chat (`scripts/`)
 
-`laptop.py` (build-graph, compile, census, enrich…), `turn_doctor.py` (a
+`pipeline.py` (build-graph, compile, census, enrich…), `turn_doctor.py` (a
 stalled turn read from its events), `bq_check.py` and `vertex_check.py`
 (the two network planes), `run_evals.py` and `chat_eval.py` (the suites,
 including the recovery kind with fault injection), `e19_baseline.py`.

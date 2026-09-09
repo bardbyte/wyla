@@ -46,7 +46,7 @@ export async function renderOperate(outlet) {
     "ENRICHMENT RUNS: drafts, gated blind before any write",
     runs.length === 0
       ? `<p class="muted">no enrichment run recorded in this graph yet -
-         run laptop.py enrich and this page fills itself</p>`
+         run pipeline.py enrich and this page fills itself</p>`
       : runs.slice().reverse().map((run) => {
           const blind = run.blind;
           const tierCls = blind

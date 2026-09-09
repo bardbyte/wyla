@@ -24,7 +24,7 @@ def _build(graph_dir: Path, out_dir: Path,
            crosswalk: Path = CROSSWALK,
            *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"), "build-graph",
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"), "build-graph",
          "--graph", str(graph_dir), "--crosswalk", str(crosswalk),
          "--bq-archive", str(FX / "real_extractions_production"),
          "--mdm-archive", str(FX / "mdm_46_patched_v2"),

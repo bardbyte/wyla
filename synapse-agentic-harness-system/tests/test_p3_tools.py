@@ -48,7 +48,7 @@ def build(tmp_path_factory) -> Build:
     """One compiled fixture build for the whole module."""
     tmp = tmp_path_factory.mktemp("p3")
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"), "build-graph",
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"), "build-graph",
          "--graph", str(tmp / "graph"),
          "--crosswalk", str(FX / "identity" / "crosswalk.jsonl"),
          "--bq-archive", str(FX / "real_extractions_production"),
@@ -58,10 +58,10 @@ def build(tmp_path_factory) -> Build:
          "--out", str(tmp / "run"), "--plain", "--run-id", "p3_r1"],
         capture_output=True, text=True, cwd=SILO)
     assert result.returncode == 0, result.stderr[-800:]
-    # through the CLI on purpose: every laptop.py subcommand must run
+    # through the CLI on purpose: every pipeline.py subcommand must run
     # end-to-end on fixtures in CI (the runbook-drift guard)
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"), "compile",
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"), "compile",
          "--graph", str(tmp / "graph"), "--builds", str(tmp / "builds"),
          "--out", str(tmp / "run_compile"), "--plain"],
         capture_output=True, text=True, cwd=SILO)

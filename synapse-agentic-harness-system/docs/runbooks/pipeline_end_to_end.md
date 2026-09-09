@@ -117,11 +117,11 @@ already uses. Missing env exits **3** with a typed message.
 
 ```bash
 # P0 — census + gold tasks (no network)              → p0_census.md
-python scripts/laptop.py census \
+python scripts/pipeline.py census \
   --sources-dir $DATA/sources \
   --registry $DATA/real_extractions_production/_batch_summary.csv \
   --out graph/runs/p0_census --json
-python scripts/laptop.py make-tasks \
+python scripts/pipeline.py make-tasks \
   --sources-dir $DATA/sources \
   --registry $DATA/real_extractions_production/_batch_summary.csv \
   --out graph/runs/p0_census
@@ -142,7 +142,7 @@ python scripts/run_evals.py \
 # top_users, co_queried, templates) enters the graph. The files stay
 # ledgered as deferred. A corrected extract re-enables the witness
 # (drop the flag) and the DIFF measures what real usage adds.
-python scripts/laptop.py build-graph \
+python scripts/pipeline.py build-graph \
   --graph graph \
   --crosswalk graph/identity/crosswalk.jsonl \
   --bq-archive $DATA/real_extractions_production \
@@ -150,7 +150,7 @@ python scripts/laptop.py build-graph \
   --registry $DATA/real_extractions_production/_batch_summary.csv \
   --no-jobs-30d \
   --out graph/runs/p2_build --json
-python scripts/laptop.py compile \
+python scripts/pipeline.py compile \
   --graph graph --builds builds \
   --out graph/runs/p2_compile --json
 # human: review builds/<id>/DIFF_vs_prev.md + tickets.jsonl
@@ -233,7 +233,7 @@ human maps) and `graph/runs` (the evidence of earlier runs):
 
 ```bash
 mv graph/nodes graph/nodes.before-vocab && mv graph/edges graph/edges.before-vocab
-python scripts/laptop.py build-graph \
+python scripts/pipeline.py build-graph \
   --graph graph \
   --crosswalk graph/identity/crosswalk.jsonl \
   --bq-archive $DATA/real_extractions_production \
@@ -242,7 +242,7 @@ python scripts/laptop.py build-graph \
   --no-jobs-30d \
   --fresh --run-id vocab1 \
   --out graph/runs/p2_build_vocab --json
-python scripts/laptop.py compile \
+python scripts/pipeline.py compile \
   --graph graph --builds builds \
   --out graph/runs/p2_compile_vocab --json
 ```
@@ -463,7 +463,7 @@ what the column is (the description on record, the MDM's supplementary
 meaning, sensitivity, how many sources agree) and where it is used
 (joins, metrics). The meaning comes from `columns.json`, an index the
 compiler writes beside `schema.json` since this change: run
-`python scripts/laptop.py compile` once after pulling, or the page
+`python scripts/pipeline.py compile` once after pulling, or the page
 falls back to the served card, which is budgeted and may carry no
 meaning past the twelfth column. Metric cards open in place with the
 full definition, the data product they are computed on and the

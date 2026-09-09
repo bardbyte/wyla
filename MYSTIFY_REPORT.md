@@ -42,6 +42,7 @@ or pointer cursor.
 | `Lumi {Home,Components,Principles,Table Profile}.dc.html` | `Admin ….dc.html` | wireframes and every href; "Admin" because `Table Profile.dc.html` is already the Synapse-branded twin |
 | `sahs/assistant/skills/lumi-data-connect.md` | `synapse-data-connect.md` | skill pack id in kit, runtime, tests |
 | `sahs/util/eag.py`, `scripts/eag_check.py`, `tests/test_eag_check.py` | `gateway.py`, `gateway_check.py`, `test_gateway_check.py` | `EagError` → `GatewayError` |
+| `scripts/laptop.py`, `docs/runbooks/laptop_end_to_end.md` | `pipeline.py`, `pipeline_end_to_end.md` | by request (third sweep); every invocation, import, runbook and error message; argparse `prog` |
 | `/api/lumi/{planes,brand,logo}` | `/api/synapse/…` | both frontends, backend, tests |
 | `lumi-theme` (localStorage) | `synapse-theme` | |
 | `LUMI_*` env vars (10) | `SYNAPSE_*` | auth.py, app.py, checks, tests, .env.example, runbooks |
@@ -75,7 +76,9 @@ carrying a personal cloud-drive path were removed from
 | `a712636` | 5 | `g19_dotted_table` golden fingerprint reminted with `SAHS_REGEN_GOLDENS=1` (its SQL literal changed); `canon_version` and the other 24 goldens unchanged |
 | `0c1e97d` | 3–4 | comments, docstrings, docs, wireframe marks; research docs to `archive/design/` (75 files) |
 | `1f7bf12` | 7 | new root README; three test names |
-| this commit | 8 | one more test name; this report |
+| `7bfe218` | 8 | one more test name; this report |
+| `64da742` | merge | `main` (#127–#129) merged, six conflicts resolved to main's logic, the arrivals swept (third sweep below) |
+| this commit | 2 | `laptop.py` → `pipeline.py`, its runbook, 46 files of references; this report |
 
 ## Verification
 
@@ -100,7 +103,8 @@ carrying a personal cloud-drive path were removed from
 1. **`lumi` as a graph witness key.** The provenance vocabulary names the MDM
    plane `lumi` (`sahs/graph/quads.py`, `merge_policy.yaml`, `mdm46.py`,
    `crosswalk.py` and the `lumi_asset_id` crosswalk key, card text
-   `| lumi:`, fixture values `"dataserver": "Lumi"`). These are data-contract
+   `| lumi:`, fixture values `"dataserver": "Lumi"`, and the witness list in
+   `db/spanner/003_graph.sql`). These are data-contract
    values: every compiled build and every laptop `graph/*.jsonl` carries them.
    Renaming them changes compiled output and breaks existing builds, so they
    were left as data. If you want them gone, it is a remint: rename the key,
@@ -118,8 +122,10 @@ carrying a personal cloud-drive path were removed from
    "Synapse by Lumi" and names a design tool.
 6. **`archive/`** is out of scope and unsanitised.
 7. **The word "laptop"** is the repo's term for the machine with warehouse
-   access (`laptop.py`, `laptop_end_to_end.md`, 170 mentions). It is not
-   company-specific and was kept; the scanner will keep flagging it.
+   access. The script and its runbook are now `pipeline.py` and
+   `pipeline_end_to_end.md` (third sweep); the word stays in prose (about
+   120 mentions). It is not company-specific; the scanner will keep flagging
+   it.
 8. **Git history.** The working tree is clean; `git log` is not. 213 of 450
    commits are authored `Claude <noreply@anthropic.com>`, 416 commit bodies
    carry `Co-Authored-By: Claude …` or `Claude-Session:` trailers, every old
@@ -159,3 +165,36 @@ The plane value is a runtime string: `SAHS_MODEL_PLANE=gateway` is what a
 assertion in the admin app test) was resolved by taking #124's assertion
 with the renamed route and plane key. After the merge the full silo suite is
 402 green (394 plus the eight #124 brought) and the admin app is 65 green.
+
+## Third sweep: #127–#129 (the composer's model dial, files in the chat, skills, Spanner)
+
+`main` moved again (three PRs, 57 files, 7,200 lines). Merged with six
+content conflicts, every one the same shape: main changed a line this branch
+had renamed. Each was resolved to main's logic, then the rules above were
+re-applied to everything the merge brought in. New entries only:
+
+| from | to |
+|---|---|
+| `eag_configured`, `FakeEag` (test helper main's new tests import) | `gateway_configured`, `FakeGateway` |
+| `PLANE_IDS = ("vertex", "eag")`, dial rows `"id": "eag"`, `"plane_name": "EAG"` | `"gateway"`, `"Gateway"` |
+| `CHECK (Model IN ('', 'vertex', 'eag'))` in `db/spanner/002_chat.sql` | `'gateway'` |
+| `SYNAPSE_SPANNER_SA_KEY` was `LUMI_SPANNER_SA_KEY` (new, nothing reads it yet) | `SYNAPSE_*` |
+| surface id `'lumi'` in `db/spanner/001_identity.sql` (role → surfaces seed), its docs and test | `'admin'` — the same object `apps/lumi` became `apps/synapse_admin`; `synapse` was taken by the other surface |
+| table page label `<b>Lumi:</b>` (the MDM's supplementary meaning) | `<b>MDM:</b>` — a display string; "Synapse:" would have named the wrong source |
+| prose: EAG, OneIdentity, "Lumi's supplementary meaning", "the Lumi console" | the gateway, the identity service, the MDM's, the admin console |
+
+Not touched: `'lumi'` in the graph schema's witness list (`003_graph.sql`),
+residual 1. Two of the runtime strings are ask-first under the skill and were
+taken on the standing decision ("every other Lumi becomes Synapse"): the
+surface id `admin` and the label `MDM:`. Both are one-line reverts.
+
+Then, by request, `scripts/laptop.py` → `scripts/pipeline.py` and
+`docs/runbooks/laptop_end_to_end.md` → `pipeline_end_to_end.md`, with all 46
+files that name them (tests that spawn it, the runbooks, `.env.example`, the
+two READMEs, the error messages that tell a user what to run, `argparse
+prog`). No other "laptop" changed.
+
+After both: silo suite 419 green, which is what `main` collects; admin app 79
+green, likewise; `compileall` clean; scanner 144 term hits in the living tree,
+all in the residual list (90 `lumi` witness-key and brand hits, 47 the user's
+name, 6 the `.gitignore` lines, 1 the `bardbyte/wyla` provenance line).

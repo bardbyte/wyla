@@ -32,7 +32,7 @@ from sahs.loaders.sources.vocab import (                           # noqa: E402
 
 def _cli(*argv: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"), *argv],
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"), *argv],
         capture_output=True, text=True, cwd=SILO)
 
 
@@ -176,7 +176,7 @@ def test_std_tech_combined_export_parity(tmp_path: Path):
     assert [(e.table, len(e.columns)) for e in from_file] == \
         [(e.table, len(e.columns)) for e in from_dir]
     # discovery: the combined file WINS over a (possibly partial) dir
-    from scripts.laptop import _std_tech_path
+    from scripts.pipeline import _std_tech_path
     sources = tmp_path / "sources"
     (sources / "std_tech_metadata").mkdir(parents=True)
     assert _std_tech_path(sources) == sources / "std_tech_metadata"

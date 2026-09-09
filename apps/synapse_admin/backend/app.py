@@ -161,7 +161,7 @@ def create_app() -> FastAPI:
         """The two network planes, as booleans — configured or not,
         never values. BQ rides the PSC/NO_PROXY contract; Vertex
         rides the proven proxy contract. The app itself calls
-        neither; enrichment and dry-runs stay with laptop.py."""
+        neither; enrichment and dry-runs stay with pipeline.py."""
         env = os.environ.get
 
         def _set(*names: str) -> bool:
