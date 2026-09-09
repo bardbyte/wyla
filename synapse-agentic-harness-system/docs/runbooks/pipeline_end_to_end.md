@@ -372,7 +372,7 @@ with what was already said. Paste the doctor's output with the transcript.
 **Gemini 2.5 Pro through the gateway (a candidate for the model plane).** The
 guide's path is an identity-service bearer token minted from `APP_ID` and
 `APP_SECRET` (an HMAC-signed request), then Gemini's own REST protocol
-behind `gateway.example.com`. Before any of it enters the program, prove
+behind `eag-dev.aexp.com`. Before any of it enters the program, prove
 what it does on the laptop:
 
 ```bash

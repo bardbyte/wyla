@@ -47,7 +47,7 @@ or pointer cursor.
 | `lumi-theme` (localStorage) | `synapse-theme` | |
 | `LUMI_*` env vars (10) | `SYNAPSE_*` | auth.py, app.py, checks, tests, .env.example, runbooks |
 | `EAG_*` (6), `ONEID_*` (2) | `GATEWAY_*`, `IDP_*` | gateway module, check, tests, .env.example |
-| gateway/identity default URLs (`*.aexp.com`) | `gateway.example.com`, `idp.example.com` | hardcoded defaults in `gateway.py` and `.env.example` |
+| gateway/identity default URLs | **unchanged** (restored after a first pass replaced them with example.com placeholders; that broke a `.env` that relied on the defaults). The two corporate hostnames remain in `gateway.py`, `.env.example` and the runbook, by the user's decision — residual 10 |
 | `axp-lumi`, `prj-p-lumi-gpt`, `prj-d-ea-poc` | `demo-warehouse`, `demo-billing`, `demo-vertex` | tests, fixtures, docstrings, .env.example |
 | `lumi-ds-NNN` | `synapse-ds-NNN` | crosswalk fixtures and tests |
 | source family `acropedia` / display `Acropedia` | `glossary` / `Glossary` | display.py, home.js, tests |
@@ -138,7 +138,13 @@ carrying a personal cloud-drive path were removed from
    Either way, confirm with
    `git log --format='%an <%ae>%n%b' | grep -iE 'claude|anthropic|copilot|co-authored'`
    returning nothing. Note this branch's own commits carry the same trailers.
-9. The repo name `wyla` carries no company or agent term. The GitHub
+9. The repo name `wyla` carries no company or agent term.
+10. **The gateway and identity-service default URLs** (`eag-dev.aexp.com`,
+   `oneidentityapi-dev.aexp.com`) in `sahs/util/gateway.py`, `.env.example`
+   and the pipeline runbook. Kept by decision: a `.env` that does not set
+   `GATEWAY_BASE_URL` / `IDP_TOKEN_URL` must keep working. The scanner's
+   `internal_host` pattern will keep flagging them; scrub them before
+   publishing, and set the two variables in `.env` when you do. The GitHub
    description and topics were not checked from here.
 
 Mystify removes identifiers, not obligations: confirm you have the right to

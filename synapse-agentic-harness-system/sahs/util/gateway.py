@@ -35,9 +35,9 @@ from typing import Any, Callable, Iterator
 from sahs.util.auth import (_first_env, describe_route, env_proxies,
                             plane_opener, redact_url)
 
-IDP_TOKEN_URL = ("https://idp.example.com/security/digital"
+IDP_TOKEN_URL = ("https://oneidentityapi-dev.aexp.com/security/digital"
                    "/v1/application/token")
-GATEWAY_BASE_URL = "https://gateway.example.com/genai/google/v1"
+GATEWAY_BASE_URL = "https://eag-dev.aexp.com/genai/google/v1"
 DEFAULT_MODEL = "gemini-2.5-pro"
 DEFAULT_SCOPES = [
     "/genai/google/v1/models/gemini-2.5-pro/**::post",
