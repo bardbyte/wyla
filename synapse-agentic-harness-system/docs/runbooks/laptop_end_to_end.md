@@ -489,24 +489,24 @@ on one call the way the chat would, and reads the answer for the
 token. Run it once on each plane before trusting a kind of file in
 the chat; the report is the answer to "what files are supported".
 
-**Teaching Synapse a skill; adding knowledge.** The Skills page has
-three shelves: built in, yours, shared. Yours live in
-`graph/skills/users/<you>/` (LUMI_USER_NAME names you until sign-in
-lands) and load for you alone, wearing unreviewed; the agent offers
-them by name in its prompt and loads them with `load_skill` like any
-pack. The creator under the shelves takes your material — pasted
-notes, a text file as it is, a workbook or a Word file converted to
-text — and asks the model to rewrite it in the house format (the
-moves and the checks for a kind of ask; nothing invented, the model's
-own notes on what was unclear); you read the draft, edit it, then
-Save as my skill. Without a model configured the draft is refused
-with the reason and the editor still opens: a hand-written pack
-saves the same way. The Knowledge page (the old Artifacts page, under
-Skills in the nav) does the same for a knowledge file — definitions,
-tables and columns, metrics, caveats, the owner — staged for a
-business unit into `sources/artifacts/` and ingested on the next
-build; typed drops and dumped text files stage as they are, as
-before.
+**Skills: one shelf, the way a settings page lists it.** Customize →
+Skills in the nav. One list of what Synapse knows how to do and what
+it knows about: the packs (built in, author Synapse; yours, author
+You, living in `graph/skills/users/<you>/` and loading for you alone;
+shared packs in `graph/skills/*.md` with the author line the file
+carries) and the knowledge files (the folders under the skills root
+such as `CFR/` and `TLS/`, author from the file's own `author:` line
+or its folder; the staged drops in `sources/artifacts/` by business
+unit; the reference docs in `sources/*.md`), each with its last
+write. Search from the toolbar; Browse brings a markdown file of
+yours as a skill; Add uploads one, writes one from the house template,
+drafts one with the model from your material (paste it, or add a text
+file, a workbook or a Word file), or adds a knowledge file staged for
+a business unit and ingested on the next build. A row opens in the
+reader on the right, a pack with Use in chat (and Delete for yours).
+Without a model the draft is refused with the reason and the editor
+still opens. `#/knowledge` and `#/artifacts` still answer, on this
+page.
 
 **Before the first query:** the graph names tables `dw.<table>`, and
 BigQuery resolves that against the project that runs the query

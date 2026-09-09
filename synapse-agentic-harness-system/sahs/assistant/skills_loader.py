@@ -42,10 +42,24 @@ UNREVIEWED = "unreviewed"      # the E14 door: usable now, labeled
 class Pack(Skill):
     origin: str = BUILTIN
     owner: str = ""             # a person's own pack: the owner's slug
+    updated: str = ""           # the file's last write, ISO, for the shelf
 
 
 def builtin_root() -> Path:
     return Path(__file__).parent / "skills"
+
+
+def author_of(text: str) -> str:
+    """The author a markdown file names for itself: a YAML front
+    matter ``author:`` or an ``Author:`` line in the first thirty
+    lines; '' when it names none."""
+    import re
+    for line in (text or "").splitlines()[:30]:
+        m = re.match(r"^\s*(?:[-*]\s*)?\*{0,2}author\*{0,2}\s*:\*{0,2}\s*(.+?)\s*$",
+                     line, re.I)
+        if m:
+            return m.group(1).strip().strip("'\"")[:60]
+    return ""
 
 
 def owner_slug(owner: str) -> str:
@@ -59,13 +73,26 @@ def user_root(graph_root: Path, owner: str) -> Path:
     return skills_root(Path(graph_root)) / "users" / owner_slug(owner)
 
 
+def _updated(path: Path) -> str:
+    import datetime as _dt
+    try:
+        stamp = path.stat().st_mtime
+    except OSError:
+        return ""
+    return _dt.datetime.fromtimestamp(
+        stamp, tz=_dt.timezone.utc).isoformat(timespec="seconds")
+
+
 def _packs(root: Path, origin: str, owner: str = "") -> list[Pack]:
     if not root.exists():
         return []
-    return [Pack(name=s.name, title=s.title,
-                 description=s.description, text=s.text, origin=origin,
-                 owner=owner)
-            for s in (_parse(p) for p in sorted(root.glob("*.md")))]
+    out = []
+    for path in sorted(root.glob("*.md")):
+        s = _parse(path)
+        out.append(Pack(name=s.name, title=s.title,
+                        description=s.description, text=s.text,
+                        origin=origin, owner=owner, updated=_updated(path)))
+    return out
 
 
 def builtin_skills() -> list[Pack]:
@@ -133,6 +160,7 @@ def render_skill_index(packs: list[Pack],
     return "\n".join(lines)
 
 
-__all__ = ["BUILTIN", "UNREVIEWED", "Pack", "builtin_root", "owner_slug",
+__all__ = ["BUILTIN", "UNREVIEWED", "Pack", "builtin_root", "author_of",
+           "owner_slug",
            "user_root", "builtin_skills", "all_skills", "get_skill",
            "load_packs", "render_skill_index"]

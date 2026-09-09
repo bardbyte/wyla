@@ -160,6 +160,7 @@ export async function renderChat(outlet, wanted = "") {
     let dials = null;
     try { dials = await api.chatDials(); } catch { dials = null; }
     if (!dials || !dials.available) return;
+    if (!planeSel.isConnected || !el("chat-depth")) return;   // page left
     const planes = dials.planes || [];
     planeSel.innerHTML = planes.map((p) => `
       <option value="${esc(p.id)}"${p.id === state.plane ? " selected" : ""}${

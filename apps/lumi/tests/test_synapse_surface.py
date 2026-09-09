@@ -61,10 +61,10 @@ def client(compiled) -> TestClient:
 def test_shell_is_stripped_and_renamed():
     """The left header says Synapse Semantic Intelligence; Home, Cosmos
     and Operate are gone; New chat and Search chats sit at the top, the
-    chats under them, and Data Products, Semantics Explorer and Skills in
-    their own section at the bottom above the account (Artifacts left
-    the nav: the shelf lives in the chat, the Skills page showcases
-    what the agent knows how to do)."""
+    chats under them, Data Products and Semantics Explorer under Explore,
+    and Skills under Customize, at the bottom above the account (the
+    knowledge files live on the Skills page, the way a settings page
+    lists them)."""
     assert "<title>Synapse Semantic Intelligence</title>" in INDEX
     assert ">Synapse</a>" in INDEX and "Semantic Intelligence" in INDEX
     for gone in ("#/home", "#/cosmos", "#/operate", "#/ask", "#/artifacts",
@@ -72,11 +72,16 @@ def test_shell_is_stripped_and_renamed():
                  ">Home<", ">Artifacts<", "chats-search"):
         assert gone not in INDEX, gone
     explore = INDEX.split('aria-label="Explore"')[1].split("</nav>")[0]
-    for kept in ("Data Products", "Semantics Explorer", "Skills", "Knowledge"):
+    for kept in ("Data Products", "Semantics Explorer"):
         assert kept in explore, kept
-    assert explore.index("Skills") < explore.index("Knowledge")
+    assert "Skills" not in explore and "Knowledge" not in INDEX.split(
+        'aria-label="Explore"')[1].split('aria-label="Customize"')[0]
+    customize = INDEX.split('aria-label="Customize"')[1].split("</nav>")[0]
+    assert ">Customize<" in customize and 'href="#/skills"' in customize
+    assert "#/knowledge" not in INDEX
     order = [INDEX.index('href="#/chat/new"'), INDEX.index('href="#/search"'),
              INDEX.index('class="chats"'), INDEX.index('aria-label="Explore"'),
+             INDEX.index('aria-label="Customize"'),
              INDEX.index('class="account"')]
     assert order == sorted(order)
     assert "Search chats" in INDEX
@@ -87,8 +92,9 @@ def test_shell_is_stripped_and_renamed():
     for page in ("cosmos", "operate", "home", "ask"):
         assert not (FRONT / "js" / "pages" / f"{page}.js").exists(), page
     assert (FRONT / "js" / "pages" / "skills.js").exists()
-    assert (FRONT / "js" / "pages" / "knowledge.js").exists()
-    assert not (FRONT / "js" / "pages" / "artifacts.js").exists()
+    assert (FRONT / "js" / "pages" / "creator.js").exists()
+    for gone in ("knowledge.js", "artifacts.js"):
+        assert not (FRONT / "js" / "pages" / gone).exists(), gone
 
 
 def test_routes_are_the_new_surface_and_chat_is_the_door():
@@ -97,8 +103,11 @@ def test_routes_are_the_new_surface_and_chat_is_the_door():
         assert route in MAIN, route            # artifacts: the old name
     assert '|| "chat"' in MAIN                     # the default route
     assert "renderSearch" in MAIN and "renderProducts" in MAIN
-    assert "renderSkills" in MAIN and "renderKnowledge" in MAIN
-    assert "renderArtifacts" not in MAIN
+    assert "renderSkills" in MAIN
+    for gone in ("renderKnowledge", "renderArtifacts"):
+        assert gone not in MAIN, gone
+    assert "knowledge: () => renderSkills(outlet)" in MAIN     # old names
+    assert "artifacts: () => renderSkills(outlet)" in MAIN
     for gone in ("renderHome", "renderCosmos", "renderOperate", "renderAsk"):
         assert gone not in MAIN, gone
     for page in ("metric.js", "table.js"):
@@ -391,25 +400,64 @@ def test_metric_cards_open_in_place_with_the_definition_and_the_table():
         assert cls in CSS, cls
 
 
-def test_skills_showcase_what_the_agent_knows(client):
-    """Skills in place of Artifacts: the doctrine packs the agent loads
-    by itself, each with its slash command, its moves, the full text a
-    click away, and a Use-in-chat door that opens a new chat with the
-    slash command in the composer."""
+def test_skills_showcase_what_the_agent_knows(client, tmp_path, monkeypatch):
+    """One shelf, the way a settings page lists it: the packs (author
+    Synapse for what ships with the assistant, You for your own, a
+    shared pack's own author line) and the knowledge files (the folders
+    under graph/skills/ such as CFR/ and TLS/ — author from the file or
+    its folder — the staged drops by business unit, the reference docs),
+    each with its last write; search, Browse and Add in the toolbar; a
+    row opens in the reader with Use in chat for a pack."""
     got = client.get("/api/chat/skills").json()
     assert got["available"] and len(got["skills"]) >= 4
-    names = {s["name"] for s in got["skills"]}
+    by = {s["name"]: s for s in got["skills"]}
     assert {"analysis-playbooks", "dashboard-design", "executive-summary",
-            "lumi-data-connect"} <= names
-    assert all(s["text"] and s["origin"] for s in got["skills"])
+            "lumi-data-connect"} <= set(by)
+    for s in got["skills"]:
+        assert s["text"] and s["origin"] and s["updated"] and s["author"]
+    assert by["analysis-playbooks"]["author"] == "Synapse"
+    # the knowledge files: CFR/ and TLS/ folders under the skills root,
+    # a staged drop for a business unit, a reference doc
+    skills_dir = tmp_path / "skills"
+    (skills_dir / "CFR").mkdir(parents=True)
+    (skills_dir / "CFR" / "chargebacks.md").write_text(
+        "# Chargebacks\n\nHow CFR reads them.\n", encoding="utf-8")
+    (skills_dir / "TLS").mkdir()
+    (skills_dir / "TLS" / "tls_glossary.md").write_text(
+        "---\nauthor: TLS\n---\n# TLS glossary\n\nWords.\n", encoding="utf-8")
+    (skills_dir / "team-notes.md").write_text(
+        "# Team notes\n\n**Author:** Ops\n\nShared words.\n", encoding="utf-8")
+    monkeypatch.setenv("MERIDIAN_SKILLS_DIR", str(skills_dir))
+    sources = tmp_path / "sources"
+    (sources / "artifacts").mkdir(parents=True)
+    (sources / "artifacts" / "gmns_lending-vocabulary.md").write_text(
+        "<!-- staged via Synapse by Lumi · actor admin · business unit "
+        "GMNS -->\n# Lending vocabulary\n\nTerms.\n", encoding="utf-8")
+    (sources / "tls_reference.md").write_text("# TLS reference\n\nDoc.\n",
+                                              encoding="utf-8")
+    monkeypatch.setenv("MERIDIAN_SOURCES_DIR", str(sources))
+    files = {f["rel"]: f for f in client.get("/api/meridian/artifacts").json()[
+        "files"]}
+    assert files["skills/CFR/chargebacks.md"]["family"] == "knowledge"
+    assert files["skills/CFR/chargebacks.md"]["author"] == "CFR"
+    assert files["skills/CFR/chargebacks.md"]["title"] == "Chargebacks"
+    assert files["skills/TLS/tls_glossary.md"]["author"] == "TLS"
+    assert files["skills/team-notes.md"]["family"] == "pack"       # a pack
+    assert files["skills/team-notes.md"]["author"] == "Ops"
+    assert files["artifacts/gmns_lending-vocabulary.md"]["author"] == "GMNS"
+    assert files["artifacts/gmns_lending-vocabulary.md"]["staged"]
+    assert files["tls_reference.md"]["family"] == "reference"
+    assert files["tls_reference.md"]["author"] == "Sources"
+    assert all(f["updated"] for f in files.values())
     page = (FRONT / "js" / "pages" / "skills.js").read_text(encoding="utf-8")
-    for piece in ("Use in chat", "synapse.prefill", "read the doctrine",
-                  "skills-how", "slash-name", "skill-moves",
-                  'location.hash = "#/chat/new"', "api.chatSkills()"):
+    for piece in ("shelf-table", "<th>Skill</th><th>Kind</th><th>Last updated</th><th>Author</th>",
+                  'id="sk-search"', 'for="sk-browse"', 'data-add="upload"',
+                  'data-add="write"', 'data-add="draft"', 'data-add="knowledge"',
+                  'f.family === "pack"', "Use in chat", "synapse.prefill",
+                  "api.artifactFile(", "createPullout(", "sk-delete"):
         assert piece in page, piece
     assert 'sessionStorage.getItem("synapse.prefill")' in CHAT
-    assert "paintSlash();" in CHAT
-    for cls in (".skills-how", ".skill-actions", ".slash-name"):
+    for cls in (".shelf-table", ".add-pop", ".navlist.customize"):
         assert cls in CSS, cls
     assert 'href="#/skills"' in INDEX
 
@@ -474,19 +522,17 @@ def test_own_skills_and_the_creators(client):
         "name": "memo.pdf", "data_b64": base64.b64encode(b"%PDF-1.4").decode()}
         ).json()
     assert pdf["available"] is False and "attach it in a chat" in pdf["reason"]
+    creator_js = (FRONT / "js" / "pages" / "creator.js").read_text(encoding="utf-8")
+    for piece in ("export function creatorPanel", "export function wireCreator",
+                  "Draft with the model", "Save as my skill",
+                  "Stage as a knowledge file", "api.chatDraft(",
+                  "api.chatFileText(", "opts.prefill"):
+        assert piece in creator_js, piece
     skills_js = (FRONT / "js" / "pages" / "skills.js").read_text(encoding="utf-8")
-    for piece in ("creatorPanel", "wireCreator", "Draft with the model",
-                  "Save as my skill", "api.chatDraft(", "api.chatSaveSkill(",
-                  "api.chatDeleteSkill(", "api.chatFileText(", "skill-delete",
-                  ">Yours<", ">Shared<", ">Built in<"):
+    for piece in ("api.chatSaveSkill(", "api.chatDeleteSkill(",
+                  "api.stageArtifact(", 'creatorPanel(kind)', "SKILL_TEMPLATE"):
         assert piece in skills_js, piece
-    knowledge_js = (FRONT / "js" / "pages" / "knowledge.js").read_text(
-        encoding="utf-8")
-    for piece in ("renderKnowledge", 'creatorPanel("knowledge")',
-                  "api.stageArtifact(", 'startsWith("skills/")'):
-        assert piece in knowledge_js, piece
-    assert "Stage as a knowledge file" in skills_js     # the shared panel
-    for cls in (".creator", ".creator-rendered", ".origin-tag.o-mine"):
+    for cls in (".creator", ".creator-rendered", ".shelf-table"):
         assert cls in CSS, cls
 
 

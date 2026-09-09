@@ -304,10 +304,17 @@ class AssistantRuntime:
         return owner_slug(self.user_name) or "anon"
 
     def skills(self) -> list[dict]:
-        from .skills_loader import all_skills
+        from .skills_loader import all_skills, author_of
         return [{"name": p.name, "title": p.title,
                  "description": p.description, "origin": p.origin,
                  "owner": p.owner, "mine": bool(p.owner),
+                 "updated": p.updated,
+                 # the author as the shelf shows it: Synapse for what
+                 # ships with the assistant, You for your own, and a
+                 # shared pack's own word for itself (an author line)
+                 "author": ("Synapse" if p.origin == "built-in"
+                            else "You" if p.owner
+                            else author_of(p.text) or "Shared"),
                  "text": p.text}
                 for p in all_skills(self.graph_root, self.owner)]
 
