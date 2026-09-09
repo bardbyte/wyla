@@ -23,7 +23,7 @@ def compiled(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("v3evals")
     graph_dir = tmp / "graph"
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"),
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"),
          "build-graph", "--graph", str(graph_dir),
          "--crosswalk", str(FX / "identity" / "crosswalk.jsonl"),
          "--bq-archive", str(FX / "real_extractions_production"),
@@ -276,9 +276,9 @@ def test_recovery_grader_through_the_real_loop(compiled, monkeypatch):
     reporter = _agent(
         [_call("run_sql", sql=bare)],
         [{"text": "I could not run this: the warehouse looked for "
-                  "dw.gms_transaction in project prj-p-lumi-gpt, where "
+                  "dw.gms_transaction in project demo-billing, where "
                   "it does not live. That is configuration, not the "
-                  "query — set LUMI_BQ_DATA_PROJECT in the silo .env "
+                  "query — set SYNAPSE_BQ_DATA_PROJECT in the silo .env "
                   "to the project that hosts the tables and I will "
                   "pick it up from here."}])
     row = run_task(build, lambda budget: reporter, task)
@@ -288,7 +288,7 @@ def test_recovery_grader_through_the_real_loop(compiled, monkeypatch):
                  for c in reporter.calls[1]["contents"]
                  for p in c["parts"] if "functionResponse" in p)
     assert first["kind"] == "environment" and first["yours_to_fix"] is False
-    assert first["fix_env"]["LUMI_BQ_DATA_PROJECT"]
+    assert first["fix_env"]["SYNAPSE_BQ_DATA_PROJECT"]
 
     stubborn = _agent(*[[_call("run_sql", sql=bare)] for _ in range(4)],
                       [{"text": "It keeps failing; here is what I have."}])

@@ -38,7 +38,7 @@ class VertexAgent:
         except AuthError as e:
             raise ModelUnavailable(
                 f"{e}: the chat needs the Vertex contract in the silo "
-                ".env (LUMI_VERTEX_SA_KEY, VERTEX_PROJECT_ID, "
+                ".env (SYNAPSE_VERTEX_SA_KEY, VERTEX_PROJECT_ID, "
                 "VERTEX_LOCATION, VERTEX_MODEL)") from e
         return VertexAgent(VertexClient(connection, log=log), budget)
 
@@ -90,29 +90,29 @@ class VertexAgent:
             max_tokens=max_tokens)
 
 
-class EagAgent(VertexAgent):
-    """The same agent over Gemini through EAG: the client delivers each
-    call in one burst (EAG serves no stream), the retry-once rule
+class GatewayAgent(VertexAgent):
+    """The same agent over Gemini through the gateway: the client delivers each
+    call in one burst (the gateway serves no stream), the retry-once rule
     therefore always applies, and the budget is charged from the same
     usage counters."""
 
     @staticmethod
     def from_env(budget: Budget | None = None,
-                 log: Any = None) -> "EagAgent":
-        from sahs.enrich.eag_client import EagClient
-        from sahs.util.eag import EagError
+                 log: Any = None) -> "GatewayAgent":
+        from sahs.enrich.gateway_client import GatewayClient
+        from sahs.util.gateway import GatewayError
         try:
-            client = EagClient.from_env(log=log)
-        except EagError as e:
+            client = GatewayClient.from_env(log=log)
+        except GatewayError as e:
             raise ModelUnavailable(
-                f"{e}: the EAG plane needs APP_ID and APP_SECRET (or "
+                f"{e}: the gateway plane needs APP_ID and APP_SECRET (or "
                 "AUTH_MODE=env with GEMINI_BEARER_TOKEN) in the silo .env; "
-                "python scripts/eag_check.py proves the path") from e
-        return EagAgent(client, budget)
+                "python scripts/gateway_check.py proves the path") from e
+        return GatewayAgent(client, budget)
 
 
 # ── the planes as the composer lists them ─────────────────────
-PLANE_IDS = ("vertex", "eag")
+PLANE_IDS = ("vertex", "gateway")
 
 
 def pretty_model(raw: str) -> str:
@@ -132,12 +132,12 @@ def plane_catalog() -> list[dict[str, Any]]:
     from sahs.util.auth import (resolve_vertex_key_path,
                                 resolve_vertex_model,
                                 resolve_vertex_project)
-    from sahs.util.eag import Config, eag_configured, model_plane
+    from sahs.util.gateway import Config, gateway_configured, model_plane
     default = model_plane()
     key = resolve_vertex_key_path()
     vertex_ok = bool(resolve_vertex_project() and key and key.exists())
     vertex_model = resolve_vertex_model()
-    eag_model = Config.from_env().model
+    gateway_model = Config.from_env().model
     return [
         {"id": "vertex",
          "label": pretty_model(vertex_model),
@@ -145,50 +145,50 @@ def plane_catalog() -> list[dict[str, Any]]:
          "model": vertex_model,
          "available": vertex_ok,
          "reason": "" if vertex_ok else
-         "needs the Vertex contract in the silo .env: LUMI_VERTEX_SA_KEY "
+         "needs the Vertex contract in the silo .env: SYNAPSE_VERTEX_SA_KEY "
          "(a key file that exists) and VERTEX_PROJECT_ID",
          "means": "Google Cloud's Vertex AI with the service-account "
                   "key. Thinking streams as it happens and the answer "
                   "arrives word by word.",
          "feel": "streams",
          "default": default == "vertex"},
-        {"id": "eag",
-         "label": pretty_model(eag_model),
-         "plane_name": "EAG",
-         "model": eag_model,
-         "available": eag_configured(),
-         "reason": "" if eag_configured() else
+        {"id": "gateway",
+         "label": pretty_model(gateway_model),
+         "plane_name": "Gateway",
+         "model": gateway_model,
+         "available": gateway_configured(),
+         "reason": "" if gateway_configured() else
          "needs APP_ID and APP_SECRET (or GEMINI_BEARER_TOKEN) in the "
-         "silo .env; python scripts/eag_check.py proves the path",
-         "means": "The enterprise AI gateway with a OneIdentity token "
+         "silo .env; python scripts/gateway_check.py proves the path",
+         "means": "The enterprise AI gateway with an identity-service token "
                   "that renews itself every ten minutes. Each call "
                   "lands whole: a thinking pause, then the text at "
                   "once. No streaming.",
          "feel": "whole calls",
-         "default": default == "eag"},
+         "default": default == "gateway"},
     ]
 
 
 def agent_for(plane: str = "", budget: Budget | None = None,
               log: Any = None) -> VertexAgent:
-    """The chat's model on a named plane — ``vertex`` or ``eag`` — or
+    """The chat's model on a named plane — ``vertex`` or ``gateway`` — or
     on the environment's default when the name is empty. An unknown
     name is a typed error, not a silent fallback: the composer only
     ever sends the two ids."""
-    from sahs.util.eag import model_plane
+    from sahs.util.gateway import model_plane
     plane = (plane or "").strip().lower() or model_plane()
-    if plane == "eag":
-        return EagAgent.from_env(budget, log)
+    if plane == "gateway":
+        return GatewayAgent.from_env(budget, log)
     if plane == "vertex":
         return VertexAgent.from_env(budget, log)
     raise ModelUnavailable(f"no model plane called {plane!r}: the "
-                           "planes are vertex and eag")
+                           "planes are vertex and gateway")
 
 
 def agent_from_env(budget: Budget | None = None,
                    log: Any = None) -> VertexAgent:
     """The chat's model, on whichever plane the environment names:
-    SAHS_MODEL_PLANE=vertex|eag, or auto — EAG when its credentials
+    SAHS_MODEL_PLANE=vertex|gateway, or auto — the gateway when its credentials
     are present, Vertex otherwise."""
     return agent_for("", budget, log)
 
@@ -257,6 +257,6 @@ def declarations(kit: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-__all__ = ["ROUTING_KEY", "VertexAgent", "EagAgent", "agent_from_env",
+__all__ = ["ROUTING_KEY", "VertexAgent", "GatewayAgent", "agent_from_env",
            "agent_for", "plane_catalog", "pretty_model", "PLANE_IDS",
            "ScriptedAgent", "declarations", "json"]

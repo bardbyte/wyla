@@ -42,8 +42,8 @@ def main(argv: list[str] | None = None) -> int:
               "synapse-agentic-harness-system/.env (alongside the BQ "
               "ones — these are SEPARATE; the proven ADK laptop "
               "values):", file=sys.stderr)
-        print("    LUMI_VERTEX_SA_KEY=~/.gcp/prj-d-ea-poc.json\n"
-              "    VERTEX_PROJECT_ID=prj-d-ea-poc   # or your existing "
+        print("    SYNAPSE_VERTEX_SA_KEY=~/.gcp/demo-vertex.json\n"
+              "    VERTEX_PROJECT_ID=demo-vertex   # or your existing "
               "GOOGLE_CLOUD_PROJECT\n"
               "    # location defaults to 'global', model to "
               "gemini-3.1-pro-preview — the proven pair;\n"
@@ -121,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"✓ CONNECTED — model answered: {text.strip()[:80]}")
     print(f"  usage: {client.usage}")
-    print("B1 is go: python scripts/laptop.py enrich --graph graph "
+    print("B1 is go: python scripts/pipeline.py enrich --graph graph "
           "--builds builds --plan --out graph/runs/b1_plan --plain")
     return 0
 

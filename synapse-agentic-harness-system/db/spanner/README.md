@@ -5,7 +5,7 @@ three GoogleSQL DDL files, applied in order, one database.
 
 | file | holds | replaces |
 |---|---|---|
-| `001_identity.sql` | users, credentials, roles and permissions, login sessions, refresh tokens, MFA, one-shot tokens, invitations, preferences, the audit | nothing yet: the laptop has one configured person (`LUMI_USER_NAME`) |
+| `001_identity.sql` | users, credentials, roles and permissions, login sessions, refresh tokens, MFA, one-shot tokens, invitations, preferences, the audit | nothing yet: the laptop has one configured person (`SYNAPSE_USER_NAME`) |
 | `002_chat.sql` | chats, messages, artifacts, plans, feedback, files, events, memory, a person's own skills, staged knowledge files | `graph/runs/chat/sessions.sqlite3`, the events JSONL, the files under each workspace, `graph/skills/users/`, `sources/artifacts/` |
 | `003_graph.sql` | the graph's nodes and edges with their provenance, as append-only assertions plus the folded current state, the crosswalk, the clerk's transitions, the builds, and a property graph over the fold | `graph/nodes/*.jsonl`, `graph/edges/*.jsonl`, `graph/identity/crosswalk.jsonl`, `graph/runs/` |
 
@@ -84,7 +84,7 @@ Two things to know about the target:
 
 `001_identity.sql` ends with the seed rows the app expects, as
 commented INSERTs: the three roles with the surfaces each may open
-(`admin` → the Lumi console at `/` and Synapse; `analyst` → Synapse
+(`admin` → the admin console at `/` and Synapse; `analyst` → Synapse
 at `/synapse/`; `steward` → Synapse, its permission set still to be
 decided) and the permission names the app checks. The bootstrap job
 applies them once, idempotent on `Name`, and grants the first admin
@@ -95,7 +95,7 @@ from an environment variable — never from a default password.
 One-way, run once per store, in this order (the foreign keys want
 users before chats and runs before assertions):
 
-1. users: one row per distinct `LUMI_USER_NAME` / `actor` seen in the
+1. users: one row per distinct `SYNAPSE_USER_NAME` / `actor` seen in the
    SQLite stores, status `active`, a temporary password set by the
    admin with `MustChangePassword`;
 2. `sessions.sqlite3` → `ChatProjects`, `ChatSessions`,

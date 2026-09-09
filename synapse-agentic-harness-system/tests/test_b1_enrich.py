@@ -31,7 +31,7 @@ FX = SILO / "tests" / "fixtures"
 def _compiled(tmp_path: Path) -> tuple[Path, Path]:
     graph_dir = tmp_path / "graph"
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"),
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"),
          "build-graph", "--graph", str(graph_dir),
          "--crosswalk", str(FX / "identity" / "crosswalk.jsonl"),
          "--bq-archive", str(FX / "real_extractions_production"),
@@ -217,7 +217,7 @@ def test_grain_divergence_files_review_item(tmp_path):
 
 
 def test_enricher_context_carries_company_vocabulary(tmp_path):
-    """The enricher reads the company's own reference shelf — acropedia
+    """The enricher reads the company's own reference shelf — the glossary
     acronym expansions + Atlas business terms — scoped to each item's
     text (snake_case split so alif_cnt finds ALIF), rendered into the
     prompt as authoritative vocabulary. The blind exam gets the same
@@ -228,7 +228,7 @@ def test_enricher_context_carries_company_vocabulary(tmp_path):
     graph_dir, builds = _compiled(tmp_path)
     build = Build.open(builds)
     single, multi = _vocab_index(build)
-    assert "alif" in single            # acropedia acronym plane loaded
+    assert "alif" in single            # glossary acronym plane loaded
     item = {"label": "Submitter ALIF", "sql": "count(alif_cnt)",
             "table": "dw.gms_transaction", "columns": [], "filters": []}
     entries = _vocab_for(item, single, multi)
@@ -434,12 +434,12 @@ def test_vertex_env_contract_is_typed_and_separate(tmp_path,
     empty_env = tmp_path / "empty.env"
     empty_env.write_text("", encoding="utf-8")
     monkeypatch.setenv("SAHS_ENV_FILE", str(empty_env))
-    for name in ("VERTEX_PROJECT_ID", "LUMI_VERTEX_PROJECT",
+    for name in ("VERTEX_PROJECT_ID", "SYNAPSE_VERTEX_PROJECT",
                  "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
-                 "VERTEX_MODEL", "LUMI_VERTEX_MODEL", "GEMINI_MODEL",
-                 "VERTEX_LOCATION", "LUMI_VERTEX_LOCATION",
+                 "VERTEX_MODEL", "SYNAPSE_VERTEX_MODEL", "GEMINI_MODEL",
+                 "VERTEX_LOCATION", "SYNAPSE_VERTEX_LOCATION",
                  "VERTEX_API_BASE_URL",
-                 "LUMI_VERTEX_SA_KEY", "GOOGLE_APPLICATION_CREDENTIALS"):
+                 "SYNAPSE_VERTEX_SA_KEY", "GOOGLE_APPLICATION_CREDENTIALS"):
         monkeypatch.delenv(name, raising=False)
     # the BQ project must NOT leak into the Vertex contract
     monkeypatch.setenv("BQ_PROJECT_ID", "bq-project-not-vertex")
@@ -452,12 +452,12 @@ def test_vertex_env_contract_is_typed_and_separate(tmp_path,
     # the proven ADK laptop env resolves as-is: GOOGLE_CLOUD_PROJECT
     # is the VERTEX project there, and the defaults are the proven
     # global + gemini-3.1-pro-preview pair
-    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "prj-d-ea-poc")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "demo-vertex")
     key = tmp_path / "k.json"
     key.write_text("{}", encoding="utf-8")
-    monkeypatch.setenv("LUMI_VERTEX_SA_KEY", str(key))
+    monkeypatch.setenv("SYNAPSE_VERTEX_SA_KEY", str(key))
     connection = VertexConnection.from_env()
-    assert connection.project == "prj-d-ea-poc"
+    assert connection.project == "demo-vertex"
     assert connection.location == "global"
     assert connection.model == "gemini-3.1-pro-preview"
     assert connection.endpoint == "https://aiplatform.googleapis.com"
@@ -496,8 +496,8 @@ def test_vertex_rides_the_proxy_bq_bypasses_it(tmp_path, monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.corp:8080")
     key = tmp_path / "k.json"
     key.write_text("{}", encoding="utf-8")
-    monkeypatch.setenv("LUMI_VERTEX_SA_KEY", str(key))
-    monkeypatch.setenv("VERTEX_PROJECT_ID", "prj-d-ea-poc")
+    monkeypatch.setenv("SYNAPSE_VERTEX_SA_KEY", str(key))
+    monkeypatch.setenv("VERTEX_PROJECT_ID", "demo-vertex")
 
     # Vertex default: the proxy, pinned; NOTHING written to NO_PROXY
     connection = VertexConnection.from_env()

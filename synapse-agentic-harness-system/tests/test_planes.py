@@ -75,10 +75,10 @@ def test_a_bigquery_connection_never_reroutes_vertex(tmp_path,
     key = tmp_path / "k.json"
     key.write_text("{}", encoding="utf-8")
     monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(key))
-    monkeypatch.setenv("BQ_PROJECT_ID", "prj-p-lumi-gpt")
+    monkeypatch.setenv("BQ_PROJECT_ID", "demo-billing")
     monkeypatch.setenv("BIGQUERY_URL",
                        "https://bigquery-prod.p.googleapis.com")
-    monkeypatch.setenv("VERTEX_PROJECT_ID", "prj-d-ea-poc")
+    monkeypatch.setenv("VERTEX_PROJECT_ID", "demo-vertex")
 
     bq = BQConnection.from_env()             # the first dry run's setup
     vertex = VertexConnection.from_env()     # the next model call's
@@ -118,10 +118,10 @@ def test_the_doctor_reads_the_planes_without_the_network(tmp_path,
     empty = tmp_path / "empty.env"
     empty.write_text("", encoding="utf-8")
     monkeypatch.setenv("SAHS_ENV_FILE", str(empty))
-    for name in ("BQ_PROJECT_ID", "LUMI_BQ_PROJECT", "GOOGLE_CLOUD_PROJECT",
-                 "VERTEX_PROJECT_ID", "LUMI_VERTEX_PROJECT",
-                 "GOOGLE_APPLICATION_CREDENTIALS", "LUMI_BQ_SA_KEY",
-                 "LUMI_VERTEX_SA_KEY", "BQ_FORCE_PROXY",
+    for name in ("BQ_PROJECT_ID", "SYNAPSE_BQ_PROJECT", "GOOGLE_CLOUD_PROJECT",
+                 "VERTEX_PROJECT_ID", "SYNAPSE_VERTEX_PROJECT",
+                 "GOOGLE_APPLICATION_CREDENTIALS", "SYNAPSE_BQ_SA_KEY",
+                 "SYNAPSE_VERTEX_SA_KEY", "BQ_FORCE_PROXY",
                  "VERTEX_DISABLE_PROXY", "VERTEX_NO_PROXY_GOOGLE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("NO_PROXY", "googleapis.com")
@@ -153,10 +153,10 @@ def test_planes_check_proves_both_planes_in_one_process(tmp_path,
     empty = tmp_path / "empty.env"
     empty.write_text("", encoding="utf-8")
     monkeypatch.setenv("SAHS_ENV_FILE", str(empty))
-    for name in ("BQ_PROJECT_ID", "LUMI_BQ_PROJECT", "GOOGLE_CLOUD_PROJECT",
-                 "VERTEX_PROJECT_ID", "LUMI_VERTEX_PROJECT",
-                 "GOOGLE_APPLICATION_CREDENTIALS", "LUMI_BQ_SA_KEY",
-                 "LUMI_VERTEX_SA_KEY", "NO_PROXY", "no_proxy"):
+    for name in ("BQ_PROJECT_ID", "SYNAPSE_BQ_PROJECT", "GOOGLE_CLOUD_PROJECT",
+                 "VERTEX_PROJECT_ID", "SYNAPSE_VERTEX_PROJECT",
+                 "GOOGLE_APPLICATION_CREDENTIALS", "SYNAPSE_BQ_SA_KEY",
+                 "SYNAPSE_VERTEX_SA_KEY", "NO_PROXY", "no_proxy"):
         monkeypatch.delenv(name, raising=False)
     assert planes_check.main([]) == 3                # nothing configured
     key = tmp_path / "k.json"

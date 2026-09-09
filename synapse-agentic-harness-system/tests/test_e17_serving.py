@@ -30,7 +30,7 @@ FX = SILO / "tests" / "fixtures"
 def _compiled(tmp_path: Path) -> Path:
     graph_dir = tmp_path / "graph"
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"),
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"),
          "build-graph", "--graph", str(graph_dir),
          "--crosswalk", str(FX / "identity" / "crosswalk.jsonl"),
          "--bq-archive", str(FX / "real_extractions_production"),
@@ -78,11 +78,11 @@ def test_display_registry_and_ledger_grouping():
                    if v["family"] == "marketplace"}
     assert marketplace == {"metrics_dmp", "extended_gmns",
                            "studio_queries"}
-    assert display_for("glossary")["display"] == "Acropedia"
+    assert display_for("glossary")["display"] == "Glossary"
     assert display_for("measures_catalog")["display"] \
         == "Metric Mining: BQ Query History"
     assert display_for("bq")["display"] \
-        == "Lumi Warehouse: BigQuery Catalog"
+        == "Synapse Warehouse: BigQuery Catalog"
     unknown = display_for("mystery_feed")
     assert unknown["family"] == "unregistered"
     assert unknown["display"] == "mystery_feed"

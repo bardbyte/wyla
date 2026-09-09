@@ -273,7 +273,7 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
     # the query: qualify every table the build knows before the trip
     # (qualify.py) — the model keeps writing the cards' dataset.table
     data_project = (
-        env.get("BQ_DATA_PROJECT") or env.get("LUMI_BQ_DATA_PROJECT")
+        env.get("BQ_DATA_PROJECT") or env.get("SYNAPSE_BQ_DATA_PROJECT")
         or getattr(getattr(substrate, "connection", None),
                    "data_project", "")
         or getattr(getattr(runner, "connection", None),

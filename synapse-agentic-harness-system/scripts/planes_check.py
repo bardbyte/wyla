@@ -1,6 +1,6 @@
 """One process, both planes, in the order the chat uses them: a
 BigQuery dry run first, then the model plane the chat rides on this
-machine (Vertex, or EAG when SAHS_MODEL_PLANE / its credentials say
+machine (Vertex, or the gateway when SAHS_MODEL_PLANE / its credentials say
 so): a token and one tiny model call.
 
     python scripts/planes_check.py
@@ -67,18 +67,18 @@ def main(argv: list[str] | None = None) -> int:
               "process; the Vertex plane would inherit it",
               file=sys.stderr)
         return 1
-    from sahs.util.eag import model_plane, plane_note
-    if model_plane() == "eag":
-        # the chat's model calls ride EAG on this machine: prove that
+    from sahs.util.gateway import model_plane, plane_note
+    if model_plane() == "gateway":
+        # the chat's model calls ride the gateway on this machine: prove that
         # plane after the dry run, in the chat's order
-        from sahs.enrich.eag_client import EagClient
-        from sahs.util.eag import EagError
+        from sahs.enrich.gateway_client import GatewayClient
+        from sahs.util.gateway import GatewayError
         try:
-            client = EagClient.from_env()
-        except EagError as e:
-            print(f"✗ EAG not configured: {e}", file=sys.stderr)
+            client = GatewayClient.from_env()
+        except GatewayError as e:
+            print(f"✗ the gateway not configured: {e}", file=sys.stderr)
             return EXIT_ENV_AUTH
-        print(f"  EAG       {client.cfg.model} · {client.cfg.base_url} · "
+        print(f"  the gateway       {client.cfg.model} · {client.cfg.base_url} · "
               f"the chat's plane ({plane_note()})")
         started = time.perf_counter()
         try:
@@ -87,13 +87,13 @@ def main(argv: list[str] | None = None) -> int:
             text = client.generate('Return exactly this JSON: {"ok": true}',
                                    max_output_tokens=512)
         except Exception as e:                             # noqa: BLE001
-            print(f"✗ EAG failed {time.perf_counter() - started:.1f}s "
+            print(f"✗ the gateway failed {time.perf_counter() - started:.1f}s "
                   f"after the dry run: {e}", file=sys.stderr)
             return 1
         print(f"  ✓ model answered {time.perf_counter() - started:.1f}s "
               f"after the dry run: {' '.join(text.split())[:60]}")
         if _env() != before:
-            print("✗ the environment changed during the EAG plane",
+            print("✗ the environment changed during the gateway plane",
                   file=sys.stderr)
             return 1
         from sahs.tools.sandbox import (human_bytes, live_switch_note,

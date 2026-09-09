@@ -594,7 +594,7 @@ def build_kit(build: Build, state: AssistantState, *,
                 "the doctrine. Loading is your job: when the task "
                 "matches a pack in the shelf, load it before the work "
                 "(\"why did it change\" → analysis-playbooks; unfamiliar "
-                "SQL ground → lumi-data-connect; a deck or memo → "
+                "SQL ground → synapse-data-connect; a deck or memo → "
                 "executive-summary; tiles → dashboard-design)."),
             fn=load_skill, schema=_obj({"name": _s("pack name")},
                                        ["name"])),

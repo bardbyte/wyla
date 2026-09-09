@@ -17,7 +17,7 @@ SILO = Path(__file__).resolve().parents[1]
 FX = SILO / "tests" / "fixtures"
 sys.path.insert(0, str(SILO))
 KEY = "You are Synapse, an analytical colleague"
-PACKS = ["lumi-data-connect", "analysis-playbooks",
+PACKS = ["synapse-data-connect", "analysis-playbooks",
          "dashboard-design", "executive-summary"]
 GHOSTS = re.compile(
     r"\b(check_\w+|verify_answer|subgraph|search_semantics|grep_cards|"
@@ -31,7 +31,7 @@ def compiled(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("v3skills")
     graph_dir = tmp / "graph"
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"),
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"),
          "build-graph", "--graph", str(graph_dir),
          "--crosswalk", str(FX / "identity" / "crosswalk.jsonl"),
          "--bq-archive", str(FX / "real_extractions_production"),
@@ -81,7 +81,7 @@ def _user_shelf(tmp_path: Path) -> Path:
     (graph_root / "skills" / "fiscal-notes.md").write_text(
         "# Fiscal notes\n\nOur fiscal year starts in February; "
         "January belongs to the prior year.\n", encoding="utf-8")
-    (graph_root / "skills" / "lumi-data-connect.md").write_text(
+    (graph_root / "skills" / "synapse-data-connect.md").write_text(
         "# Impostor\n\nA user file wearing a built-in name.\n",
         encoding="utf-8")
     return graph_root
@@ -109,8 +109,8 @@ def test_builtin_packs_are_real_and_speak_the_v3_kit(compiled,
         for kind in re.findall(r"check\(kind=(\w+)", pack.text):
             assert kind in ("part_whole", "crosscheck", "coverage",
                             "fanout", "reconcile", "answer"), kind
-    assert "search" in packs["lumi-data-connect"].text
-    assert "kind=list" in packs["lumi-data-connect"].text
+    assert "search" in packs["synapse-data-connect"].text
+    assert "kind=list" in packs["synapse-data-connect"].text
 
 
 def test_shelves_merge_and_builtin_wins(tmp_path):
@@ -118,8 +118,8 @@ def test_shelves_merge_and_builtin_wins(tmp_path):
     graph_root = _user_shelf(tmp_path)
     packs = {p.name: p for p in all_skills(graph_root)}
     assert packs["fiscal-notes"].origin == "unreviewed"
-    assert packs["lumi-data-connect"].origin == "built-in"
-    assert "Impostor" not in packs["lumi-data-connect"].text
+    assert packs["synapse-data-connect"].origin == "built-in"
+    assert "Impostor" not in packs["synapse-data-connect"].text
     loaded, missing = load_packs(
         graph_root, ["executive-summary", "fiscal-notes", "ghost"])
     assert [p.name for p in loaded] == ["executive-summary",
@@ -136,13 +136,13 @@ def test_load_skill_teaches_and_records(compiled, tmp_path):
     tools, state = _kit(compiled, tmp_path, graph_root=graph_root)
     assert "list_skills" not in tools          # the shelf is in the prompt
     assert len(all_skills(graph_root)) == 5
-    got = tools["load_skill"].fn("lumi-data-connect")
+    got = tools["load_skill"].fn("synapse-data-connect")
     assert got["ok"] and got["origin"] == "built-in"
     assert "resolve first" in got["text"]
-    assert state.skills_loaded == ["lumi-data-connect"]
-    again = tools["load_skill"].fn("lumi-data-connect")
+    assert state.skills_loaded == ["synapse-data-connect"]
+    again = tools["load_skill"].fn("synapse-data-connect")
     assert again.get("note") and "already loaded" in again["note"]
-    assert state.skills_loaded == ["lumi-data-connect"]
+    assert state.skills_loaded == ["synapse-data-connect"]
     miss = tools["load_skill"].fn("ghost")
     assert "no skill named" in miss["error"]
     assert "fiscal-notes (unreviewed)" in miss["hint"]
@@ -193,10 +193,10 @@ def test_preloaded_skill_leaves_the_shelf_index(compiled):
     index = all_skills(None)
     offered = system_prompt(build, [], skill_index=index)
     preloaded = system_prompt(
-        build, [p for p in index if p.name == "lumi-data-connect"],
+        build, [p for p in index if p.name == "synapse-data-connect"],
         skill_index=index)
-    assert "- lumi-data-connect" in offered
-    assert "- lumi-data-connect" not in preloaded
+    assert "- synapse-data-connect" in offered
+    assert "- synapse-data-connect" not in preloaded
     assert "resolve first" in preloaded
     assert system_prompt(build, []) \
         == system_prompt(build, None, skill_index=[])
@@ -213,7 +213,7 @@ def test_runtime_serves_both_shelves(compiled, tmp_path):
     assert set(PACKS) <= set(rows)
     assert rows["executive-summary"]["origin"] == "built-in"
     assert rows["fiscal-notes"]["origin"] == "unreviewed"
-    assert rows["lumi-data-connect"]["text"]
+    assert rows["synapse-data-connect"]["text"]
     session = runtime.create_session()
     saved = runtime.set_skills(session["id"],
                                ["executive-summary", "fiscal-notes"])

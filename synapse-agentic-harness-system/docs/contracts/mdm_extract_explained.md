@@ -6,11 +6,11 @@
 
 Absolutely. The most important way to explain `mdm_extract` to a peer is:
 
-> **`mdm_extract` is not extracting business data from the 46 BigQuery tables. It is extracting the enterprise metadata and relationships around those tables from Lumi MDM — schema, columns, ownership, governance, pipelines, AppFlows, lineage, lifecycle, environments, replication, workflows, versions, and the evidence proving those relationships.**
+> **`mdm_extract` is not extracting business data from the 46 BigQuery tables. It is extracting the enterprise metadata and relationships around those tables from the MDM — schema, columns, ownership, governance, pipelines, AppFlows, lineage, lifecycle, environments, replication, workflows, versions, and the evidence proving those relationships.**
 
 In other words, it is building the **technical and governance context required to understand and safely reason about each table**.
 
-The Lumi API itself supports this progression: table → dataset/schema → ownership → AppFlow → pipeline → lineage → lifecycle/tracking/security metadata.
+The MDM API itself supports this progression: table → dataset/schema → ownership → AppFlow → pipeline → lineage → lifecycle/tracking/security metadata.
 
 ---
 
@@ -24,7 +24,7 @@ At the end of the 46-table run, we should have something conceptually like:
         ▼
 mdm_extract
         │
-        ├── discover each table in Lumi
+        ├── discover each table in the MDM
         ├── find datasets
         ├── find schemas and versions
         ├── find columns
@@ -101,7 +101,7 @@ REPLICATED_TO
     └── region
 
 SUPPORTED_BY_EVIDENCE
-    └── exact Lumi API response
+    └── exact the MDM API response
 ```
 
 That is the core value.
@@ -165,7 +165,7 @@ Extractor version/build
 Start time
 End time
 
-Lumi API host
+The MDM API host
 API prefix
 Storage type = BigQuery
 
@@ -211,7 +211,7 @@ Extractor build:
     patched_v2
 
 Source:
-    Lumi MDM dev API
+    the MDM dev API
 
 Mode:
     focused
@@ -464,7 +464,7 @@ Pipeline metadata can contain information such as:
 * sensitivity flags
 * third-party flags
 
-Those are explicitly part of Lumi's pipeline/governance model.
+Those are explicitly part of the MDM's pipeline/governance model.
 
 This makes questions possible such as:
 
@@ -497,7 +497,7 @@ AppFlow Parent
      └── ...
 ```
 
-An AppFlow represents an important piece of Lumi's processing topology.
+An AppFlow represents an important piece of the MDM's processing topology.
 
 It helps connect:
 
@@ -543,7 +543,7 @@ Host regions
 Governance information
 ```
 
-Lumi exposes both pipeline details and full portal metadata for those pipeline IDs.
+The MDM exposes both pipeline details and full portal metadata for those pipeline IDs.
 
 So eventually:
 
@@ -591,7 +591,7 @@ This is much closer to a technical architecture map than a traditional table cat
 
 This is one of the highest-value outputs.
 
-Lumi exposes both directions.
+The MDM exposes both directions.
 
 ```text
             upstream
@@ -614,7 +614,7 @@ Table X
    └──► Downstream Q
 ```
 
-Lumi explicitly provides table-as-target, table-as-source, pipeline-scoped and AppFlow-scoped lineage.
+The MDM explicitly provides table-as-target, table-as-source, pipeline-scoped and AppFlow-scoped lineage.
 
 So we can eventually answer:
 
@@ -644,7 +644,7 @@ Table A.column_x
 Table B.column_y
 ```
 
-Lumi's attribute lineage model contains:
+The MDM's attribute lineage model contains:
 
 * source table
 * source identifier
@@ -697,7 +697,7 @@ errors
 timestamps
 ```
 
-Lumi explicitly exposes these fields in …
+The MDM explicitly exposes these fields in …
 
 `[GAP IN SOURCE — end of this sentence not captured]`
 
@@ -757,7 +757,7 @@ Table / Pipeline
        └── GLOBAL
 ```
 
-where Lumi provides it.
+where the MDM provides it.
 
 The API explicitly offers latest replication information by pipeline and replication statistics.
 
@@ -820,9 +820,9 @@ Graph edge
      ↓
 Extraction run
      ↓
-Lumi endpoint
+MDM endpoint
      ↓
-Raw Lumi JSON response
+Raw MDM JSON response
 ```
 
 That's the difference between:
@@ -853,7 +853,7 @@ HTTP 503
 
 Meaning:
 
-> Lumi/service was unavailable or degraded.
+> The MDM service was unavailable or degraded.
 
 Again, we cannot conclude the relationship does not exist.
 
@@ -899,7 +899,7 @@ This allows us afterward to ask:
 
 > Which endpoints caused the most retries?
 
-> When did Lumi start returning 503?
+> When did the MDM start returning 503?
 
 > Which tables were running during the outage?
 
@@ -1047,13 +1047,13 @@ Or:
 
 If somebody asks you **"What exactly is this `mdm_extract` thing doing?"**, I would explain it like this:
 
-> "We have identified 46 strategically important BigQuery tables. `mdm_extract` is a read-only metadata crawler built against Lumi MDM's OpenAPI. Starting with only a table name, it walks the metadata relationships around that table — datasets and versions, schemas and columns, ownership and governance, AppFlows, validated pipelines, workflows, table and column lineage, lifecycle/certification, environments, promotion and replication.
+> "We have identified 46 strategically important BigQuery tables. `mdm_extract` is a read-only metadata crawler built against the MDM's OpenAPI. Starting with only a table name, it walks the metadata relationships around that table — datasets and versions, schemas and columns, ownership and governance, AppFlows, validated pipelines, workflows, table and column lineage, lifecycle/certification, environments, promotion and replication.
 >
 > It doesn't query or copy the actual business rows. Its job is to build the technical knowledge envelope around each data asset.
 >
-> For every API call we retain the raw Lumi response, the endpoint used, HTTP result, attempts and extraction status. We also produce normalized table summaries and typed discovery relationships. That means we're not just building a catalog — we're building a provenance-backed metadata graph where an assertion such as 'Pipeline X produces Table Y' can be traced back to the exact Lumi source response that established it.
+> For every API call we retain the raw the MDM response, the endpoint used, HTTP result, attempts and extraction status. We also produce normalized table summaries and typed discovery relationships. That means we're not just building a catalog — we're building a provenance-backed metadata graph where an assertion such as 'Pipeline X produces Table Y' can be traced back to the exact the MDM source response that established it.
 >
-> We also explicitly distinguish metadata that was successfully observed from metadata that is unknown because Lumi returned a 500, 503 or timeout. That prevents an API outage from becoming a false knowledge-graph statement that something doesn't exist.
+> We also explicitly distinguish metadata that was successfully observed from metadata that is unknown because the MDM returned a 500, 503 or timeout. That prevents an API outage from becoming a false knowledge-graph statement that something doesn't exist.
 >
 > Once these 46 table dossiers are loaded into the graph, we can layer the governed DMP metrics on top to tell us what business metrics officially mean, and the query-history measures catalog to tell us how analysts actually calculate things. Then later a BigQuery executor provides the actual numbers.
 >
@@ -1061,4 +1061,4 @@ If somebody asks you **"What exactly is this `mdm_extract` thing doing?"**, I wo
 
 That's the cleanest description of what this run is buying us.
 
-And one more point I would emphasize to your peer: **the fact that this first 46-table run is taking a long time does not make the output less valuable.** In fact, its coverage/error artifacts are showing us exactly where Lumi metadata is available, missing, or temporarily unavailable. Your current run has examples of tables completing with strong answerability despite hundreds of failed supplemental requests, while other tables became partial during 503 degradation. That uncertainty itself is useful provenance: the graph can know not only facts, but also **what we do not yet know and why**.
+And one more point I would emphasize to your peer: **the fact that this first 46-table run is taking a long time does not make the output less valuable.** In fact, its coverage/error artifacts are showing us exactly where the MDM metadata is available, missing, or temporarily unavailable. Your current run has examples of tables completing with strong answerability despite hundreds of failed supplemental requests, while other tables became partial during 503 degradation. That uncertainty itself is useful provenance: the graph can know not only facts, but also **what we do not yet know and why**.

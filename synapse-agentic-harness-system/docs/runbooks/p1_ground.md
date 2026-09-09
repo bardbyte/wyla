@@ -15,8 +15,8 @@ defect, not a model problem (there is no model yet).
   shell exports always win over it):
 
   ```
-  GOOGLE_APPLICATION_CREDENTIALS=/path/to/prj-p-lumi-gpt.json
-  BQ_PROJECT_ID=prj-p-lumi-gpt
+  GOOGLE_APPLICATION_CREDENTIALS=/path/to/demo-billing.json
+  BQ_PROJECT_ID=demo-billing
   BIGQUERY_URL=https://bigquery-prod.p.googleapis.com
   ```
 

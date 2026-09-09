@@ -2,13 +2,13 @@
  "table_name": "wwcas_authorization",
  "discovery": {
   "dataset_ids": [
-   "lumi-ds-002"
+   "synapse-ds-002"
   ],
   "schema_ids": [
-   "lumi-ds-002-schema"
+   "synapse-ds-002-schema"
   ],
   "pipeline_ids": [
-   "lumi-ds-002-pipe"
+   "synapse-ds-002-pipe"
   ]
  },
  "answerability": {

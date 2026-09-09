@@ -4,7 +4,7 @@
     python scripts/bq_check.py [--sql "SELECT 1"] [--table dw.gms_transaction]
 
 ``--table`` dry-runs ONE known table the way the sandbox will — qualified
-with the data project (LUMI_BQ_DATA_PROJECT, e.g. axp-lumi) — so a
+with the data project (SYNAPSE_BQ_DATA_PROJECT, e.g. demo-warehouse) — so a
 "Not found: Table <query-project>:dw.x" surprise is caught here, not
 in a chat.
 
@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  project    {connection.project}   (runs and bills the query)")
     print(f"  data proj  {connection.data_project}"
           + ("   (same project hosts the tables; set "
-             "LUMI_BQ_DATA_PROJECT if they live elsewhere)"
+             "SYNAPSE_BQ_DATA_PROJECT if they live elsewhere)"
              if connection.data_project == connection.project
              else "   (hosts the tables: dataset.table is qualified "
                   "with it)"))
@@ -93,8 +93,8 @@ def _hint(error: str) -> None:
     if "Not found: Table" in (error or "") or "not found in location" \
             in (error or ""):
         print("  the table resolved against the wrong project or "
-              "location: set LUMI_BQ_DATA_PROJECT to the project that "
-              "HOSTS the tables (e.g. axp-lumi) and BQ_LOCATION to the "
+              "location: set SYNAPSE_BQ_DATA_PROJECT to the project that "
+              "HOSTS the tables (e.g. demo-warehouse) and BQ_LOCATION to the "
               "dataset's location if it is regional, then rerun with "
               "--table", file=sys.stderr)
         return

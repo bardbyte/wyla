@@ -32,7 +32,7 @@ from sahs.loaders.sources.vocab import (                           # noqa: E402
 
 def _cli(*argv: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"), *argv],
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"), *argv],
         capture_output=True, text=True, cwd=SILO)
 
 
@@ -44,7 +44,7 @@ def test_registry_suffix_and_ambiguity():
     assert reg.resolve("nope_table") == (None, "unknown")
     # real queries reference tables FULLY QUALIFIED — they resolve by
     # their table component; ambiguity still never guesses
-    assert reg.resolve("`axp-lumi`.dw.gms_transaction") == \
+    assert reg.resolve("`demo-warehouse`.dw.gms_transaction") == \
         ("gms_transaction", "qualified")
     assert reg.resolve("dw.authorization") == (None, "ambiguous")
     assert reg.resolve("dw.nope_table") == (None, "unknown")
@@ -176,7 +176,7 @@ def test_std_tech_combined_export_parity(tmp_path: Path):
     assert [(e.table, len(e.columns)) for e in from_file] == \
         [(e.table, len(e.columns)) for e in from_dir]
     # discovery: the combined file WINS over a (possibly partial) dir
-    from scripts.laptop import _std_tech_path
+    from scripts.pipeline import _std_tech_path
     sources = tmp_path / "sources"
     (sources / "std_tech_metadata").mkdir(parents=True)
     assert _std_tech_path(sources) == sources / "std_tech_metadata"
@@ -293,7 +293,7 @@ def test_std_tech_real_envelope_shape(tmp_path: Path):
         "appl_id": "600001868",
         "page_info": {"total_pages": 1, "downloaded_elements": 2},
         "tech_metadata_list": [
-            {"datasource": "axp-lumi", "technology": "BigQuery",
+            {"datasource": "demo-warehouse", "technology": "BigQuery",
              "isActive": "Y",
              "datasetAttribute": {
                  "business_name": "Acquisitions data for US market",
@@ -317,7 +317,7 @@ def test_std_tech_real_envelope_shape(tmp_path: Path):
                   "pdeAttribute": {"data_type_name": "STRING",
                                    "pii_role_id":
                                        "NGBD-SDE-Date-of-Birth"}}]},
-            {"datasource": "axp-lumi",
+            {"datasource": "demo-warehouse",
              "datasetAttribute": {"data_type_name": "ODL",
                                   "has_pii": False},
              "pde": []},

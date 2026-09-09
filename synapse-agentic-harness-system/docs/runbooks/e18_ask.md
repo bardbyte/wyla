@@ -13,7 +13,7 @@ classify → apply → delta-resolve → validate → generate → verify → re
 
 ```bash
 # from the repo root
-uvicorn apps.lumi.backend.app:app --port 8400
+uvicorn apps.synapse_admin.backend.app:app --port 8400
 ```
 
 Ask mounts at `/api/sessions*`. Paths and credentials come from the
@@ -23,7 +23,7 @@ line and no key ever reaches the browser.
 | variable | what it does |
 |---|---|
 | `MERIDIAN_BUILDS_DIR` / `MERIDIAN_GRAPH_DIR` | which build Ask answers from, where sessions and events are written (`graph/runs/ask/`) |
-| `LUMI_VERTEX_SA_KEY` | the Vertex service-account key (a DIFFERENT project than BQ) |
+| `SYNAPSE_VERTEX_SA_KEY` | the Vertex service-account key (a DIFFERENT project than BQ) |
 | `VERTEX_PROJECT_ID` · `VERTEX_LOCATION` · `VERTEX_MODEL` | the model contract; location defaults to `global`, model to `gemini-3.1-pro-preview` |
 | `SAHS_ALLOW_LIVE=1` + `ASK_EXECUTE=live` | BOTH required before Ask executes for real; otherwise every query is a dry run that returns zero rows by design |
 | `SYNAPSE_COST_IN` / `SYNAPSE_COST_OUT` | dollars per million tokens. Unset → the budget meter reports tokens and says the rate is not configured, rather than inventing a price |
@@ -129,7 +129,7 @@ That is the difference between honest and polished.
 
 ## Stage B: the chat surface
 
-`#/ask` in Synapse by Lumi, `apps/lumi/frontend/js/pages/ask.js`. It
+`#/ask` in Synapse by Lumi, `apps/synapse_admin/frontend/js/pages/ask.js`. It
 is a **pure consumer** of the stream above: it opens one EventSource
 per session and every value it draws arrived on that stream. It never
 calls a model, never holds a key, never learns an endpoint. A test
@@ -168,7 +168,7 @@ Pinned in the UI:
 
 The transport is the only thing worth faking, and it is faked from
 *outside* the product: build an `AskRuntime` with a `model_factory`
-and assign it to `apps.lumi.backend.ask._RUNTIME` before `create_app()`
+and assign it to `apps.synapse_admin.backend.ask._RUNTIME` before `create_app()`
 (the same substitution `tests/test_ask_loop.py` makes). Everything
 else — the build, the resolver, the contract, the sandbox, the
 verifier — stays real.

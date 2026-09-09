@@ -20,7 +20,7 @@ from sahs.assistant.files import (FileRefused, docx_to_text, manifest,
 
 SILO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SILO / "tests"))
-from test_eag_plane import (SECRET, FakeEag, _client,  # noqa: E402,F401
+from test_gateway_plane import (SECRET, FakeGateway, _client,  # noqa: E402,F401
                             compiled)
 
 _spec = importlib.util.spec_from_file_location(
@@ -110,7 +110,7 @@ def test_a_whole_turn_carries_a_pdf_to_the_model(compiled, tmp_path):
     file, the turn record names it, the file is no longer pending, and
     the next turn's history says a file was sent — by name, not bytes."""
     from sahs.assistant import AssistantRuntime
-    from sahs.assistant.agent import EagAgent
+    from sahs.assistant.agent import GatewayAgent
     build, tmp = compiled
     seen: list[dict] = []
 
@@ -118,12 +118,12 @@ def test_a_whole_turn_carries_a_pdf_to_the_model(compiled, tmp_path):
         seen.append(body)
         return {"parts": [{"text": "The token is PDF-7413-ORCHID."}]}
 
-    fake = FakeEag([answer, answer])
+    fake = FakeGateway([answer, answer])
     client = _client(fake)
     runtime = AssistantRuntime(
         builds_root=build.root.parent, graph_root=tmp / "graph",
         store_path=tmp_path / "chat.sqlite3",
-        model_factory=lambda budget: EagAgent(client, budget))
+        model_factory=lambda budget: GatewayAgent(client, budget))
     session = runtime.create_session()
     sid = session["id"]
     row = runtime.add_file(sid, "token.pdf",

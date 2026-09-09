@@ -336,11 +336,11 @@ we can distinguish:
 
 ```text
 Logical:
-axp-lumi.dw.wwcas_authorization
+demo-warehouse.dw.wwcas_authorization
 type = VIEW
 
 Physical:
-axp-lumi.data.wwcas_authorization
+demo-warehouse.data.wwcas_authorization
 type = TABLE
 ```
 
@@ -365,7 +365,7 @@ num rows/bytes where exposed
 These describe:
 
 ```text
-axp-lumi.dw.<table>
+demo-warehouse.dw.<table>
 ```
 
 ## `01_logical_table_meta.*`
@@ -476,7 +476,7 @@ You can explain this as:
 These describe:
 
 ```text
-axp-lumi.data.<table>
+demo-warehouse.data.<table>
 ```
 
 where it exists.
@@ -579,7 +579,7 @@ This comes from the special function:
 
 ```sql
 SELECT *
-FROM `axp-lumi.dw.get_table_metrics`('<table>');
+FROM `demo-warehouse.dw.get_table_metrics`('<table>');
 ```
 
 You get:
@@ -1001,7 +1001,7 @@ This is the operational/recent BigQuery job history.
 This is matching evidence from:
 
 ```text
-axp-lumi.data_backup.cloudaudit_googleapis_com_data_access
+demo-warehouse.data_backup.cloudaudit_googleapis_com_data_access
 ```
 
 It provides another history source containing things like:
@@ -1234,7 +1234,7 @@ At the root:
 _history/
 │
 ├── jobs_by_project/
-│   └── prj-p-lumi-gpt/
+│   └── demo-billing/
 │       ├── 2026-07-25.jsonl.gz
 │       ├── 2026-07-26.jsonl.gz
 │       ├── ...

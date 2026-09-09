@@ -13,7 +13,7 @@
 --   * every timestamp that means "when this row landed" is a commit
 --     timestamp; "until when" columns drive row deletion policies;
 --   * roles are data (Roles, Permissions), not code: a surface a
---     role may open is a column, so admin→Lumi, analyst→Synapse
+--     role may open is a column, so admin→the admin console, analyst→Synapse
 --     and the steward's set change without a deploy;
 --   * audit is append-only, on its own change stream.
 -- ============================================================
@@ -76,7 +76,7 @@ CREATE TABLE UserCredentials (
 -- by the key range (UserId): a person has a handful of rows, no index.
 
 -- Roles are rows. Surfaces says which app a role may open:
--- 'lumi' is the admin console at /, 'synapse' the analyst surface
+-- 'admin' is the admin console at /, 'synapse' the analyst surface
 -- at /synapse/. The steward's row exists so its set can be decided
 -- without a schema change.
 CREATE TABLE Roles (
@@ -299,7 +299,7 @@ CREATE CHANGE STREAM AuditStream FOR AuditEvents
 --
 -- INSERT INTO Roles (Name, Description, Surfaces, IsSystem, CreatedAt) VALUES
 --   ('admin',   'Runs the graph: builds, sources, reviews, users',
---               ['lumi', 'synapse'], true, PENDING_COMMIT_TIMESTAMP()),
+--               ['admin', 'synapse'], true, PENDING_COMMIT_TIMESTAMP()),
 --   ('analyst', 'Asks: the Synapse surface, chats, artifacts, own skills',
 --               ['synapse'], true, PENDING_COMMIT_TIMESTAMP()),
 --   ('steward', 'Decides: certifies and deprecates metrics (set to be decided)',

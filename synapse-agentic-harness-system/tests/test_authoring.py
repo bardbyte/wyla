@@ -16,7 +16,7 @@ from sahs.assistant.skills_loader import (all_skills, get_skill, load_packs,
 
 SILO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SILO / "tests"))
-from test_eag_plane import compiled  # noqa: E402,F401
+from test_gateway_plane import compiled  # noqa: E402,F401
 
 PACK = ("# Churn triage\n\nThe moves for a churn question on merchants.\n\n"
         "## Split rate from mix\n1. search(\"churn\") for the certified "

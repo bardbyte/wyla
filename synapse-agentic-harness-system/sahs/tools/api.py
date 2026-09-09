@@ -57,7 +57,7 @@ class Build:
             path = path / current.read_text(encoding="utf-8").strip()
         if not (path / "manifest.json").exists():
             raise FileNotFoundError(
-                f"no build at {path}: run `laptop.py compile` first "
+                f"no build at {path}: run `pipeline.py compile` first "
                 "(or point at a builds/ root containing CURRENT)")
         return cls(
             root=path,

@@ -1,10 +1,10 @@
 # Synapse by Lumi — design inventory (draft, staged for docs/design_inventory.md at go-ahead)
 
-> Sweep of apps/console/design/** on 2026-08-30 (branch tip e0067f4). Two visual systems
-> run through the set; **Lumi is canonical**, Synapse-branded twins are superseded.
+> Sweep of apps/console/design/** (now `apps/synapse_admin/design/`; the console itself is under `archive/apps/console`) on 2026-08-30 (branch tip e0067f4). Two visual systems
+> run through the set; **the Admin rebrand is canonical**, Synapse-branded twins are superseded.
 
 ## Format
-All 26 artboards are Claude Design canvas files: `<x-dc>` template + `DCLogic` component with
+All 26 artboards are design-canvas files: `<x-dc>` template + `DCLogic` component with
 `renderVals()`; verbs `sc-for` / `sc-if` / `x-import` / `{{ }}` / `style-hover`. All styling
 inline (no classes) except `Synapse Wireframes.dc.html`. `support.js` (1,911 L) is the
 VENDORED canvas runtime ("GENERATED — do not edit"; expects window.React) — black box.
@@ -14,7 +14,7 @@ Artboards are design references; production pages build in the React SPA.
 - **Synapse** (earlier): Libre Franklin + IBM Plex Mono; #f4f6f9/#1a2332/#71809b/#d8dee8;
   accent #006fcf; tiers green #0e7a55, amber #9a6407, gray #b9c2d0, crimson #be3a48.
   = EXACTLY frontend/src/styles/tokens.css (that file rendered).
-- **Lumi** (rebrand, canonical): Plus Jakarta Sans + IBM Plex Mono; #f5f8fc/#00175a/#5b6b8f/
+- **Admin** (rebrand, canonical): Plus Jakarta Sans + IBM Plex Mono; #f5f8fc/#00175a/#5b6b8f/
   #d7e2f2; deep #00175A, bright #006FCF, ice #EAF2FB, on-navy #c6dcf5; tiers green
   #0e7a55+#eaf6f0, amber #b07908+#fdf4e0, gray #7c8bab/#a9b8d4, crimson #b3282d+#fdf0f0.
   Recorded in github.md as intentional; NOT yet in tokens.css → sync task.
@@ -29,7 +29,7 @@ Artboards are design references; production pages build in the React SPA.
 ## Artboards (file → screen → notes)
 - Synapse Wireframes.dc.html — exploration sheet (brand options 2a-2f, screens ×3 layouts);
   only file with CSS classes; sketch layer in Patrick Hand.
-- Lumi Home.dc.html — landing: navy hero + 3 CTAs; WHAT IT DOES (6 promises) / LIVE PROOF
+- Admin Home.dc.html — landing: navy hero + 3 CTAs; WHAT IT DOES (6 promises) / LIVE PROOF
   (46 tables·3,074 metrics·15,288 vocab·joins 2◆·readiness 73%·TQSR 0.71·reviews 14);
   SINCE LAST BUILD strip; 5-group screen index (HOME/UNDERSTAND/GOVERN/OPERATE/WORK·E16);
   tier legend.
@@ -40,18 +40,18 @@ Artboards are design references; production pages build in the React SPA.
   MEANING (question prov:dmp, grain prov:studio·observed, amber llm_enriched unreviewed);
   WITNESSES bars+agreement; FAMILY tree (proposed/child/quiet ○) + crimson competing-
   definition banner; BINDINGS; WHO USES (GMNS 1302/CFR 1089); Rename/Deprecate.
-- Lumi Table Profile.dc.html (canonical; Table Profile.dc.html = Synapse twin) — 73%
+- Admin Table Profile.dc.html (canonical; Table Profile.dc.html = Synapse twin) — 73%
   readiness donut; columns grid w/ per-column tier+PII ⊘; measures 3-up; witness ledger
   (human ×10/MDM ×8/BigQuery ×6/glossary ×5/mined ×2); usage sparkline; join topology;
   "what we don't know yet" dashed card; 360px "Who says so" drawer; viewMode analyst|VP.
 - Concept Profile.dc.html — alias/anti-alias chips; bindings-by-table grid w/ conflict
   banner; REMEMBERED CHOICES (scoped memory) card.
-- Graph Cosmos.dc.html / F6 Cosmos.dc.html (Lumi canonical) — search + edge-filter chips;
+- Graph Cosmos.dc.html / F6 Cosmos.dc.html (Admin canonical) — search + edge-filter chips;
   <synapse-cosmos> 560px; right rail docked node profile/legend/RECENT CHANGES feed;
   "size = usage · glow = trust tier · gold = multi-domain".
 - Agent Theater.dc.html — 5-stage replayable run player (Understand/Route/Load skills/
   Descend/Draft SQL); routing scores; guardrails ⊘; SQL trace annotated; refusal branch.
-- Metric Flywheel.dc.html / F3 Variation Flywheel.dc.html (Lumi canonical) — answer card
+- Metric Flywheel.dc.html / F3 Variation Flywheel.dc.html (Admin canonical) — answer card
   DERIVED FROM strip (meridian labeled); Propose-as-governed/Save-as-child/Just-this-once;
   family tree; steward promotion card.
 - F1 Analyst Conversation.dc.html — 100vh chat + 330px Semantic plan rail; 6-step scripted
@@ -84,16 +84,16 @@ Artboards are design references; production pages build in the React SPA.
   CONSTANTS + MODELS & ABLATION LOG. → docs/assumptions.md rendered.
 - Sessions.dc.html — session list (mine/all); plan-version chain v1→v5; budget $/cap;
   handoff preview. Flagged "ships with E16".
-- Lumi Components.dc.html — component library spec, 13 specimens: 1 Answer Card · 2 Plan
+- Admin Components.dc.html — component library spec, 13 specimens: 1 Answer Card · 2 Plan
   Panel · 3 Disambiguation Chips · 4 Join & Grain Preview · 5 Tap-out Card · 9 Lifecycle
   Tracker · 10 Provenance Popover · 11 Agent Theater Strip · 12 Verifier Verdict Card ·
   13 Analysis Notebook · 14 Budget Meter · 15 Plan Version Stepper · 16 Session Handoff
   Card (numbers 6-8 absent). Grain REQ crimson *; evidence-bearing disambiguation options.
-- Lumi Principles.dc.html — 8 principles (thresholds; one component everywhere; uncertainty
+- Admin Principles.dc.html — 8 principles (thresholds; one component everywhere; uncertainty
   is a rendered surface; recorded as you·reversible; flywheel shown; verification is a
   surface; exploratory carries a passport; the stream is the interface). "crimson =
   definition conflict, only, ever."
-- github.md — sync manifest → apps/console types.ts/tokens.css/events.py; Lumi rebrand
+- github.md — sync manifest → apps/console types.ts/tokens.css/events.py; Admin rebrand
   recorded.
 
 ## cosmos.js (151 L, near-complete)
@@ -105,7 +105,7 @@ edge groups toggleable; drag-orbit/wheel-zoom/raycast pick → CustomEvent 'cosm
 theme paper|navy; ResizeObserver; reduced-motion. Missing: real data feed (makeGraph is
 synthetic), 2D fallback, edge-kind colors, label collision.
 
-## Earlier mocks (apps/console/design/)
+## Earlier mocks (now under archive/design/)
 - console-mock.html (v1) — chat-transcript-first + trace rail (model later abandoned);
   own palette; real dark theme; self-documenting spec.
 - radix-workspace-mock.html (v2) — "The Brief is the product"; introduces the Bright Blue
@@ -137,10 +137,10 @@ serves the SPA via StaticFiles after API routes. Runner: SYNAPSE_CONSOLE_RUNNER 
 sahs.tools.api.Build.
 
 ## Deltas this inventory forces into the build plan
-1. tokens.css: sync to Lumi palette (light + dark per doctrine) + fix --ink-3 AA failure.
+1. tokens.css: sync to the Admin palette (light + dark per doctrine) + fix --ink-3 AA failure.
 2. Backend: re-point existing read endpoints at Build.open (don't invent parallel routes).
 3. Enrichment Runs + Builds & Diffs pages are near-free (reports already shaped).
 4. Builds artboard already renders "45 (+1 excluded)" — honesty decision pre-made by design.
-5. Lumi Components is the component contract; new components register there + here.
+5. Admin Components is the component contract; new components register there + here.
 6. Carry doctrines: no numeric confidence in UI; labeled previews never unlabeled fakes;
    accumulation surfaces (pins/reviews/feedback); crimson = conflict only ever.

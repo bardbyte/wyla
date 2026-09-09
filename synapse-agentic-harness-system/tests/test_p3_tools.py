@@ -48,7 +48,7 @@ def build(tmp_path_factory) -> Build:
     """One compiled fixture build for the whole module."""
     tmp = tmp_path_factory.mktemp("p3")
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"), "build-graph",
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"), "build-graph",
          "--graph", str(tmp / "graph"),
          "--crosswalk", str(FX / "identity" / "crosswalk.jsonl"),
          "--bq-archive", str(FX / "real_extractions_production"),
@@ -58,10 +58,10 @@ def build(tmp_path_factory) -> Build:
          "--out", str(tmp / "run"), "--plain", "--run-id", "p3_r1"],
         capture_output=True, text=True, cwd=SILO)
     assert result.returncode == 0, result.stderr[-800:]
-    # through the CLI on purpose: every laptop.py subcommand must run
+    # through the CLI on purpose: every pipeline.py subcommand must run
     # end-to-end on fixtures in CI (the runbook-drift guard)
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"), "compile",
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"), "compile",
          "--graph", str(tmp / "graph"), "--builds", str(tmp / "builds"),
          "--out", str(tmp / "run_compile"), "--plain"],
         capture_output=True, text=True, cwd=SILO)
@@ -239,29 +239,29 @@ def test_sandbox_qualifies_tables_with_the_data_project(build, tmp_path):
     rec = _Recorder()
     out = execute_sandboxed(build, sql, mode="snapshot", substrate=rec,
                             ledger_path=tmp_path / "l.jsonl",
-                            env={"BQ_DATA_PROJECT": "axp-lumi"})
+                            env={"BQ_DATA_PROJECT": "demo-warehouse"})
     assert out["status"] == "ok"
-    assert "`axp-lumi`.dw.wwcas_authorization" in rec.seen[0]
+    assert "`demo-warehouse`.dw.wwcas_authorization" in rec.seen[0]
     assert out["meta"]["sql_sent"] == rec.seen[0]
     assert out["meta"]["qualified"] == [
-        {"from": WWCAS, "to": f"axp-lumi.{WWCAS}"}]
+        {"from": WWCAS, "to": f"demo-warehouse.{WWCAS}"}]
     assert out["meta"]["tables"] == [WWCAS]      # the graph's name stays
     # a query already written the warehouse's way resolves and passes
     rec = _Recorder()
     out = execute_sandboxed(
-        build, f"SELECT approval_cd FROM `axp-lumi`.{WWCAS} {DATED}",
+        build, f"SELECT approval_cd FROM `demo-warehouse`.{WWCAS} {DATED}",
         mode="snapshot", substrate=rec, ledger_path=tmp_path / "l.jsonl",
-        env={"BQ_DATA_PROJECT": "axp-lumi"})
+        env={"BQ_DATA_PROJECT": "demo-warehouse"})
     assert out["status"] == "ok" and "sql_sent" not in out["meta"]
     assert out["meta"]["tables"] == [WWCAS]
     # the connection's data project is the default source of truth
     class _Conn:
-        data_project = "axp-lumi"
+        data_project = "demo-warehouse"
     rec = _Recorder()
     rec.connection = _Conn()
     out = execute_sandboxed(build, sql, mode="snapshot", substrate=rec,
                             ledger_path=tmp_path / "l.jsonl", env={})
-    assert "`axp-lumi`.dw.wwcas_authorization" in rec.seen[0]
+    assert "`demo-warehouse`.dw.wwcas_authorization" in rec.seen[0]
     # no data project anywhere: the SQL travels untouched
     rec = _Recorder()
     execute_sandboxed(build, sql, mode="snapshot", substrate=rec,
@@ -289,7 +289,7 @@ def test_sandbox_teaches_a_failed_dry_run(build, tmp_path):
     assert "approval_cd" in taught["closest"]
     out = execute_sandboxed(
         build, sql, mode="snapshot",
-        substrate=_Refuses("Not found: Table prj-p-lumi-gpt:"
+        substrate=_Refuses("Not found: Table demo-billing:"
                            "dw.wwcas_authorization was not found in "
                            "location US"),
         ledger_path=tmp_path / "l.jsonl",
@@ -297,7 +297,7 @@ def test_sandbox_teaches_a_failed_dry_run(build, tmp_path):
     taught = out["meta"]["taught"]
     assert taught["kind"] == "environment"
     assert taught["yours_to_fix"] is False
-    assert "LUMI_BQ_DATA_PROJECT" in taught["hint"]
+    assert "SYNAPSE_BQ_DATA_PROJECT" in taught["hint"]
     # a live execution that blows up is taught the same way
     class _Explodes:
         connection = None

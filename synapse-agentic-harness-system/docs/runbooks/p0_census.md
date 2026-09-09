@@ -20,7 +20,7 @@ health**.
 ```bash
 cd synapse-agentic-harness-system
 
-python scripts/laptop.py census \
+python scripts/pipeline.py census \
   --sources-dir <SRC> \
   --registry <BQ_ROOT>/_batch_summary.csv \
   --out graph/runs/p0_census \
@@ -58,7 +58,7 @@ python scripts/laptop.py census \
 ## Then materialize the gold tasks
 
 ```bash
-python scripts/laptop.py make-tasks \
+python scripts/pipeline.py make-tasks \
   --sources-dir <SRC> \
   --registry <BQ_ROOT>/_batch_summary.csv \
   --out graph/runs/p0_census

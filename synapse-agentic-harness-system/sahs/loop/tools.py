@@ -1,6 +1,6 @@
 """The agent's tools (Agent Loop v1 §3): descriptions are the product.
 
-Claude Code's Glob/Grep/Read/Bash/TodoWrite/Task map onto the graph
+A coding agent's Glob/Grep/Read/Bash/TodoWrite/Task map onto the graph
 one-for-one. Each tool ships with EXACTLY the description the spec
 wrote (a test pins the text), and each error message names the correct
 next call — the error channel is a teaching channel, never a dead end.
@@ -79,7 +79,7 @@ class SnapshotRunner(Protocol):
 @dataclass(frozen=True)
 class ToolSpec:
     """One tool as the model sees it. ``signature`` and ``description``
-    are the spec's text verbatim; ``maps_to`` names the Claude Code
+    are the spec's text verbatim; ``maps_to`` names the coding-agent
     analogue the design borrowed."""
 
     name: str
@@ -893,7 +893,7 @@ def toolkit(build: Build, state: LoopState, *,
 
         if problems:
             # errors return the plan UNCHANGED: the model fixes its
-            # own patch from the teaching, Claude-Code style
+            # own patch from the teaching, coding-agent style
             return {"ok": False, "plan": state.plan.to_dict(),
                     "changes": [], "problems": problems,
                     "warnings": warnings}

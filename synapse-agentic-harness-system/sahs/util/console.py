@@ -1,7 +1,7 @@
 """Production console (E10) — the terminal is a projection; the stream is
 the record.
 
-Every laptop.py subcommand routes its progress through one RunConsole:
+Every pipeline.py subcommand routes its progress through one RunConsole:
 events append to graph/runs/<run_id>/events.jsonl as ``meridian.event/1``
 records (committed with all run outputs), while the terminal renders either
 a single in-place TTY line with EMA-smoothed rate and ETA, or plain
