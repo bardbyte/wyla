@@ -273,7 +273,7 @@ def test_the_artifact_drawer_and_the_report():
                   'id="chat-meter" hidden', 'id="chat-build" hidden',
                   "tableReport", "animateNumbers", "sparkline",
                   "report-strip", "tablev3", "Show all",
-                  'class="line"', 'class="bar"', "--i:"):
+                  'class="line"', 'class="chart-bar"', "--i:"):
         assert piece in CHAT_JS, piece
     for cls in (".chat-panel.open", ".chatv2.panel-open .chat-main",
                 "--panel-w", ".report-strip", ".stat-spark", ".tablev3",

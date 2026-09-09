@@ -910,7 +910,9 @@ table.result tr:last-child td { border-bottom: none; }
 }
 .chat-user {
   align-self: flex-end; max-width: 72%;
-  background: var(--panel, #efece4);
+  /* tokens that both themes define: the panel colour stayed light in
+     the dark theme and the words vanished into it */
+  background: var(--surface-2, #eef3fa); color: var(--ink, #222018);
   border: 1px solid var(--line, #d5d2ca);
   border-radius: 14px 14px 4px 14px; padding: 8px 12px;
   white-space: pre-wrap;
@@ -1346,7 +1348,7 @@ table.result tr:last-child td { border-bottom: none; }
   stroke-dasharray: 2400; stroke-dashoffset: 2400;
   animation: draw 1s ease-out forwards;
 }
-.chartv2 .bar {
+.chartv2 .chart-bar {
   transform-box: fill-box; transform-origin: bottom;
   animation: grow 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
@@ -1374,7 +1376,7 @@ table.result tr:last-child td { border-bottom: none; }
 @keyframes fillin { to { fill-opacity: 0.15; } }
 @media (prefers-reduced-motion: reduce) {
   .chat-main, .chat-panel, .artifact-inline { transition: none; }
-  .stat, .dash-panel, .chartv2 .line, .chartv2 .bar, .chartv2 .dot,
+  .stat, .dash-panel, .chartv2 .line, .chartv2 .chart-bar, .chartv2 .dot,
   .chartv2 .fill { animation: none; opacity: 1; stroke-dashoffset: 0;
     transform: none; fill-opacity: 0.15; }
 }
