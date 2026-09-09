@@ -109,6 +109,15 @@ export async function renderChat(outlet, wanted = "") {
     boot = await api.chatSession(stored);
     if (!boot.available) boot = null;
   }
+  if (!boot && wanted === "new") {
+    // an empty chat already exists: reuse it rather than pile them up
+    const recent = await api.chatSessions(10).catch(() => ({}));
+    const empty = (recent.sessions || []).find((r) => r.messages === 0);
+    if (empty) {
+      boot = await api.chatSession(empty.id);
+      if (!boot.available) boot = null;
+    }
+  }
   if (!boot) {
     const created = await api.chatNewSession();
     if (!created.available) {
@@ -151,6 +160,7 @@ export async function renderChat(outlet, wanted = "") {
     let dials = null;
     try { dials = await api.chatDials(); } catch { dials = null; }
     if (!dials || !dials.available) return;
+    if (!planeSel.isConnected || !el("chat-depth")) return;   // page left
     const planes = dials.planes || [];
     planeSel.innerHTML = planes.map((p) => `
       <option value="${esc(p.id)}"${p.id === state.plane ? " selected" : ""}${
@@ -159,7 +169,7 @@ export async function renderChat(outlet, wanted = "") {
         p.available ? "" : " · not configured"}</option>`).join("");
     for (const o of el("chat-depth").options) {
       const d = (dials.depths || []).find((x) => x.id === o.value);
-      if (d) o.title = `${d.means} (${d.on.vertex} on Vertex, ${d.on.eag} on EAG)`;
+      if (d) o.title = d.means;
     }
     for (const b of document.querySelectorAll(".chat-mode")) {
       const m = (dials.modes || []).find((x) => x.id === b.dataset.mode);
@@ -168,20 +178,14 @@ export async function renderChat(outlet, wanted = "") {
     const notes = dials.notes || {};
     helpPop.innerHTML = `
       <div class="help-group">
-        <div class="help-head">Mode <span>how far Synapse goes on its own</span></div>
-        ${(dials.modes || []).map((m) => helpRow(m.label, m.means)).join("")}
-      </div>
-      <div class="help-group">
-        <div class="help-head">Depth <span>${esc(notes.depth || "")}</span></div>
-        ${(dials.depths || []).map((d) => helpRow(d.label, d.means,
-          `${d.on.vertex} on Vertex · ${d.on.eag} on EAG`)).join("")}
+        <div class="help-head">Depth <span>how much Synapse thinks before each step</span></div>
+        ${(dials.depths || []).map((d) => helpRow(d.label, d.means)).join("")}
       </div>
       <div class="help-group">
         <div class="help-head">Model <span>${esc(notes.plane || "")}</span></div>
         ${planes.map((p) => helpRow(p.label, p.means, p.available
-          ? (p.default ? "configured here · where a new chat starts"
-                       : "configured here")
-          : `not configured here: ${p.reason}`)).join("")}
+          ? (p.default ? "available · where a new chat starts" : "available")
+          : `not available here: ${p.reason}`)).join("")}
       </div>`;
   }
   loadDials();

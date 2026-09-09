@@ -1,4 +1,4 @@
-/** Metrics Explorer: the metrics as cards. Published first, then the
+/** Semantics Explorer: the metrics as cards. Published first, then the
  * unreviewed bulk, then pending specs; filterable by status and by
  * data product, searchable. A card shows the name, the exact
  * calculation, the question it answers, where it is computed, its
@@ -9,6 +9,7 @@
  * profile is one more link. */
 
 import { api } from "../api.js";
+import { filterBar, optionsFrom } from "../filters.js";
 import {
   card, esc, loading, statusLabel, tierChip, unavailable,
 } from "../ui.js";
@@ -136,11 +137,12 @@ function metricDetail(r, m, t) {
 }
 
 export async function renderMetrics(outlet) {
-  const state = { q: "", status: "", table: "" };
+  const state = { q: "", status: "" };
+  const picks = {};                       // lob, table
   outlet.innerHTML = `
     <div class="library-page">
       <div class="page-head">
-        <h1>Metrics Explorer</h1>
+        <h1>Semantics Explorer</h1>
         <p class="muted">Every metric the build holds, published first.
         Each card shows the exact calculation and the real use behind
         it; click one for its full definition and the data product it
@@ -150,29 +152,30 @@ export async function renderMetrics(outlet) {
         <input class="search" id="search"
           placeholder="search name, calculation, question…" />
         <div class="pills" id="status-pills"></div>
-        <select class="search" id="table-filter"
-          title="show only metrics computed on one data product">
-          <option value="">all data products</option>
-        </select>
+        <div id="m-filter"></div>
         <span class="muted" id="count"></span>
       </div>
       <div class="card-grid" id="list">${loading()}</div>
     </div>`;
 
-  const tablesPayload = await api.tables();
-  const tableSelect = outlet.querySelector("#table-filter");
-  if (tablesPayload.available) {
-    for (const r of tablesPayload.rows) {
-      const option = document.createElement("option");
-      option.value = r.physical;
-      option.textContent = `${r.short || r.physical} (${r.metrics_here})`;
-      tableSelect.appendChild(option);
-    }
-  }
-  tableSelect.addEventListener("change", () => {
-    state.table = tableSelect.value;
-    draw();
-  });
+  // the filters, from the metrics the build holds: line of business
+  // and data product, counted; the funnel offers only what exists
+  const [tablesPayload, everything] = await Promise.all([
+    api.tables(), api.metrics({ limit: 1000 })]);
+  const all = everything.available ? everything.rows : [];
+  const tableRows = tablesPayload.available ? tablesPayload.rows : [];
+  const lobName = (code) => {
+    const hit = tableRows.find((r) => r.lob === code && r.lob_name);
+    return hit ? `${code} · ${hit.lob_name}` : code;
+  };
+  const groups = [
+    { key: "lob", label: "Line of business",
+      options: optionsFrom(all, (r) => r.lob || "", lobName) },
+    { key: "table", label: "Data product",
+      options: optionsFrom(all, (r) => r.table || "",
+        (v) => v.split(".").pop()) },
+  ].filter((g) => g.options.length > 0);
+  filterBar(outlet.querySelector("#m-filter"), groups, picks, () => draw());
 
   const pills = (host, options, value, onPick, labels = {}) => {
     host.innerHTML = options.map((option) =>
@@ -227,7 +230,8 @@ export async function renderMetrics(outlet) {
       (v) => { state.status = v; draw(); }, STATUS_LABEL);
     list.innerHTML = loading();
     const data = await api.metrics(
-      { q: state.q, status: state.status, table: state.table });
+      { q: state.q, status: state.status, table: picks.table || "",
+        lob: picks.lob || "" });
     if (!list.isConnected) return;
     if (!data.available) { list.innerHTML = unavailable(data.reason); return; }
     outlet.querySelector("#count").textContent =

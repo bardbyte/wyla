@@ -151,7 +151,8 @@ class AssistantRuntime:
 
     def label_for(self, plane: str = "") -> str:
         """The model as the composer names it, for a plane: "Gemini
-        2.5 Pro via EAG"; a scripted transport says so."""
+        2.5 Pro" (the plane is the catalog's business, not the
+        label's); a scripted transport says so."""
         if self._model_factory is not None:
             return "scripted"
         from sahs.util.eag import model_plane
@@ -303,10 +304,17 @@ class AssistantRuntime:
         return owner_slug(self.user_name) or "anon"
 
     def skills(self) -> list[dict]:
-        from .skills_loader import all_skills
+        from .skills_loader import all_skills, author_of
         return [{"name": p.name, "title": p.title,
                  "description": p.description, "origin": p.origin,
                  "owner": p.owner, "mine": bool(p.owner),
+                 "updated": p.updated,
+                 # the author as the shelf shows it: Synapse for what
+                 # ships with the assistant, You for your own, and a
+                 # shared pack's own word for itself (an author line)
+                 "author": ("Synapse" if p.origin == "built-in"
+                            else "You" if p.owner
+                            else author_of(p.text) or "Shared"),
                  "text": p.text}
                 for p in all_skills(self.graph_root, self.owner)]
 
@@ -371,7 +379,7 @@ class AssistantRuntime:
     @property
     def model_label(self) -> str:
         """The model a new chat starts on, as the composer names it
-        ("Gemini 2.5 Pro via EAG"); a scripted transport says so."""
+        ("Gemini 2.5 Pro"); a scripted transport says so."""
         return self.label_for("")
 
     def slash_skill(self, text: str) -> tuple[str, list[str]]:

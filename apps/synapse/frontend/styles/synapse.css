@@ -24,6 +24,9 @@
 }
 .navlist.explore .shelf-head { padding: 0 10px 6px; margin-top: 0; }
 .navlist.explore a { animation: none; }
+.navlist.customize { padding-top: var(--s-3); }
+.navlist.customize .shelf-head { padding: 0 10px 6px; margin-top: 0; }
+.navlist.customize a { animation: none; }
 .account { border-top: 1px solid var(--line); border-radius: 0;
            padding-top: 12px; margin-top: var(--s-2); }
 
@@ -143,8 +146,44 @@
 }
 .artifact-body > .watermark-band + svg.chartv2 { max-width: 720px; }
 
-/* ── the line-of-business filter ── */
-.lob-filter { max-width: 340px; }
+/* ── the filter icon: a funnel, a panel of groups, the picks as chips ── */
+.filter-bar { position: relative; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filter-btn { display: inline-flex; align-items: center; gap: 6px; }
+.filter-btn.on { border-color: var(--accent); color: var(--accent); }
+.filter-btn .funnel { font-size: 12px; }
+.filter-count {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-size: 11px; line-height: 18px;
+  text-align: center;
+}
+.filter-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.filter-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px 3px 8px;
+  border: 1px solid var(--line); border-radius: 999px; font-size: var(--fs-12);
+  background: var(--surface-2);
+}
+.filter-chip .chip-x {
+  border: 0; background: transparent; color: var(--ink-3); cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0 2px;
+}
+.filter-pop {
+  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0;
+  min-width: 260px; max-width: 420px; max-height: 60vh; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: var(--shadow-lift); padding: 8px; display: flex; flex-direction: column; gap: 8px;
+}
+.filter-group { display: flex; flex-direction: column; gap: 1px; }
+.filter-head {
+  font-size: var(--fs-11); text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--ink-3); padding: 4px 8px 2px;
+}
+.filter-opt {
+  display: flex; justify-content: space-between; gap: 12px; width: 100%;
+  padding: 6px 10px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--ink); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer;
+}
+.filter-opt:hover { background: var(--surface-2); }
+.filter-opt.on { background: var(--accent-soft); color: var(--accent); }
 
 /* ── the product profile: what it is, then the columns as a list ── */
 .product-desc-full {
@@ -285,3 +324,44 @@
   background: var(--surface-2); font-size: var(--fs-13); max-height: 480px; overflow: auto;
 }
 .origin-tag.o-mine { background: var(--accent-soft, #eaf2fb); color: var(--accent, #2f6feb); }
+
+/* ── the Skills shelf: one list, the way a settings page lists them ── */
+.shelf-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.shelf-toolbar h1 { margin: 0; }
+.shelf-toolbar .search { flex: 0 1 320px; }
+.add-menu { position: relative; }
+.add-pop {
+  position: absolute; z-index: 30; right: 0; top: calc(100% + 6px);
+  min-width: 240px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: var(--shadow-lift); padding: 6px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.add-pop button {
+  display: flex; gap: 10px; align-items: center; padding: 8px 10px;
+  border: 0; background: transparent; color: var(--ink); font: inherit;
+  font-size: var(--fs-13); text-align: left; border-radius: 8px; cursor: pointer;
+}
+.add-pop button:hover { background: var(--accent-soft); color: var(--accent); }
+.add-pop hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.shelf-intro { margin: 0 0 12px; max-width: 820px; }
+.shelf-table { width: 100%; border-collapse: collapse; font-size: var(--fs-13); }
+.shelf-table th {
+  text-align: left; font-weight: 500; color: var(--ink-3); font-size: var(--fs-12);
+  padding: 8px 10px; border-bottom: 1px solid var(--line);
+}
+.shelf-table td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.shelf-table tr.shelf-row { cursor: pointer; }
+.shelf-table tr.shelf-row:hover td { background: var(--surface-2); }
+.shelf-table tr.shelf-row.on td { background: var(--accent-soft); }
+.shelf-table .shelf-name { font-weight: 600; color: var(--ink); }
+.shelf-table .shelf-sub {
+  display: block; color: var(--ink-3); font-size: var(--fs-12);
+  max-width: 560px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.shelf-table .shelf-kind .chip { font-size: var(--fs-11); }
+.shelf-table .shelf-when, .shelf-table .shelf-author { color: var(--ink-2); white-space: nowrap; }
+.shelf-empty { padding: 24px 10px; color: var(--ink-3); }
+.shelf-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+@media (max-width: 720px) {
+  .shelf-table .shelf-kind, .shelf-table th:nth-child(2) { display: none; }
+}

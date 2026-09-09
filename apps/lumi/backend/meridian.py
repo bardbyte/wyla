@@ -512,6 +512,9 @@ class MeridianData:
         # runs/ tree holds
         return {"available": True, "runs": runs[-20:]}
 
+    # a staged file's header names the business unit it was dropped for
+    _STAGED_BU = re.compile(r"business unit ([A-Za-z0-9_-]+)")
+
     # the knowledge inventory roots — everything the Artifacts browser
     # may list and read. Path containment is enforced on read.
     def _knowledge_index(self) -> tuple[list[dict], dict[str, Path]]:
@@ -523,16 +526,44 @@ class MeridianData:
         entries: list[dict] = []
         paths: dict[str, Path] = {}
 
-        def _add(path: Path, rel: str, area: str,
-                 staged: bool) -> None:
+        def _head(path: Path) -> str:
             try:
-                size = path.stat().st_size
+                with path.open("r", encoding="utf-8", errors="replace") as fh:
+                    return fh.read(4000)
+            except OSError:
+                return ""
+
+        def _title(head: str, fallback: str) -> str:
+            for line in head.splitlines()[:40]:
+                if line.startswith("# "):
+                    return line[2:].strip()[:120]
+            return fallback
+
+        def _add(path: Path, rel: str, area: str, staged: bool,
+                 family: str, folder: str = "", author: str = "") -> None:
+            try:
+                stat = path.stat()
             except OSError:
                 return
+            head = _head(path) if path.suffix.lower() in (
+                ".md", ".txt", ".markdown") else ""
+            # the author, in order: what the file says about itself,
+            # the business unit a staged file was dropped for, the
+            # folder it lives in (CFR, TLS), then the shelf's own word
+            named = _author_of(head)
+            staged_bu = self._STAGED_BU.search(head) if staged else None
             entries.append({
                 "rel": rel, "name": path.name, "area": area,
-                "size": size, "staged": staged,
-                "kind": path.suffix.lstrip(".") or "file"})
+                "size": stat.st_size, "staged": staged,
+                "kind": path.suffix.lstrip(".") or "file",
+                "family": family, "folder": folder,
+                "title": _title(head, path.stem),
+                "author": (named or (staged_bu.group(1).strip()
+                                     if staged_bu else "")
+                           or folder or author),
+                "updated": _dt.datetime.fromtimestamp(
+                    stat.st_mtime, tz=_dt.timezone.utc).isoformat(
+                        timespec="seconds")})
             paths[rel] = path
 
         if skills.exists():
@@ -540,17 +571,25 @@ class MeridianData:
                 if path.is_file():
                     parts = path.relative_to(skills).parts
                     area = "/".join(parts[:-1]) or "skills"
+                    # a top-level markdown is a pack (the shelf lists
+                    # packs through the skills API); users/ holds the
+                    # owned packs; a folder is knowledge (CFR/, TLS/)
+                    if len(parts) == 1 or parts[0] == "users":
+                        family, folder = "pack", ""
+                    else:
+                        family, folder = "knowledge", parts[0]
                     _add(path, "skills/" + "/".join(parts), area,
-                         staged=False)
+                         staged=False, family=family, folder=folder)
         staged_dir = sources / "artifacts"
         if staged_dir.exists():
             for path in sorted(staged_dir.glob("*")):
                 if path.is_file():
                     _add(path, f"artifacts/{path.name}", "staged",
-                         staged=True)
+                         staged=True, family="knowledge")
         if sources.exists():
             for path in sorted(sources.glob("*.md")):
-                _add(path, path.name, "reference docs", staged=False)
+                _add(path, path.name, "reference docs", staged=False,
+                     family="reference", author="Sources")
         return entries, paths
 
     def _knowledge_files(self) -> list[dict]:
@@ -625,6 +664,18 @@ class ArtifactStageRequest(BaseModel):
     ext: str = Field(default="md",
                      pattern=r"^(md|txt|csv|json|yaml|yml|sql)$")
     actor: str = "admin"
+
+
+def _author_of(text: str) -> str:
+    """A markdown file's own author line (front matter ``author:`` or
+    an ``Author:`` line up top), the same way the skills loader reads
+    it; '' when there is none."""
+    for line in (text or "").splitlines()[:30]:
+        m = re.match(r"^\s*(?:[-*]\s*)?\*{0,2}author\*{0,2}\s*:\*{0,2}\s*(.+?)\s*$",
+                     line, re.I)
+        if m:
+            return m.group(1).strip().strip("'\"")[:60]
+    return ""
 
 
 router = APIRouter(prefix="/api/meridian")

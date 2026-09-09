@@ -286,8 +286,8 @@ def test_the_dials_catalog_and_the_model_switch(client):
     assert [d["default"] for d in dials["depths"]] == [False, True, False]
     assert [p["id"] for p in dials["planes"]] == ["vertex", "eag"]
     for p in dials["planes"]:
-        assert p["label"].endswith(" via " + {"vertex": "Vertex",
-                                              "eag": "EAG"}[p["id"]])
+        assert " via " not in p["label"]          # the model, nothing more
+        assert p["plane_name"] == {"vertex": "Vertex", "eag": "EAG"}[p["id"]]
         assert p["means"] and isinstance(p["available"], bool)
         assert p["available"] or p["reason"]
     assert sum(p["default"] for p in dials["planes"]) == 1
@@ -370,3 +370,14 @@ def test_files_ride_the_message(client):
     assert client.get(f"/api/chat/sessions/{sid}/files").json()["files"] == []
     assert client.delete(f"/api/chat/sessions/{sid}/files/{fid}").json()[
         "removed"] is False
+
+
+def test_an_untouched_new_chat_stays_off_the_shelf(client):
+    """A session carries how many messages it holds; the shelf lists
+    only those with one, so New chat without a word never shows under
+    Recent, and the next New chat reuses the empty one."""
+    made = client.post("/api/chat/sessions", json={}).json()["session"]
+    rows = client.get("/api/chat/sessions?limit=50").json()["sessions"]
+    mine = next(r for r in rows if r["id"] == made["id"])
+    assert mine["messages"] == 0
+    assert all(isinstance(r["messages"], int) for r in rows)

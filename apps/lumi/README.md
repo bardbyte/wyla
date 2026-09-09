@@ -110,10 +110,12 @@ where it is used, metric cards open in place with the definition and
 the table, and Skills (in place of Artifacts) showcases the doctrine
 packs with a Use-in-chat door. Skills also lets a person teach one:
 material in, the model's draft in the house format out, saved under
-`graph/skills/users/<owner>/` and loaded for that person alone; the
-Knowledge page (under Skills) does the same for a knowledge file
-staged for a business unit. The chat's "+" offers Add files: PDF and
-images ride inline, text as text, Office files converted here.
+`graph/skills/users/<owner>/` and loaded for that person alone. The
+same page lists the knowledge files the graph is built from (the
+folders under the skills root, the staged drops, the reference docs)
+with their authors and last writes, and adds one staged for a
+business unit. The chat's "+" offers Add files: PDF and images ride
+inline, text as text, Office files converted here.
 
 On both surfaces the composer's model label is a select over the two
 model planes (Gemini 3.1 Pro on Vertex, Gemini 2.5 Pro through EAG),
