@@ -435,7 +435,7 @@ handoff, the eval suites.
    making the facts up.
 
 20. The schema for leaving the laptop (2026-09-09), in
-   `db/spanner/` with its reasoning in `docs/specs/spanner_schema.md`:
+   `db/spanner/` with its reasoning in `docs/spanner_schema.md`:
    identity with roles as rows that name the surface each may open
    (admin the Lumi console, analyst Synapse, the steward's set to be
    decided), credentials as Argon2id strings with a pepper outside
@@ -449,6 +449,23 @@ handoff, the eval suites.
    Spanner move have a contract to build against; nothing in the
    laptop's discipline (append-only, provenance, one writer, the E14
    door) is given up to get there.
+
+21. The first rollout off the laptop (2026-09-09), decided in
+   `docs/spanner_schema.md`: people sign up with an email and a
+   password and sign in with them — no second factor, no mail, no
+   invitations, no refresh tokens; those five tables stay in the DDL,
+   marked and empty. A role names the surfaces it opens. Every chat,
+   message, file, artifact, plan, vote, event, memory, skill and
+   knowledge file is a row with its person; the search index
+   partitions by the person; a file's bytes stay outside the
+   database. The graph stays on the filesystem. There is no SQLite
+   identity store in between: the laptop runs `SAHS_STORE=local`, as
+   it does today, and the deployment `SAHS_STORE=spanner`, with the
+   block the store reads in `.env.example`, unread until the store
+   lands. Reason: the product asked for the simplest thing that lets
+   people in and tracks everything; because the schema was designed
+   whole, simplifying is a choice of which tables to write, not a
+   second schema.
 
 ## 12 · The laptop, measured (state report of 2026-09-02)
 

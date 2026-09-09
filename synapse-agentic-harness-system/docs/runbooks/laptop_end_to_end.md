@@ -536,3 +536,12 @@ per-turn record (what the model saw, every tool result) is the
 events file beside it — the chat itself shows none of that. PPTX
 export needs the `assistant` extra — the route says so if it is
 missing.
+
+**Leaving the laptop.** The stores above are the laptop's. What they
+become on Spanner — people with an email and a password, roles that
+open a surface, every chat and message and file and memory as a row
+with its person, the graph still on the filesystem — is explained
+table by table in `docs/spanner_schema.md`, with the DDL under
+`db/spanner/` and the `.env` block in `.env.example` (`SAHS_STORE`,
+`SPANNER_*`, `AUTH_*`). Nothing here reads them yet: the laptop runs
+`SAHS_STORE=local`, which is what it does today.

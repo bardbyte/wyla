@@ -2,7 +2,9 @@
 -- Synapse on Spanner · 001 · identity, credentials, roles, sessions
 -- GoogleSQL dialect. Apply in order: 001, 002, 003.
 --
--- Principles, each a line in docs/specs/spanner_schema.md:
+-- Principles, each a line in docs/spanner_schema.md (the design,
+-- table by table; §3.8 names the five tables the first rollout
+-- applies but leaves empty):
 --   * keys are random UUIDs (GENERATE_UUID), never monotonic: no hot
 --     tail on the split;
 --   * nothing secret is stored recoverable: passwords are Argon2id
@@ -70,8 +72,8 @@ CREATE TABLE UserCredentials (
 ) PRIMARY KEY (UserId, CredentialId),
   INTERLEAVE IN PARENT Users ON DELETE CASCADE;
 
-CREATE NULL_FILTERED INDEX ActiveCredentialByUser
-  ON UserCredentials (UserId, RetiredAt);
+-- The current password is the child row with RetiredAt IS NULL, read
+-- by the key range (UserId): a person has a handful of rows, no index.
 
 -- Roles are rows. Surfaces says which app a role may open:
 -- 'lumi' is the admin console at /, 'synapse' the analyst surface
@@ -146,6 +148,7 @@ CREATE TABLE AuthSessions (
 CREATE UNIQUE INDEX AuthSessionsByToken ON AuthSessions (TokenHash);
 CREATE INDEX AuthSessionsByUser ON AuthSessions (UserId, RevokedAt, ExpiresAt);
 
+-- ── phase 2: applied with the file, empty in the first rollout (docs/spanner_schema.md §3.8) ──
 -- Refresh tokens rotate in families: each use issues a child and
 -- marks the parent used; a used token presented again is reuse, and
 -- the whole family is revoked (ReuseDetectedAt).
@@ -185,6 +188,7 @@ CREATE TABLE LoginAttempts (
 CREATE INDEX LoginAttemptsByEmail ON LoginAttempts (EmailNormalized, OccurredAt DESC);
 CREATE INDEX LoginAttemptsByIp ON LoginAttempts (Ip, OccurredAt DESC);
 
+-- ── phase 2: applied with the file, empty in the first rollout (docs/spanner_schema.md §3.8) ──
 -- Second factors. A TOTP secret is wrapped by Cloud KMS (envelope
 -- encryption): the ciphertext and the key version land here, the key
 -- never does. Recovery codes are hashed, single-use.
@@ -214,6 +218,7 @@ CREATE TABLE MfaRecoveryCodes (
 ) PRIMARY KEY (UserId, CodeHash),
   INTERLEAVE IN PARENT Users ON DELETE CASCADE;
 
+-- ── phase 2: applied with the file, empty in the first rollout (docs/spanner_schema.md §3.8) ──
 -- One table for every one-shot token a person receives by mail:
 -- verify the address, reset the password, accept an invitation.
 -- Hashed, single-use, short-lived; gone a day after expiry.
@@ -234,6 +239,7 @@ CREATE TABLE ActionTokens (
 
 CREATE UNIQUE INDEX ActionTokensByHash ON ActionTokens (TokenHash);
 
+-- ── phase 2: applied with the file, empty in the first rollout (docs/spanner_schema.md §3.8) ──
 -- An invitation names the address and the role it will hold; the
 -- token that redeems it lives in ActionTokens (Purpose = 'invite').
 CREATE TABLE Invitations (
@@ -309,3 +315,10 @@ CREATE CHANGE STREAM AuditStream FOR AuditEvents
 --   ('sources.manage', 'Add, patch, retire sources'),
 --   ('users.manage', 'Invite, grant roles, lock, disable'),
 --   ('audit.read', 'Read the audit');
+-- INSERT INTO RolePermissions (RoleId, PermissionId)
+--   SELECT r.RoleId, p.PermissionId FROM Roles r CROSS JOIN Permissions p
+--   WHERE r.Name = 'admin';                       -- admin holds every permission
+-- INSERT INTO RolePermissions (RoleId, PermissionId)
+--   SELECT r.RoleId, p.PermissionId FROM Roles r CROSS JOIN Permissions p
+--   WHERE r.Name IN ('analyst', 'steward')        -- the steward's own set: to be decided
+--     AND p.Name IN ('chat.use', 'chat.autopilot', 'skills.own', 'knowledge.stage');

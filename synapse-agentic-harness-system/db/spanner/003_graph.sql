@@ -15,6 +15,9 @@
 --                  writer in the same transaction as the append.
 -- The property graph is defined over the fold, so GQL sees the
 -- current state and SQL over *Assertions sees the history.
+--
+-- Applied with the other two files; EMPTY in the first rollout, where
+-- the graph stays on the filesystem (docs/spanner_schema.md §5).
 -- ============================================================
 
 -- A run: one build-graph invocation, the provenance anchor.
