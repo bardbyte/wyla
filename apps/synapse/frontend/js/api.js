@@ -134,6 +134,14 @@ export const api = {
     post(`/api/chat/sessions/${encodeURIComponent(id)}/star`, { on }),
   chatArchive: (id, on) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/archive`, { on }),
+  // memory.md: the document, and the document back
+  chatMemoryDoc: () => get("/api/chat/memory.md"),
+  chatSaveMemoryDoc: async (text) => {
+    const r = await fetch("/api/chat/memory.md", { method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }) });
+    return r.json();
+  },
   chatMemories: (projectId = "") =>
     get(`/api/chat/memories?project_id=${encodeURIComponent(projectId)}`),
   chatRetireMemory: (id) =>

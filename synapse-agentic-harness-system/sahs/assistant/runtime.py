@@ -212,6 +212,54 @@ class AssistantRuntime:
                         "conversation remembers that it was sent, not "
                         "its bytes. Attach it again to ask more."}
 
+    # ── memory.md: what Synapse remembers, as a document a person
+    #    can read and edit; a line is a memory ──────────────────
+    MEMORY_HEAD = ("# What Synapse remembers about {name}\n\n"
+                   "One line per memory: a preference or a choice you "
+                   "settled in chat. Edit the list and save — a line you "
+                   "add is remembered, a line you remove is retired. "
+                   "Never a metric definition or a number: those live in "
+                   "the graph.\n\n")
+
+    def memory_markdown(self) -> dict[str, Any]:
+        rows = self.store.list_memories()
+        name = self.user_name or "you"
+        lines = [self.MEMORY_HEAD.format(name=name)]
+        lines.append("## Everywhere\n")
+        everywhere = [m for m in rows if m.get("scope") == "global"]
+        lines.extend(f"- {m['text']}" for m in everywhere)
+        if not everywhere:
+            lines.append("<!-- nothing remembered yet: settle a preference "
+                         "in chat, or add a line here -->")
+        return {"text": "\n".join(lines).rstrip() + "\n",
+                "count": len(everywhere)}
+
+    def save_memory_markdown(self, text: str) -> dict[str, Any]:
+        """The document back to rows: bullets are the memories; a line
+        no longer present retires its memory, a new line becomes one.
+        Matching is by the text, which is what a memory is."""
+        import re
+        wanted: list[str] = []
+        for line in (text or "").splitlines():
+            m = re.match(r"^\s*[-*]\s+(.+?)\s*$", line)
+            if m and not m.group(1).startswith("<!--"):
+                item = m.group(1).strip()[:400]
+                if item and item not in wanted:
+                    wanted.append(item)
+        current = {m["text"]: m for m in self.store.list_memories()
+                   if m.get("scope") == "global"}
+        added, retired = 0, 0
+        for item in wanted:
+            if item not in current:
+                self.store.add_memory(item, scope="global", source="person")
+                added += 1
+        for item, row in current.items():
+            if item not in wanted:
+                self.store.retire_memory(row["id"])
+                retired += 1
+        out = self.memory_markdown()
+        return {"added": added, "retired": retired, **out}
+
     def dials(self) -> dict[str, Any]:
         """Everything the composer lets a person set, explained in one
         place: the modes, the depths (with what each does on each

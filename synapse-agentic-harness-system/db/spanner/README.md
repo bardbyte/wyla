@@ -9,8 +9,22 @@ three GoogleSQL DDL files, applied in order, one database.
 | `002_chat.sql` | chats, messages, artifacts, plans, feedback, files, events, memory, a person's own skills, staged knowledge files | `graph/runs/chat/sessions.sqlite3`, the events JSONL, the files under each workspace, `graph/skills/users/`, `sources/artifacts/` |
 | `003_graph.sql` | the graph's nodes and edges with their provenance, as append-only assertions plus the folded current state, the crosswalk, the clerk's transitions, the builds, and a property graph over the fold | `graph/nodes/*.jsonl`, `graph/edges/*.jsonl`, `graph/identity/crosswalk.jsonl`, `graph/runs/` |
 
-The reasoning behind every table is in
-`docs/specs/spanner_schema.md`. This file is the how.
+The reasoning behind every table is in `docs/spanner_schema.md`.
+This file is the how.
+
+## The first rollout
+
+All three files are applied; the first rollout writes to the identity
+tables that email-and-password sign-in needs (`Users`,
+`UserCredentials`, `Roles`, `Permissions`, `RolePermissions`,
+`UserRoles`, `AuthSessions`, `LoginAttempts`, `UserPreferences`,
+`AuditEvents`) and to every chat table. Five identity tables wait for
+phase 2 and stay empty — `RefreshTokens`, `MfaFactors`,
+`MfaRecoveryCodes`, `ActionTokens`, `Invitations`, marked in the file
+— and the graph file's tables stay empty too: the graph stays on the
+filesystem (`docs/spanner_schema.md` §3.8 and §5). The `.env` block
+the deployment fills is in `.env.example` (`SAHS_STORE=spanner`,
+`SPANNER_*`, `AUTH_*`).
 
 ## Check the files without a Spanner
 
@@ -82,8 +96,8 @@ One-way, run once per store, in this order (the foreign keys want
 users before chats and runs before assertions):
 
 1. users: one row per distinct `LUMI_USER_NAME` / `actor` seen in the
-   SQLite stores, status `pending_verification`, a password set on
-   first login through the reset flow;
+   SQLite stores, status `active`, a temporary password set by the
+   admin with `MustChangePassword`;
 2. `sessions.sqlite3` → `ChatProjects`, `ChatSessions`,
    `ChatMessages` (Seq from rowid order), `ChatArtifacts`,
    `ChatPlanVersions`, `ChatFeedback`, `ChatMemories`;
@@ -91,7 +105,8 @@ users before chats and runs before assertions):
    a bucket, `ObjectPath` the object);
 4. `graph/skills/users/<owner>/*.md` → `UserSkills`;
    `sources/artifacts/*` → `KnowledgeFiles`;
-5. `graph/runs/*/manifest.json` → `GraphRuns`, then every JSONL line
+5. not in the first rollout (the graph stays on the filesystem):
+   `graph/runs/*/manifest.json` → `GraphRuns`, then every JSONL line
    → `GraphNodeAssertions` / `GraphEdgeAssertions` in file order
    (Seq per identity), then one fold pass → `GraphNodes` /
    `GraphEdges`; `identity/crosswalk.jsonl` → `GraphCrosswalk`;

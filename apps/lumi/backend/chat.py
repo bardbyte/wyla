@@ -29,6 +29,8 @@ key, never calls a model.
     POST /api/chat/sessions/{id}/project           {project_id}
     POST /api/chat/sessions/{id}/star|archive      {on}
     GET  /api/chat/memories[?project_id=]
+    GET  /api/chat/memory.md                       what Synapse remembers, as a document
+    PUT  /api/chat/memory.md                       {text} → the document back to memories
     POST /api/chat/memories/{id}/retire
     GET  /api/chat/artifacts/{artifact_id}[?version=]
     GET  /api/chat/artifacts/{artifact_id}/versions
@@ -500,6 +502,22 @@ def list_memories(project_id: str = "") -> dict:
     return {"available": True,
             "memories": runtime.store.list_memories(
                 project_id=project_id)}
+
+
+class MemoryDoc(BaseModel):
+    text: str = Field(default="", max_length=60_000)
+
+
+@router.get("/memory.md")
+def memory_markdown() -> dict:
+    runtime, _ = _chat()
+    return {"available": True, **runtime.memory_markdown()}
+
+
+@router.put("/memory.md")
+def save_memory_markdown(req: MemoryDoc) -> dict:
+    runtime, _ = _chat()
+    return {"available": True, **runtime.save_memory_markdown(req.text)}
 
 
 @router.post("/memories/{memory_id}/retire")

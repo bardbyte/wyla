@@ -3,7 +3,8 @@
 -- artifacts, projects, memory, files, events, own skills, knowledge
 -- Mapped one-to-one from sahs/ask/store.py + sahs/assistant/store.py
 -- (the SQLite store the laptop runs today), with the person as the
--- owner everywhere the laptop assumed one configured user.
+-- owner everywhere the laptop assumed one configured user. The
+-- design, table by table: docs/spanner_schema.md §4.
 -- ============================================================
 
 -- A project: a folder with its own instructions and pinned skills.
@@ -56,6 +57,9 @@ CREATE INDEX ChatSessionsByProject ON ChatSessions (ProjectId, UpdatedAt DESC);
 CREATE TABLE ChatMessages (
   SessionId   STRING(36)  NOT NULL,
   MessageId   STRING(36)  NOT NULL DEFAULT (GENERATE_UUID()),
+  -- the chat's owner, repeated here so the search index can partition
+  -- by person (a search spans a person's chats, never one chat)
+  OwnerUserId STRING(36)  NOT NULL,
   Seq         INT64       NOT NULL,
   TurnId      STRING(24)  NOT NULL DEFAULT (''),
   Role        STRING(16)  NOT NULL,
@@ -71,9 +75,10 @@ CREATE INDEX ChatMessagesBySeq ON ChatMessages (SessionId, Seq), INTERLEAVE IN C
 CREATE INDEX ChatMessagesByTurn ON ChatMessages (SessionId, TurnId), INTERLEAVE IN ChatSessions;
 
 -- Search chats (the fuzzy finder) reads titles and message text; a
--- search index keeps it fast past the first thousand chats.
+-- search index, partitioned by the person, keeps it fast past the
+-- first thousand chats: SEARCH(Text_Tokens, @q) WHERE OwnerUserId = @me.
 CREATE SEARCH INDEX ChatMessagesText ON ChatMessages (Text_Tokens)
-  PARTITION BY SessionId;
+  PARTITION BY OwnerUserId;
 
 -- Artifacts are versioned: an edit is a new version, never an
 -- overwrite, so "what did the dashboard say on Tuesday" stays answerable.
@@ -189,7 +194,7 @@ CREATE TABLE UserSkills (
 ) PRIMARY KEY (UserId, Name),
   INTERLEAVE IN PARENT Users ON DELETE CASCADE;
 
-CREATE NULL_FILTERED INDEX UserSkillsShared ON UserSkills (Shared, Name);
+CREATE INDEX UserSkillsShared ON UserSkills (Shared, Name);
 
 -- Knowledge files staged for a business unit (sources/artifacts/
 -- today): the content, who staged it, and which build-graph run
