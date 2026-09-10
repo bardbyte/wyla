@@ -1,0 +1,2070 @@
+<title>Graph, Harness, Answer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+/* ══ tokens ══ light is the base; both dark paths redefine only tokens ══ */
+:root{
+  --paper:#f4f6f8;      /* cool paper, blue-biased neutral */
+  --stage:#ffffff;
+  --sunk:#eaeef3;
+  --ink:#111922;
+  --ink-2:#3d4d5e;
+  --muted:#63748a;
+  --line:#d3dbe4;
+  --line-2:#e6ecf1;
+  --trust:#006fcf;      /* the cosmos ramp, light theme, verbatim */
+  --trust-2:#4da2e8;
+  --trust-3:#7f9cc4;
+  --trust-4:#b0c0d8;
+  --conflict:#a01f2d;   /* crimson: CONFLICT and REFUSAL only, as in the system */
+  --evidence:#8a6300;   /* unreviewed / mined */
+  --ok:#1d7a4c;
+  --glow:0 1px 2px rgba(17,25,34,.05), 0 8px 28px -14px rgba(17,25,34,.16);
+  --stage-pad:clamp(20px,3.6vw,64px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0a0e14;
+    --stage:#111a24;
+    --sunk:#16212d;
+    --ink:#e7edf4;
+    --ink-2:#b8c6d6;
+    --muted:#8598ae;
+    --line:#26333f;
+    --line-2:#1c2732;
+    --trust:#57a9f2;
+    --trust-2:#82bef7;
+    --trust-3:#64789e;
+    --trust-4:#475572;
+    --conflict:#ff8592;
+    --evidence:#d8a63c;
+    --ok:#4fbd85;
+    --glow:0 1px 2px rgba(0,0,0,.4), 0 10px 34px -16px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0a0e14; --stage:#111a24; --sunk:#16212d;
+  --ink:#e7edf4; --ink-2:#b8c6d6; --muted:#8598ae;
+  --line:#26333f; --line-2:#1c2732;
+  --trust:#57a9f2; --trust-2:#82bef7; --trust-3:#64789e; --trust-4:#475572;
+  --conflict:#ff8592; --evidence:#d8a63c; --ok:#4fbd85;
+  --glow:0 1px 2px rgba(0,0,0,.4), 0 10px 34px -16px rgba(0,0,0,.7);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:"Source Serif 4",Iowan Old Style,Georgia,serif;
+  font-size:17px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{
+  font-family:"Bricolage Grotesque","Helvetica Neue",Arial,sans-serif;
+  font-weight:700; letter-spacing:-.018em; text-wrap:balance; margin:0;
+}
+code,kbd,.mono,.eyebrow,.tag,th,.num{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+
+/* ══ shell ══ */
+#deck{min-height:100vh;display:flex;flex-direction:column}
+.topbar{
+  position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:14px;
+  padding:10px clamp(14px,2.4vw,28px);background:var(--paper);
+  border-bottom:1px solid var(--line-2);
+}
+.brand{font-family:"Bricolage Grotesque",sans-serif;font-weight:800;
+  font-size:14px;letter-spacing:-.01em;white-space:nowrap}
+.brand span{color:var(--trust)}
+.chapters{display:flex;gap:4px;flex:1;min-width:0;overflow:hidden}
+.chapseg{
+  flex:1 1 0;min-width:0;border:0;padding:0;cursor:pointer;background:none;
+  text-align:left;font-family:"JetBrains Mono",monospace;font-size:9.5px;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--muted);
+}
+.chapseg .bar{display:block;height:3px;border-radius:2px;background:var(--line);margin-bottom:5px}
+.chapseg .bar i{display:block;height:100%;border-radius:2px;background:var(--trust);width:0;
+  transition:width .3s ease}
+.chapseg[aria-current="true"]{color:var(--ink)}
+.chapseg .lab{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tools{display:flex;align-items:center;gap:6px}
+.btn{
+  font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.04em;
+  background:var(--stage);color:var(--ink-2);border:1px solid var(--line);
+  border-radius:6px;padding:6px 9px;cursor:pointer;line-height:1;
+}
+.btn:hover{border-color:var(--trust);color:var(--trust)}
+.btn:focus-visible,.chapseg:focus-visible,.ovcard:focus-visible,.zone:focus-visible{
+  outline:2px solid var(--trust);outline-offset:2px}
+.count{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--muted);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+
+main{flex:1;display:flex;justify-content:center;padding:clamp(14px,2.2vw,26px) clamp(16px,2.4vw,28px) 74px}
+.stage{
+  width:100%;max-width:1180px;background:var(--stage);border:1px solid var(--line);
+  border-radius:12px;box-shadow:var(--glow);padding:var(--stage-pad);
+  display:flex;flex-direction:column;gap:clamp(16px,2vw,26px);
+}
+.slide{display:none}
+.slide.on{display:flex;flex-direction:column;gap:clamp(15px,1.9vw,24px)}
+@media (prefers-reduced-motion: no-preference){
+  .slide.on{animation:rise .22s ease-out}
+  @keyframes rise{from{opacity:.55;transform:translateY(5px)}to{opacity:1;transform:none}}
+}
+
+/* ══ slide furniture ══ */
+.head{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 16px;
+  padding-bottom:12px;border-bottom:1px solid var(--line-2)}
+.eyebrow{font-size:10.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--trust);
+  font-weight:500;white-space:nowrap}
+.layer{font-size:10.5px;letter-spacing:.1em;color:var(--muted);border:1px solid var(--line);
+  border-radius:4px;padding:2px 6px}
+.head h2{font-size:clamp(23px,3.05vw,38px);line-height:1.08;flex:1 1 100%}
+.dek{color:var(--ink-2);max-width:66ch;font-size:clamp(15px,1.28vw,18px)}
+.dek em{font-style:italic;color:var(--ink)}
+
+.grid{display:grid;gap:clamp(13px,1.5vw,20px)}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.g23{grid-template-columns:minmax(0,2fr) minmax(0,3fr)}
+.g32{grid-template-columns:minmax(0,3fr) minmax(0,2fr)}
+@media (max-width:900px){.g2,.g3,.g4,.g23,.g32{grid-template-columns:minmax(0,1fr)}}
+
+/* panels: border for grouped data, sunk fill for quoted machinery, nothing for prose */
+.panel{border:1px solid var(--line);border-radius:9px;padding:clamp(13px,1.3vw,18px);
+  display:flex;flex-direction:column;gap:9px;min-width:0}
+.panel h3{font-size:14.5px;letter-spacing:-.005em}
+.panel h3 .k{color:var(--muted);font-family:"JetBrains Mono",monospace;font-size:11px;
+  letter-spacing:.05em;font-weight:400;margin-right:7px}
+.panel p{margin:0;font-size:15px;color:var(--ink-2)}
+.sunk{background:var(--sunk);border:0}
+.rule-top{border-top:2px solid var(--trust);border-radius:0 0 9px 9px}
+.rule-top.warn{border-top-color:var(--evidence)}
+.rule-top.stop{border-top-color:var(--conflict)}
+
+ul,ol{margin:0;padding-left:1.15em}
+li{margin:.28em 0;color:var(--ink-2);font-size:15.2px}
+li::marker{color:var(--trust-3)}
+li b,p b{color:var(--ink);font-weight:600}
+.bare{list-style:none;padding:0}
+.bare li{display:flex;gap:9px;align-items:flex-start;border-bottom:1px solid var(--line-2);
+  padding:7px 0;margin:0}
+.bare li:last-child{border-bottom:0}
+.bare .mono{color:var(--ink);font-size:12px;flex:0 0 auto}
+
+code{background:var(--sunk);border-radius:4px;padding:.1em .34em;font-size:.855em;color:var(--ink)}
+pre{margin:0;background:var(--sunk);border-radius:8px;padding:13px 14px;overflow-x:auto;
+  font-family:"JetBrains Mono",monospace;font-size:12.2px;line-height:1.62;color:var(--ink-2)}
+pre code{background:none;padding:0;font-size:1em}
+pre b{color:var(--trust);font-weight:500}
+pre i{color:var(--muted);font-style:normal}
+pre s{color:var(--conflict);text-decoration:none}
+
+table{width:100%;border-collapse:collapse;font-family:"JetBrains Mono",monospace;font-size:12px}
+.tw{overflow-x:auto}
+th{text-align:left;font-weight:500;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted);padding:0 11px 7px 0;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:7px 11px 7px 0;border-bottom:1px solid var(--line-2);color:var(--ink-2);
+  vertical-align:top;font-variant-numeric:tabular-nums}
+tr:last-child td{border-bottom:0}
+td b{color:var(--ink);font-weight:500}
+td.n{text-align:right;padding-right:16px;white-space:nowrap}
+td.say{font-family:"Source Serif 4",Georgia,serif;font-size:14px}
+
+.tiles{display:grid;gap:11px;grid-template-columns:repeat(auto-fit,minmax(128px,1fr))}
+.tile{border-left:2px solid var(--trust);padding:2px 0 2px 12px}
+.tile .num{display:block;font-family:"Bricolage Grotesque",sans-serif;font-weight:800;
+  font-size:clamp(22px,2.5vw,31px);line-height:1.05;letter-spacing:-.03em;
+  font-variant-numeric:tabular-nums}
+.tile .cap{display:block;font-size:12.5px;color:var(--muted);margin-top:3px}
+
+.pull{border-left:2px solid var(--trust);padding:3px 0 3px 15px;font-size:clamp(15px,1.4vw,19px);
+  line-height:1.42;color:var(--ink)}
+.pull cite{display:block;font-style:normal;font-family:"JetBrains Mono",monospace;font-size:10.5px;
+  letter-spacing:.07em;color:var(--muted);margin-top:7px}
+.pull.stop{border-left-color:var(--conflict)}
+
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;letter-spacing:.05em;
+  border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:var(--ink-2);white-space:nowrap}
+.tag.t1{border-color:var(--trust);color:var(--trust)}
+.tag.t2{border-color:var(--trust-2)}
+.tag.t3{border-color:var(--trust-3)}
+.tag.t4{border-color:var(--trust-4)}
+.tag.no{border-color:var(--conflict);color:var(--conflict)}
+.tag.ev{border-color:var(--evidence);color:var(--evidence)}
+.tag.yes{border-color:var(--ok);color:var(--ok)}
+.tagrow{display:flex;flex-wrap:wrap;gap:6px}
+
+figure{margin:0;display:flex;flex-direction:column;gap:9px}
+figure svg{max-width:100%;height:auto;display:block;color:var(--ink-2)}
+figcaption{font-size:12.5px;color:var(--muted);max-width:70ch}
+.svgwrap{overflow-x:auto}
+
+/* ══ dividers ══ */
+.divider{min-height:clamp(230px,38vh,380px);justify-content:center;gap:16px}
+.divider .no{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.2em;
+  color:var(--trust)}
+.divider h2{font-size:clamp(34px,6vw,74px);line-height:.98;letter-spacing:-.035em;max-width:22ch}
+.divider .dek{font-size:clamp(16px,1.7vw,21px);max-width:56ch}
+.divider .tagrow{margin-top:6px}
+
+/* ══ nav ══ */
+.footnav{position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;align-items:center;
+  gap:10px;padding:9px clamp(14px,2.4vw,28px);background:var(--paper);
+  border-top:1px solid var(--line-2)}
+.dots{display:flex;flex-wrap:wrap;gap:4px;flex:1;min-width:0}
+.dot{width:9px;height:9px;border-radius:2px;border:0;padding:0;cursor:pointer;
+  background:var(--line);transition:background .15s}
+.dot[aria-current="true"]{background:var(--trust)}
+.dot:hover{background:var(--trust-2)}
+.dot:focus-visible{outline:2px solid var(--trust);outline-offset:2px}
+.here{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--muted);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.zone{border:0;background:none;cursor:pointer;color:var(--muted);padding:4px 7px;font-size:15px;
+  line-height:1;border-radius:5px}
+.zone:hover{color:var(--trust);background:var(--sunk)}
+
+/* ══ overview ══ */
+#overview{display:none;padding:0 clamp(16px,2.4vw,28px) 80px}
+#overview.on{display:block}
+.ovgrid{display:grid;gap:11px;grid-template-columns:repeat(auto-fill,minmax(196px,1fr));
+  max-width:1180px;margin:0 auto}
+.ovcard{text-align:left;background:var(--stage);border:1px solid var(--line);border-radius:9px;
+  padding:12px;cursor:pointer;display:flex;flex-direction:column;gap:6px;min-height:96px}
+.ovcard:hover{border-color:var(--trust)}
+.ovcard .n{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--muted)}
+.ovcard .t{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:14px;
+  line-height:1.2;color:var(--ink)}
+.ovcard .c{font-family:"JetBrains Mono",monospace;font-size:9px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--trust);margin-top:auto}
+
+@media (max-width:760px){
+  /* a diagram scrolls in its own container rather than shrinking illegibly */
+  .svgwrap svg{min-width:700px}
+}
+@media (max-width:640px){
+  body{font-size:16px}
+  .chapters{display:none}
+  .stage{border-radius:9px}
+  li,.panel p{font-size:14.5px}
+}
+</style>
+
+<div id="deck">
+
+  <div class="topbar">
+    <div class="brand">SYNAPSE <span>/</span> MERIDIAN</div>
+    <div class="chapters" id="chapters"></div>
+    <div class="tools">
+      <span class="count" id="count"></span>
+      <button class="btn" id="ovbtn" aria-pressed="false">Overview</button>
+      <button class="btn" id="themebtn" title="Switch theme">Theme</button>
+    </div>
+  </div>
+
+  <main>
+    <div class="stage" id="stage">
+
+<!-- ═══════════════════ 1 · TITLE ═══════════════════ -->
+<section class="slide" data-chap="0" data-title="Graph, Harness, Answer">
+  <div class="head">
+    <span class="eyebrow">A semantic layer and the agent that stands on it</span>
+    <h2>The graph is compiled,<br>never edited.</h2>
+  </div>
+  <p class="dek">A provenance-typed graph compiled from the exports a data team already
+  owns — a catalog, warehouse metadata, thirty days of query history, gold SQL, playbooks,
+  a glossary — and an agent harness that can only answer from what the build witnessed.
+  <em>Every number carries the definition it came from, or it is not served.</em></p>
+
+  <div class="tiles">
+    <div class="tile"><span class="num">45,002</span><span class="cap">lines of Python, 182 files</span></div>
+    <div class="tile"><span class="num">476</span><span class="cap">tests, all offline on fixtures</span></div>
+    <div class="tile"><span class="num">15</span><span class="cap">witness families</span></div>
+    <div class="tile"><span class="num">25</span><span class="cap">typed relations</span></div>
+    <div class="tile"><span class="num">12</span><span class="cap">agent tools</span></div>
+    <div class="tile"><span class="num">46</span><span class="cap">tables in the reference warehouse</span></div>
+  </div>
+
+  <div class="grid g4">
+    <div class="panel sunk"><h3><span class="k">01</span>The graph</h3>
+      <p>Quads with provenance on every statement. Compiled, gated, promoted.</p></div>
+    <div class="panel sunk"><h3><span class="k">02</span>The harness</h3>
+      <p>A thin loop, twelve tools, six hooks. Governance in code, not prose.</p></div>
+    <div class="panel sunk"><h3><span class="k">03</span>Generative UI</h3>
+      <p><code>a2ui.answer/1</code> and validated artifacts. The renderer refuses.</p></div>
+    <div class="panel sunk"><h3><span class="k">04</span>Proof</h3>
+      <p>Two-number lines, a third verdict, and the parts still marked absent.</p></div>
+  </div>
+  <p style="color:var(--muted);font-size:12.5px;font-family:'JetBrains Mono',monospace">
+    ← → to move · O for the overview · a slide is a link</p>
+</section>
+
+<!-- ═══════════════════ 2 · THE PROBLEM ═══════════════════ -->
+<section class="slide" data-chap="0" data-title="The failure is not SQL">
+  <div class="head">
+    <span class="eyebrow">Frame</span>
+    <h2>The failure is not SQL.</h2>
+  </div>
+  <p class="dek">Point a modern model at a schema and ask for “new accounts approval rate
+  last quarter.” You get syntactically perfect BigQuery. It runs. It returns a number.
+  The number is wrong, and <em>nothing about it looks wrong.</em></p>
+
+  <div class="grid g2">
+    <div class="panel rule-top"><h3>Which definition</h3>
+      <p>Three catalogs in this warehouse define approval rate and disagree on the
+      denominator. The model picks one. Nothing tells it there were three.</p></div>
+    <div class="panel rule-top"><h3>What one row means</h3>
+      <p>A join against a table with no declared primary key silently doubles the
+      numerator. The SQL is valid. The grain changed.</p></div>
+    <div class="panel rule-top"><h3>What the literal is</h3>
+      <p><code>WHERE status = 'Approved'</code> returns zero rows, because the warehouse
+      stores <code>'A'</code>. The query succeeds. The answer is 0.</p></div>
+    <div class="panel rule-top"><h3>Whose authority</h3>
+      <p>A mined pattern with 4,000 executions and a certified KPI with 3 look identical
+      to a ranker that scores on usage. <b>Popularity is not governance.</b></p></div>
+  </div>
+
+  <p class="dek">All four are <em>meaning</em> problems, and meaning is not in the schema.
+  It is scattered across a catalog nobody fully trusts, a metadata service that answers
+  <code>DENIED</code> a third of the time, 35,700 SQL fragments people pasted into a wiki
+  over six years, and the query history — the only source that knows what is actually run.</p>
+</section>
+
+<!-- ═══════════════════ 3 · THE COMMITMENT ═══════════════════ -->
+<section class="slide" data-chap="0" data-title="One commitment, five layers">
+  <div class="head">
+    <span class="eyebrow">Frame</span>
+    <h2>One commitment. Everything else falls out of it.</h2>
+  </div>
+  <p class="dek">Don’t build a better translator. Build a substrate the translator
+  cannot lie about — the way a compiler takes source text, runs a fixed sequence of
+  passes, and emits an artifact you can diff, hash and ship.</p>
+
+  <figure>
+    <div class="svgwrap">
+    <svg viewBox="0 0 1000 268" role="img" aria-label="Five layers: exports become typed records, then append-only quads, then an immutable build, then the serving surface. The only write back into the quad store is the governance clerk; nothing in serving writes to the store.">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+        <marker id="arT" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--trust)"/>
+        </marker>
+        <marker id="arX" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--conflict)"/>
+        </marker>
+      </defs>
+
+      <!-- boxes -->
+      <g fill="none" stroke="currentColor" stroke-width="1.2">
+        <rect x="6" y="74" width="150" height="64" rx="7"/>
+        <rect x="216" y="74" width="150" height="64" rx="7"/>
+        <rect x="426" y="74" width="150" height="64" rx="7" stroke="var(--trust)" stroke-width="2"/>
+        <rect x="636" y="74" width="150" height="64" rx="7" stroke="var(--trust)" stroke-width="2"/>
+        <rect x="846" y="74" width="148" height="64" rx="7"/>
+      </g>
+
+      <g font-family="JetBrains Mono, monospace" font-size="10" fill="var(--muted)" letter-spacing="1.4">
+        <text x="24" y="88" fill="var(--muted)">L0</text>
+        <text x="234" y="88" fill="var(--muted)">L1</text>
+        <text x="444" y="88" fill="var(--trust)">L2</text>
+        <text x="654" y="88" fill="var(--trust)">L3</text>
+        <text x="862" y="88" fill="var(--muted)">L4</text>
+      </g>
+      <g font-family="Bricolage Grotesque, sans-serif" font-size="13" font-weight="700" fill="currentColor" text-anchor="middle">
+        <text x="81" y="103">source exports</text>
+        <text x="291" y="103">typed records</text>
+        <text x="501" y="103">quad store</text>
+        <text x="711" y="103">the build</text>
+        <text x="920" y="103">serving</text>
+      </g>
+      <g font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--muted)" text-anchor="middle">
+        <text x="81" y="122">read-only</text>
+        <text x="291" y="122">transient</text>
+        <text x="501" y="122">append-only</text>
+        <text x="711" y="122">immutable</text>
+        <text x="920" y="122">read-only</text>
+      </g>
+
+      <!-- flow arrows -->
+      <g stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)">
+        <line x1="158" y1="106" x2="212" y2="106"/>
+        <line x1="368" y1="106" x2="422" y2="106"/>
+        <line x1="578" y1="106" x2="632" y2="106"/>
+        <line x1="788" y1="106" x2="842" y2="106"/>
+      </g>
+      <g font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--muted)" text-anchor="middle">
+        <text x="185" y="98">loaders</text>
+        <text x="395" y="98">c(sql)</text>
+        <text x="605" y="90">compile()</text>
+        <text x="605" y="101">pure fn</text>
+        <text x="815" y="98">CURRENT</text>
+      </g>
+
+      <!-- clerk: the only write back into L2 -->
+      <rect x="400" y="6" width="202" height="30" rx="6" fill="none" stroke="var(--trust)"
+            stroke-width="1.4"/>
+      <text x="501" y="25" font-family="JetBrains Mono, monospace" font-size="10.5"
+            fill="var(--trust)" text-anchor="middle">the clerk — a human actor</text>
+      <line x1="501" y1="38" x2="501" y2="70" stroke="var(--trust)" stroke-width="1.4"
+            stroke-dasharray="5 4" marker-end="url(#arT)"/>
+      <text x="614" y="52" font-family="JetBrains Mono, monospace" font-size="9.5"
+            fill="var(--trust)">signed, lattice-checked</text>
+
+      <!-- serving never writes -->
+      <path d="M920 142 C920 196 520 196 512 146" fill="none" stroke="var(--conflict)" stroke-width="1.4"
+            stroke-dasharray="3 5" marker-end="url(#arX)"/>
+      <text x="716" y="212" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--conflict)"
+            text-anchor="middle">no chat tool writes to the graph — enforced by absence of a writer</text>
+
+      <!-- build id note -->
+      <text x="711" y="248" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--muted)"
+            text-anchor="middle">build id = sha256(sorted jsonl)[:12] → same graph, byte-identical build</text>
+    </svg>
+    </div>
+    <figcaption>Information flows one way. The two dotted arrows are the whole governance
+    story: one signed write path in, and no write path back from the agent.</figcaption>
+  </figure>
+
+  <div class="grid g3">
+    <div class="panel sunk"><h3>Determinism</h3><p>Same graph → same 12-hex build id →
+      byte-identical artifacts. A diff means what it appears to mean.</p></div>
+    <div class="panel sunk"><h3>Provenance</h3><p>Every served line carries a
+      <code>[prov:…]</code> ref down to a file and a row. “Where did this come from” is a lookup.</p></div>
+    <div class="panel sunk"><h3>Disagreement is output</h3><p>The platform’s honest
+      difficulty is a number in <code>census.json</code>, not a thing you find in production.</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 4 · DIVIDER: THE GRAPH ═══════════════════ -->
+<section class="slide divider" data-chap="1" data-title="Chapter 1 — The Graph">
+  <span class="no">CHAPTER 01</span>
+  <h2>The Graph</h2>
+  <p class="dek">Identity by canonical form. Provenance as payload. Fifteen witnesses that
+  never collapse into one another. And a compiler with gates that block rather than warn.</p>
+  <div class="tagrow">
+    <span class="tag t1">c(sql)</span><span class="tag t1">fingerprints</span>
+    <span class="tag t2">quads &amp; witnesses</span><span class="tag t2">nine loaders</span>
+    <span class="tag t3">D1–D5</span><span class="tag t3">cards</span>
+    <span class="tag t4">the lattice</span>
+  </div>
+</section>
+
+<!-- ═══════════════════ 5 · c(sql) ═══════════════════ -->
+<section class="slide" data-chap="1" data-title="c(sql) — nine passes, two fingerprints">
+  <div class="head">
+    <span class="eyebrow">Identity</span><span class="layer">L1 · canon/canonical.py</span>
+    <h2>Two expressions that mean the same thing must have the same identity.</h2>
+  </div>
+  <p class="dek">One function, nine passes, a pinned order. Everything downstream —
+  equivalence classes, the authority lattice, the census, metric identity — keys on
+  its output.</p>
+
+  <div class="grid g23">
+    <div class="panel">
+      <h3>The pinned order</h3>
+      <pre><code><b>1</b> parse            dialect=bigquery
+<b>2</b> strip comments
+<b>3</b> normalize ids    lowercase unquoted
+<b>4</b> qualify columns  <i>full | partial | none</i>
+<b>5</b> de-alias tables  + passthrough-CTE inlining
+<b>6</b> constant fold    <i>literals KEPT</i>
+  ↳ <b>fork the template branch here</b>
+<b>7</b> sort commutative operands
+<b>8</b> canonical literals
+<b>9</b> generate         no pretty, fns lowered</code></pre>
+      <p><b>No CNF expansion</b> — explosion risk on a 35K-fragment corpus.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:15px;min-width:0">
+      <div class="panel sunk">
+        <h3>Two fingerprints, not one</h3>
+        <ul class="bare">
+          <li><span class="mono">fp_expr</span><span>identity of the exact expression,
+            <b>literals included</b> — <code>country = 'GB'</code> and <code>'US'</code> are
+            different filters, and a layer that fuses them lost what users care about most</span></li>
+          <li><span class="mono">fp_template</span><span>literals → <code>?s ?n ?d</code>,
+            <code>IN</code>-lists → <code>?*</code>, forked <b>before</b> sorting, so pattern
+            identity is arity-blind</span></li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>Rules the corpus taught us</h3>
+        <pre><code><i># ruleset 2: COUNT(*) ≡ COUNT(1) — two</i>
+<i># fingerprints for one function is a lie</i>
+<i># the jobs witness exposed: catalog said</i>
+<i># COUNT(1), jobs said COUNT(*), and the</i>
+<i># same metric refused to fuse</i></code></pre>
+        <p><code>x IN ('B')</code> collapses to <code>x = 'B'</code> — found by watching a
+        conflict count that was too high and asking why. <b>The census is not a report,
+        it is an instrument.</b></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 6 · THE FINGERPRINT ═══════════════════ -->
+<section class="slide" data-chap="1" data-title="A fingerprint carries its deriver's version">
+  <div class="head">
+    <span class="eyebrow">Identity</span><span class="layer">canon/fingerprint.py</span>
+    <h2>Make derived identities carry the version of the deriver.</h2>
+  </div>
+
+  <pre><code>fp = sha256(canonical_text ⊕ NUL ⊕ dialect ⊕ NUL ⊕ <b>canon_version</b>)[:12]
+
+CANON_VERSION = f"{CANON_RULESET}:{sqlglot.__version__}"</code></pre>
+
+  <p class="dek">Read that twice: <em>upgrading the SQL parser changes every fingerprint in
+  the system.</em> Which sounds insane, until you price the alternative.</p>
+
+  <div class="grid g2">
+    <div class="panel rule-top stop">
+      <h3>Without the version in the fp</h3>
+      <ul>
+        <li>An upgrade silently re-fingerprints <b>only the expressions whose canonical form
+          changed</b>.</li>
+        <li>The graph forks identities. Two nodes for one metric.</li>
+        <li><b>No error. Nobody notices for a month.</b></li>
+        <li>Recovery: none — you cannot tell which ids drifted.</li>
+      </ul>
+    </div>
+    <div class="panel rule-top">
+      <h3>With the version in the fp</h3>
+      <ul>
+        <li><b>Every</b> fingerprint changes. <code>tests/test_canon.py</code> goes red.</li>
+        <li>The remint is a deliberate migration: <code>SAHS_REGEN_GOLDENS=1</code>.</li>
+        <li>Mechanical, because the canonical text is stored beside every fingerprint.</li>
+        <li>Recovery: re-derive every id from stored text.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="pull">Silent drift in an identity function is unrecoverable. Loud drift is a
+  Tuesday.<cite>the single strongest lesson in the project</cite></div>
+
+  <div class="panel sunk">
+    <h3>Failures are typed, and <code>try_canon</code> never raises</h3>
+    <div class="tagrow">
+      <span class="tag">parse_error</span><span class="tag">fragment</span>
+      <span class="tag">dialect</span><span class="tag">transform</span>
+      <span class="tag ev">out_of_scope — the row's table isn't in this run; nothing is missing</span>
+      <span class="tag ev">not_sql — prose in the SQL column, caught before the parser</span>
+    </div>
+    <p>One junk row in a 35,700-row corpus must not kill a run. So quarantine is
+    categorized, counted, and the <b>rate becomes a gate</b>. Some rows arrive with label
+    and SQL swapped; detection is deterministic (this side fails to parse, that side parses)
+    and the row is recovered with a flag.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════ 7 · IDS ═══════════════════ -->
+<section class="slide" data-chap="1" data-title="IDs are pure functions">
+  <div class="head">
+    <span class="eyebrow">Identity</span><span class="layer">graph/ids.py · 20 kinds</span>
+    <h2>Never auto-increment. Never UUID.</h2>
+  </div>
+  <p class="dek">An id is a pure function of the entity, so two runs producing the same fact
+  produce the same line. Content-addressing, applied to meaning.</p>
+
+  <div class="grid g2">
+    <div class="panel">
+      <h3>The grammar</h3>
+      <pre><code>table:&lt;dataset&gt;.&lt;table&gt;      <i>project lives in prov</i>
+col:&lt;dataset&gt;.&lt;table&gt;.&lt;column&gt;
+pred:&lt;fp12&gt;  tmpl:&lt;fp12&gt;     <i>canonical-AST fps</i>
+metric:&lt;fp12&gt;                <i>fp(expr+grain+entity)</i>
+mgroup:&lt;key&gt;                 <i>catalog id, else label@entity</i>
+concept:&lt;label_norm&gt;@table:&lt;ds&gt;.&lt;t&gt;
+acr:&lt;symbol&gt;@&lt;bu&gt;@&lt;region&gt;   <i>missing scope → all</i>
+status:&lt;state&gt;  review:&lt;fp12&gt;
+lob:&lt;slug&gt;      mdom:&lt;slug&gt;</code></pre>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:15px;min-width:0">
+      <div class="panel sunk">
+        <h3>The mint-site rule</h3>
+        <p>Where an id embeds a source string, the slug happens at <b>exactly one mint
+        site</b>, and the verbatim value stays in <code>props</code>. Real tribal labels carry
+        <code>/ . ::</code>; the id is a <em>derivation</em>, not the label.</p>
+        <p style="color:var(--muted);font-size:13.5px">The term node and every
+        <code>mapped_term</code> edge must derive the id identically — so it is minted in one
+        place and nowhere else.</p>
+      </div>
+      <div class="panel rule-top">
+        <h3>The whole discipline in eleven words</h3>
+        <pre><code><i>"""LOB identity is the slug of its CODE —</i>
+<i>"GMNS" (a catalog value) and "gmns" (a</i>
+<i>steward code) are the same node, so the two</i>
+<i>declarations corroborate instead of forking.</i>
+<i>A display name used as a code slugs to a</i>
+<b>DIFFERENT node — divergence stays visible</b>
+<b>in the graph rather than being guessed away.</b><i>"""</i></code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 8 · THE QUAD ═══════════════════ -->
+<section class="slide" data-chap="1" data-title="Provenance is the payload">
+  <div class="head">
+    <span class="eyebrow">The store</span><span class="layer">L2 · graph/quads.py</span>
+    <h2>Provenance is not metadata. It is the payload.</h2>
+  </div>
+  <p class="dek">JSONL files in git. That is the entire database. Discipline replaces the
+  database: single writer, append-only, current state is a fold.</p>
+
+  <div class="grid g23">
+    <div class="panel">
+      <h3>On every node and every edge</h3>
+      <pre><code>class Prov(BaseModel):
+    source:    str          <i># the ingestion source</i>
+    run:       str          <i># which run wrote it</i>
+    retrieved: str          <i># when captured</i>
+    valid_for: list[str]    <i># schema versions</i>
+    status:    str = "active"
+    support:   int | None   <i># ≥1 where present</i>
+    <b>evidence:  str</b>          <i># file + row</i>
+    <b>actor:     str | None</b>   <i># REQUIRED for clerk</i>
+    <b>witness:   str</b>          <i># WHO SAW IT</i></code></pre>
+      <p><code>evidence</code> is the bottom of the chain — a byte offset in somebody’s CSV
+      export. <b>That pointer is what lets a card print <code>[prov:…]</code> and mean it.</b></p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:15px;min-width:0">
+      <div class="panel sunk">
+        <h3>25 relations, endpoints typed</h3>
+        <p><code>append_edge</code> refuses an unregistered relation; the validator refuses
+        illegal endpoint kinds. A registry entry is a sentence about the world:</p>
+        <pre><code>"joins_via":       ({table}, {table})  <i>HOW</i>
+"co_queried_with": ({table}, {table})  <i>together</i>
+"fk_references":   ({col},   {col})    <i>declared</i>
+"certified_as":    ({metric},{status})
+<b>"in_lob"</b>:  ownership  ·  <b>"used_by"</b>: usage</code></pre>
+        <p><b>Ownership is not usage.</b> The mined <code>business_unit</code> names who
+        <em>runs</em> the queries — a risk team’s patterns sit on a merchant team’s tables.
+        It feeds <code>used_by</code>, never <code>in_lob</code>.</p>
+      </div>
+      <div class="panel rule-top warn">
+        <h3>Two traps, paid for once</h3>
+        <ul>
+          <li><b>Torn tails.</b> A run killed mid-append leaves a line with no newline. The
+            torn bytes move to a <code>.torn</code> sidecar — evidence, never deleted — and the
+            file truncates to its last complete line.</li>
+          <li><b>U+2028 / U+2029 / NEL.</b> <code>json.dumps</code> passes them through raw and
+            every line tool, <code>splitlines()</code> included, treats them as breaks. Real
+            catalog descriptions carry them. Escape on write, split on <code>"\n"</code> only
+            on read. <b>If your store is JSONL, this bug is waiting for you.</b></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 9 · WITNESSES ═══════════════════ -->
+<section class="slide" data-chap="1" data-title="Fifteen witnesses, and the fold key">
+  <div class="head">
+    <span class="eyebrow">The store</span><span class="layer">E12/A1 · the load-bearing line</span>
+    <h2>A witness is <em>who saw it.</em></h2>
+  </div>
+  <p class="dek">Fifteen independent evidence families — and the fold key for edges is not
+  <code>(s, r, o)</code>. It is <code>(s, r, o, <b>witness</b>)</code>.</p>
+
+  <div class="tagrow">
+    <span class="tag t1">dmp</span><span class="tag t1">gmns</span>
+    <span class="tag t2">catalog_mined</span><span class="tag t2">jobs_30d</span>
+    <span class="tag t2">studio</span><span class="tag t2">skill_contract</span>
+    <span class="tag t3">atlas</span><span class="tag t3">lumi</span><span class="tag t3">bq</span>
+    <span class="tag t3">snippet</span><span class="tag t4">steward</span>
+    <span class="tag t4">user_variant</span><span class="tag ev">llm_enriched</span>
+    <span class="tag no">gold_attested — never ranked</span>
+    <span class="tag no">audit_30d — never ranked</span>
+  </div>
+
+  <figure>
+    <div class="svgwrap">
+    <svg viewBox="0 0 1000 214" role="img" aria-label="Comparison: folding on subject-relation-object keeps only the last writer and destroys the agreement signal; folding on subject-relation-object-witness keeps all three testimonies, so the compiler can compute support as a max and agreement as a count.">
+      <text x="230" y="16" font-family="JetBrains Mono, monospace" font-size="10.5" letter-spacing="1.6"
+            fill="var(--conflict)" text-anchor="middle">FOLD ON (s, r, o)</text>
+      <text x="740" y="16" font-family="JetBrains Mono, monospace" font-size="10.5" letter-spacing="1.6"
+            fill="var(--trust)" text-anchor="middle">FOLD ON (s, r, o, WITNESS)</text>
+
+      <!-- left: naive -->
+      <g font-family="JetBrains Mono, monospace" font-size="10.5">
+        <g fill="none" stroke="currentColor" stroke-width="1.1" opacity=".45">
+          <rect x="16" y="34" width="200" height="26" rx="5"/>
+          <rect x="16" y="68" width="200" height="26" rx="5"/>
+        </g>
+        <g fill="none" stroke="currentColor" stroke-width="1.1">
+          <rect x="16" y="102" width="200" height="26" rx="5"/>
+        </g>
+        <text x="26" y="51" fill="var(--muted)">dmp · support 1</text>
+        <text x="26" y="85" fill="var(--muted)">jobs_30d · support 417</text>
+        <text x="26" y="119" fill="currentColor">catalog_mined · 1204</text>
+        <text x="228" y="51" fill="var(--conflict)">overwritten</text>
+        <text x="228" y="85" fill="var(--conflict)">overwritten</text>
+        <text x="228" y="119" fill="currentColor">last writer wins</text>
+      </g>
+      <rect x="16" y="150" width="330" height="48" rx="6" fill="none" stroke="var(--conflict)" stroke-width="1.4"/>
+      <text x="30" y="168" font-family="JetBrains Mono, monospace" font-size="10.5" fill="var(--conflict)">support = 1204   agreement = <tspan font-weight="700">unknowable</tspan></text>
+      <text x="30" y="187" font-family="JetBrains Mono, monospace" font-size="10.5" fill="var(--conflict)">the best feature in the system is gone</text>
+
+      <!-- divider -->
+      <line x1="480" y1="28" x2="480" y2="200" stroke="currentColor" stroke-width="1" stroke-dasharray="3 5" opacity=".4"/>
+
+      <!-- right: witnessed -->
+      <g font-family="JetBrains Mono, monospace" font-size="10.5">
+        <g fill="none" stroke="var(--trust)" stroke-width="1.2">
+          <rect x="520" y="34" width="210" height="26" rx="5"/>
+          <rect x="520" y="68" width="210" height="26" rx="5"/>
+          <rect x="520" y="102" width="210" height="26" rx="5"/>
+        </g>
+        <text x="530" y="51" fill="currentColor">dmp · support 1</text>
+        <text x="530" y="85" fill="currentColor">jobs_30d · support 417</text>
+        <text x="530" y="119" fill="currentColor">catalog_mined · 1204</text>
+      </g>
+      <g stroke="var(--trust)" stroke-width="1.2" marker-end="url(#ar)" fill="none">
+        <path d="M734 47 C766 47 768 78 796 82"/>
+        <path d="M734 81 C760 81 770 84 796 86"/>
+        <path d="M734 115 C766 115 768 94 796 90"/>
+      </g>
+      <rect x="806" y="52" width="184" height="70" rx="6" fill="none" stroke="var(--trust)" stroke-width="1.4"/>
+      <g font-family="JetBrains Mono, monospace" font-size="10.5" fill="currentColor">
+        <text x="818" y="72">support = <tspan fill="var(--trust)" font-weight="700">max</tspan> = 1204</text>
+        <text x="818" y="90">agreement = <tspan fill="var(--trust)" font-weight="700">3</tspan></text>
+        <text x="818" y="108">last_seen ← jobs_30d</text>
+      </g>
+      <text x="898" y="42" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--muted)"
+            text-anchor="middle">compiler output, not store state</text>
+      <rect x="520" y="150" width="470" height="48" rx="6" fill="none" stroke="var(--trust)" stroke-width="1.4"/>
+      <text x="534" y="168" font-family="JetBrains Mono, monospace" font-size="10.5" fill="currentColor">a retraction by one witness never erases another's testimony</text>
+      <text x="534" y="187" font-family="JetBrains Mono, monospace" font-size="10.5" fill="currentColor">store at witness granularity · aggregate at read time</text>
+    </svg>
+    </div>
+    <figcaption>The one edge the design adds, and what it buys. Fold early and you have
+    destroyed the fact that three sources agreed — which is the single most useful signal
+    in the system, and cannot be recomputed after it is thrown away.</figcaption>
+  </figure>
+</section>
+
+<!-- ═══════════════════ 10 · MAX NOT SUM + GOLD GUARD ═══════════════════ -->
+<section class="slide" data-chap="1" data-title="Max, not sum — and the gold guard">
+  <div class="head">
+    <span class="eyebrow">Aggregation</span><span class="layer">L3 · compiler/compile.py</span>
+    <h2>Two guards we would not ship without.</h2>
+  </div>
+
+  <div class="grid g2">
+    <div class="panel">
+      <h3><span class="k">01</span>Max, never sum</h3>
+      <pre><code>ranking = {f: v for f, v in support_by_witness.items()
+           if f in RANKING_WITNESSES}
+row["support"]           = <b>max</b>(ranking.values(), default=0)
+row["witness_agreement"] = <b>len</b>(ranking)</code></pre>
+      <ul>
+        <li>The catalog was mined from a <b>superset of the same query history</b> the jobs
+          witness reads. Summing double-counts the same events and rewards overlap.</li>
+        <li>“Strongest single evidence” and “how many independent families” are two
+          questions. <b>A sum smears them together.</b></li>
+        <li>Max applies <em>within</em> a family too: the same witness corroborating from two
+          directions is one witness, not two.</li>
+        <li>Recency comes from the jobs witness <b>alone</b> — job creation times are the only
+          true timestamps. A fallback is flagged <code>recency_source: "catalog"</code>.</li>
+      </ul>
+    </div>
+    <div class="panel rule-top stop">
+      <h3><span class="k">02</span>The gold contamination guard</h3>
+      <pre><code><i># the gold pairs are the eval answer key — a full</i>
+<i># graph citizen (census, cards, evidence) that</i>
+<i># must never feed a feature the resolver ranks on.</i>
+<i># audit_30d corroborates, never votes.</i>
+<b>assert "gold_attested" not in RANKING_WITNESSES
+assert "audit_30d"     not in RANKING_WITNESSES</b></code></pre>
+      <p>An <b>import-time assertion</b>. The 158 gold prompt→SQL pairs are genuinely useful
+      graph content — they attest expressions, appear as evidence, a steward can read them.
+      They are also the answer key.</p>
+      <div class="pull stop">The system under test must not contain its own test set.
+      <cite>and audit_30d is excluded for a different reason: two witnesses of the same
+      events don’t count twice</cite></div>
+      <p style="color:var(--muted);font-size:13.5px">If you build a system that both learns
+      from and is evaluated on the same corpus, write this assert. Put it at module import.
+      Let it fail the day somebody adds a family to the wrong tuple.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 11 · LOADERS ═══════════════════ -->
+<section class="slide" data-chap="1" data-title="Nine loaders, nine export shapes">
+  <div class="head">
+    <span class="eyebrow">Ingestion</span><span class="layer">L0→L1 · loaders/</span>
+    <h2>One loader per source <em>shape</em>. Each emits, and nothing else.</h2>
+  </div>
+  <p class="dek">No arbitration, no policy in a loader. Arbitration happens once, in the
+  reconciler — which is what keeps disagreement handling in a single auditable place.</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>loader</th><th>export shape</th><th class="n">scale</th><th>contributes</th></tr></thead>
+    <tbody>
+      <tr><td><b>bq_extraction</b></td><td>real_extractions_production/ 00–17 per table</td><td class="n">46 tables</td><td class="say">columns, types, partitions, profiles, low-cardinality domains, row policies</td></tr>
+      <tr><td><b>mdm46</b></td><td>metadata service responses/</td><td class="n">46 tables</td><td class="say">ownership, lineage, lifecycle, PII flags</td></tr>
+      <tr><td><b>jobs_30d</b></td><td>17_queries_30d/jobs_30d.jsonl.gz</td><td class="n">per table</td><td class="say">true recency, measured joins, cost priors, usage rhythm</td></tr>
+      <tr><td><b>catalogs</b></td><td>metrics_dmp · extended_gmns · measures_catalog</td><td class="n">35 · 14 · 6,223</td><td class="say">certified KPIs, pending specs, mined patterns with usage support</td></tr>
+      <tr><td><b>blue_insights</b></td><td>blue_business_insights.csv</td><td class="n">~35.7K</td><td class="say">tribal predicates and CASE expressions as concept bindings</td></tr>
+      <tr><td><b>vocab</b></td><td>acronyms · business terms · std_tech</td><td class="n">~12.3K · ~4.4K · 46</td><td class="say">acronyms scoped by unit and region, governed terms, declared column↔term links</td></tr>
+      <tr><td><b>skills</b></td><td>ten analytical packs</td><td class="n">10</td><td class="say">exact contract expressions</td></tr>
+      <tr><td><b>gold_queries</b></td><td>extracted_gold_queries.json</td><td class="n">158</td><td class="say">the answer key, plus a separately returned <b>abstention backlog</b></td></tr>
+      <tr><td><b>studio_csv</b></td><td>studio_results_*_cte_or_subqueries.csv</td><td class="n">—</td><td class="say">observed certified-metric SQL with CTEs, grain, data owners</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="grid g3">
+    <div class="panel rule-top stop"><h3>Identity blocks</h3>
+      <p>Every archive quad’s table must resolve through a <b>human-verified crosswalk</b>
+      (46 signed rows). An unresolvable archive record <b>stops the build</b> — identity
+      confusion is the one error class that corrupts everything downstream.</p>
+      <p style="font-size:13.5px;color:var(--muted)">Semantic sources are different: they
+      legitimately mention out-of-scope tables, so a counted skip is honest there.</p></div>
+    <div class="panel rule-top warn"><h3><code>DENIED</code> is not absence</h3>
+      <p>A denied policy listing becomes <code>has_policy → policy:unknown_denied</code>, and
+      the ACL fails <b>closed</b>. A present-but-empty policy file is <em>confirmed none</em>
+      and emits nothing. Those look identical in a naive loader and mean opposite things.</p></div>
+    <div class="panel rule-top"><h3>The utilization ledger</h3>
+      <p>Every input file marked <code>consumed</code> · <code>deferred(reason)</code> ·
+      <code>inventoried</code>. The third bucket is a machine-maintained list of your own
+      blind spots, and a CI test keeps it honest.</p>
+      <p style="font-size:13.5px;color:var(--muted)">Anything in it you don’t recognize is
+      a finding, not a detail.</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 12 · D1-D5 ═══════════════════ -->
+<section class="slide" data-chap="1" data-title="Five ways to disagree, five handlers">
+  <div class="head">
+    <span class="eyebrow">Reconciliation</span><span class="layer">E1 · compiler/reconcile.py</span>
+    <h2>Three sources describe the same column. They disagree constantly.</h2>
+  </div>
+  <p class="dek">The catalog, the metadata service, and the warehouse. One consensus record
+  per column with per-field <code>{value, source}</code> and an <code>agreement_count</code> —
+  and five pinned handlers for the rest.</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>code</th><th>disagreement</th><th>handler</th><th>ticket</th><th>why</th></tr></thead>
+    <tbody>
+      <tr><td><b>D1</b></td><td>documented, absent in BigQuery</td><td><b>omitted from cards entirely</b></td><td>catalog_stale</td><td class="say">The agent must never see a column the runtime can’t serve. A documented column that doesn’t exist is a trap, not a gap.</td></tr>
+      <tr><td><b>D2</b></td><td>in BigQuery, undocumented</td><td>kept, flagged <code>ungoverned</code>; binds only with disclosure</td><td>coverage_gap</td><td class="say">The column is real; the meaning is missing. Hiding it would hide the warehouse from itself.</td></tr>
+      <tr><td><b>D3</b></td><td>type / DDL mismatch</td><td><b>BigQuery wins</b>, everywhere execution-facing</td><td>catalog_mismatch</td><td class="say">A catalog can be right about meaning and wrong about type, and only one of those breaks at runtime. A hierarchy of consequence, not prestige.</td></tr>
+      <tr><td><b>D4</b></td><td>description divergence</td><td>both kept with attribution, catalog display-first</td><td>none</td><td class="say">Usually complementary rather than contradictory. Not a defect, so not a ticket.</td></tr>
+      <tr><td><b>D5</b></td><td>sensitivity flags disagree</td><td><b>most-restrictive applied immediately</b>, and it holds while the ticket is open</td><td>sensitivity_conflict</td><td class="say">When witnesses disagree about risk, apply the restrictive reading now. Don’t wait for resolution.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="grid g2">
+    <div class="panel sunk"><h3>The counts are diffable</h3>
+      <p>D1–D5 land in <code>census.json</code> under <code>structural</code>, per table and in
+      total — so “did the catalogs and the warehouse drift closer or further apart this
+      month” is <b>a number in a diff</b>, not an opinion.</p></div>
+    <div class="panel rule-top"><h3>The 46→45 rule</h3>
+      <p>A table can drop out silently: reconciliation iterates <code>has_column</code>, so a
+      table with zero columns never reaches consensus. So <b>every crosswalk row either
+      compiles or is explained</b> — with a signed reason in
+      <code>exclusions.jsonl</code>, or the gate blocks promotion.</p>
+      <p style="font-size:13.5px;color:var(--muted)">45 of 46 compiled. The 46th has a
+      signed reason. The gap is not a mystery, it is a row.</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 13 · THE COMPILER ═══════════════════ -->
+<section class="slide" data-chap="1" data-title="The compiler and its gates">
+  <div class="head">
+    <span class="eyebrow">Compile</span><span class="layer">L3 · 878 lines, one promise</span>
+    <h2>A pure function of the graph. Gates that block, not warn.</h2>
+  </div>
+
+  <div class="grid g23">
+    <div style="display:flex;flex-direction:column;gap:15px;min-width:0">
+      <div class="panel">
+        <h3>Promotion is gated, then atomic</h3>
+        <pre><code>failures = list(recon_failures)
+for t in consensus: <i># every table has a card</i>
+for m in metrics:   <i># certified ⇒ has a table</i>
+
+if not failures:
+    tmp.write_text(build_id)
+    <b>os.replace(tmp, current_path)</b>   <i># atomic</i></code></pre>
+        <p><code>builds/CURRENT</code> is one line of text. A reader sees the old build or the
+        new one, <b>never a half state.</b></p>
+        <p>A build that fails a gate <b>still exists on disk</b> with its census and its diff
+        — go read why it failed. It simply never becomes <code>CURRENT</code>.</p>
+      </div>
+      <div class="panel sunk">
+        <h3>The gates, as sentences about the world</h3>
+        <ul class="bare">
+          <li><span class="mono">crosswalk</span><span>every archive table resolved to a signed row</span></li>
+          <li><span class="mono">jobs ≥90%</span><span>canonicalized-or-understood, per table</span></li>
+          <li><span class="mono">validator</span><span>14 checks: grammar, endpoints, relations, lattice, witnesses</span></li>
+          <li><span class="mono">46→45</span><span>every crosswalk row compiled or explained</span></li>
+          <li><span class="mono">cards</span><span>every reconciled table has one</span></li>
+          <li><span class="mono">certified</span><span><b>a certified metric without a table is a lie</b></span></li>
+        </ul>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>What comes out</h3>
+      <pre><code>builds/b_&lt;hash12&gt;/
+  cards/{tables,metrics,concepts}/*.md
+  indexes/
+    metrics.jsonl   bindings.jsonl
+    vocab.jsonl     <i>+ FTS5 where available</i>
+    <b>joins.jsonl</b>      <i>5 named witness families</i>
+    domains.jsonl   value_meanings.jsonl
+    <b>tables.jsonl</b>     <i>row counts + declared PKs</i>
+    cost_priors.json  lob.jsonl
+    sources.json    <b>graph_map.json</b>
+    index.sqlite    <i>derived, rebuilt</i>
+  <b>census.json</b>       <i>conflicts + D1–D5 + meta</i>
+  tickets.jsonl     acl.json
+  schema.json       columns.json
+  manifest.json     <i>+ resolver constants</i>
+  <b>DIFF_vs_prev.md</b>   <i>read it like a PR</i></code></pre>
+      <p><b>JSONL is the diffable source of truth; the sqlite index is derived.</b> The
+      reviewable thing is authoritative; the fast thing is disposable.</p>
+      <p style="font-size:13.5px;color:var(--muted)">No wall clock anywhere in a build
+      artifact. Run it twice and watch the id repeat — the runbook tells you to.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 14 · CARDS ═══════════════════ -->
+<section class="slide" data-chap="1" data-title="Cards — 2,000 tokens, a fixed drop order">
+  <div class="head">
+    <span class="eyebrow">The agent's world</span><span class="layer">compiler/cards.py</span>
+    <h2>Truncation is inevitable. <em>What</em> you truncate is a design decision.</h2>
+  </div>
+  <p class="dek">Most systems make that decision accidentally, by ordering. Here it is
+  explicit: the twelfth column can go, the conflict cannot.</p>
+
+  <div class="grid g32">
+    <div class="panel">
+      <h3>The budgeter, pinned</h3>
+      <pre><code>TOKEN_BUDGET_TABLE = 2000
+
+drop order:  column long-tail
+          →  history / usage
+          →  join detail
+
+<b>NEVER drop:  grain · conflicts · access</b></code></pre>
+      <ul>
+        <li>Every line carries a <code>[prov:…]</code> ref.</li>
+        <li><b>Conflicts are always printed</b> — a card that hides ambiguity is lying to
+          the agent.</li>
+        <li>Drops are counted into the manifest’s <code>budget</code> block, so a diff can say
+          <em>“this table started dropping columns this build.”</em></li>
+        <li>The complete column list still lives in <code>columns.json</code> for surfaces
+          that can afford it. The card is the <em>budgeted</em> view, not the only view.</li>
+      </ul>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:15px;min-width:0">
+      <div class="panel sunk">
+        <h3>Three templates</h3>
+        <ul class="bare">
+          <li><span class="mono">table</span><span>grain, columns with type and sensitivity,
+            metrics measured here, filters on record, ownership vs usage, joins by family,
+            access, conflicts</span></li>
+          <li><span class="mono">metric</span><span>label, <b>definition line</b>, canonical
+            SQL, status + evidence origin, grain, approved dimensions, sign convention,
+            variants, usage texture</span></li>
+          <li><span class="mono">concept</span><span>every binding for the label with its
+            predicate, authority, support and witness — <b>conflicts side by side</b></span></li>
+        </ul>
+      </div>
+      <div class="panel rule-top">
+        <h3>Status and origin are different axes</h3>
+        <pre><code>store          served
+─────────────  ──────────────────────
+mined       →  <b>unreviewed</b>
+pending     →  pending_certification
+
++ evidence_origin:
+  measures_catalog → usage_mining
+  jobs_30d         → query_history
+  metrics_dmp      → certified_catalog</code></pre>
+        <p>The agent-facing surface says <b>“unreviewed (evidence: usage_mining)”</b> while
+        the store state and the clerk lattice stay untouched. <b>Display vocabularies are
+        translations, never renames.</b></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 15 · RANKING ═══════════════════ -->
+<section class="slide" data-chap="1" data-title="Support cannot outvote certification">
+  <div class="head">
+    <span class="eyebrow">The binder</span><span class="layer">L4 · tools/resolver.py</span>
+    <h2>The lattice, made literal as a sort key.</h2>
+  </div>
+
+  <div class="grid g2">
+    <div class="panel">
+      <h3>Five tiers, one enum, defined once</h3>
+      <pre><code>CERTIFIED      5   metrics_dmp        ceiling .95
+PENDING        4   extended_gmns      ceiling .80
+SKILL_CONTRACT 3   packs, gold pairs  ceiling .70
+MINED          2   catalog, jobs      ceiling .55
+SNIPPET        1   tribal fragments   ceiling .40</code></pre>
+      <p>The resolver sorts <b>lexicographically</b> on
+      <code>(authority_tier, score_rest)</code>:</p>
+      <pre><code>score_rest = 0.4·log1p(support)/log1p(max_support)
+           + 0.3·recency_decay(last_seen, hl 90d)
+           + 0.3·context_fit</code></pre>
+      <p>Because the sort is lexicographic and <b>not a weighted sum</b>, a mined pattern
+      with 6,000 executions loses to a certified KPI with 3, always, by construction.
+      <em>A coefficient is a thing someone tunes. A sort key is not.</em></p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:15px;min-width:0">
+      <div class="panel rule-top">
+        <h3>Disambiguation is a success state</h3>
+        <pre><code>m &lt; margin_threshold  <b>OR</b>  top reached only via fuzzy
+     ⇒ <b>NO BIND</b> — a structured ambiguity with
+       named options, each carrying its evidence</code></pre>
+        <p><b>Never argmax.</b> An agent that asks “did you mean the certified definition,
+        or the one your team uses?” is doing its job. An agent that picks is gambling with
+        your quarter-end.</p>
+      </div>
+      <div class="panel sunk">
+        <h3>Decay is data-relative, not wall-clock</h3>
+        <p>Age is measured against <b>the build’s own newest <code>last_seen</code></b>. A build
+        re-scored six months later ranks identically. Wall-clock decay would mean the same
+        build answers differently on different days — quietly breaking every
+        reproducibility claim.</p>
+      </div>
+      <div class="panel">
+        <h3>Every constant versioned and cited</h3>
+        <pre><code>RESOLVER_CONSTANTS = {"version": "<b>rc1</b>",
+  "weights": {support .4, recency .3, context .3},
+  "recency_half_life_days": 90,
+  "margin_threshold": 0.15,
+  "fuzzy_reach_forces_ask": True}</code></pre>
+        <p>Embedded in every build manifest, cited in every response, and openly labelled
+        <b>uncalibrated bets</b>. A wrong bind is always traceable to the constants that
+        produced it — every slot carries its own <code>features</code> block.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 16 · DIVIDER: THE HARNESS ═══════════════════ -->
+<section class="slide divider" data-chap="2" data-title="Chapter 2 — The Harness">
+  <span class="no">CHAPTER 02</span>
+  <h2>The Harness</h2>
+  <p class="dek">Thin on purpose. The model drives; the harness streams, records, and holds
+  the must-haves in code. Everything the harness was doing to <em>manage</em> the model
+  got deleted.</p>
+  <div class="tagrow">
+    <span class="tag t1">the thin loop</span><span class="tag t1">12 tools</span>
+    <span class="tag t2">6 hooks</span><span class="tag t2">budgets in code</span>
+    <span class="tag t3">two modes</span><span class="tag t3">memory · skills · files</span>
+  </div>
+</section>
+
+<!-- ═══════════════════ 17 · WHAT GOT DELETED ═══════════════════ -->
+<section class="slide" data-chap="2" data-title="Two transcripts, and the delete list">
+  <div class="head">
+    <span class="eyebrow">Method</span><span class="layer">specs/synapse_v3_harness.md §0</span>
+    <h2>Two real transcripts, read line by line.</h2>
+  </div>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>symptom</th><th>cause</th><th>fix</th></tr></thead>
+    <tbody>
+      <tr><td class="say">a long answer with SQL in it died</td><td class="say">strict JSON per step, and a 1,200-token output cap</td><td class="say"><b>delete both</b></td></tr>
+      <tr><td class="say">the same card read three times</td><td class="say">per-result compaction starved the model — a whole card reached it as four lines, a search as three forty-character labels</td><td class="say"><b>results go back whole</b>, ~20K chars, with an explicit truncation note</td></tr>
+      <tr><td class="say">the thinking line and the artifact panel never hid</td><td class="say"><code>display:flex</code> in the stylesheet overrode the HTML <code>hidden</code> attribute — and the browser walk asserted the property, not visibility</td><td class="say"><code>[hidden]{display:none!important}</code> globally; <b>assert visibility</b></td></tr>
+      <tr><td class="say">a simple question took 35 seconds</td><td class="say">seven model calls per answer, each with full thinking</td><td class="say"><b>one interaction</b>, native tool calls, streamed</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="pull">Every one of these is harness, not model. <b>“Never bet against the
+  model” is the operating rule from here.</b></div>
+
+  <div class="grid g2">
+    <div class="panel rule-top stop"><h3>Removed outright</h3>
+      <div class="tagrow">
+        <span class="tag no">strict-JSON protocol</span><span class="tag no">strikes</span>
+        <span class="tag no">1200-token cap</span><span class="tag no">24-step cap</span>
+        <span class="tag no">per-result compaction</span><span class="tag no">the <code>think</code> field</span>
+        <span class="tag no">RULES prose</span><span class="tag no">“what the model saw” in chat</span>
+        <span class="tag no">22 of 33 tools</span><span class="tag no">projects UI</span>
+        <span class="tag no">skills picker</span>
+      </div></div>
+    <div class="panel rule-top"><h3>Kept, because measured</h3>
+      <div class="tagrow">
+        <span class="tag yes">the checks</span><span class="tag yes">the rendering rules</span>
+        <span class="tag yes">the business map</span><span class="tag yes">skill packs</span>
+        <span class="tag yes">memory scoping</span><span class="tag yes">the session handoff</span>
+        <span class="tag yes">the eval suites</span>
+      </div>
+      <p style="font-size:13.5px;color:var(--muted)">Principle 10, from the repo’s own
+      discipline doc: <em>delete on upgrade. A harness that only grows is a harness nobody
+      understands.</em></p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 18 · THE TURN ═══════════════════ -->
+<section class="slide" data-chap="2" data-title="The turn, and the limits">
+  <div class="head">
+    <span class="eyebrow">The loop</span><span class="layer">assistant/loop.py</span>
+    <h2>One interaction per turn. The turn ends when the model stops calling tools.</h2>
+  </div>
+
+  <figure>
+    <div class="svgwrap">
+    <svg viewBox="0 0 1000 200" role="img" aria-label="A turn: the harness builds a cached system prompt and replays history with the newest ask last, opens one model interaction, and loops — streaming text and thought summaries to the user while each tool call runs whole through pre and post hooks and returns whole to the model. Three limits end the turn gracefully.">
+      <g fill="none" stroke="currentColor" stroke-width="1.2">
+        <rect x="8" y="52" width="152" height="60" rx="7"/>
+        <rect x="212" y="52" width="152" height="60" rx="7" stroke="var(--trust)" stroke-width="2"/>
+        <rect x="416" y="20" width="168" height="52" rx="7"/>
+        <rect x="416" y="94" width="168" height="52" rx="7"/>
+        <rect x="640" y="94" width="152" height="52" rx="7" stroke="var(--trust)" stroke-width="2"/>
+        <rect x="844" y="52" width="148" height="60" rx="7"/>
+      </g>
+      <g font-family="Bricolage Grotesque, sans-serif" font-size="12.5" font-weight="700" fill="currentColor" text-anchor="middle">
+        <text x="84" y="78">system prompt</text>
+        <text x="288" y="78">one interaction</text>
+        <text x="500" y="44">stream to user</text>
+        <text x="500" y="118">tool call</text>
+        <text x="716" y="118">hooks</text>
+        <text x="918" y="78">turn_done</text>
+      </g>
+      <g font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--muted)" text-anchor="middle">
+        <text x="84" y="95">cacheable prefix</text>
+        <text x="84" y="107">+ history, ask LAST</text>
+        <text x="288" y="95">native tool decls</text>
+        <text x="288" y="107">thinking_level per turn</text>
+        <text x="500" y="59">say_token · thinking</text>
+        <text x="500" y="134">runs WHOLE</text>
+        <text x="716" y="134">pre → run → post</text>
+        <text x="918" y="95">chips · budget_tick</text>
+      </g>
+      <g stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)">
+        <line x1="162" y1="82" x2="208" y2="82"/>
+        <path d="M366 74 C392 74 392 46 412 46" fill="none"/>
+        <path d="M366 90 C392 90 392 120 412 120" fill="none"/>
+        <line x1="586" y1="120" x2="636" y2="120"/>
+        <line x1="586" y1="46" x2="840" y2="46" stroke-dasharray="3 4"/>
+      </g>
+      <path d="M716 148 C716 182 288 182 288 116" fill="none" stroke="var(--trust)" stroke-width="1.4" marker-end="url(#arT)"/>
+      <text x="502" y="196" font-family="JetBrains Mono, monospace" font-size="10" fill="var(--trust)" text-anchor="middle">functionResponse — the result goes back WHOLE (≤20K chars, else "read(section=…) for the rest")</text>
+      <path d="M794 120 C818 120 820 96 842 90" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"/>
+      <text x="918" y="30" font-family="JetBrains Mono, monospace" font-size="9.5" fill="var(--muted)" text-anchor="middle">no more tool calls</text>
+    </svg>
+    </div>
+    <figcaption>The harness builds the prompt, opens one interaction, and gets out of the
+    way. Governance lives in the hooks on the tool path, not in the prompt.</figcaption>
+  </figure>
+
+  <div class="grid g4">
+    <div class="panel sunk"><h3>Limits, in code</h3>
+      <pre><code>MAX_CALLS  = 40
+WALL_SEC   = 600
+RESULT_CAP = 20_000
+HISTORY    = 30 msgs</code></pre></div>
+    <div class="panel sunk"><h3>Never a vanished turn</h3>
+      <p>Each limit ends the turn <b>in plain language with what was already said</b>, and a
+      “continue” that resumes the same interaction. <b>Streamed text is never
+      discarded.</b></p></div>
+    <div class="panel sunk"><h3>One abort path</h3>
+      <p>The stop button and the session breaker share it — so “stop” is exercised by every
+      test that exercises the cap.</p></div>
+    <div class="panel sunk"><h3>Depth, not effort</h3>
+      <p><b>Quick / Standard / Deep</b> change per-step thinking and nothing else. The call
+      ceiling and the wall clock are identical at every depth.</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 19 · THE SYSTEM PROMPT ═══════════════════ -->
+<section class="slide" data-chap="2" data-title="The system prompt, section by section">
+  <div class="head">
+    <span class="eyebrow">Context</span><span class="layer">assistant/loop.py · system_prompt()</span>
+    <h2>Stable parts first, so the prefix caches. The newest ask always last.</h2>
+  </div>
+
+  <div class="grid g32">
+    <div class="panel">
+      <h3>Seven sections</h3>
+      <ul class="bare">
+        <li><span class="mono">&lt;identity&gt;</span><span>a general reasoner first; a
+          thinking question gets thinking, with no tools. <b>Numbers come from tools;
+          reasoning comes from you.</b></span></li>
+        <li><span class="mono">&lt;chain&gt;</span><span>platform governance ≻ the product ≻
+          this user’s memory and asks ≻ defaults. <b>A remembered preference steers a choice;
+          it never softens a rule.</b></span></li>
+        <li><span class="mono">&lt;mode&gt;</span><span>chat or autopilot — a prompt section,
+          not a gate</span></li>
+        <li><span class="mono">&lt;graph&gt;</span><span><code>SYNAPSE.md</code>, the world
+          digest, ≤2K tokens, <b>generated from the build’s indexes and nothing else</b></span></li>
+        <li><span class="mono">&lt;skills&gt;</span><span>loaded packs whole; the rest of the
+          shelf by name</span></li>
+        <li><span class="mono">&lt;memory&gt;</span><span>the project block and what is
+          remembered about this person</span></li>
+        <li><span class="mono">&lt;session&gt;</span><span>today’s date, artifacts in this
+          chat, working notes</span></li>
+      </ul>
+      <p>Then the conversation as messages — <b>instructions after data.</b> Temperature stays
+      at the model default; 0.0 is a documented cause of looping.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:15px;min-width:0">
+      <div class="panel rule-top">
+        <h3>The digest is generated, never written</h3>
+        <p><b>Hand-written prose has no entry point.</b> If a fact is not derivable from the
+        build, it does not appear — the reality law applies to the model’s briefing exactly
+        as it applies to answers.</p>
+        <p style="font-size:13.5px;color:var(--muted)">Deterministic per build, so the
+        assembled prompt is byte-identical across turns. Which is what makes it cacheable.</p>
+      </div>
+      <div class="panel sunk">
+        <h3>The date block exists because a model has no clock</h3>
+        <pre><code><i># without this line "last month" resolves</i>
+<i># against its training-time sense of now,</i>
+<i># and a window with no upper bound rides</i>
+<i># into the future</i></code></pre>
+        <p>It spells out today, this month, last month, this quarter <em>with its start
+        date</em>, last quarter, year-to-date — and <b>the newest partition the build saw</b>,
+        so “rows after it may not exist yet” is a stated fact rather than a surprise.</p>
+        <p style="font-size:13.5px;color:var(--muted)">It sits in the last section on
+        purpose, so the cached prefix stays stable within a day.</p>
+      </div>
+      <div class="pull">The governance rules do not live in prose any more. They are hooks.
+      Prose only steers what the model cannot know: tone, the shape of the disclosure
+      sentence, when to ask.<cite>§1 — press delete</cite></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 20 · THE TOOLS ═══════════════════ -->
+<section class="slide" data-chap="2" data-title="Twelve tools, sharp and non-overlapping">
+  <div class="head">
+    <span class="eyebrow">The kit</span><span class="layer">assistant/kit.py · 33 → 12</span>
+    <h2>No tool description repeats what another tool does.</h2>
+  </div>
+  <p class="dek">Each is a thin door over deterministic machinery the silo already has.
+  <em>The model reasons; the tools never guess; the hooks hold the must-haves.</em></p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>tool</th><th>signature</th><th>absorbed</th><th>the “when”, from its own description</th></tr></thead>
+    <tbody>
+      <tr><td><b>search</b></td><td>query, kind?</td><td>4 tools + resolve</td><td class="say">One door. <code>list</code> for “all X metrics”, <code>exact</code> greps card text, <code>vocab</code> expands an acronym <em>with its scope</em>, <code>values</code> turns a business phrase into the stored code. Business areas rank first.</td></tr>
+      <tr><td><b>read</b></td><td>id, section?, graph_ids?</td><td>4 tools</td><td class="say">A card whole, before using anything on it. A metric card carries its definition line; <code>graph_ids</code> returns the subgraph behind what this turn touched.</td></tr>
+      <tr><td><b>sample_values</b></td><td>table, column, n?</td><td>—</td><td class="say">Observed values, never live. <b>Call before writing any filter literal.</b></td></tr>
+      <tr><td><b>run_sql</b></td><td>sql, mode?, limit?</td><td>run_sql, whatif</td><td class="say">Price it (<code>dry_run</code>) or run it under <b>two limits you cannot lift</b>. Rows save as <code>q&lt;N&gt;</code>. Refused for cost → narrow the scan; refused as disabled → that is configuration, say so and stop.</td></tr>
+      <tr><td><b>propose_sql</b></td><td>sql, title, why?, metric_id?</td><td>—</td><td class="say"><b>Ends the turn.</b> Hand the proved query to the person; the card carries status, price and meridian line and offers Run / Run + dashboard / Edit.</td></tr>
+      <tr><td><b>python</b></td><td>code</td><td>python, compare</td><td class="say">The session workspace. Decomposition, variance, cohorts, aligning two results — <em>this is where it happens.</em></td></tr>
+      <tr><td><b>check</b></td><td>kind, …</td><td>6 tools + verify</td><td class="say">A citable <b>FACT</b>: part_whole · crosscheck · coverage · fanout · reconcile · answer. A passing <code>fact_id</code> cited in provenance lets a composed number shed its watermark.</td></tr>
+      <tr><td><b>artifact</b></td><td>type, title, spec_json, id?</td><td>4 tools</td><td class="say">Something the user keeps. Id present ⇒ a new version, never a copy.</td></tr>
+      <tr><td><b>ask</b></td><td>question, options</td><td>ask_user</td><td class="say"><b>Ends the turn.</b> One question, 2–4 named options with a reason each. <em>Do not ask what <code>read</code> or <code>sample_values</code> could tell you.</em></td></tr>
+      <tr><td><b>load_skill</b></td><td>name</td><td>list_skills</td><td class="say">Pull one doctrine pack into this turn — <b>the result IS the doctrine.</b> Loading is your job.</td></tr>
+      <tr><td><b>remember</b></td><td>text, scope?</td><td>memories, forget</td><td class="say">One preference the user settled, in their words. <b>NEVER a metric definition or a number</b> — those belong in the graph.</td></tr>
+      <tr><td><b>note</b></td><td>text</td><td>plan_set, note</td><td class="say">What you ruled out, what to compare next. <em>Your later self reads it.</em></td></tr>
+      <tr><td><b>suggest_next</b></td><td>options</td><td>—</td><td class="say">≤3 follow-ups, once, at the end, only when there is a natural next step.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="color:var(--muted);font-size:13px">Tools get the care of a user interface: every
+  description passes the new-hire test, arguments are poka-yoked with enums drawn from
+  compiled domains, and <b>every error message names the correct next call — the error
+  channel is a teaching channel, never a dead end.</b></p>
+</section>
+
+<!-- ═══════════════════ 21 · HOOKS ═══════════════════ -->
+<section class="slide" data-chap="2" data-title="Six hooks — governance in code">
+  <div class="head">
+    <span class="eyebrow">Verification first</span><span class="layer">assistant/hooks.py</span>
+    <h2>Governance is never prose the model may or may not follow.</h2>
+  </div>
+  <p class="dek">It is a deterministic check on the way in or out of a tool. This module is
+  the registry that makes those checks <em>legible</em>.</p>
+
+  <div class="grid g23">
+    <div class="panel">
+      <div class="tw"><table>
+        <thead><tr><th>hook</th><th>kind</th><th>enforces</th></tr></thead>
+        <tbody>
+          <tr><td><b>artifact_schema</b></td><td>pre</td><td class="say">disclosure and watermark</td></tr>
+          <tr><td><b>sql_gates</b></td><td>pre</td><td class="say">cost + ACL <em>before any execution</em></td></tr>
+          <tr><td><b>literal_check</b></td><td>post</td><td class="say">filter literals vs observed values</td></tr>
+          <tr><td><b>rows_to_workspace</b></td><td>post</td><td class="say"><code>q&lt;N&gt;</code> saved for python and check</td></tr>
+          <tr><td><b>warehouse_errors</b></td><td>post</td><td class="say">a failure comes back <em>classified</em></td></tr>
+          <tr><td><b>clerk_only</b></td><td><span class="tag no">absent</span></td><td class="say">nothing in a chat writes truth</td></tr>
+        </tbody>
+      </table></div>
+      <p><code>clerk_only</code> is registered with <code>kind: "absent"</code>. There is no code
+      to run — <b>the guarantee is the absence of a writer in the kit.</b> Registering it
+      anyway makes the absence documented and testable rather than merely true.</p>
+      <div class="panel sunk" style="margin-top:4px">
+        <h3>A failure that teaches</h3>
+        <pre><code>kind         yours?  the hint carries
+sql          <b>yes</b>     closest real names, the snippet
+cost         <b>yes</b>     narrow the scan
+environment  <s>no</s>      the exact .env change
+access       <s>no</s>      which table, which permission</code></pre>
+        <p>No model call, no guessing — everything named comes from the build or the error
+        itself. <b>And the eval suite grades both behaviours:</b> fixing what is yours, and
+        <em>stopping</em> when it is not.</p>
+      </div>
+    </div>
+    <div class="panel rule-top">
+      <h3>The literal check, in full</h3>
+      <pre><code>for each  column = 'literal'  in the SQL:
+
+  no observed values on record
+      → <b>leave it alone. No domain, no opinion.</b>
+
+  literal ∈ observed
+      → silent
+
+  literal is a <b>MEANING</b> on record
+      → "'KYC done' is the meaning of a stored
+         code, not a value: filter with
+         status = 'K' (value lookup) and say
+         the meaning in the answer"
+
+  otherwise
+      → "not among the 8 observed values of
+         dw.t.status; closest: 'A', 'D', 'P'
+         <i>(the profile estimates 12 distinct values,</i>
+         <i>so the list on record is partial)</i>"</code></pre>
+      <ul>
+        <li><b>No domain, no opinion.</b> Silence on columns we know nothing about.</li>
+        <li><b>A partial list is a hint, not a verdict</b> — if the profiler’s distinct
+          estimate exceeds the observed list, the warning says so.</li>
+        <li><b>A business phrase gets the code.</b> “Approved” is not a value; <code>'A'</code>
+          is.</li>
+      </ul>
+      <div class="pull">This hook replaced two prose rules. “Read before use” and “sample
+      before filter” left the prompt: <b>the literal hook and the card-shaped tools make the
+      right path the easy path.</b></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 22 · MODES ═══════════════════ -->
+<section class="slide" data-chap="2" data-title="Two modes, and what needs no model call">
+  <div class="head">
+    <span class="eyebrow">The autonomy slider, legibly</span><span class="layer">§5</span>
+    <h2>Query first. Rows on a tap. The first picture without the model.</h2>
+  </div>
+
+  <div class="grid g2">
+    <div class="panel rule-top">
+      <h3>Chat <span class="tag t1">default</span></h3>
+      <p>A data question ends with <code>propose_sql</code>: the query on a card with its
+      price, its status and its meridian line, and <b>Run query</b> / <b>Run + build
+      dashboard</b> / <b>Edit SQL</b>. Say in a sentence or two what it will show, then stop.</p>
+    </div>
+    <div class="panel rule-top">
+      <h3>Autopilot</h3>
+      <p>Run it under the limits, check, and build the deliverable without stopping to hand
+      over. <code>propose_sql</code> is not needed.</p>
+      <p style="font-size:13.5px;color:var(--muted)"><b>The mode is a prompt section, not a
+      gate: the limits hold in both.</b></p>
+    </div>
+  </div>
+
+  <div class="grid g3">
+    <div class="panel sunk"><h3>Run — no model call</h3>
+      <p><code>run_proposal_turn</code> executes the proposal. The rows land as a table
+      artifact <b>and</b> as <code>q1</code>, the receipts stream as prose, and the chips offer
+      a dashboard from the rows.</p></div>
+    <div class="panel sunk"><h3>Chart — no model call</h3>
+      <p><code>chart_rows_turn</code> draws saved rows under the run’s provenance: x is the
+      first date-like or text column, numeric columns become series, a line on a date axis
+      and a bar otherwise.</p></div>
+    <div class="panel sunk"><h3>What does need the model</h3>
+      <p>Only the showcase and the <em>designed</em> dashboard. <b>Execution and the first
+      picture never wait on it.</b></p></div>
+  </div>
+
+  <div class="grid g2">
+    <div class="panel">
+      <h3>Irreversible actions do not exist in this chat</h3>
+      <ul>
+        <li>The graph is read-only from here.</li>
+        <li>SQL is sandboxed: <b>parse → resolve tables → ACL verdict <em>before any
+          execution object is constructed</em></b> → then, and only then, a substrate.</li>
+        <li>Artifacts are versions, never overwrites.</li>
+        <li>Live execution sits behind <code>SAHS_ALLOW_LIVE</code>, a byte ceiling and a row
+          cap, <b>both disclosed on every result</b>.</li>
+        <li>Memory writes disclose and undo.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>Memory, bound to the person</h3>
+      <ul class="bare">
+        <li><span class="mono">who writes</span><span>the model when a preference is stated;
+          a post-turn Flash-tier pass proposing durable ones; the person directly</span></li>
+        <li><span class="mono">disclosure</span><span>inline, every save — <em>“Remembered:
+          by spend you mean acquirer net spend · undo”</em></span></li>
+        <li><span class="mono">retiring</span><span>strikes through, <b>never deletes</b></span></li>
+        <li><span class="mono">boundary</span><span>a <em>preference</em> is memory; a
+          <em>definition</em> is a quad with a signature and a review item</span></li>
+      </ul>
+      <p style="font-size:13.5px;color:var(--muted)">A confirmed on-the-fly variant is
+      written at creation as ordinary metric quads —
+      <code>certified_as → team_candidate</code> with the user as <code>actor</code>,
+      <code>variant_of</code> the nearest certified fingerprint, plus a ReviewItem.
+      <b>One store, one lattice; variants are never “memory.”</b></p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 23 · DIVIDER: GENERATIVE UI ═══════════════════ -->
+<section class="slide divider" data-chap="3" data-title="Chapter 3 — Generative UI">
+  <span class="no">CHAPTER 03</span>
+  <h2>A2UI, and the renderer that refuses</h2>
+  <p class="dek">The agent does not emit HTML. It emits a <em>typed description</em> of an
+  answer, and the client decides how to render it. Two properties are bolted onto that
+  contract that a generic protocol does not give you.</p>
+  <div class="tagrow">
+    <span class="tag t1">a2ui.answer/1</span><span class="tag t1">RenderRefused</span>
+    <span class="tag t2">6 artifact types</span><span class="tag t2">3 rendering rules</span>
+    <span class="tag t3">13 event kinds</span><span class="tag t3">replay = live</span>
+  </div>
+</section>
+
+<!-- ═══════════════════ 24 · a2ui.answer/1 ═══════════════════ -->
+<section class="slide" data-chap="3" data-title="a2ui.answer/1 — the envelope that refuses">
+  <div class="head">
+    <span class="eyebrow">The answer contract</span><span class="layer">ask/render.py</span>
+    <h2>An ungoverned answer is not a formatting problem.</h2>
+  </div>
+
+  <div class="grid g2">
+    <div class="panel">
+      <h3>The payload</h3>
+      <pre><code>{
+  "schema": "<b>a2ui.answer/1</b>",
+  "<b>meridian_line</b>": "…the one-sentence disclosure…",
+  "<b>grain</b>": "one row per merchant per day",
+  "metric": {id, label, fp, <b>tier</b>, <b>status</b>, table},
+  "prose": "…the streamed written answer…",
+  "sql":   "…the composed query…",
+  "why":   "…why this answers the ask…",
+  "rows": [...],  "result_schema": [...],
+  "bytes_processed": 41234567,
+  "<b>verdict</b>": {…the contract, criterion by criterion},
+  "plan":  {…the versioned plan},
+  "build_id": "b_2cd603279061",
+  "<b>limits</b>": ["validated by dry run, not executed live",
+             "3 further rows withheld from this view",
+             "unverified, the join is raw-safe: …"],
+  "<b>actions</b>": [
+    {id: "open_metric", href: "#/metric/…", enabled: <b>true</b>},
+    {id: "promote", enabled: <b>false</b>,
+     note: "arrives with the steward loop"}]
+}</code></pre>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:15px;min-width:0">
+      <div class="panel rule-top stop">
+        <h3>The two refusals</h3>
+        <pre><code>class <b>RenderRefused</b>(ValueError):
+    <i>"""The payload would have been ungoverned;</i>
+<i>       nothing was rendered."""</i>
+
+if not gen.definition_line:
+    raise RenderRefused(
+      "no meridian line for this metric: an answer
+       that cannot say where its definition comes
+       from is <b>not servable</b>")
+
+if not plan.grain:
+    raise RenderRefused(
+      "no grain on this plan: an answer that cannot
+       say what one row means is <b>not servable</b>")</code></pre>
+        <p>The reality law is enforced <b>at the last gate</b> rather than trusted upstream.</p>
+      </div>
+      <div class="panel">
+        <h3>Why this is the interesting part</h3>
+        <ul class="bare">
+          <li><span class="mono">in-schema</span><span><b>Governance is a required field.</b>
+            A renderer cannot forget the disclosure, because a payload without it does not
+            exist.</span></li>
+          <li><span class="mono">limits[]</span><span><b>Hedges are first-class, not prose.</b>
+            Not executed live, rows withheld, each failed criterion, <em>“the first composed
+            query was refused by the validator and repaired before running”</em> — the UI
+            renders them; the model cannot bury them in a paragraph.</span></li>
+          <li><span class="mono">actions[]</span><span><b>Declared, with <code>enabled</code>
+            </b>— including a disabled action carrying a note about when it arrives. Honest
+            affordances beat hidden ones.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 25 · ARTIFACTS ═══════════════════ -->
+<section class="slide" data-chap="3" data-title="Artifacts — six types, three rules">
+  <div class="head">
+    <span class="eyebrow">The other shape of the same principle</span><span class="layer">assistant/artifacts.py</span>
+    <h2>Governance as schema, not as a gate in front of the conversation.</h2>
+  </div>
+  <p class="dek">The assistant lane’s equivalent of A2UI components is the artifact type
+  system. <em>Everything the component work produced survives as artifact and message
+  types; nothing is wasted.</em></p>
+
+  <div class="tagrow">
+    <span class="tag t1">chart</span><span class="tag t1">table</span><span class="tag t1">document</span>
+    <span class="tag t1">kpi</span><span class="tag t1">dashboard</span><span class="tag t1">diagram</span>
+    <span class="tag">a dashboard nests tiles, never another dashboard</span>
+  </div>
+
+  <div class="grid g3">
+    <div class="panel rule-top"><h3><span class="k">RULE 1</span>Disclosure</h3>
+      <p>Any artifact that shows a number carries <code>provenance: {status,
+      meridian_line}</code> <b>in-schema</b>. The validator refuses one that does not — with
+      a <em>teaching</em> message, so the model fixes its own spec.</p>
+      <pre><code>"say what the number IS: certified (on the
+ meridian), pending (governed but unreviewed),
+ composed (you built it from parts),
+ exploratory (a look, not a claim)"</code></pre></div>
+    <div class="panel rule-top warn"><h3><span class="k">RULE 2</span>Watermark</h3>
+      <p><code>status: composed</code> keeps the <b>EXPLORATORY</b> watermark until a passing
+      <code>reconcile</code> or <code>crosscheck</code> fact <em>from this trajectory</em> is
+      cited in <code>provenance.facts</code>.</p>
+      <p><b>Forced by the validator, never negotiated by prose.</b></p>
+      <p style="font-size:13.5px;color:var(--muted)">And a dashboard’s <em>every numeric
+      panel carries its own provenance</em> — one disclosure at the top would be a lie about
+      the tiles.</p></div>
+    <div class="panel rule-top stop"><h3><span class="k">RULE 3</span>Clerk only</h3>
+      <p>Nothing here writes truth. Versions are append-only rows keyed
+      <code>(artifact_id, version)</code>: an edit is a new version, never an overwrite,
+      <b>so “what did the dashboard say on Tuesday” stays answerable.</b></p></div>
+  </div>
+
+  <div class="grid g2">
+    <div class="panel sunk"><h3>What the panel renders</h3>
+      <p>Every stored spec is normalized: build id stamped, watermark decided, unknown
+      fields dropped. <b>What the panel renders is exactly what the validator passed — the
+      renderer never patches an artifact up.</b></p></div>
+    <div class="panel sunk"><h3>Honesty of method is part of the fact</h3>
+      <p>A structural <code>reconcile</code> says <code>structural</code> (the certified
+      expression is contained in the composed SQL); a numeric one says <code>numeric</code>
+      (totals compared over snapshot rows). <b>A fact never claims more than its method
+      delivered</b> — which is the difference between a check and a rubber stamp.</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 26 · EVENTS + SURFACES ═══════════════════ -->
+<section class="slide" data-chap="3" data-title="The event stream is the only UI truth">
+  <div class="head">
+    <span class="eyebrow">Transport</span><span class="layer">meridian.event/1</span>
+    <h2>Replay equals live. Every surface is a pure consumer.</h2>
+  </div>
+
+  <div class="grid g23">
+    <div class="panel">
+      <h3>One turn, thirteen event kinds</h3>
+      <pre><code>turn_started
+<b>model_prompt</b>    <i>what the model saw</i>
+thinking        <i>a thought summary delta</i>
+tool_call       <i>announced, before it runs</i>
+tool_step       <i>tool, args, compact summary</i>
+tool_result     <i>the full result behind it</i>
+say_token       <i>streamed prose</i>
+<b>artifact</b>        <i>the full spec rides</i>
+<b>proposal</b>        <i>the card with Run on it</i>
+chips
+budget_tick
+turn_done
+error</code></pre>
+      <p><b>No classify, no resolve_started, no contract gate</b> — the model drives; the
+      harness streams and records.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:15px;min-width:0">
+      <div class="panel rule-top">
+        <h3>Poll-based on purpose</h3>
+        <p>The turn runs in a worker thread (the resolver is CPU work, model calls are
+        blocking HTTP) while SSE consumers live on the event loop. <b>A lock-protected append
+        log that consumers read by sequence number is thread-safe by construction, needs no
+        loop plumbing, and loses nothing on reconnect.</b></p>
+        <p>Consequence: <b>a turn belongs to the server, not the tab.</b> Leaving the page
+        closes only the listener; coming back mid-turn reattaches from the turn’s first
+        event and replays it whole.</p>
+      </div>
+      <div class="grid g2" style="gap:12px">
+        <div class="panel sunk"><h3>Synapse by Lumi</h3>
+          <p>The steward console. Home · Sources · Semantics Explorer · Metric and Table
+          Profiles · <b>Cosmos</b> · Artifacts and Skills · Operate · Ask · Chat.</p>
+          <p style="font-size:13px;color:var(--muted)">Deep links work: <em>a metric profile
+          is a URL you can send someone.</em></p></div>
+        <div class="panel sunk"><h3>Synapse Semantic Intelligence</h3>
+          <p>The ask surface. Chat first, the library under it: search · data products ·
+          metrics · skills · memory. Same server, same build, a different centre of
+          gravity.</p>
+          <p style="font-size:13px;color:var(--muted)">A steward browses <em>tables</em>; an
+          analyst asks about <em>products</em>.</p></div>
+      </div>
+      <div class="panel">
+        <h3>The cosmos: layout baked at compile</h3>
+        <p>Positions come from <code>graph_map.json</code>, seeded from sha256 of stable
+        identifiers — <b>no RNG</b> — so the same build always renders the same sky and
+        <em>a diff in the map is a diff in the data.</em></p>
+        <div class="tagrow">
+          <span class="tag">size = usage</span><span class="tag">glow = trust tier</span>
+          <span class="tag">gold star = held by several domains</span>
+          <span class="tag t3">41 named stars drawn</span>
+          <span class="tag t4">~3,000 anonymous ones counted in meta.truncated</span>
+        </div>
+        <p style="font-size:13.5px;color:var(--muted)">Three.js vendored locally: no CDN,
+        works offline. And the whole frontend has <b>no build step at all</b> — plain ES
+        modules, a hash router.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 27 · DIVIDER: CAPABILITIES ═══════════════════ -->
+<section class="slide divider" data-chap="4" data-title="Chapter 4 — Capabilities and proof">
+  <span class="no">CHAPTER 04</span>
+  <h2>What it does, and what we actually know</h2>
+  <p class="dek">The capability inventory, the way the system is measured, and the parts
+  still marked <em>absent — not built, not scored.</em></p>
+  <div class="tagrow">
+    <span class="tag t1">the inventory</span><span class="tag t2">pass@1 · pass^3</span>
+    <span class="tag t2">the third verdict</span><span class="tag ev">what is still a bet</span>
+  </div>
+</section>
+
+<!-- ═══════════════════ 28 · CAPABILITY INVENTORY ═══════════════════ -->
+<section class="slide" data-chap="4" data-title="The capability inventory">
+  <div class="head">
+    <span class="eyebrow">Everything the system can do</span>
+    <h2>The inventory, honestly labelled.</h2>
+  </div>
+
+  <div class="grid g3">
+    <div class="panel">
+      <h3>Build the layer</h3>
+      <ul class="bare">
+        <li><span class="tag yes">works</span><span>canonicalize a mixed SQL corpus with categorized quarantine and a rate gate</span></li>
+        <li><span class="tag yes">works</span><span>compile a deterministic, content-addressed build from nine source shapes</span></li>
+        <li><span class="tag yes">works</span><span>reconcile catalog / metadata / warehouse with five named handlers and tickets</span></li>
+        <li><span class="tag yes">works</span><span>publish a census: how contested each meaning is, per build</span></li>
+        <li><span class="tag yes">works</span><span>diff two builds semantically and gate promotion on it</span></li>
+        <li><span class="tag yes">works</span><span>account for every input file: consumed / deferred / inventoried</span></li>
+        <li><span class="tag yes">works</span><span>mine 30 days of raw query history for recency, joins and cost priors</span></li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>Answer questions</h3>
+      <ul class="bare">
+        <li><span class="tag yes">works</span><span>bind a business phrase to a governed metric, or refuse and ask with evidence</span></li>
+        <li><span class="tag yes">works</span><span>expand an acronym with its business unit and region, with a common-word guard</span></li>
+        <li><span class="tag yes">works</span><span>turn a business phrase into the stored code and the predicate</span></li>
+        <li><span class="tag yes">works</span><span>judge join fan-out from row counts and declared keys <em>before</em> the query runs</span></li>
+        <li><span class="tag yes">works</span><span>compose SQL that provably contains the certified expression, or be refused</span></li>
+        <li><span class="tag yes">works</span><span>dry-run price every query; execute under a byte ceiling and a row cap</span></li>
+        <li><span class="tag yes">works</span><span>run six kinds of check and cite the passing fact</span></li>
+        <li><span class="tag yes">works</span><span>hand a proved query over; run it and chart it <em>with no model call</em></span></li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>Produce and keep</h3>
+      <ul class="bare">
+        <li><span class="tag yes">works</span><span>six artifact types, validated, versioned, watermarked</span></li>
+        <li><span class="tag yes">works</span><span>Python analysis in an isolated per-session workspace with the build’s indexes</span></li>
+        <li><span class="tag yes">works</span><span>attach PDFs, images, text; convert Office files and say so</span></li>
+        <li><span class="tag yes">works</span><span>memory bound to a person, disclosed, retirable, outranked by governance</span></li>
+        <li><span class="tag yes">works</span><span>skill packs on demand, built-in and user, with shadowing refused</span></li>
+        <li><span class="tag yes">works</span><span>fuzzy search across every chat, with the matching lines</span></li>
+        <li><span class="tag ev">basic</span><span>PPTX export — one panel per slide, meridian line in the notes, native charts</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="grid g3">
+    <div class="panel">
+      <h3>Govern and improve</h3>
+      <ul class="bare">
+        <li><span class="tag yes">works</span><span>the clerk: signed transitions, illegal jumps refused before the write</span></li>
+        <li><span class="tag yes">works</span><span>ReviewItems from ten streams, prioritized by blast radius</span></li>
+        <li><span class="tag yes">works</span><span>model-written descriptions behind a blind exam that halts below 60%</span></li>
+        <li><span class="tag yes">works</span><span>feedback appended beside the graph, never into it</span></li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>Operate</h3>
+      <ul class="bare">
+        <li><span class="tag yes">works</span><span>one CLI over every runbook, five pinned exit codes, resumable checkpoints</span></li>
+        <li><span class="tag yes">works</span><span>19 plane checks, each answering one question</span></li>
+        <li><span class="tag yes">works</span><span>serving tools over MCP behind one envelope</span></li>
+        <li><span class="tag yes">works</span><span>two surfaces, one process, zero frontend build steps</span></li>
+        <li><span class="tag ev">candidate</span><span>an enterprise model gateway with its own identity provider — validated, not the default</span></li>
+        <li><span class="tag ev">ready</span><span>Spanner DDL for identity, chat and graph; first rollout keeps the graph on the filesystem</span></li>
+      </ul>
+    </div>
+    <div class="panel rule-top stop">
+      <h3>Not built</h3>
+      <ul class="bare">
+        <li><span class="tag no">absent</span><span><b>T8 composition</b> — not built, <em>not scored</em></span></li>
+        <li><span class="tag no">absent</span><span><b>T9 exploratory</b> — not built, <em>not scored</em></span></li>
+        <li><span class="tag ev">first cut</span><span>the delegate/scout lane — a read-only worker with a hard cap and a compact report</span></li>
+        <li><span class="tag no">missing</span><span>a license file</span></li>
+      </ul>
+      <p style="font-size:13.5px;color:var(--muted)">A matrix with holes should show its
+      holes. Two tiers report <b>absent — not built, not scored.</b> Not 0/3, not omitted.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 29 · EVALS ═══════════════════ -->
+<section class="slide" data-chap="4" data-title="Evals, and the third verdict">
+  <div class="head">
+    <span class="eyebrow">Measurement</span><span class="layer">evals/</span>
+    <h2>Evals are the loss function. Transcripts are the gradient.</h2>
+  </div>
+
+  <div class="grid g2">
+    <div class="panel">
+      <h3>Three outcomes, not two</h3>
+      <pre><code>fp ∈ accepted_fps                      → <b>PASS</b>
+fp ≠ and (invalid <b>or</b> schema ≠ gold)   → <b>FAIL</b>
+fp ≠ and schema matches                → <b>AMBIGUOUS</b>
+   counted in neither · its own rate
+   · appended to the triage file</code></pre>
+      <p>Fingerprint equality is a strong and <em>incomplete</em> signal. A different query
+      with the same result schema that dry-runs clean is probably a legitimate alternative
+      phrasing. Scoring it FAIL punishes correct work; scoring it PASS launders wrong work.</p>
+      <p><b>Ambiguous items never silently move the floor in either direction.</b> Human
+      triage resolves them — and admitting a fingerprint into a task’s accepted set is how
+      <em>the suite learns.</em></p>
+      <ul>
+        <li>Static result-shape runs <b>before</b> any dry run — <em>no free FAIL should cost
+          a network call.</em></li>
+        <li>Bytes-scanned is a <b>warning, never a gate</b> — partition pruning makes it
+          flaky, and a flaky gate teaches people to ignore gates.</li>
+        <li>Answering when the task says abstain is its own loud failure class. <b>A
+          confident wrong answer is worse than silence.</b></li>
+      </ul>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:15px;min-width:0">
+      <div class="panel sunk">
+        <h3>pass@1 and pass^3, honestly computed</h3>
+        <pre><code>pass@1 = mean(c/n)
+pass^3 = mean(C(c,3)/C(n,3))   <i>unbiased</i>
+
+deterministic SUTs run n=1;
+pass^3 ≡ pass@1 and is <b>never simulated</b>.
+0 &lt; c &lt; n on a deterministic SUT is
+itself a <b>bug alarm</b> — the harness raises it.</code></pre>
+      </div>
+      <div class="panel">
+        <h3>Calibration instruments ship with the suite</h3>
+        <ul class="bare">
+          <li><span class="mono">oracle</span><span>echoes gold — <b>must</b> score 100% pass,
+            0 ambiguous. Otherwise the harness is broken.</span></li>
+          <li><span class="mono">null</span><span>always abstains — <b>must</b> score exactly
+            the abstention share. Otherwise the answer key is broken.</span></li>
+        </ul>
+        <p style="font-size:13.5px;color:var(--muted)">Two systems that cannot possibly be
+        intelligent, whose scores are known in advance.</p>
+      </div>
+      <div class="panel rule-top">
+        <h3>The baseline, and the ablation that found nothing</h3>
+        <div class="tw"><table>
+          <thead><tr><th>tier</th><th></th><th class="n">score</th></tr></thead>
+          <tbody>
+            <tr><td>T1</td><td class="say">vocabulary</td><td class="n">4/4</td></tr>
+            <tr><td>T2</td><td class="say">certified bind</td><td class="n">2/2</td></tr>
+            <tr><td>T3</td><td class="say">clarification</td><td class="n">4/4</td></tr>
+            <tr><td>T4</td><td class="say">single-slot mutation</td><td class="n">1/1</td></tr>
+            <tr><td>T5</td><td class="say">contract, default-FAIL</td><td class="n">2/2</td></tr>
+            <tr><td>T6</td><td class="say">join and grain preview</td><td class="n">3/3</td></tr>
+            <tr><td>T7</td><td class="say">answer receipts</td><td class="n">1/1</td></tr>
+            <tr><td>T8</td><td class="say">composition</td><td class="n"><span style="color:var(--conflict)">absent</span></td></tr>
+            <tr><td>T9</td><td class="say">exploratory</td><td class="n"><span style="color:var(--conflict)">absent</span></td></tr>
+            <tr><td>T10</td><td class="say">abstention and honesty</td><td class="n">3/3</td></tr>
+            <tr><td>T11</td><td class="say">conversation quality</td><td class="n">9/9</td></tr>
+          </tbody>
+        </table></div>
+        <p>Margin 0.05 / 0.15 / 0.30 produce <b>identical</b> two-number lines on the fixture
+        build. Reported as a finding about the fixture: <em>none of these tasks sits near
+        the margin boundary at this scale. On the full graph the knob is expected to
+        differentiate; a flat line there would be a finding about the knob, not the
+        suite.</em></p>
+      </div>
+      <div class="pull">The first real-graph run produced <b>no eval delta at all</b> and was
+      still the most valuable run to date, because reading it found three transport bugs no
+      scripted suite could see.<cite>a score nobody has read the transcripts for is not a
+      score</cite></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 30 · WHAT IS A BET ═══════════════════ -->
+<section class="slide" data-chap="4" data-title="What is still a bet">
+  <div class="head">
+    <span class="eyebrow">Honest limits</span>
+    <h2>I would rather write this section than have someone else write it for me.</h2>
+  </div>
+
+  <div class="grid g2">
+    <div class="panel rule-top warn">
+      <h3>Asserted, not learned</h3>
+      <ul>
+        <li><b>The authority lattice.</b> Obviously a certified KPI outranks a wiki fragment.
+          Not obvious that a skill-pack contract outranks a mined pattern with 4,000
+          executions <em>in every case</em> — and we have no measurement that says it does.</li>
+        <li><b>The resolver constants.</b> 0.4 / 0.3 / 0.3, a 90-day half-life, a 0.15 margin.
+          Versioned, cited, honestly labelled bets. The ablation could not distinguish them
+          at fixture scale.</li>
+      </ul>
+    </div>
+    <div class="panel rule-top warn">
+      <h3>Counters that measure less than their names suggest</h3>
+      <ul>
+        <li><b><code>metric_conflicts</code></b> counts same-<em>identity</em> drift only. Same
+          intent, different formula, <em>different names</em> is invisible to it — and the
+          census <code>meta</code> block says so out loud.</li>
+        <li><b>Label normalization is case and whitespace only.</b> <code>ALIF</code> and
+          “active locations in force” count separately. Deliberate — better to over-count
+          conflicts than silently merge two meanings — so the total is not a deduplicated
+          count, and the meta says that too.</li>
+      </ul>
+      <p style="font-size:13.5px;color:var(--muted)">A census field whose docstring explains
+      what it cannot see is worth more than one that quietly overclaims.</p>
+    </div>
+    <div class="panel rule-top stop">
+      <h3>Structural</h3>
+      <ul>
+        <li><b>No CNF expansion.</b> Two logically equivalent predicates with different
+          boolean structure will not fuse. Explosion risk on 35K fragments.</li>
+        <li><b>Single writer, single machine.</b> The store’s correctness rests on “nobody
+          else is appending right now.” That is a <em>discipline, not a lock.</em> It held for
+          a laptop with warehouse access. It would not hold for a team, and the honest fix
+          is a real transaction boundary, not a stricter README.</li>
+        <li><b>The loaders are shaped to specific exports.</b> Nine documented layouts.
+          Pointing this at another warehouse is real work, and the README says so rather
+          than implying a <code>pip install</code> will do it.</li>
+      </ul>
+    </div>
+    <div class="panel rule-top warn">
+      <h3>The enrichment gate optimises against its own exam</h3>
+      <p>The prompt history is the most instructive document in the tree: <b>b1.1 halted at
+      56%</b> (and its grader passed a Card-Present / Card-Not-Present swap in both
+      directions — so a negation veto was added, and graders may only tighten from there).
+      <b>b1.2 halted at 59%.</b> <b>b1.3 opened the gate at 62%</b>, tier <em>item review</em>.</p>
+      <p>A context probe on b1.3’s misses found that <b>two of the three problems were
+      ours</b>: five cases were unwinnable from the context shown, and the vocab shelf was
+      feeding poison (SQL keywords and two-letter column fragments matching unrelated
+      acronyms).</p>
+      <div class="pull">iterating a prompt against exam feedback adds mild optimistic bias
+      — the exam’s names are never embedded, and <b>the true audit is steward
+      review.</b><cite>written into both the module and the runbook</cite></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 31 · CLOSE ═══════════════════ -->
+<section class="slide" data-chap="4" data-title="Ten things to steal">
+  <div class="head">
+    <span class="eyebrow">Close</span>
+    <h2>Almost none of the engineering that made this work was about the model.</h2>
+  </div>
+  <p class="dek">It was about making the environment truthful enough that intelligence had
+  something to stand on.</p>
+
+  <div class="grid g2">
+    <div class="panel">
+      <h3>Ten things to steal, in order of what they earned</h3>
+      <ol>
+        <li><b>Embed the deriver’s version in every derived identity.</b></li>
+        <li><b>Fold at witness granularity; aggregate at read time.</b></li>
+        <li><b>Max, not sum, when sources overlap</b> — then report agreement separately.</li>
+        <li><b>Make the ranking a lexicographic sort on a governance tier</b>, not a weighted
+          feature. Nobody can tune governance away.</li>
+        <li><b>Assert your evaluation set out of your ranking features at import time.</b></li>
+        <li><b><code>DENIED</code> is not absence.</b> Give unknowns their own node and fail
+          closed.</li>
+        <li><b>Categorize your quarantine and gate on the rate.</b></li>
+        <li><b>Ledger every input file</b> as consumed / deferred(reason) / inventoried.</li>
+        <li><b>Truncate on purpose</b>, with a named drop order and a never-drop list.</li>
+        <li><b>Make errors say what to do.</b> “The store is derivable: remove these two
+          directories and re-run” beats a stack trace every time.</li>
+      </ol>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:15px;min-width:0">
+      <div class="panel rule-top">
+        <h3>The principle underneath all of it</h3>
+        <div class="pull">Make the environment truthful before making the model clever.
+        <b>Intelligence on a lying environment is confident nonsense; intelligence on a
+        truthful one compounds.</b><cite>docs/harness-discipline.md · principle 8</cite></div>
+        <p>Which is why an answer whose verdict is <code>fail</code> is still shown — with the
+        failure showing.</p>
+      </div>
+      <div class="panel sunk">
+        <h3>Read the code in this order</h3>
+        <pre><code>scripts/pipeline.py       <i>the CLI</i>
+sahs/canon/canonical.py   <i>c(sql)</i>
+sahs/graph/ids.py         <i>the grammar</i>
+sahs/graph/quads.py       <i>store + witnesses</i>
+sahs/loaders/             <i>one per shape</i>
+sahs/compiler/reconcile.py <i>D1–D5</i>
+sahs/compiler/compile.py  <i>quads → build</i>
+sahs/tools/api.py         <i>Build.open()</i>
+sahs/assistant/loop.py    <i>read this one slowly</i>
+sahs/assistant/kit.py     <i>the tools, verbatim</i>
+sahs/assistant/hooks.py   <i>the checks around them</i></code></pre>
+      </div>
+      <div class="panel">
+        <h3>Companion documents</h3>
+        <ul class="bare">
+          <li><span class="mono">paper</span><span><code>docs/paper/compiling-a-semantic-layer.md</code></span></li>
+          <li><span class="mono">wiki</span><span><code>docs/wiki/</code> — 14 pages, per subsystem, with source citations</span></li>
+          <li><span class="mono">runbooks</span><span>exports → promoted build, and the weekly trajectory ritual</span></li>
+        </ul>
+      </div>
+      <div class="pull">The graph is compiled, never edited. Everything else is downstream
+      of that sentence.</div>
+    </div>
+  </div>
+</section>
+
+    </div>
+  </main>
+
+  <div id="overview"><div class="ovgrid" id="ovgrid"></div></div>
+
+  <div class="footnav">
+    <button class="zone" id="prev" aria-label="Previous slide">←</button>
+    <div class="dots" id="dots"></div>
+    <span class="here" id="here"></span>
+    <button class="zone" id="next" aria-label="Next slide">→</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var CHAPS = [
+    { key: "0", label: "Frame" },
+    { key: "1", label: "The Graph" },
+    { key: "2", label: "The Harness" },
+    { key: "3", label: "Generative UI" },
+    { key: "4", label: "Capabilities & Proof" }
+  ];
+  var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+  var stage = document.getElementById("stage");
+  var dots = document.getElementById("dots");
+  var chapters = document.getElementById("chapters");
+  var ovgrid = document.getElementById("ovgrid");
+  var overview = document.getElementById("overview");
+  var ovbtn = document.getElementById("ovbtn");
+  var here = document.getElementById("here");
+  var count = document.getElementById("count");
+  var idx = 0;
+
+  count.textContent = slides.length + " slides";
+
+  // chapter rail
+  CHAPS.forEach(function (c, ci) {
+    var b = document.createElement("button");
+    b.className = "chapseg";
+    b.type = "button";
+    b.innerHTML = '<span class="bar"><i></i></span><span class="lab">' +
+      String(ci).padStart(2, "0") + " · " + c.label + "</span>";
+    b.addEventListener("click", function () {
+      for (var i = 0; i < slides.length; i++) {
+        if (slides[i].dataset.chap === c.key) { go(i); return; }
+      }
+    });
+    chapters.appendChild(b);
+  });
+
+  // dots + overview cards
+  slides.forEach(function (s, i) {
+    var d = document.createElement("button");
+    d.className = "dot";
+    d.type = "button";
+    d.title = (i + 1) + ". " + s.dataset.title;
+    d.setAttribute("aria-label", "Slide " + (i + 1) + ": " + s.dataset.title);
+    d.addEventListener("click", function () { go(i); });
+    dots.appendChild(d);
+
+    var ch = CHAPS.filter(function (c) { return c.key === s.dataset.chap; })[0];
+    var card = document.createElement("button");
+    card.className = "ovcard";
+    card.type = "button";
+    card.innerHTML = '<span class="n">' + String(i + 1).padStart(2, "0") + "</span>" +
+      '<span class="t"></span><span class="c"></span>';
+    card.querySelector(".t").textContent = s.dataset.title;
+    card.querySelector(".c").textContent = ch ? ch.label : "";
+    card.addEventListener("click", function () { setOverview(false); go(i); });
+    ovgrid.appendChild(card);
+  });
+
+  function go(n, quiet) {
+    idx = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, i) { s.classList.toggle("on", i === idx); });
+    Array.prototype.forEach.call(dots.children, function (d, i) {
+      d.setAttribute("aria-current", i === idx ? "true" : "false");
+    });
+    var chap = slides[idx].dataset.chap;
+    Array.prototype.forEach.call(chapters.children, function (b, ci) {
+      var key = CHAPS[ci].key;
+      var all = slides.filter(function (s) { return s.dataset.chap === key; });
+      var seen = all.filter(function (s) { return slides.indexOf(s) <= idx; }).length;
+      var pct = key < chap ? 100 : key === chap ? Math.round((seen / all.length) * 100) : 0;
+      b.querySelector(".bar i").style.width = pct + "%";
+      b.setAttribute("aria-current", key === chap ? "true" : "false");
+    });
+    here.textContent = (idx + 1) + " / " + slides.length;
+    if (!quiet) {
+      try { history.replaceState(null, "", "#/" + (idx + 1)); } catch (e) { }
+      stage.scrollIntoView({ block: "start", behavior: "auto" });
+      if (window.scrollY > 0) window.scrollTo(0, 0);
+    }
+  }
+
+  function setOverview(on) {
+    overview.classList.toggle("on", on);
+    document.querySelector("main").style.display = on ? "none" : "flex";
+    ovbtn.setAttribute("aria-pressed", on ? "true" : "false");
+    ovbtn.textContent = on ? "Close" : "Overview";
+  }
+  ovbtn.addEventListener("click", function () {
+    setOverview(ovbtn.getAttribute("aria-pressed") !== "true");
+  });
+
+  document.getElementById("prev").addEventListener("click", function () { go(idx - 1); });
+  document.getElementById("next").addEventListener("click", function () { go(idx + 1); });
+
+  document.addEventListener("keydown", function (e) {
+    var t = e.target || {};
+    if (t.tagName === "INPUT" || t.tagName === "TEXTAREA") return;
+    if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") { go(idx + 1); e.preventDefault(); }
+    else if (e.key === "ArrowLeft" || e.key === "PageUp") { go(idx - 1); e.preventDefault(); }
+    else if (e.key === "Home") { go(0); e.preventDefault(); }
+    else if (e.key === "End") { go(slides.length - 1); e.preventDefault(); }
+    else if (e.key === "o" || e.key === "O") { setOverview(ovbtn.getAttribute("aria-pressed") !== "true"); }
+    else if (e.key === "Escape") { setOverview(false); }
+  });
+
+  // theme toggle: explicit stamp wins over the OS in both directions
+  var tb = document.getElementById("themebtn");
+  tb.addEventListener("click", function () {
+    var root = document.documentElement;
+    var now = root.getAttribute("data-theme");
+    if (!now) {
+      var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      now = dark ? "dark" : "light";
+    }
+    root.setAttribute("data-theme", now === "dark" ? "light" : "dark");
+  });
+
+  var m = /^#\/(\d+)$/.exec(location.hash || "");
+  go(m ? parseInt(m[1], 10) - 1 : 0, true);
+  here.textContent = (idx + 1) + " / " + slides.length;
+})();
+</script>
