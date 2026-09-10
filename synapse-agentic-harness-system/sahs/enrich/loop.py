@@ -115,7 +115,7 @@ def _looks_like_sql(text: str) -> bool:
 def _vocab_index(build: Build) -> tuple[dict[str, str],
                                         list[tuple[str, str]]]:
     """The company's own reference shelf — Atlas business terms + the
-    acropedia glossary, already compiled into the vocab plane — split
+    enterprise glossary, already compiled into the vocab plane — split
     for fast per-item lookup: single-token entries (acronyms, symbols)
     keyed exactly; multi-word terms matched by phrase."""
     single: dict[str, str] = {}

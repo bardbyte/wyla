@@ -55,7 +55,7 @@ def built(tmp_path_factory):
     """One fixture graph + build for the module. → (graph_dir, Build)."""
     tmp = tmp_path_factory.mktemp("e12")
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"), "build-graph",
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"), "build-graph",
          "--graph", str(tmp / "graph"),
          "--crosswalk", str(FX / "identity" / "crosswalk.jsonl"),
          "--bq-archive", str(FX / "real_extractions_production"),

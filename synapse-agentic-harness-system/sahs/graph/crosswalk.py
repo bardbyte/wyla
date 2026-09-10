@@ -1,4 +1,4 @@
-"""E1 — the identity crosswalk: Atlas ↔ Lumi ↔ BQ, human-verified once.
+"""E1 — the identity crosswalk: Atlas ↔ MDM ↔ BQ, human-verified once.
 
 46 rows, one per table:
     {"physical": "<dataset>.<table>", "lumi_asset_id": "...",

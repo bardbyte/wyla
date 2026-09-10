@@ -39,7 +39,7 @@
    "datasetGroup": "data",
    "dataserver": "Lumi",
    "isLineageExist": "Y",
-   "datasystem": "NGBD - Lumi Metadata Management"
+   "datasystem": "Metadata Management"
   }
  ]
 }

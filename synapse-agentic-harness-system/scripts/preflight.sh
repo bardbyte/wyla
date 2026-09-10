@@ -8,7 +8,7 @@
 #
 # Read-only: never modifies data, never prints secrets (env vars are
 # reported set/unset only), never touches the network. Ends with a
-# "PASTE THIS BACK" JSON block — send that block to Claude to confirm
+# "PASTE THIS BACK" JSON block — send that block back with the run report to confirm
 # readiness and lock the run-time estimate.
 
 set -u
@@ -37,12 +37,12 @@ hdr "roots"
 
 # ── environment + toolchain ──
 hdr "environment (P1+ needs these; P0 needs none)"
-for v in LUMI_BQ_SA_KEY GOOGLE_APPLICATION_CREDENTIALS BQ_PROJECT_ID \
-         LUMI_BQ_PROJECT GOOGLE_CLOUD_PROJECT BIGQUERY_API_BASE_URL \
+for v in SYNAPSE_BQ_SA_KEY GOOGLE_APPLICATION_CREDENTIALS BQ_PROJECT_ID \
+         SYNAPSE_BQ_PROJECT GOOGLE_CLOUD_PROJECT BIGQUERY_API_BASE_URL \
          BQ_LOCATION; do
   if [ -n "${!v:-}" ]; then ok "$v is set"; else echo "    · $v unset"; fi
 done
-[ -n "${LUMI_BQ_SA_KEY:-}${GOOGLE_APPLICATION_CREDENTIALS:-}" ] \
+[ -n "${SYNAPSE_BQ_SA_KEY:-}${GOOGLE_APPLICATION_CREDENTIALS:-}" ] \
   || warn "no BQ key env — P1 dry-run will exit 3 until set"
 $PY --version 2>/dev/null | grep -qE '3\.(1[1-9]|[2-9][0-9])' \
   && ok "$($PY --version)" || bad "python >= 3.11 required"
@@ -256,7 +256,7 @@ hdr "verdict"
   || bad "$PROBLEMS blocking problem(s), $WARNINGS warning(s) — fix ✗ items first"
 
 echo
-echo "=== PASTE THIS BACK TO CLAUDE ==="
+echo "=== REPORT BLOCK ==="
 $PY - <<EOF
 import json
 print(json.dumps({

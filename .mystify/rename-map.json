@@ -1,0 +1,81 @@
+{
+  "_note": "Proposed in Phase 1. Every entry is applied everywhere (files, imports, configs, tests, docs) in one batch, whole-word and case-aware. Entries marked ask_first change a runtime string (env var, route, data key, id) and wait for the Phase 5 decision.",
+  "directories_and_files": {
+    "apps/lumi/": "apps/admin/",
+    "apps/lumi/tests/test_lumi_app.py": "apps/admin/tests/test_admin_app.py",
+    "apps/lumi/design/wireframes/Lumi Home.dc.html": "apps/admin/design/wireframes/Admin Home.dc.html",
+    "apps/lumi/design/wireframes/Lumi Components.dc.html": "apps/admin/design/wireframes/Admin Components.dc.html",
+    "apps/lumi/design/wireframes/Lumi Principles.dc.html": "apps/admin/design/wireframes/Admin Principles.dc.html",
+    "apps/lumi/design/wireframes/Lumi Table Profile.dc.html": "apps/admin/design/wireframes/Admin Table Profile.dc.html",
+    "synapse-agentic-harness-system/sahs/assistant/skills/lumi-data-connect.md": "synapse-agentic-harness-system/sahs/assistant/skills/data-connect.md",
+    "synapse-agentic-harness-system/sahs/util/eag.py": "synapse-agentic-harness-system/sahs/util/gateway.py",
+    "synapse-agentic-harness-system/scripts/eag_check.py": "synapse-agentic-harness-system/scripts/gateway_check.py",
+    "synapse-agentic-harness-system/tests/test_eag_check.py": "synapse-agentic-harness-system/tests/test_gateway_check.py"
+  },
+  "python_packages_and_imports": {
+    "apps.lumi": "apps.admin",
+    "sahs.util.eag": "sahs.util.gateway"
+  },
+  "identifiers": {
+    "lumi_asset_id": {"to": "catalog_asset_id", "ask_first": true, "why": "also the JSON key in graph/identity/crosswalk.jsonl on the laptop"},
+    "by_lumi": "by_catalog",
+    "physical_for_lumi": "physical_for_catalog",
+    "EagError": "GatewayError",
+    "eag_check": "gateway_check",
+    "test_the_model_comes_from_eag_model_and_gemini_model_is_warned_about": "test_the_model_comes_from_gateway_model_and_gemini_model_is_warned_about"
+  },
+  "product_and_brand_words": {
+    "Synapse by Lumi": "Synapse",
+    "powered by Lumi": "powered by Meridian",
+    "Lumi design canvas": "the design canvas",
+    "Lumi Data Connect": "Data Connect",
+    "Lumi Warehouse: BigQuery Catalog": "Warehouse: BigQuery Catalog",
+    "Lumi (as the brand family / data platform, in prose)": "the data platform",
+    "EAG (in prose)": "the model gateway",
+    "OneIdentity (in prose)": "the identity service",
+    "Acropedia (in prose)": "the glossary",
+    "Amex / American Express (in prose and CSS comments)": "the enterprise / the brand",
+    "Claude / Claude Code (in prose: 'Claude-Code-class harness', 'the Claude way', 'Claude-shaped chat')": "an agentic coding harness / a chat-assistant layout",
+    "PASTE THIS BACK TO CLAUDE (preflight.sh banner)": "REPORT BLOCK"
+  },
+  "runtime_strings_ask_first": {
+    "LUMI_BQ_SA_KEY": "SYNAPSE_BQ_SA_KEY",
+    "LUMI_BQ_PROJECT": "SYNAPSE_BQ_PROJECT",
+    "LUMI_BQ_DATA_PROJECT": "SYNAPSE_BQ_DATA_PROJECT",
+    "LUMI_BQ_API_BASE_URL": "SYNAPSE_BQ_API_BASE_URL",
+    "LUMI_VERTEX_SA_KEY": "SYNAPSE_VERTEX_SA_KEY",
+    "LUMI_VERTEX_PROJECT": "SYNAPSE_VERTEX_PROJECT",
+    "LUMI_VERTEX_LOCATION": "SYNAPSE_VERTEX_LOCATION",
+    "LUMI_VERTEX_MODEL": "SYNAPSE_VERTEX_MODEL",
+    "LUMI_USER_NAME": "SYNAPSE_USER_NAME",
+    "LUMI_BUILD_PLAN": "SYNAPSE_BUILD_PLAN",
+    "EAG_BASE_URL": "GATEWAY_BASE_URL",
+    "EAG_MODEL": "GATEWAY_MODEL",
+    "EAG_SCOPES": "GATEWAY_SCOPES",
+    "EAG_ROUTE": "GATEWAY_ROUTE",
+    "EAG_PATH_FORM": "GATEWAY_PATH_FORM",
+    "EAG_CA_BUNDLE": "GATEWAY_CA_BUNDLE",
+    "ONEID_TOKEN_URL": "IDP_TOKEN_URL",
+    "ONEID_TIMESTAMP_UNIT": "IDP_TIMESTAMP_UNIT",
+    "https://eag-dev.aexp.com/genai/google/v1 (hardcoded default in eag.py)": "https://gateway.example.com/genai/google/v1",
+    "https://oneidentityapi-dev.aexp.com/security/digital/v1/application/token (hardcoded default in eag.py)": "https://idp.example.com/token",
+    "/api/lumi/planes | /api/lumi/brand | /api/lumi/logo": "/api/shell/planes | /api/shell/brand | /api/shell/logo",
+    "lumi-theme (localStorage key)": "synapse-theme",
+    "lumi-data-connect (skill id in the skills registry strings)": "data-connect",
+    "acropedia (source family key) / Acropedia (display name)": "glossary / Glossary",
+    "axp-lumi (GCP project id in fixtures, tests, .env.example)": "demo-warehouse",
+    "prj-p-lumi-gpt (billing project id in a docstring and .env.example)": "demo-billing",
+    "prj-d-ea-poc (Vertex project id in tests, scripts, docs)": "demo-vertex",
+    "lumi-ds-001 … lumi-ds-090 (catalog datasource ids in fixtures/tests)": "ds-001 … ds-090",
+    "/certs/amex-root.pem (test string)": "/certs/corp-root.pem",
+    "Saheb Singh (account row in both frontends, tests, .env.example, v3 spec)": "<the user decides>",
+    "radix.aexp.internal (design mock URL bar)": "radix.example.internal"
+  },
+  "keep_unchanged_by_default": {
+    "Synapse, Meridian, SAHS, wyla": "coined in this repo, not company terms",
+    "laptop / laptop.py / laptop_end_to_end.md": "the repo's word for the machine with warehouse access; not company-specific. Only 'work laptop' and 'paste back' notes are rewritten",
+    "gms_transaction, wwcas_authorization, tlsarpt_travel_sales, CFR/TLS folders": "table and business-unit names inside test fixtures; structure-bearing (tests assert on them). Flagged as a residual unless the user wants synthetic fixtures",
+    "Atlas": "ambiguous (Apache Atlas is a public catalog); left for the user to call",
+    "bardbyte (github.md line 1)": "the user's own public handle"
+  }
+}

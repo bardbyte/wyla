@@ -3,7 +3,7 @@
 Status: DESIGN, Stage 1 BUILT (2026-09-02). Applies the Gemini 3.1
 Pro harness research (Cherny / Model Spec / Karpathy) to Synapse.
 Stage 1 of §10 is in the tree (`sahs/assistant/{agent,loop,kit,
-hooks,state}.py`, the surface in `apps/lumi/frontend/js/pages/chat.js`);
+hooks,state}.py`, the surface in `apps/synapse_admin/frontend/js/pages/chat.js`);
 Stages 2–4 are not. v2's checks, artifacts, store, events, and evals
 stay; the turn loop, the kit, and the surface changed.
 
@@ -35,7 +35,7 @@ stable cacheable prefix (≥4,096 tokens so implicit caching engages):
 ```
 <identity>     Synapse, an analytical colleague. Warm, brief, plain.
                Numbers come from tools; reasoning comes from you.
-<chain>        platform (governance, immutable) > Lumi (product) >
+<chain>        platform (governance, immutable) > Synapse (product) >
                the user's memory and asks > defaults
 <business_map> the LOB rows, metric counts, tables   (data, stable)
 <shelf>        top metrics · concepts · skills by name  (data, stable)
@@ -164,7 +164,7 @@ path.
 - Text streams as it arrives. Function-call arguments stream too, so
   the activity line can say "Reading the Submitter Active Locations
   card…" before the call returns.
-- **The thinking block, the way Claude shows it.** Under the user's
+- **The thinking block, the way a chat assistant shows it.** Under the user's
   message, one block streams the model's own thought summaries in
   the order they happen, interleaved with the steps ("Searching the
   graph for enrolments — 16 results"); its header is the live line
@@ -208,9 +208,9 @@ path.
 - No "what the model saw" in the chat. No harness sentences in the
   user's language ("strict JSON" never appears again).
 - Chips: model-authored, at most three, optional. (Decision below.)
-- **The ask starts the way Claude's does (BUILT 2026-09-03).** A
+- **The ask starts the way a chat assistant's does (BUILT 2026-09-03).** A
   greeting for the time of day (the person's first name when
-  `LUMI_USER_NAME` is set), a centered composer ("Type / for skills"),
+  `SYNAPSE_USER_NAME` is set), a centered composer ("Type / for skills"),
   the + menu (skills, memory, a new chat), the Chat | Autopilot
   toggle, the model and the depth. The first message turns it into
   the conversation: the title (a click renames it) and Share at the
@@ -366,9 +366,9 @@ handoff, the eval suites.
    page swaps the words for it once it has loaded, and the words stay
    when there is none.
 
-15. A second model plane, Gemini 2.5 Pro through EAG (2026-09-05),
-   behind a OneIdentity token, chosen by `SAHS_MODEL_PLANE` (auto:
-   EAG when its credentials are present). Built from the laptop's
+15. A second model plane, Gemini 2.5 Pro through the gateway (2026-09-05),
+   behind an identity-service token, chosen by `SAHS_MODEL_PLANE` (auto:
+   the gateway when its credentials are present). Built from the laptop's
    check, not the guide: the token is a JWT that lives 599 s and is
    minted again at 80% of that or on a 401 with one retry; the model
    is addressed with a slash; thinking is a budget under a cap raised
@@ -390,14 +390,14 @@ handoff, the eval suites.
    dials a "?" explains every stop of every dial from one backend
    catalog (`/api/chat/dials`): the modes, the depths with what each
    does on each plane, and the models with whether each is
-   configured here. Reason: a person comparing 2.5 through EAG with
+   configured here. Reason: a person comparing 2.5 through the gateway with
    3.1 on Vertex needs to switch mid-conversation and to know what
    Quick, Standard and Deep actually change (the thinking, nothing
    else); the history is text, so a switch mid-chat is safe.
 
 17. The columns get their meaning served (2026-09-09). The compiler
    writes `columns.json` beside `schema.json`: every consensus column
-   with its description and source, Lumi's supplementary meaning,
+   with its description and source, the MDM's supplementary meaning,
    its business name, sensitivity, governance and agreement — the
    same facts the served card renders, complete where the card is
    budgeted. The table detail serves it (falling back to the card's
@@ -437,7 +437,7 @@ handoff, the eval suites.
 20. The schema for leaving the laptop (2026-09-09), in
    `db/spanner/` with its reasoning in `docs/spanner_schema.md`:
    identity with roles as rows that name the surface each may open
-   (admin the Lumi console, analyst Synapse, the steward's set to be
+   (admin the admin console, analyst Synapse, the steward's set to be
    decided), credentials as Argon2id strings with a pepper outside
    the database, sessions and one-shot tokens as hashes, an
    append-only audit on a change stream; the chat store as the
@@ -471,8 +471,8 @@ handoff, the eval suites.
    the depth alone; the model select names the model; Chat or
    Autopilot is a select beside them, the pill gone; and
    `SAHS_MODEL_PLANE=auto` lands a new chat on Vertex (Gemini 3.1 Pro
-   Preview) whenever its contract is present, EAG only when EAG alone
-   is configured. Reason: the person asked for the plain thing —
+   Preview) whenever its contract is present, the gateway only when
+   the gateway alone is configured. Reason: the person asked for the plain thing —
    three depths, one model name, one mode word — and for the better
    model as the default.
 
@@ -517,7 +517,7 @@ handoff, the eval suites.
 
 What v3 is actually built against — not the fixture.
 
-- **Vertex, confirmed for Stage 1:** project prj-d-ea-poc, location
+- **Vertex, confirmed for Stage 1:** project demo-vertex, location
   global, `gemini-3.1-pro-preview` behind the proxy with truststore.
   Native function calling works on our REST client and the
   `functionCall` part comes back WITH a thought signature; thinking
@@ -553,6 +553,6 @@ What v3 is actually built against — not the fixture.
   question and grain; 35 have a description. The batch gate (80%)
   is not yet met.
 - **Housekeeping the report exposed:** the checkout lives in the
-  OneDrive-synced desktop, so the SA key and `.env` must stay
+  cloud-synced desktop, so the SA key and `.env` must stay
   outside it (`~/.gcp/`); 1,706 tickets and 0 reviews means the
   steward door has never been opened on this graph.

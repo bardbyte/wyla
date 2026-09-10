@@ -74,7 +74,7 @@ def test_tables_resolve_through_ctes_and_dots():
     r = c(GOLDEN["g09_cte_inline"])
     assert r.tables == ["gms_transaction"]
     r = c(GOLDEN["g19_dotted_table"])
-    assert r.tables == ["axp-lumi.dw.wwcas_authorization"]
+    assert r.tables == ["demo-warehouse.dw.wwcas_authorization"]
 
 
 def test_self_join_stays_semantically_distinct():

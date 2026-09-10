@@ -178,7 +178,7 @@ def main() -> int:
         pass
     from sahs.assistant.agent import agent_from_env
     from sahs.ask.model import ModelUnavailable
-    from sahs.util.eag import model_plane, plane_note
+    from sahs.util.gateway import model_plane, plane_note
     print(time.strftime("%H:%M:%S"))
     print(f"plane: {model_plane()} ({plane_note()})")
     # the converters first: they run here, not on the model

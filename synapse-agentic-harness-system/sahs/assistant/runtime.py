@@ -36,7 +36,7 @@ from .store import AssistantStore
 # breaker behind them. A native-tool turn re-sends its whole context
 # on every call, so the turn cap must hold forty calls of a long
 # context, not twelve of a short one.
-# "/lumi-data-connect how do I …": a slash command names a skill pack
+# "/synapse-data-connect how do I …": a slash command names a skill pack
 # to load for this turn — the composer's "Type / for skills"
 SLASH = re.compile(r"^/([A-Za-z0-9][A-Za-z0-9_\-]*)\s*")
 
@@ -71,9 +71,9 @@ class AssistantRuntime:
         # inject a static or fault-injecting one
         self.substrate = substrate
         # memory is bound to the person (§7): the name rides into the
-        # prompt's memory section; LUMI_USER_NAME sets it on a laptop
+        # prompt's memory section; SYNAPSE_USER_NAME sets it on a laptop
         self.user_name = (user_name if user_name is not None
-                          else os.environ.get("LUMI_USER_NAME", "")).strip()
+                          else os.environ.get("SYNAPSE_USER_NAME", "")).strip()
         self.graph_root = Path(graph_root)
         self.events_dir = Path(events_dir) if events_dir else None
         if self.events_dir:
@@ -104,7 +104,7 @@ class AssistantRuntime:
             if not current.exists():
                 raise BuildUnavailable(
                     f"no compiled build: {current} missing. Run "
-                    "`python scripts/laptop.py compile` first.")
+                    "`python scripts/pipeline.py compile` first.")
             self._build = Build.open(self.builds_root)
             self._build_stamp = stamp
         return self._build
@@ -127,7 +127,7 @@ class AssistantRuntime:
         """The plane a chat is on: its remembered switch, else the
         .env default — the id, whether or not this machine can ride
         it (the composer shows it greyed when it cannot)."""
-        from sahs.util.eag import model_plane
+        from sahs.util.gateway import model_plane
         return (((session or {}).get("model") or "").strip().lower()
                 or model_plane())
 
@@ -142,7 +142,7 @@ class AssistantRuntime:
         rows = {row["id"]: row for row in self.planes()}
         if plane not in rows:
             raise ModelUnavailable(f"no model plane called {plane!r}: "
-                                   "the planes are vertex and eag")
+                                   "the planes are vertex and gateway")
         if not rows[plane]["available"] and self._model_factory is None:
             raise ModelUnavailable(
                 f"the {rows[plane]['label']} plane is not configured on "
@@ -155,7 +155,7 @@ class AssistantRuntime:
         label's); a scripted transport says so."""
         if self._model_factory is not None:
             return "scripted"
-        from sahs.util.eag import model_plane
+        from sahs.util.gateway import model_plane
         plane = (plane or "").strip().lower() or model_plane()
         for row in self.planes():
             if row["id"] == plane:
@@ -264,7 +264,7 @@ class AssistantRuntime:
         """Everything the composer lets a person set, explained in one
         place: the modes, the depths (with what each does on each
         plane), and the planes. One source for both surfaces."""
-        from sahs.util.eag import thinking_budgets
+        from sahs.util.gateway import thinking_budgets
         budgets = thinking_budgets()
         depths = []
         for key, row in DEPTHS.items():
@@ -273,7 +273,7 @@ class AssistantRuntime:
                 "id": key, "label": row["label"], "level": level,
                 "means": row["means"],
                 "on": {"vertex": f"thinking level {level}",
-                       "eag": f"{budgets.get(level, 0):,} thinking "
+                       "gateway": f"{budgets.get(level, 0):,} thinking "
                               "tokens per call"},
                 "default": level == DEFAULT_THINKING})
         modes = [{"id": key, "label": row["label"], "means": row["means"],
@@ -532,7 +532,7 @@ class AssistantRuntime:
         return self.label_for("")
 
     def slash_skill(self, text: str) -> tuple[str, list[str]]:
-        """"/lumi-data-connect how do I …" loads that pack for this
+        """"/synapse-data-connect how do I …" loads that pack for this
         turn and hands the model the rest; an unknown name stays
         text, so a question that happens to start with / still asks."""
         m = SLASH.match(text or "")
@@ -595,12 +595,12 @@ class AssistantRuntime:
                                     + str(e),
                             retryable=False,
                             next_actions=[
-                                "check the EAG contract in the silo "
-                                ".env" if plane == "eag" else
+                                "check the gateway contract in the silo "
+                                ".env" if plane == "gateway" else
                                 "check the Vertex contract in the "
                                 "silo .env",
-                                "python scripts/eag_check.py"
-                                if plane == "eag" else
+                                "python scripts/gateway_check.py"
+                                if plane == "gateway" else
                                 "python scripts/vertex_check.py",
                                 "or switch the model in the composer"])
                 rt.bus.emit("turn_done", turn_id=turn_id,

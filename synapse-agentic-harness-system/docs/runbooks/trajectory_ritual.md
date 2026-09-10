@@ -1,6 +1,6 @@
 # The trajectory ritual (Agent Loop v1 §8)
 
-Claude Code improves its prompt and its tools from transcripts, and
+A coding agent improves its prompt and its tools from transcripts, and
 so does this harness. Twenty trajectories read weekly; every bad turn
 becomes a system-prompt example or a tool-description fix. This page
 is the how.

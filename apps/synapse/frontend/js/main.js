@@ -70,7 +70,7 @@ toggle.addEventListener("click", () => {
       matchMedia("(prefers-color-scheme: dark)").matches);
   const next = dark ? "light" : "dark";
   document.documentElement.dataset.theme = next;
-  try { localStorage.setItem("lumi-theme", next); } catch { /* fine */ }
+  try { localStorage.setItem("synapse-theme", next); } catch { /* fine */ }
   applyThemeGlyph();
 });
 applyThemeGlyph();
@@ -83,10 +83,10 @@ async function brandLogo() {
   if (!brand) return;
   let got = {};
   try {
-    got = await fetch("/api/lumi/brand").then((r) => r.json());
+    got = await fetch("/api/synapse/brand").then((r) => r.json());
   } catch { return; }
   if (!got.logo) {
-    // the words stay; the reason is a page away (/api/lumi/brand)
+    // the words stay; the reason is a page away (/api/synapse/brand)
     // and in the console, never a broken image in the header
     if (got.configured) console.warn(`SYNAPSE_LOGO: ${got.reason}`);
     return;
@@ -96,7 +96,7 @@ async function brandLogo() {
   img.alt = "Synapse Semantic Intelligence";
   img.onerror = () => console.warn(
     "SYNAPSE_LOGO: the browser could not decode the image the server "
-    + "sent; open /api/lumi/brand for what the file's bytes are");
+    + "sent; open /api/synapse/brand for what the file's bytes are");
   img.onload = () => {
     const link = document.createElement("a");
     link.className = "brand-link";
@@ -106,7 +106,7 @@ async function brandLogo() {
     brand.replaceChildren(link);
     brand.classList.add("has-logo");
   };
-  img.src = `/api/lumi/logo?v=${encodeURIComponent(got.stamp || "")}`;
+  img.src = `/api/synapse/logo?v=${encodeURIComponent(got.stamp || "")}`;
 }
 
 /* the Skills badge: what waits on the approval board — submissions

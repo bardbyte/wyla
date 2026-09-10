@@ -42,7 +42,7 @@ CREATE TABLE ChatSessions (
   CreatedAt     TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true),
   UpdatedAt     TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true),
   CONSTRAINT ck_sessions_kind CHECK (Kind IN ('analyst', 'steward', 'assistant')),
-  CONSTRAINT ck_sessions_model CHECK (Model IN ('', 'vertex', 'eag')),
+  CONSTRAINT ck_sessions_model CHECK (Model IN ('', 'vertex', 'gateway')),
   CONSTRAINT fk_sessions_owner FOREIGN KEY (OwnerUserId) REFERENCES Users (UserId),
   CONSTRAINT fk_sessions_project FOREIGN KEY (ProjectId) REFERENCES ChatProjects (ProjectId),
 ) PRIMARY KEY (SessionId);

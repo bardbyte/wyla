@@ -113,11 +113,10 @@ time a trigger fires. Status: `active` | `expired` | `resolved`.
 - **component**: build-graph inputs; E1 reconciliation; the first real
   compile
 - **bet**: run 1 builds WITHOUT `--mdm-archive`: std_tech (Atlas) is a
-  relay of the same Lumi MDM declarations (`datasystem: NGBD – Lumi
-  Metadata Management`, `sourceType: Declared`), so the sensitivity,
+  relay of the same MDM declarations (`datasystem: Metadata Management`, `sourceType: Declared`), so the sensitivity,
   description, type, ownership, and term-link planes are fully served
   by bq + atlas — and skipping the 305,955-file MDM response tree cuts
-  build-graph time dramatically (and removes the OneDrive-hydration
+  build-graph time dramatically (and removes the cloud-drive hydration
   risk). KNOWN LOSSES for run 1, accepted: table/column lineage
   (`upstream_of`/`derived_from`), lifecycle_status (incl. the honest
   `unknown_unavailable` pattern), `business_unit` from pipeline

@@ -17,7 +17,7 @@ from sahs.assistant.skills_loader import all_skills, get_skill
 
 SILO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SILO / "tests"))
-from test_eag_plane import compiled  # noqa: E402,F401
+from test_gateway_plane import compiled  # noqa: E402,F401
 
 PACK = ("# Approvals triage\n\nThe moves for an approvals question.\n\n"
         "## Rate first\n1. search(\"approval rate\") for the definition.\n"
@@ -31,18 +31,18 @@ def _reviews(tmp_path) -> rv.Reviews:
 
 
 def test_the_approver_is_assigned_never_chosen():
-    manager = rv.approver_for(ME, {"LUMI_USER_MANAGER": "Jane Doe",
-                                   "LUMI_USER_MANAGER_BAND": "45"})
+    manager = rv.approver_for(ME, {"SYNAPSE_USER_MANAGER": "Jane Doe",
+                                   "SYNAPSE_USER_MANAGER_BAND": "45"})
     assert manager == rv.Approver("Jane Doe", 45)
     assert manager.may_approve and not manager.self_review
-    junior = rv.approver_for(ME, {"LUMI_USER_MANAGER": "Sam",
-                                  "LUMI_USER_MANAGER_BAND": "35"})
+    junior = rv.approver_for(ME, {"SYNAPSE_USER_MANAGER": "Sam",
+                                  "SYNAPSE_USER_MANAGER_BAND": "35"})
     assert not junior.may_approve
     own = rv.approver_for(ME, {})
     assert own.self_review and own.name == ME and own.band == rv.MIN_BAND
     assert "no manager configured" in own.note
-    assert rv.approver_for(ME, {"LUMI_USER_MANAGER_BAND": "x",
-                                "LUMI_USER_MANAGER": "J"}).band == 40
+    assert rv.approver_for(ME, {"SYNAPSE_USER_MANAGER_BAND": "x",
+                                "SYNAPSE_USER_MANAGER": "J"}).band == 40
 
 
 def test_a_submission_is_pending_and_off_the_loader(tmp_path):
@@ -148,7 +148,7 @@ def test_the_checks_stand_in_and_the_model_reads(tmp_path):
 
 def test_approve_publishes_reject_sends_back_resubmit_bumps(tmp_path):
     r = _reviews(tmp_path)
-    approver = rv.approver_for(ME, {"LUMI_USER_MANAGER": "Jane Doe"})
+    approver = rv.approver_for(ME, {"SYNAPSE_USER_MANAGER": "Jane Doe"})
     sid = r.submit(kind="skill", name="triage", text=PACK, purpose="p",
                    submitter=ME, submitter_slug="saheb-singh",
                    approver=approver)["submission"]["id"]
@@ -190,8 +190,8 @@ def test_approve_publishes_reject_sends_back_resubmit_bumps(tmp_path):
     assert not bad["ok"] and bad["reason"] == "disk full"
     assert r.get(sid2)["status"] == "pending"
     # band 40 is the floor
-    junior = rv.approver_for(ME, {"LUMI_USER_MANAGER": "Sam",
-                                  "LUMI_USER_MANAGER_BAND": "30"})
+    junior = rv.approver_for(ME, {"SYNAPSE_USER_MANAGER": "Sam",
+                                  "SYNAPSE_USER_MANAGER_BAND": "30"})
     sid3 = r.submit(kind="skill", name="third", text=PACK, purpose="p",
                     submitter=ME, submitter_slug="saheb-singh",
                     approver=junior)["submission"]["id"]
@@ -203,7 +203,7 @@ def test_approve_publishes_reject_sends_back_resubmit_bumps(tmp_path):
 
 def test_the_notices_are_the_ledger_read_for_a_person(tmp_path):
     r = _reviews(tmp_path)
-    approver = rv.approver_for(ME, {"LUMI_USER_MANAGER": "Jane Doe"})
+    approver = rv.approver_for(ME, {"SYNAPSE_USER_MANAGER": "Jane Doe"})
     sid = r.submit(kind="knowledge", name="TLS glossary", business_unit="TLS",
                    text="# TLS glossary\n\nNet sales: gross less cancels.\n",
                    purpose="definitions", submitter=ME,
@@ -230,8 +230,8 @@ def test_the_runtime_wires_the_doors(compiled, tmp_path, monkeypatch):  # noqa: 
     where the loader reads it or stages the knowledge file, and the
     model's read comes from the chat's plane."""
     from sahs.assistant import AssistantRuntime
-    monkeypatch.setenv("LUMI_USER_NAME", ME)
-    monkeypatch.delenv("LUMI_USER_MANAGER", raising=False)
+    monkeypatch.setenv("SYNAPSE_USER_NAME", ME)
+    monkeypatch.delenv("SYNAPSE_USER_MANAGER", raising=False)
     build, _ = compiled
     agent = ScriptedAgent(json_answers=[{
         "summary": {"executive": "Doctrine for approvals.", "topics": ["approvals"],
@@ -280,7 +280,7 @@ def test_the_runtime_wires_the_doors(compiled, tmp_path, monkeypatch):  # noqa: 
     assert runtime.reviews.get(sid)["status"] == "withdrawn"
     # the model away: the checks stay and say so
     runtime._model_factory = None
-    monkeypatch.delenv("LUMI_VERTEX_SA_KEY", raising=False)
+    monkeypatch.delenv("SYNAPSE_VERTEX_SA_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.delenv("APP_ID", raising=False)
     monkeypatch.delenv("APP_SECRET", raising=False)

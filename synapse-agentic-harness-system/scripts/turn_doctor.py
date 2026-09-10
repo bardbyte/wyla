@@ -192,16 +192,16 @@ def planes() -> str:
         lines.append("  note      NO_PROXY names googleapis in the "
                      "environment: ignored on both planes by design")
     # the model plane: which one the chat's calls ride, and why
-    from sahs.util.eag import (Config, candidate_routes, model_plane,
+    from sahs.util.gateway import (Config, candidate_routes, model_plane,
                                plane_note)
     plane = model_plane()
     lines.append(f"  model     {plane} plane ({plane_note()})")
-    if plane == "eag":
+    if plane == "gateway":
         cfg = Config.from_env()
         routes = " → ".join(r.label for r in candidate_routes(
             dict(os.environ)))
-        lines.append(f"  EAG       {cfg.model} · {cfg.base_url} · routes "
-                     f"{routes} · no stream through EAG: each call lands "
+        lines.append(f"  the gateway       {cfg.model} · {cfg.base_url} · routes "
+                     f"{routes} · no stream through the gateway: each call lands "
                      "whole")
     from sahs.tools.sandbox import (human_bytes, live_switch_note,
                                     scan_ceiling)

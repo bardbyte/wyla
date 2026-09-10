@@ -31,7 +31,7 @@ def compiled(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("v3")
     graph_dir = tmp / "graph"
     result = subprocess.run(
-        [sys.executable, str(SILO / "scripts" / "laptop.py"),
+        [sys.executable, str(SILO / "scripts" / "pipeline.py"),
          "build-graph", "--graph", str(graph_dir),
          "--crosswalk", str(FX / "identity" / "crosswalk.jsonl"),
          "--bq-archive", str(FX / "real_extractions_production"),
@@ -875,7 +875,7 @@ def test_the_composer_names_the_model_the_client_will_use(compiled,
     from sahs.util.auth import DEFAULT_VERTEX_MODEL
     runtime = _runtime(compiled, None, tmp=tmp_path)
     runtime._model_factory = None            # the laptop: env-bound
-    for var in ("VERTEX_MODEL", "LUMI_VERTEX_MODEL", "GEMINI_MODEL"):
+    for var in ("VERTEX_MODEL", "SYNAPSE_VERTEX_MODEL", "GEMINI_MODEL"):
         monkeypatch.delenv(var, raising=False)
     assert DEFAULT_VERTEX_MODEL.split("-")[0].capitalize() \
         in runtime.model_label
@@ -953,7 +953,7 @@ def test_an_over_ceiling_query_comes_back_once_then_hands_over_with_the_warning(
     # an earlier module's .env can leave a data project in the process
     # environment, which qualifies the SQL the sandbox sends: price by
     # outcome, not by fingerprint, so the order of the suite is moot
-    for name in ("LUMI_BQ_DATA_PROJECT", "BQ_DATA_PROJECT"):
+    for name in ("SYNAPSE_BQ_DATA_PROJECT", "BQ_DATA_PROJECT"):
         monkeypatch.delenv(name, raising=False)
 
     class BigTable:

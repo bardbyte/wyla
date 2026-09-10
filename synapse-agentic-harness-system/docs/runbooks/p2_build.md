@@ -59,7 +59,7 @@ non-crosswalk physical refuses to load):
 ```bash
 cd synapse-agentic-harness-system
 
-python scripts/laptop.py build-graph \
+python scripts/pipeline.py build-graph \
   --graph graph \
   --crosswalk graph/identity/crosswalk.jsonl \
   --bq-archive <BQ_ROOT> \
@@ -107,7 +107,7 @@ Three E12 gates to read in the summary:
 ## 3. Compile
 
 ```bash
-python scripts/laptop.py compile \
+python scripts/pipeline.py compile \
   --graph graph --builds builds \
   --out graph/runs/p2_compile --json
 ```

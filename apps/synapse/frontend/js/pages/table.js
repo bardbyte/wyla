@@ -3,7 +3,7 @@
  * metrics computed on it, toggled by status; the joins on record with
  * their evidence; and the columns as a searchable list — the first
  * twelve open, the rest a search away — each one expandable to what
- * it is (the description on record, Lumi's supplementary meaning,
+ * it is (the description on record, the MDM's supplementary meaning,
  * sensitivity, agreement) and where it is used (joins, metrics).
  * "What the agent sees" opens the served card, exactly the bytes the
  * agent reads. */
@@ -56,7 +56,7 @@ function columnRow(c, uses) {
           : ""}</p>`
           : `<p class="muted">${esc(shortDesc)}: the archive and the
              stewards have not described this column.</p>`}
-        ${c.supplementary ? `<p><b>Lumi:</b> ${esc(c.supplementary)}</p>` : ""}
+        ${c.supplementary ? `<p><b>MDM:</b> ${esc(c.supplementary)}</p>` : ""}
         ${c.business_name ? `<p>business name: <b>${esc(c.business_name)}</b></p>`
                           : ""}
         <div class="col-facts muted">${facts.join(" · ")}</div>

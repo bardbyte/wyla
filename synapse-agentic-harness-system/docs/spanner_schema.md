@@ -17,7 +17,7 @@ against this contract, and §6 says how the `.env` names the target.
   flow, no refresh tokens. The tables for those stay in the DDL
   (§3.8) so the day they land is a code change, not a migration;
   they are empty until then.
-* **A role decides which surface opens**: `admin` opens the Lumi
+* **A role decides which surface opens**: `admin` opens the admin
   console at `/` and Synapse; `analyst` opens Synapse at `/synapse/`;
   `steward` opens Synapse, with its permission set still to be
   decided.
@@ -43,8 +43,8 @@ seeding · §8 moving the laptop's data · §9 size, cost, retention ·
 
 ## 1 · What the laptop has, and what changes
 
-Today one configured person (`LUMI_USER_NAME`) uses two surfaces off
-one process: the Lumi console at `/` and Synapse at `/synapse/`. The
+Today one configured person (`SYNAPSE_USER_NAME`) uses two surfaces off
+one process: the admin console at `/` and Synapse at `/synapse/`. The
 chat store is SQLite — `sahs/ask/store.py` holds sessions, messages,
 plan versions and feedback; `sahs/assistant/store.py` adds artifacts,
 projects, memories and the session's organisation columns (project,
@@ -57,7 +57,7 @@ folder under `graph/runs/chat/workspaces/`; a person's own skills in
 
 | the laptop today | on Spanner | first rollout |
 |---|---|---|
-| `LUMI_USER_NAME`, one configured person | `Users`, `UserCredentials`, `UserRoles` | yes |
+| `SYNAPSE_USER_NAME`, one configured person | `Users`, `UserCredentials`, `UserRoles` | yes |
 | nothing: no sign-in | `AuthSessions`, `LoginAttempts`, `AuditEvents` | yes |
 | `sessions.sqlite3` → `sessions`, `projects` | `ChatSessions`, `ChatProjects` | yes |
 | `sessions.sqlite3` → `messages` | `ChatMessages` | yes |
@@ -81,7 +81,7 @@ the one-writer rule for the graph, the E14 door for user packs
 store changes underneath the same code paths: `SessionStore` /
 `AssistantStore` gain a Spanner implementation and an owner on every
 read and write; `AssistantRuntime`, `run_assistant_turn` and the
-routes in `apps/lumi/backend/chat.py` keep their shape.
+routes in `apps/synapse_admin/backend/chat.py` keep their shape.
 
 ## 2 · Conventions every table follows
 
@@ -240,14 +240,14 @@ the deployment may not have.
 ### 3.3 `Roles`, `Permissions`, `RolePermissions`, `UserRoles` — who may open what
 
 Roles are rows, not code. `Roles.Surfaces` is an array of the
-surfaces a role may open — `lumi` is the console at `/`, `synapse`
+surfaces a role may open — `admin` is the console at `/`, `synapse`
 the analyst surface at `/synapse/` — so the mapping the product wants
 is data reviewed with the schema (the seed at the foot of the file)
 and changed without a deploy:
 
 | role | surfaces | who |
 |---|---|---|
-| `admin` | `lumi`, `synapse` | runs the graph: builds, sources, reviews, users |
+| `admin` | `admin`, `synapse` | runs the graph: builds, sources, reviews, users |
 | `analyst` | `synapse` | asks: chats, artifacts, own skills — the role a sign-up receives |
 | `steward` | `synapse` | decides: certifies and deprecates metrics. The permission set is still to be decided, so the row exists, seeded with the analyst's permissions, and grows when it is |
 
@@ -454,8 +454,8 @@ open.
 The pages: `/login` and `/signup` on both shells (one HTML each,
 served without a session; the brand and logo endpoints stay public so
 the login page carries the logo), `/account` for the password and the
-sessions, `/admin/users` on the Lumi shell. A request without a valid
-session is sent to `/login`; a session whose roles carry no `lumi`
+sessions, `/admin/users` on the admin shell. A request without a valid
+session is sent to `/login`; a session whose roles carry no `admin`
 cannot open `/`, no `synapse` cannot open `/synapse/`. The account
 block's hard-coded name and role (`apps/synapse/frontend/index.html`)
 become `/api/auth/me`.
@@ -493,7 +493,7 @@ The map from the SQLite columns:
 | `sessions.id` | `ChatSessions.SessionId` | a UUID on Spanner; the laptop's `s_<hex>` ids are carried over as they are by the migration (both fit `STRING(36)`) |
 | `sessions.kind` | `ChatSessions.Kind` | `analyst` \| `steward` (the Ask surface's two hats) \| `assistant` (v3) |
 | `sessions.actor` | `ChatSessions.OwnerUserId` | the person, a foreign key |
-| `sessions.title`, `build_id`, `skills`, `project_id`, `starred`, `archived`, `handoff`, `notes`, `model` | the same names in PascalCase | `Skills` an `ARRAY<STRING>`, `Handoff` and `Notes` `JSON`; `Model` checked to `''` \| `vertex` \| `eag`, the plane the chat rides, `''` the deployment default |
+| `sessions.title`, `build_id`, `skills`, `project_id`, `starred`, `archived`, `handoff`, `notes`, `model` | the same names in PascalCase | `Skills` an `ARRAY<STRING>`, `Handoff` and `Notes` `JSON`; `Model` checked to `''` \| `vertex` \| `gateway`, the plane the chat rides, `''` the deployment default |
 | — | `ChatSessions.MessageCount` | new: the shelf lists only chats with messages without counting them |
 | `messages.*` | `ChatMessages` | `Seq` is new (the laptop ordered by `created_at`); `OwnerUserId` repeated for the search index |
 | `artifacts.*` | `ChatArtifacts` | keyed `(SessionId, ArtifactId, Version)` |
@@ -791,7 +791,7 @@ behaviour exactly.
 |---|---|---|
 | `SAHS_STORE` | `local`: the SQLite chat store, the events JSONL, one configured person, no sign-in. `spanner`: people and chats on Spanner, sign-in required | `local` |
 | `SPANNER_PROJECT_ID`, `SPANNER_INSTANCE_ID`, `SPANNER_DATABASE_ID` | the database; all three required under `spanner` | — |
-| `LUMI_SPANNER_SA_KEY` | the service-account key file, as `LUMI_BQ_SA_KEY` and `LUMI_VERTEX_SA_KEY` name theirs; the account needs `roles/spanner.databaseUser` on the database. Unset on a host with workload identity, where `GOOGLE_APPLICATION_CREDENTIALS` or the metadata server applies | — |
+| `SYNAPSE_SPANNER_SA_KEY` | the service-account key file, as `SYNAPSE_BQ_SA_KEY` and `SYNAPSE_VERTEX_SA_KEY` name theirs; the account needs `roles/spanner.databaseUser` on the database. Unset on a host with workload identity, where `GOOGLE_APPLICATION_CREDENTIALS` or the metadata server applies | — |
 | `SPANNER_EMULATOR_HOST` | `localhost:9010` for development against the emulator; never set in production | — |
 | `AUTH_PEPPER` | 32 or more random characters (`python -c "import secrets; print(secrets.token_urlsafe(48))"`); never in source control, never printed, never changed in place once anyone has a password (§3.2.1) | required under `spanner` |
 | `AUTH_SESSION_HOURS` | the absolute life of a sign-in | `12` |
@@ -845,7 +845,7 @@ WHERE u.EmailNormalized = 'you@yourcompany.com' AND r.Name = 'admin';
 ## 8 · Moving the laptop's data
 
 One-way, run once per store, in the README's order: the people first
-(one row per distinct `LUMI_USER_NAME` / `actor` seen in the SQLite
+(one row per distinct `SYNAPSE_USER_NAME` / `actor` seen in the SQLite
 stores, `active`, a temporary password from the admin with
 `MustChangePassword`); then the chats and everything interleaved in
 them (`Seq` from row order, `MessageCount` counted once); then the

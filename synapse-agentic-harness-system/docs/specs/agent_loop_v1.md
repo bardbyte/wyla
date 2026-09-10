@@ -7,10 +7,10 @@
 > character-for-character by `sahs/loop/tools.py` and pinned by
 > `tests/test_loop_tools.py`.
 
-How the agent actually finds the right answer. Written at the level Claude Code is built at: a loop, a system prompt, tools with real descriptions, and traces.
+How the agent actually finds the right answer. Written at the level a coding agent is built at: a loop, a system prompt, tools with real descriptions, and traces.
 0 · The one-sentence design
 Every turn is the agent loop: the model drives tool calls over the cards, indexes, and snapshot until it can answer, must ask, or honestly stops — with determinism living inside the tools, and the contract, verifier, budgets, and disclosure as the harness around it.
-Claude Code's insight is that the model is the planner and the navigator — it reads a result and decides what to look at next. There is no second, shortcut implementation of that decision. One door, one behavior, one place a bug can live.
+a coding agent's insight is that the model is the planner and the navigator — it reads a result and decides what to look at next. There is no second, shortcut implementation of that decision. One door, one behavior, one place a bug can live.
 1 · One path
 
 ```
@@ -42,9 +42,9 @@ def agent_loop(msg, session):
 
 ```
 
-Four properties carried over from Claude Code, deliberately: the model sees tool results and chooses the next action (no fixed order); tools are primitive and composable; results are compacted into artifacts so 24 calls don't rot the context; and the loop ends in one of three honest states — answer, ask, or "here's what I found and where I stopped."
+Four properties carried over from coding-agent harnesses, deliberately: the model sees tool results and chooses the next action (no fixed order); tools are primitive and composable; results are compacted into artifacts so 24 calls don't rot the context; and the loop ends in one of three honest states — answer, ask, or "here's what I found and where I stopped."
 3 · The tools, as the agent sees them (descriptions are the product)
-Claude Code's Glob/Grep/Read/Bash/TodoWrite/Task map onto the graph one-for-one. Each tool below ships with exactly this description; each error message names the correct next call.
+A coding agent's Glob/Grep/Read/Bash/TodoWrite/Task map onto the graph one-for-one. Each tool below ships with exactly this description; each error message names the correct next call.
 
 ```
 list_tables(domain?, lob?)         # Glob
@@ -147,7 +147,7 @@ Eleven tool calls, one question, every literal checked against observed values, 
 
 7 · Where the guardrails sit (unchanged, relocated)
 
-* Typecheck runs on every `plan_set` (teaching errors come back as tool results — the model fixes its own plan, Claude-Code style).
+* Typecheck runs on every `plan_set` (teaching errors come back as tool results — the model fixes its own plan, coding-agent style).
 * Contract + verifier run once, on `final`, fresh context, default-FAIL.
 * Budgets in the loop; `ask_user` ends the turn; scout is the only delegation.
 * Disclosure by schema: meridian line, grain, subgraph_used (every card read and every binding used is recorded automatically — the trace is the sub-graph).
@@ -158,7 +158,7 @@ Eleven tool calls, one question, every literal checked against observed values, 
 * Outcome: final plan/SQL/number vs gold (E19); never the tool sequence.
 * Trajectory hygiene (soft): tool calls per task, asks per task, literal-check rate (did it sample before filtering), read-before-use rate, budget stops.
 * Navigation tasks: questions whose answer lives in a card the fast path can't bind — graded on whether the loop found it (recall) and didn't drag in wrong tables (precision).
-* The ritual: 20 trajectories read weekly; every bad turn becomes a system-prompt example or a tool-description fix — Claude Code improves its prompt and tools from transcripts, and so will this.
+* The ritual: 20 trajectories read weekly; every bad turn becomes a system-prompt example or a tool-description fix — a coding agent improves its prompt and tools from transcripts, and so will this.
 
 9 · Build order (replaces E21 Step 4's "explore.py")
 
@@ -168,7 +168,7 @@ Eleven tool calls, one question, every literal checked against observed values, 
 4. Navigation task set (30) + trajectory reading; iterate prompt and tools from what you see.
 5. Scout as `delegate_scout`. Then the exploratory lane is just the loop with `snapshot` on.
 
-10 · Why this is the Claude-Code-class design
-Claude Code is good because the model can look, cheaply and truthfully, as many times as it needs, and because the harness verifies rather than trusts. Everything here is that: cards are the files, indexes are the grep, the snapshot is the test runner, the plan is the todo list, the verifier is CI, and the model is the engineer. The fast path is just the case where the engineer already knows.
+10 · Why this is the coding-agent-class design
+A coding agent is good because the model can look, cheaply and truthfully, as many times as it needs, and because the harness verifies rather than trusts. Everything here is that: cards are the files, indexes are the grep, the snapshot is the test runner, the plan is the todo list, the verifier is CI, and the model is the engineer. The fast path is just the case where the engineer already knows.
 
 I want us to build the same and this should be our agent harness behavior and design

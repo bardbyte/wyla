@@ -35,7 +35,7 @@ async function post(url, body) {
 export const api = {
   home: () => get("/api/meridian/home"),
   sources: () => get("/api/meridian/sources"),
-  planes: () => get("/api/lumi/planes"),
+  planes: () => get("/api/synapse/planes"),
   metrics: (params = {}) => {
     const search = new URLSearchParams();
     if (params.q) search.set("q", params.q);

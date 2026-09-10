@@ -118,7 +118,7 @@ suggest_next only when there is a natural next step."""
 
 CHAIN = """Platform governance (the validators, the cost and access \
 gates, the rendering rules) is immutable and outranks everything \
-below it. Lumi, the product, comes next. Then what this user \
+below it. Synapse, the product, comes next. Then what this user \
 remembered and asked for. Then defaults. A remembered preference \
 steers a choice; it never softens a rule."""
 

@@ -43,7 +43,7 @@ def test_identity_holds_nothing_recoverable_and_roles_are_rows():
         assert policy in ddl, policy
     assert "Surfaces      ARRAY<STRING(16)>" in ddl
     seed = ddl.split("INSERT INTO Roles", 1)[1]
-    assert "('admin'" in seed and "['lumi', 'synapse']" in seed
+    assert "('admin'" in seed and "['admin', 'synapse']" in seed
     assert "('analyst'" in seed and "('steward'" in seed
     assert "'users.manage'" in seed and "'metrics.certify'" in seed
     assert "INSERT INTO RolePermissions" in seed
@@ -68,7 +68,7 @@ def test_the_chat_store_is_the_sqlite_store_with_a_person():
     assert ddl.count("INTERLEAVE IN PARENT ChatSessions ON DELETE CASCADE") == 6
     assert "INTERLEAVE IN PARENT Users ON DELETE CASCADE" in ddl   # memory, skills
     assert "OwnerUserId   STRING(36)  NOT NULL" in ddl
-    assert "CHECK (Model IN ('', 'vertex', 'eag'))" in ddl
+    assert "CHECK (Model IN ('', 'vertex', 'gateway'))" in ddl
     assert "Text_Tokens TOKENLIST   AS (TOKENIZE_FULLTEXT(Text)) HIDDEN" in ddl
     # a search spans a person's chats: the index partitions by the owner
     assert "PARTITION BY OwnerUserId" in ddl
@@ -113,7 +113,7 @@ def test_the_readme_and_the_design_say_how():
     assert "docs/spanner_schema.md" in readme
     for piece in ("Argon2id", "Secret Manager", "SameSite=Lax",
                   "Refresh tokens rotate in families", "NIST 800-63B",
-                  "| `admin` | `lumi`, `synapse` |",
+                  "| `admin` | `admin`, `synapse` |",
                   "| `analyst` | `synapse` |",
                   "GRAPH SynapseGraph", "one quad per witness family",
                   "POST /api/auth/login", "POST /api/auth/signup",
@@ -135,7 +135,7 @@ def test_the_readme_and_the_design_say_how():
 def test_the_env_example_carries_the_spanner_block():
     env = (SILO / ".env.example").read_text(encoding="utf-8")
     for var in ("SAHS_STORE=", "SPANNER_PROJECT_ID", "SPANNER_INSTANCE_ID",
-                "SPANNER_DATABASE_ID", "LUMI_SPANNER_SA_KEY",
+                "SPANNER_DATABASE_ID", "SYNAPSE_SPANNER_SA_KEY",
                 "SPANNER_EMULATOR_HOST", "AUTH_PEPPER", "AUTH_SESSION_HOURS",
                 "AUTH_IDLE_MINUTES", "AUTH_BOOTSTRAP_ADMIN_EMAIL",
                 "AUTH_OPEN_SIGNUP", "AUTH_ALLOWED_EMAIL_DOMAINS",
@@ -145,6 +145,6 @@ def test_the_env_example_carries_the_spanner_block():
     design = (SILO / "docs" / "spanner_schema.md").read_text(
         encoding="utf-8")
     named = set(re.findall(r"`((?:SAHS_STORE|SAHS_FILES_DIR|SPANNER_[A-Z_]+"
-                           r"|AUTH_[A-Z_]+|LUMI_SPANNER_SA_KEY))`", design))
+                           r"|AUTH_[A-Z_]+|SYNAPSE_SPANNER_SA_KEY))`", design))
     for var in named:
         assert var in env, var

@@ -1,6 +1,6 @@
 {
  "tableReference": {
-  "projectId": "axp-lumi",
+  "projectId": "demo-warehouse",
   "datasetId": "dw",
   "tableId": "wwcas_authorization"
  },

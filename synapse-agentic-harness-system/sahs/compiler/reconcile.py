@@ -1,4 +1,4 @@
-"""E1 — structural reconciliation: Atlas ↔ Lumi ↔ BQ consensus.
+"""E1 — structural reconciliation: Atlas ↔ MDM ↔ BQ consensus.
 
 Runs inside compile, BEFORE cards. Per (table, column): one consensus
 record with per-field {value, source} and an ``agreement_count`` (how
@@ -13,7 +13,7 @@ feature). Disagreements route through the pinned D1–D5 handlers:
      disclosure flag.
   D3 type/DDL mismatch                   → BQ wins everywhere
      execution-facing; ticket `catalog_mismatch`.
-  D4 description divergence Atlas↔Lumi   → both kept with attribution,
+  D4 description divergence Atlas↔MDM   → both kept with attribution,
      Atlas display-first; no ticket (usually complementary).
   D5 sensitivity flags disagree          → most-restrictive applied
      immediately; ticket `sensitivity_conflict`; restrictive holds
@@ -135,7 +135,7 @@ def reconcile(graph: GraphDir) -> dict[str, TableConsensus]:
             column.agreement_count = 1 + sum(
                 1 for t in (mdm_type, atlas_type) if t == bq_type)
 
-            # description: Atlas display-first, Lumi kept (D4 divergence)
+            # description: Atlas display-first, MDM kept (D4 divergence)
             atlas_desc = str(props.get("description_atlas") or "")
             mdm_desc = str(props.get("description_mdm") or "")
             column.description = atlas_desc or mdm_desc

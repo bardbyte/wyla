@@ -9,12 +9,12 @@
     <script>
       // saved theme before first paint: no flash of the wrong mode
       (function () {
-        var t = localStorage.getItem("lumi-theme");
+        var t = localStorage.getItem("synapse-theme");
         if (t === "light" || t === "dark")
           document.documentElement.dataset.theme = t;
       })();
     </script>
-    <!-- Lumi type. display=swap + full system fallbacks in tokens.css
+    <!-- Synapse type. display=swap + full system fallbacks in tokens.css
          keep the product working when the font CDN is unreachable. -->
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

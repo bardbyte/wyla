@@ -94,8 +94,8 @@ class Approver:
 def approver_for(submitter: str,
                  env: dict[str, str] | None = None) -> Approver:
     """The submitter's direct manager, from the directory this
-    deployment has. On the laptop that is the .env: LUMI_USER_MANAGER
-    names the manager and LUMI_USER_MANAGER_BAND their band (40 when
+    deployment has. On the laptop that is the .env: SYNAPSE_USER_MANAGER
+    names the manager and SYNAPSE_USER_MANAGER_BAND their band (40 when
     unset); without a manager the configured person reviews their own
     submissions, and the record says so. The signed-in directory
     replaces this function when identity lands."""
@@ -106,12 +106,12 @@ def approver_for(submitter: str,
             return int((env.get(var) or "").strip() or MIN_BAND)
         except ValueError:
             return MIN_BAND
-    manager = (env.get("LUMI_USER_MANAGER") or "").strip()
+    manager = (env.get("SYNAPSE_USER_MANAGER") or "").strip()
     if manager:
-        return Approver(manager, band_of("LUMI_USER_MANAGER_BAND"))
+        return Approver(manager, band_of("SYNAPSE_USER_MANAGER_BAND"))
     return Approver((submitter or "").strip() or "you",
-                    band_of("LUMI_USER_BAND"), self_review=True,
-                    note="no manager configured (LUMI_USER_MANAGER in the "
+                    band_of("SYNAPSE_USER_BAND"), self_review=True,
+                    note="no manager configured (SYNAPSE_USER_MANAGER in the "
                          "silo .env): on this laptop you review your own "
                          "submissions")
 

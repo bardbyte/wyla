@@ -1,4 +1,4 @@
-"""Agent Loop v1 — the Claude-Code-class harness (docs/specs/agent_loop_v1.md).
+"""Agent Loop v1 — the coding-agent-class harness (docs/specs/agent_loop_v1.md).
 
 The model is the planner and the navigator; determinism lives inside
 the tools; the contract, verifier, budgets, and disclosure are the

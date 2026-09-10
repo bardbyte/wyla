@@ -7,7 +7,7 @@ governance states seeded per source (dmp → certified, gmns → pending,
 skills → team_candidate, mined → mined); vocabulary becomes ``term:`` /
 ``acr:`` nodes; Atlas std_tech entries land their DECLARED column↔term
 links as ``mapped_term`` edges plus atlas-attributed props — the E1
-merge policy arbitrates against BQ/Lumi at compile time, not here.
+merge policy arbitrates against BQ/MDM at compile time, not here.
 
 Table identity resolves through the crosswalk; a semantic record whose
 table can't resolve is SKIPPED with a count (unlike archives, semantic

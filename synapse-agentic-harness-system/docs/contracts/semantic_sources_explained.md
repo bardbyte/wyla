@@ -10,7 +10,7 @@ Updated todo list
 
 | Column | What it tells you |
 |---|---|
-| `table_name` | The `axp-lumi.dw.*` table name |
+| `table_name` | The `demo-warehouse.dw.*` table name |
 | `status` | `success` or `error` |
 | `error` | Error message if failed (empty on success) |
 | `total_pages` / `total_no_of_elements` / `downloaded_elements` | Pagination counts |
@@ -139,13 +139,10 @@ Updated todo list
 The file attachment was summarized (content not shown). Let me read it to understand the structure.
 
 ```text
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/blue_business_insights.csv#1-1), lines 1 to 30
 
-Ran terminal command: wc -l /Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/blue_business_insights.csv
 
 Ran terminal command: head -1 blue_business_insights.csv && echo "---" && awk -F',' '{print $3}' blue_business_insights.csv | sort -u | head -30 && echo "---TOTAL DISTINCT TABLES---" && awk -F',' '{print $3}' blue_business_insights.csv | sort -u | wc -l && echo "---SAMPLE INSIGHT NAMES---" && awk -F',' '{print $1}' blue_business_insights.csv | sort -u | head -20
 
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/blue_business_insights.csv#28-28), lines 28 to 60
 ```
 
 **blue_business_insights.csv** — ~35,700 SQL filter/logic snippets extracted from production queries, mapped to table names.
@@ -210,12 +207,11 @@ business_terms.csv              std_tech_metadata/            measures_catalog.j
 Updated todo list
 
 ```text
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/data_cleaned.csv#1-1), lines 1 to 5
 
 Ran terminal command: wc -l data_cleaned.csv && echo "---BU DIST---" && awk -F',' '{print $3}' data_cleaned.csv | sort | uniq -c | sort -rn | head -10 && echo "---REGION DIST---" && awk -F',' '{print $4}' data_cleaned.csv | sort | uniq -c | sort -rn | head -10 && echo "---ENTRY TYPE DIST---" && awk -F',' '{print $5}' data_cleaned.csv | sort | uniq -c | sort -rn | head -10 && echo "---SAMPLE ROWS---" && head -15 data_cleaned.csv
 ```
 
-**data_cleaned.csv** — ~12,300 internal acronyms and glossary terms used across American Express.
+**data_cleaned.csv** — ~12,300 internal acronyms and glossary terms used across the enterprise.
 
 | Column | What it tells you |
 |---|---|
@@ -277,22 +273,6 @@ Updated todo list
 
 Read skills folder files
 
-```text
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/skills/NewAccountsSkills/SBS_NewAccountsApprovalRate/skill.yaml)
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/skills/NewAccountsSkills/SBS_NewAccountsApprovalRate/knowledge.md)
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/skills/NewAccountsSkills/SBS_NewAccountsApprovalRate/sample_codes.sql)
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/skills/NewAccountsSkills/SBS_NewAccountsApprovalRate/chart_contract.yaml)
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/skills/NewAccountsSkills/SBS_NewAccountsApprovalRate/metric_contracts.yaml)
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/skills/NewAccountsSkills/SBS_NewAccountsApprovalRate/qa_checks.yaml)
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/skills/PortfolioAnalyticsSkills/SBS_WriteOffs/skill.yaml)
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/skills/PortfolioAnalyticsSkills/SBS_WriteOffs/knowledge.md)
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/skills/PortfolioAnalyticsSkills/SBS_WriteOffs/sample_codes.sql)
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/skills/PortfolioAnalyticsSkills/SBS_WriteOffs/data_specs.md)
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/skills/PortfolioAnalyticsSkills/CPS_RollRates/skill.yaml)
-Read [](file:///Users/sjgandh/Library/CloudStorage/OneDrive-AmericanExpress/Desktop/bq-connect/skills/PortfolioAnalyticsSkills/CPS_RollRates/data_specs.md)
-Read [](file:///Users/sjgandh/Library/Application%20Support/Code/User/workspaceStorage/41f1febccbe3454013de35d04bcc4dad/GitHub.copilot-chat/chat-session-resources/2b722b12-9a14-4025-bf23-a81f57e10d72/toolu_vrtx_01W9ztae6WFzf6BqVkYsBZRC__vscode-1787338467744/content.txt#1-1), lines 1 to 150
-Read [](file:///Users/sjgandh/Library/Application%20Support/Code/User/workspaceStorage/41f1febccbe3454013de35d04bcc4dad/GitHub.copilot-chat/chat-session-resources/2b722b12-9a14-4025-…
-```
 
 ```text
 skills/

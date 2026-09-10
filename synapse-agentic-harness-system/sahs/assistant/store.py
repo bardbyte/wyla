@@ -67,7 +67,7 @@ _SESSION_COLUMNS = (
     ("handoff", "TEXT NOT NULL DEFAULT ''"),   # JSON or ''
     ("notes", "TEXT NOT NULL DEFAULT '[]'"),   # working notes, JSON
     ("model", "TEXT NOT NULL DEFAULT ''"),     # the plane this chat
-                                               # rides: vertex | eag |
+                                               # rides: vertex | gateway |
                                                # '' (the .env default)
 )
 
