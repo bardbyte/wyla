@@ -654,7 +654,41 @@ first rollout (§5), so its ingest step exports the active rows to
 when it has read them; the Skills shelf lists these rows as knowledge
 with the staging person as the author.
 
-### 4.11 The reads each surface makes
+### 4.11 Submissions and their reviews (the approval workflow)
+
+The prototype keeps the PRD's workflow beside the packs on the
+filesystem: an append-only ledger (`graph/runs/reviews/ledger.jsonl`,
+one record per event — submitted, resubmitted, ai_review, approved,
+rejected, withdrawn) and the text of every version under
+`files/<id>/v<n>.md`; the current state of a submission is a fold, the
+graph's discipline. On Spanner that is one table and its children,
+to add to `002_chat.sql` when the store lands:
+
+* `Submissions` — `SubmissionId` (random), `Kind` (`skill` \|
+  `knowledge`), `Name`, `Title`, `Description`, `Purpose`,
+  `BusinessUnit`, `Ext`, `SubmitterUserId` (a foreign key),
+  `ApproverUserId` (assigned from `Users.ManagerUserId`, the column
+  the directory fills; never chosen), `ApproverBand`, `Version`,
+  `Status` (`pending` \| `published` \| `rejected` \| `withdrawn`),
+  `SubmittedAt`, `UpdatedAt`, `DecidedAt`, `DecidedBy`,
+  `PublishedPath`; an index `(ApproverUserId, Status, UpdatedAt DESC)`
+  is the manager's queue, `(SubmitterUserId, UpdatedAt DESC)` the
+  person's own;
+* `SubmissionVersions` — interleaved: `Version`, `Text`, `CreatedAt`;
+* `SubmissionEvents` — interleaved, append-only: `Seq`, `Event`,
+  `ActorUserId`, `Comment`, `Review` (the model's read as JSON:
+  summary, insights with category, confidence and reference,
+  recommendation, and who read it), `OccurredAt`; the notices the
+  PRD lists are this table read for a person, and `NoticesSeen` on
+  `UserPreferences` says how far they have read.
+
+Two columns join the identity file for it: `Users.ManagerUserId` and
+`Users.Band`, from the HR directory at sign-up or by an admin. Only a
+`published` submission is written to `UserSkills` or `KnowledgeFiles`;
+`pending` and `rejected` never are, which is how the loader never sees
+them.
+
+### 4.12 The reads each surface makes
 
 | the surface | reads | through |
 |---|---|---|

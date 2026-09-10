@@ -1,6 +1,6 @@
 /** The chats shelf in the sidebar (§8): one nav, not two. Starred
  * chats, then recents — newest first, searchable, star and archive
- * on hover. "New ask" in the navlist starts a fresh conversation; a
+ * on hover. "New chat" in the navlist starts a fresh conversation; a
  * row reopens a kept one with its artifacts. A session appears once
  * it holds a message and earns its name from the first thing you
  * asked; an untouched New chat stays off the shelf. (Projects exist in the store and API but stay out of the
@@ -70,7 +70,7 @@ export async function refreshChats() {
   parts.push(rest.map((r) => chatRow(r, current)).join("")
     || `<p class="chats-note">${needle
       ? "Nothing matches."
-      : "No conversations yet. New ask starts one; it lands here "
+      : "No conversations yet. New chat starts one; it lands here "
         + "with its artifacts."}</p>`);
   body.innerHTML = parts.join("");
 

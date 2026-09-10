@@ -1,10 +1,10 @@
 /** Add a skill: one pop-up, three ways in — bring a file, write one
- * from the house template, or Draft with Synapse from your material.
- * Draft is a guided flow: material in (paste, or add a text file, a
- * workbook or a Word file), the draft out with Synapse's notes on
- * what was unclear, read and edit, name, save. Every way ends the
- * same: a skill of yours on the shelf, loading for you alone from the
- * next chat on, with Use in chat one click away. */
+ * from the house template, or Draft with Synapse from your material —
+ * and one door out: every way ends as a submission to your manager
+ * (the PRD's single-level approval). The person gives the name, a
+ * description and the intended purpose; the system records the
+ * submitter, the date, the version and the status; Synapse reads the
+ * file for the manager. Nothing loads until the manager approves. */
 
 import { api } from "../api.js";
 import { renderMarkdown } from "../md.js";
@@ -17,6 +17,7 @@ export function slugOf(text) {
 
 const TEXT_EXT = ["md", "txt", "csv", "tsv", "json", "yaml", "yml", "sql",
                   "xml", "html", "py", "markdown"];
+const KNOWLEDGE_EXT = ["md", "txt", "csv", "json", "yaml", "yml", "sql"];
 
 export const SKILL_TEMPLATE = `# <Title: the kind of ask this is for>
 
@@ -38,10 +39,24 @@ const readB64 = (file) => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
+const firstLine = (text) => {
+  let title = "";
+  for (const raw of String(text || "").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith("#") && !title) { title = line.replace(/^#+\s*/, ""); continue; }
+    if (line.startsWith("<!--")) continue;
+    return { title, description: line.slice(0, 160) };
+  }
+  return { title, description: "" };
+};
+
 // opens the pop-up on a tab: "upload" | "write" | "draft"
-// onSaved(skill) runs after a save, the pop-up closes itself
-export function openAddSkill(tab = "upload", onSaved = null) {
+// onSubmitted(submission) runs after a submission, the pop-up closes
+// itself; approver names who will review (the board's approver)
+export function openAddSkill(tab = "upload", onSubmitted = null, approver = null) {
   document.getElementById("addskill")?.remove();
+  const to = approver?.name || "your manager";
   const root = document.createElement("div");
   root.id = "addskill";
   root.className = "modal-root";
@@ -49,7 +64,7 @@ export function openAddSkill(tab = "upload", onSaved = null) {
     <div class="modal" role="dialog" aria-modal="true" aria-label="Add a skill">
       <div class="modal-head">
         <b>Add a skill</b>
-        <span class="muted">it loads for you alone, from the next chat on</span>
+        <span class="muted">it goes to ${esc(to)} for approval before it loads</span>
         <span class="spacer"></span>
         <button class="icon-btn" data-x title="Close">✕</button>
       </div>
@@ -60,13 +75,25 @@ export function openAddSkill(tab = "upload", onSaved = null) {
       </div>
       <div class="modal-body">
         <section data-pane="upload">
-          <p class="muted">A markdown file of yours becomes a skill of yours:
-            the first heading is its title, the first line after it the one
-            line the agent reads when deciding to load it.</p>
+          <p class="muted">A markdown file of yours becomes a skill (doctrine:
+            the moves for a kind of ask) or a knowledge file (reference for
+            a business unit). The first heading is its title, the first line
+            after it the one line the agent reads when deciding to load it.</p>
+          <div class="as-row kind-toggle" role="radiogroup" aria-label="What kind of file">
+            <button class="btn on" data-kind="skill" role="radio" aria-checked="true">Skill</button>
+            <button class="btn" data-kind="knowledge" role="radio" aria-checked="false">Knowledge file</button>
+            <input class="search" id="as-upload-bu" placeholder="business unit (e.g. TLS)" maxlength="40" hidden />
+          </div>
+          <div class="as-row">
+            <input class="search" id="as-upload-description" placeholder="description, in a line (blank: the file's first line)" maxlength="400" />
+          </div>
+          <div class="as-row">
+            <input class="search" id="as-upload-purpose" placeholder="intended purpose: what it is for, who asks (required)" maxlength="600" />
+          </div>
           <label class="drop" for="as-file">
-            <input type="file" id="as-file" multiple accept=".md,.txt,.markdown" hidden />
+            <input type="file" id="as-file" multiple accept=".md,.txt,.markdown,.csv,.json,.yaml,.yml,.sql" hidden />
             <span class="drop-glyph">⇧</span>
-            <span>Drop markdown files here, or click to choose</span>
+            <span>Drop files here, or click to choose — each one is submitted for approval</span>
           </label>
           <ul class="as-outcomes muted" id="as-upload-outcomes"></ul>
         </section>
@@ -79,24 +106,27 @@ export function openAddSkill(tab = "upload", onSaved = null) {
             <span class="spacer"></span>
             <button class="btn" id="as-write-preview" aria-pressed="false">preview</button>
           </div>
+          <div class="as-row">
+            <input class="search" id="as-write-purpose" placeholder="intended purpose: what it is for, who asks (required)" maxlength="600" />
+          </div>
           <textarea class="input as-editor" id="as-write-text"></textarea>
           <div class="md as-rendered" id="as-write-rendered" hidden></div>
           <div class="as-row">
             <span class="muted" id="as-write-note"></span>
             <span class="spacer"></span>
-            <button class="btn primary" id="as-write-save">Save skill</button>
+            <button class="btn primary" id="as-write-save">Submit for approval</button>
           </div>
         </section>
         <section data-pane="draft" hidden>
           <ol class="as-steps">
             <li data-step="1" class="on"><b>Material</b> what you know, in your words</li>
             <li data-step="2"><b>Draft</b> Synapse rewrites it as a pack</li>
-            <li data-step="3"><b>Read, edit, save</b> yours from the next chat</li>
+            <li data-step="3"><b>Read, edit, submit</b> to ${esc(to)} for approval</li>
           </ol>
           <div data-draft="1">
             <div class="as-row">
               <input class="search" id="as-title" placeholder="title (e.g. Churn triage)" />
-              <input class="search" id="as-hint" placeholder="what it is for, in a line (e.g. why did approvals move)" />
+              <input class="search" id="as-hint" placeholder="intended purpose: what it is for, in a line (e.g. why did approvals move)" />
             </div>
             <textarea class="input as-material" id="as-material"
               placeholder="paste your notes, a runbook, an email — how your team reads a metric, the steps you take for a kind of question"></textarea>
@@ -126,7 +156,7 @@ export function openAddSkill(tab = "upload", onSaved = null) {
               <button class="btn" id="as-draft-back">← material</button>
               <span class="muted" id="as-draft-note"></span>
               <span class="spacer"></span>
-              <button class="btn primary" id="as-draft-save">Save skill</button>
+              <button class="btn primary" id="as-draft-save">Submit for approval</button>
             </div>
           </div>
           <p class="muted" id="as-draft-error"></p>
@@ -141,10 +171,13 @@ export function openAddSkill(tab = "upload", onSaved = null) {
   root.addEventListener("click", (e) => {
     if (e.target === root || e.target.closest("[data-x]")) close();
   });
-  const saved = (skill) => {
-    if (onSaved) onSaved(skill);
+  const submitted = (submission) => {
+    if (onSubmitted) onSubmitted(submission);
     close();
   };
+  // one door out: the submission, with what the PRD asks for
+  const submit = (body) => api.chatSubmitReview(body)
+    .catch((err) => ({ available: false, reason: String(err) }));
 
   // ── tabs ──
   function show(name) {
@@ -162,24 +195,50 @@ export function openAddSkill(tab = "upload", onSaved = null) {
   });
   show(tab);
 
-  // ── bring a file ──
+  // ── bring a file: a skill, or a knowledge file for a business unit ──
+  let uploadKind = "skill";
+  root.querySelector(".kind-toggle").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-kind]");
+    if (!b) return;
+    uploadKind = b.dataset.kind;
+    for (const o of root.querySelectorAll("[data-kind]")) {
+      o.classList.toggle("on", o === b);
+      o.setAttribute("aria-checked", String(o === b));
+    }
+    $("as-upload-bu").hidden = uploadKind !== "knowledge";
+    $("as-file").accept = uploadKind === "knowledge"
+      ? KNOWLEDGE_EXT.map((k) => `.${k}`).join(",") : ".md,.txt,.markdown";
+  });
   $("as-file").addEventListener("change", async (e) => {
     const picked = [...e.target.files];
     e.target.value = "";
     const list = $("as-upload-outcomes");
+    const purpose = $("as-upload-purpose").value.trim();
+    if (!purpose) {
+      list.innerHTML = "<li>say what it is for first: the intended purpose is part of the submission</li>";
+      $("as-upload-purpose").focus();
+      return;
+    }
     let last = null;
     for (const file of picked) {
       const text = await file.text();
-      const got = await api.chatSaveSkill(slugOf(file.name.replace(/\.[^.]+$/, "")), text)
-        .catch((err) => ({ available: false, reason: String(err) }));
+      const ext = (file.name.split(".").pop() || "md").toLowerCase();
+      const stem = file.name.replace(/\.[^.]+$/, "");
+      const got = await submit({
+        kind: uploadKind, name: slugOf(stem), title: firstLine(text).title || stem,
+        description: $("as-upload-description").value.trim(),
+        purpose, text, business_unit: $("as-upload-bu").value.trim(),
+        ext: KNOWLEDGE_EXT.includes(ext) ? ext : "md" });
       const li = document.createElement("li");
       li.textContent = got.available
-        ? `${file.name} → /${got.skill.name}${got.skill.replaced ? " (replaced your earlier version)" : ""}`
+        ? `${file.name} → /${got.submission.name} submitted to ${
+            got.submission.approver?.name || to} for approval${
+            got.resubmitted ? ` (v${got.submission.version}: a new version of your earlier one)` : ""}`
         : `${file.name}: ${got.reason || "refused"}`;
       list.appendChild(li);
-      if (got.available) last = got.skill;
+      if (got.available) last = { ...got.submission, resubmitted: got.resubmitted };
     }
-    if (last) setTimeout(() => saved(last), 600);
+    if (last) setTimeout(() => submitted(last), 600);
   });
   const drop = root.querySelector(".drop");
   drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
@@ -202,12 +261,16 @@ export function openAddSkill(tab = "upload", onSaved = null) {
     if (!editing) $("as-write-rendered").innerHTML = renderMarkdown($("as-write-text").value, "md");
   });
   $("as-write-save").addEventListener("click", async () => {
-    const name = $("as-write-name").value.trim()
-      || slugOf(($("as-write-text").value.match(/^#\s+(.+)$/m) || [])[1] || "");
-    const got = await api.chatSaveSkill(name, $("as-write-text").value)
-      .catch((err) => ({ available: false, reason: String(err) }));
-    $("as-write-note").textContent = got.available ? `saved as /${got.skill.name}` : (got.reason || "not saved");
-    if (got.available) setTimeout(() => saved(got.skill), 400);
+    const text = $("as-write-text").value;
+    const head = firstLine(text);
+    const name = $("as-write-name").value.trim() || slugOf(head.title);
+    const purpose = $("as-write-purpose").value.trim();
+    if (!purpose) { $("as-write-note").textContent = "say what it is for: the intended purpose is part of the submission"; $("as-write-purpose").focus(); return; }
+    const got = await submit({ kind: "skill", name, title: head.title, description: head.description,
+                               purpose, text });
+    $("as-write-note").textContent = got.available
+      ? `submitted to ${got.submission.approver?.name || to} for approval` : (got.reason || "not submitted");
+    if (got.available) setTimeout(() => submitted({ ...got.submission, resubmitted: got.resubmitted }), 400);
   });
 
   // ── Draft with Synapse ──
@@ -261,7 +324,7 @@ export function openAddSkill(tab = "upload", onSaved = null) {
     $("as-draft-name").value = d.name || slugOf(d.title || $("as-title").value);
     $("as-notes").innerHTML = (d.notes || []).map((n) => `<li>${esc(n)}</li>`).join("");
     showDraft(d.text);
-    $("as-draft-note").textContent = "read it; edit if you like; then save";
+    $("as-draft-note").textContent = "read it; edit if you like; then submit";
     step(3);
   });
   $("as-draft-toggle").addEventListener("click", () => {
@@ -274,10 +337,16 @@ export function openAddSkill(tab = "upload", onSaved = null) {
   });
   $("as-draft-back").addEventListener("click", () => step(1));
   $("as-draft-save").addEventListener("click", async () => {
-    const got = await api.chatSaveSkill($("as-draft-name").value.trim(), $("as-draft-text").value)
-      .catch((err) => ({ available: false, reason: String(err) }));
-    $("as-draft-note").textContent = got.available ? `saved as /${got.skill.name}` : (got.reason || "not saved");
-    if (got.available) setTimeout(() => saved(got.skill), 400);
+    const text = $("as-draft-text").value;
+    const head = firstLine(text);
+    const purpose = $("as-hint").value.trim();
+    if (!purpose) { $("as-draft-note").textContent = "say what it is for on the material step: the intended purpose is part of the submission"; return; }
+    const got = await submit({ kind: "skill", name: $("as-draft-name").value.trim(),
+                               title: head.title || $("as-title").value, description: head.description,
+                               purpose, text });
+    $("as-draft-note").textContent = got.available
+      ? `submitted to ${got.submission.approver?.name || to} for approval` : (got.reason || "not submitted");
+    if (got.available) setTimeout(() => submitted({ ...got.submission, resubmitted: got.resubmitted }), 400);
   });
   return close;
 }

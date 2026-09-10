@@ -17,6 +17,7 @@ import pytest
 from sahs.enrich.client import EnrichTransportError
 from sahs.enrich.gateway_client import GatewayClient
 from sahs.util.gateway import (Config, GatewayError, TokenManager, model_plane,
+                               vertex_configured,
                            plane_note, thinking_budgets)
 
 SILO = Path(__file__).resolve().parents[1]
@@ -213,7 +214,9 @@ def test_the_plane_switch_and_the_budgets():
                         "SAHS_MODEL_PLANE": "vertex"}) == "vertex"
     assert model_plane({"SAHS_MODEL_PLANE": "gateway"}) == "gateway"
     assert plane_note({"APP_ID": "a", "APP_SECRET": "s"}) == \
-        "SAHS_MODEL_PLANE unset: the gateway credentials present"
+        "SAHS_MODEL_PLANE unset: the gateway credentials present, no Vertex key"
+    assert plane_note({}) == \
+        "SAHS_MODEL_PLANE unset: no Vertex key and no gateway credentials"
     assert plane_note({"SAHS_MODEL_PLANE": "gateway"}) == "SAHS_MODEL_PLANE=gateway"
     assert thinking_budgets({})["medium"] == 4096
     assert thinking_budgets({"GATEWAY_THINKING_BUDGETS": "low:512, high:8192",
@@ -350,11 +353,20 @@ def test_the_plane_catalog_names_both_planes_and_why_one_cannot_be_ridden(
     assert rows["gateway"]["available"] and rows["gateway"]["default"]
     assert not rows["vertex"]["default"]
     # Vertex configured too (a key file that exists): both available,
-    # the .env still names the default
+    # and a new chat lands on Vertex (Gemini 3.1 Pro Preview) unless
+    # the .env names the gateway
     key = tmp_path / "sa.json"
     key.write_text("{}")
     monkeypatch.setenv("SYNAPSE_VERTEX_SA_KEY", str(key))
     monkeypatch.setenv("VERTEX_PROJECT_ID", "prj")
+    monkeypatch.delenv("SAHS_MODEL_PLANE", raising=False)
+    rows = {r["id"]: r for r in plane_catalog()}
+    assert rows["vertex"]["available"] and rows["vertex"]["default"]
+    assert rows["gateway"]["available"] and not rows["gateway"]["default"]
+    assert vertex_configured() and "Vertex contract is present" in plane_note()
+    monkeypatch.setenv("SAHS_MODEL_PLANE", "gateway")
+    rows = {r["id"]: r for r in plane_catalog()}
+    assert rows["gateway"]["default"] and not rows["vertex"]["default"]
     monkeypatch.setenv("SAHS_MODEL_PLANE", "vertex")
     rows = {r["id"]: r for r in plane_catalog()}
     assert rows["vertex"]["available"] and rows["vertex"]["default"]

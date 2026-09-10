@@ -1175,19 +1175,23 @@ table.result tr:last-child td { border-bottom: none; }
   background: var(--accent-soft, #eaf2fb); color: var(--accent, #2f6feb);
 }
 .slash-none { padding: 6px 10px; font-size: var(--fs-12, 0.75rem); }
-.chat-modes {
-  display: inline-flex; border: 1px solid var(--line, #d5d2ca);
-  border-radius: 999px; padding: 2px; background: var(--surface-2, #eef3fa);
+/* the skills on this chat, where the mode pill used to sit: a chip per
+   pack the way an attached image sits in a composer, × to remove */
+.chat-skills { display: inline-flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.skill-chip {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 220px;
+  border: 1px solid var(--accent, #2f6feb); border-radius: 999px;
+  padding: 3px 6px 3px 9px; background: var(--accent-soft, #eaf2fb);
+  color: var(--accent, #2f6feb); font-size: var(--fs-12, 0.75rem); font-weight: 600;
 }
-.chat-mode {
-  border: 0; background: transparent; color: var(--ink-3, #5b6b8f);
-  font: inherit; font-size: var(--fs-13, 0.8125rem); padding: 4px 12px;
-  border-radius: 999px; cursor: pointer;
+.skill-chip .skill-glyph { font-size: var(--fs-11, 0.6875rem); }
+.skill-chip .skill-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-chip .skill-x {
+  border: 0; background: transparent; color: inherit; cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0 2px; border-radius: 999px;
 }
-.chat-mode.on {
-  background: var(--surface, #fff); color: var(--ink, #222018);
-  box-shadow: var(--shadow);
-}
+.skill-chip .skill-x:hover { background: var(--accent, #2f6feb); color: #fff; }
+.chat-mode-select { max-width: 120px; }
 .chat-model { font-size: var(--fs-13, 0.8125rem); color: var(--ink-3, #5b6b8f); }
 /* the model switch and the "?" that explains every dial */
 .chat-plane { max-width: 240px; text-overflow: ellipsis; }

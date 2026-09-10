@@ -384,7 +384,108 @@ class AssistantRuntime:
 
     def delete_my_skill(self, name: str) -> bool:
         from . import authoring
-        return authoring.delete_skill(self.graph_root, self.owner, name)
+        gone = authoring.delete_skill(self.graph_root, self.owner, name)
+        # a published submission whose file is gone is withdrawn too
+        sub = self.reviews.find("skill", authoring.slug(name), self.owner)
+        if sub is not None and sub["status"] == "published":
+            self.reviews.withdraw(sub["id"], by=self.user_name)
+        return gone
+
+    # ── the approval workflow (the PRD): a submission goes to the
+    #    manager, with the model's read, before the agent sees it ──
+    # where approved knowledge files land: a folder, or a callable the
+    # app gives so the answer follows its configuration at publish time
+    knowledge_dir: Any = None
+
+    @property
+    def reviews(self) -> Any:
+        from .reviews import Reviews
+        if getattr(self, "_reviews", None) is None:
+            self._reviews = Reviews(self.graph_root / "runs" / "reviews")
+        return self._reviews
+
+    def submit_for_review(self, **fields: Any) -> dict:
+        """A skill or a knowledge file from the person, filed for their
+        manager: pending from this moment, the checks at once, the
+        model's read in the background. Nothing reaches the loader."""
+        from .reviews import approver_for
+        from .skills_loader import builtin_skills
+        got = self.reviews.submit(
+            submitter=self.user_name or "you", submitter_slug=self.owner,
+            approver=approver_for(self.user_name),
+            reserved={p.name for p in builtin_skills()}, **fields)
+        if got.get("ok"):
+            sid = got["submission"]["id"]
+            self.reviews.start_ai(sid, self._read_for_review)
+            got["submission"] = self.reviews.get(sid)
+        return got
+
+    def _read_for_review(self, sub: dict, text: str) -> dict:
+        from . import reviews as reviews_mod
+        try:
+            plane = self.plane_for(None, "")
+            agent = self.model_for(Budget(**CHAT_BUDGET), plane)
+        except ModelUnavailable as e:
+            return {"ok": False, "reason": f"the model is unavailable: {e}"}
+        return reviews_mod.ai_review(agent, sub["kind"], sub.get("title", ""),
+                                     text, purpose=sub.get("purpose", ""),
+                                     by=self.label_for(plane))
+
+    def resubmit_review(self, sid: str, text: str, *, description: str = "",
+                        purpose: str = "", comment: str = "") -> dict:
+        got = self.reviews.resubmit(sid, text=text, description=description,
+                                    purpose=purpose, by=self.user_name,
+                                    comment=comment)
+        if got.get("ok"):
+            self.reviews.start_ai(sid, self._read_for_review)
+            got["submission"] = self.reviews.get(sid)
+        return got
+
+    def decide_review(self, sid: str, decision: str,
+                      comment: str = "") -> dict:
+        return self.reviews.decide(sid, decision, comment=comment,
+                                   publish=self._publish_submission)
+
+    def _publish_submission(self, sub: dict, text: str) -> dict:
+        """Approval opens the door the file was waiting at: an own pack
+        on the shelf for its owner, or a knowledge file staged for its
+        business unit — the same two places the creators wrote to."""
+        from . import authoring
+        if sub["kind"] == "skill":
+            # the owner's folder is the submitter's slug (a slug slugs
+            # to itself), so it lists for the person who filed it
+            got = authoring.save_skill(self.graph_root,
+                                       sub.get("submitter_slug") or self.owner,
+                                       sub["name"], text)
+            return {"ok": bool(got.get("ok")), "reason": got.get("reason", ""),
+                    "path": got.get("path", "")}
+        root = self.knowledge_dir() if callable(self.knowledge_dir) \
+            else self.knowledge_dir
+        root = Path(root) if root else (
+            self.graph_root.parent / "sources" / "artifacts")
+        root.mkdir(parents=True, exist_ok=True)
+        ext = sub.get("ext") or "md"
+        path = root / f"{sub['business_unit'].lower()}_{sub['name']}.{ext}"
+        header = (f"<!-- staged via Synapse by Lumi · actor {sub['submitter']} "
+                  f"· business unit {sub['business_unit']} · approved by "
+                  f"{(sub.get('approver') or {}).get('name', '')} -->\n"
+                  if ext == "md" else "")
+        path.write_text(header + text, encoding="utf-8")
+        return {"ok": True, "path": str(path)}
+
+    def withdraw_review(self, sid: str) -> dict:
+        return self.reviews.withdraw(sid, by=self.user_name)
+
+    def review_board(self) -> dict:
+        """The Skills page's view of the workflow: every submission
+        without its text, the notices, who approves and the band rule."""
+        from dataclasses import asdict
+
+        from .reviews import MIN_BAND, approver_for
+        board = self.reviews.notices(self.owner)
+        return {"submissions": self.reviews.list(),
+                "approver": asdict(approver_for(self.user_name)),
+                "min_band": MIN_BAND, "me": self.user_name, **board}
 
     def set_skills(self, session_id: str, names: list[str]) -> dict:
         from sahs.loop.skills import MAX_LOADED

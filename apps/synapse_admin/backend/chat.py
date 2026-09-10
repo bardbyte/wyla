@@ -24,6 +24,14 @@ key, never calls a model.
     DELETE /api/chat/skills/mine/{name}
     POST /api/chat/files/text                      {name, data_b64} → a file as text (for the creators)
     POST /api/chat/sessions/{id}/skills            {names}
+    GET  /api/chat/reviews                         the approval board: submissions, notices, the approver
+    POST /api/chat/reviews                         {kind, name, title, description, purpose, text, business_unit?, ext?} → pending, with the checks
+    GET  /api/chat/reviews/{id}                    one submission with its text and the model's read
+    POST /api/chat/reviews/{id}/decision           {decision: approve|reject, comment} → published or rejected
+    POST /api/chat/reviews/{id}/resubmit           {text, description?, purpose?, comment?} → a new version, pending
+    POST /api/chat/reviews/{id}/withdraw
+    GET  /api/chat/reviews/{id}/file               the current version, as a download
+    POST /api/chat/reviews/seen                    the notices read
     GET  /api/chat/projects · POST /api/chat/projects
     POST /api/chat/projects/{id}                   {…updates}
     POST /api/chat/sessions/{id}/project           {project_id}
@@ -47,7 +55,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from apps.synapse_admin.backend.meridian import (_builds_root, _graph_root,
-                                        _silo_import)
+                                                 _silo_import, _sources_dir)
 
 router = APIRouter(prefix="/api/chat")
 
@@ -68,6 +76,9 @@ def _chat():
             builds_root=_builds_root(), graph_root=_graph_root(),
             store_path=chat_dir / "sessions.sqlite3",
             events_dir=chat_dir / "events")
+        # approved knowledge files land where the shelf reads staged
+        # ones; resolved at publish time, so the .env decides
+        _RUNTIME.knowledge_dir = lambda: _sources_dir() / "artifacts"
     return _RUNTIME, sse_frame
 
 
@@ -135,6 +146,31 @@ class Rename(BaseModel):
 
 class SetSkills(BaseModel):
     names: list[str] = Field(default_factory=list, max_length=8)
+
+
+class ReviewSubmit(BaseModel):
+    """A file for the manager: what the PRD asks the person for (name,
+    description, intended purpose) and the text itself."""
+    kind: str = Field(pattern=r"^(skill|knowledge)$")
+    name: str = Field(default="", max_length=80)
+    title: str = Field(default="", max_length=200)
+    description: str = Field(default="", max_length=400)
+    purpose: str = Field(default="", max_length=600)
+    text: str = Field(min_length=1, max_length=200_000)
+    business_unit: str = Field(default="", max_length=40)
+    ext: str = Field(default="md", pattern=r"^(md|txt|csv|json|yaml|yml|sql)$")
+
+
+class ReviewDecision(BaseModel):
+    decision: str = Field(pattern=r"^(approve|reject)$")
+    comment: str = Field(default="", max_length=4000)
+
+
+class ReviewResubmit(BaseModel):
+    text: str = Field(min_length=1, max_length=200_000)
+    description: str = Field(default="", max_length=400)
+    purpose: str = Field(default="", max_length=600)
+    comment: str = Field(default="", max_length=2000)
 
 
 class NewProject(BaseModel):
@@ -434,6 +470,83 @@ def set_skills(session_id: str, req: SetSkills) -> dict:
                 **runtime.set_skills(session_id, req.names)}
     except KeyError:
         return _unavailable(f"no session {session_id}")
+
+
+# ── the approval workflow: a submission, the read, the decision ──
+@router.get("/reviews")
+def review_board() -> dict:
+    runtime, _ = _chat()
+    return {"available": True, **runtime.review_board()}
+
+
+@router.post("/reviews", status_code=201)
+def submit_review(req: ReviewSubmit) -> dict:
+    runtime, _ = _chat()
+    got = runtime.submit_for_review(
+        kind=req.kind, name=req.name, title=req.title,
+        description=req.description, purpose=req.purpose, text=req.text,
+        business_unit=req.business_unit, ext=req.ext)
+    if not got.get("ok"):
+        return _unavailable(got.get("reason") or "not submitted")
+    return {"available": True, "submission": got["submission"],
+            "resubmitted": bool(got.get("resubmitted"))}
+
+
+@router.get("/reviews/{sid}")
+def review(sid: str) -> dict:
+    runtime, _ = _chat()
+    sub = runtime.reviews.get(sid)
+    if sub is None:
+        return _unavailable(f"no submission {sid}")
+    return {"available": True, "submission": sub}
+
+
+@router.post("/reviews/{sid}/decision")
+def decide_review(sid: str, req: ReviewDecision) -> dict:
+    runtime, _ = _chat()
+    got = runtime.decide_review(sid, req.decision, req.comment)
+    if not got.get("ok"):
+        return _unavailable(got.get("reason") or "no decision")
+    return {"available": True, "submission": got["submission"]}
+
+
+@router.post("/reviews/{sid}/resubmit")
+def resubmit_review(sid: str, req: ReviewResubmit) -> dict:
+    runtime, _ = _chat()
+    got = runtime.resubmit_review(sid, req.text, description=req.description,
+                                  purpose=req.purpose, comment=req.comment)
+    if not got.get("ok"):
+        return _unavailable(got.get("reason") or "not resubmitted")
+    return {"available": True, "submission": got["submission"]}
+
+
+@router.post("/reviews/{sid}/withdraw")
+def withdraw_review(sid: str) -> dict:
+    runtime, _ = _chat()
+    got = runtime.withdraw_review(sid)
+    if not got.get("ok"):
+        return _unavailable(got.get("reason") or "not withdrawn")
+    return {"available": True, "submission": got["submission"]}
+
+
+@router.get("/reviews/{sid}/file")
+def review_file(sid: str):
+    runtime, _ = _chat()
+    sub = runtime.reviews.get(sid)
+    if sub is None:
+        return Response(status_code=404, content=f"no submission {sid}")
+    ext = sub.get("ext") or "md"
+    return Response(content=sub.get("text", ""),
+                    media_type="text/markdown" if ext == "md" else "text/plain",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="{sub["name"]}-v{sub["version"]}.{ext}"'})
+
+
+@router.post("/reviews/seen")
+def reviews_seen() -> dict:
+    runtime, _ = _chat()
+    runtime.reviews.mark_seen(runtime.owner)
+    return {"available": True}
 
 
 @router.get("/projects")
