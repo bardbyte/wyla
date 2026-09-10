@@ -81,11 +81,20 @@ def _chart_slide(slide, spec: dict[str, Any]) -> str:
     kind = spec.get("kind", "line")
     data = CategoryChartData()
     series = spec.get("series") or []
-    first = (series[0].get("points") if series else []) or []
-    data.categories = [str(p[0]) for p in first]
+    # one category axis, the union of every series' x labels in order
+    # of first appearance (a forecast series starts where the actuals
+    # end; it is not drawn over them); a missing or null y is a gap
+    categories: list[str] = []
     for entry in series:
+        for p in entry.get("points", []):
+            label = str(p[0])
+            if label not in categories:
+                categories.append(label)
+    data.categories = categories
+    for entry in series:
+        by_label = {str(p[0]): p[1] for p in entry.get("points", [])}
         data.add_series(entry.get("name", "series"),
-                        [p[1] for p in entry.get("points", [])])
+                        [by_label.get(c) for c in categories])
     slide.shapes.add_chart(
         _CHART_TYPES.get(kind, XL_CHART_TYPE.LINE),
         Inches(0.6), Inches(1.1), SLIDE_W - Inches(1.2),

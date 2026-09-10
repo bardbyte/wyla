@@ -18,7 +18,7 @@ FX = SILO / "tests" / "fixtures"
 sys.path.insert(0, str(SILO))
 KEY = "You are Synapse, an analytical colleague"
 PACKS = ["lumi-data-connect", "analysis-playbooks",
-         "dashboard-design", "executive-summary"]
+         "dashboard-design", "executive-summary", "charts"]
 GHOSTS = re.compile(
     r"\b(check_\w+|verify_answer|subgraph|search_semantics|grep_cards|"
     r"read_card|get_join_paths|get_definition_line|list_skills|"
@@ -135,7 +135,7 @@ def test_load_skill_teaches_and_records(compiled, tmp_path):
     graph_root = _user_shelf(tmp_path / "g")
     tools, state = _kit(compiled, tmp_path, graph_root=graph_root)
     assert "list_skills" not in tools          # the shelf is in the prompt
-    assert len(all_skills(graph_root)) == 5
+    assert len(all_skills(graph_root)) == 6
     got = tools["load_skill"].fn("lumi-data-connect")
     assert got["ok"] and got["origin"] == "built-in"
     assert "resolve first" in got["text"]

@@ -428,11 +428,29 @@ export async function renderChat(outlet, wanted = "") {
   }
 
   function chartSVG(spec, width = 520, height = 280) {
-    const series = (spec.series || []).map((s) => ({
-      name: s.name, points: (s.points || []).map((p) =>
-        [p[0], Number(p[1])]) }));
-    const all = series.flatMap((s) => s.points.map((p) => p[1]))
-      .filter(Number.isFinite);
+    // one x axis for every series: the union of their labels in order
+    // of first appearance (chronological when they are dates), each
+    // point placed by its label — a forecast over Jul–Dec lands on
+    // Jul–Dec, never over the actuals; a null, or a label a series
+    // lacks, is a gap in the line
+    const cats = [];
+    for (const s of spec.series || []) {
+      for (const p of s.points || []) {
+        const label = String(p[0]);
+        if (!cats.includes(label)) cats.push(label);
+      }
+    }
+    if (cats.length > 1 && cats.every(isDate)) cats.sort();
+    const series = (spec.series || []).map((s) => {
+      const by = new Map((s.points || []).map((p) => [String(p[0]),
+        p[1] === null || p[1] === undefined ? NaN : Number(p[1])]));
+      return { name: s.name,
+               // a forecast, a projection or a target reads dashed
+               dashed: !!s.dashed || /forecast|projection|projected|estimate|target|\bplan\b/i
+                 .test(String(s.name || "")),
+               values: cats.map((c) => (by.has(c) ? by.get(c) : NaN)) };
+    });
+    const all = series.flatMap((s) => s.values).filter(Number.isFinite);
     if (!all.length) return "<svg></svg>";
     const yMin = Math.min(0, ...all);
     const yMax = Math.max(...all) || 1;
@@ -447,8 +465,7 @@ export async function renderChat(outlet, wanted = "") {
     const textW = (s) => String(s).length * 6.2;     // 10.5px, roughly
     const many = series.length > 1;
     const isBar = spec.kind === "bar";
-    const n = Math.max(...series.map((s) => s.points.length));
-    const cats = (series[0]?.points || []).map((p) => String(p[0]));
+    const n = cats.length;
     // the frame fits its labels: the left margin from the widest tick,
     // the bottom from the category labels — rotated when a bar chart's
     // names would collide, thinned when even that would
@@ -466,6 +483,18 @@ export async function renderChat(outlet, wanted = "") {
       : pad.l + (n < 2 ? 0 : (i * plotW) / (n - 1));
     const py = (v) => pad.t + (height - pad.t - pad.b)
       * (1 - (v - yMin) / (yMax - yMin || 1));
+    // the runs of consecutive values a line is drawn through: a gap
+    // ends one run and starts the next
+    const runs = (values) => {
+      const out = [];
+      let cur = [];
+      values.forEach((v, i) => {
+        if (Number.isFinite(v)) cur.push(i);
+        else if (cur.length) { out.push(cur); cur = []; }
+      });
+      if (cur.length) out.push(cur);
+      return out;
+    };
     let body = "";
     for (const v of ticks) {
       const y = py(v);
@@ -476,42 +505,49 @@ export async function renderChat(outlet, wanted = "") {
     }
     series.forEach((s, si) => {
       const color = PALETTE[si % PALETTE.length];
+      const dash = s.dashed ? ' stroke-dasharray="6 4"' : "";
       if (isBar) {
         const group = slot * 0.72;
         const bw = Math.max(3, group / series.length - 2);
-        s.points.forEach((p, i) => {
-          if (!Number.isFinite(p[1])) return;
+        s.values.forEach((v, i) => {
+          if (!Number.isFinite(v)) return;
           const x = px(i) - group / 2 + si * (group / series.length) + 1;
           body += `<rect class="chart-bar" x="${x}" y="${
-            Math.min(py(p[1]), py(0))}"
-            width="${bw}" height="${Math.max(0.5, Math.abs(py(p[1]) - py(0)))}"
-            fill="${color}" opacity="0.85"
-            style="animation-delay:${i * 12}ms"><title>${esc(String(p[0]))}: ${
-            esc(fmtNum(p[1]))}</title></rect>`;
+            Math.min(py(v), py(0))}"
+            width="${bw}" height="${Math.max(0.5, Math.abs(py(v) - py(0)))}"
+            fill="${color}" opacity="${s.dashed ? 0.55 : 0.85}"
+            style="animation-delay:${i * 12}ms"><title>${esc(cats[i])}: ${
+            esc(fmtNum(v))}</title></rect>`;
         });
       } else {
-        const path = s.points.map((p, i) =>
-          `${i ? "L" : "M"}${px(i)},${py(p[1])}`).join(" ");
-        if (spec.kind === "area") {
-          body += `<path class="fill" d="${path} L${
-            px(s.points.length - 1)},${py(yMin)} L${px(0)},${
-            py(yMin)} Z" fill="${color}"/>`;
+        for (const run of runs(s.values)) {
+          const path = run.map((i, k) =>
+            `${k ? "L" : "M"}${px(i)},${py(s.values[i])}`).join(" ");
+          if (spec.kind === "area" && run.length > 1) {
+            body += `<path class="fill" d="${path} L${
+              px(run[run.length - 1])},${py(yMin)} L${px(run[0])},${
+              py(yMin)} Z" fill="${color}"/>`;
+          }
+          if (spec.kind !== "scatter" && run.length > 1) {
+            body += `<path class="line" d="${path}" fill="none"
+              stroke="${color}" stroke-width="2"${dash}/>`;
+          }
         }
-        if (spec.kind !== "scatter") {
-          body += `<path class="line" d="${path}" fill="none"
-            stroke="${color}" stroke-width="2"/>`;
-        }
-        s.points.forEach((p, i) => {
-          body += `<circle class="dot" cx="${px(i)}" cy="${py(p[1])}"
-            r="2.6" fill="${color}"><title>${esc(String(p[0]))}: ${
-            esc(fmtNum(p[1]))}</title></circle>`;
+        s.values.forEach((v, i) => {
+          if (!Number.isFinite(v)) return;
+          body += `<circle class="dot" cx="${px(i)}" cy="${py(v)}"
+            r="2.6" fill="${color}"><title>${esc(cats[i])}: ${
+            esc(fmtNum(v))}</title></circle>`;
         });
       }
     });
     // the category labels: every one when they fit, every k-th when
     // not, the last always on a line chart so the range reads
     cats.forEach((label, i) => {
-      const drawn = i % step === 0 || (!isBar && i === n - 1);
+      // the last label of a line chart always, and none within a step
+      // of it, so the range reads without two labels colliding
+      const drawn = isBar ? i % step === 0
+        : (i === n - 1 || (i % step === 0 && n - 1 - i >= step));
       if (!drawn) return;
       const x = px(i);
       if (rotate) {
@@ -531,7 +567,8 @@ export async function renderChat(outlet, wanted = "") {
       let lx = pad.l;
       series.forEach((s, si) => {
         body += `<text x="${lx}" y="${12}" class="tick"><tspan fill="${
-          PALETTE[si % PALETTE.length]}">■</tspan> ${esc(s.name)}</text>`;
+          PALETTE[si % PALETTE.length]}">${s.dashed ? "┄" : "■"}</tspan> ${
+          esc(s.name)}</text>`;
         lx += textW(s.name) + 22;
       });
     }

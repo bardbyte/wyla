@@ -115,19 +115,34 @@ def validate_artifact(type: str, spec: Any, *,
             for i, entry in enumerate(series):
                 points = (entry or {}).get("points") \
                     if isinstance(entry, dict) else None
+                # a point is [x, y]: y numeric, or null for a gap (a
+                # forecast series is null where the actuals are, and
+                # the other way round — both ride ONE shared x axis)
                 if (not isinstance(points, list) or not points
                         or not all(isinstance(p, (list, tuple))
-                                   and len(p) == 2 and _numeric(p[1])
-                                   for p in points)):
+                                   and len(p) == 2
+                                   and (p[1] is None or _numeric(p[1]))
+                                   for p in points)
+                        or not any(_numeric(p[1]) for p in points)):
                     problems.append(_problem(
                         "chart_points",
                         f"series[{i}] has no usable points",
-                        "each point is [x, y] with numeric y; x is a "
-                        "label or a date string"))
+                        "each point is [x, y] with numeric y (null for "
+                        "a gap; at least one number); x is a label or "
+                        "a date string, shared across the series"))
                     continue
-                clean_series.append({
+                clean: dict[str, Any] = {
                     "name": str(entry.get("name", f"series {i + 1}")),
-                    "points": [[p[0], p[1]] for p in points]})
+                    "points": [[p[0], p[1]] for p in points]}
+                if entry.get("dashed") is True:
+                    clean["dashed"] = True       # a forecast, a target
+                clean_series.append(clean)
+        if len(clean_series) > 6:
+            problems.append(_problem(
+                "chart_series_many",
+                f"{len(clean_series)} series on one chart",
+                "at most 6: fold the tail into Other, or split into "
+                "one chart per group"))
         shows_numbers = True
         out.update(kind=kind, series=clean_series,
                    x_label=str(spec.get("x_label", "")),
