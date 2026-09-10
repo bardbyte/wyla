@@ -431,19 +431,46 @@ export async function renderChat(outlet, wanted = "") {
     pinSkills(state.skills.filter((n) => n !== name));
   });
   loadPacks().then(paintSkills);
+  // the status the Skills page shows, on the menu too: Built in for
+  // what ships with Synapse, Published for a pack of yours the manager
+  // approved, Shared for the shelf's shared packs
+  const packStatus = (p) => p.origin === "built-in"
+    ? ["s-builtin", "Built in"] : p.mine
+      ? ["s-published", "Published"] : ["s-shared", "Shared"];
+  const packRank = (p) => (p.mine ? 0 : p.origin === "built-in" ? 1 : 2);
+  // below the composer while the chat is empty and the composer sits
+  // mid-screen, above it once docked; never past the window's edge —
+  // it scrolls inside instead
+  function placeSlash() {
+    const box = (slash.offsetParent || slash.parentElement)
+      .getBoundingClientRect();
+    const below = shell.classList.contains("empty");
+    slash.classList.toggle("below", below);
+    const room = below ? window.innerHeight - box.bottom - 16 : box.top - 16;
+    slash.style.maxHeight =
+      `${Math.max(160, Math.min(room, window.innerHeight * 0.7))}px`;
+  }
   async function paintSlash() {
     const m = input.value.match(/^\/([A-Za-z0-9_\-]*)$/);
     if (!m) { slash.hidden = true; return; }
+    // the whole shelf, not a first few: yours first, then the built-in
+    // packs, then the shared ones; the menu scrolls past the fold
     const rows = (await loadPacks()).filter((p) =>
       String(p.name || "").toLowerCase().startsWith(m[1].toLowerCase()))
-      .slice(0, 8);
-    slash.innerHTML = rows.length ? rows.map((p) => `
+      .sort((a, b) => packRank(a) - packRank(b)
+        || String(a.name).localeCompare(String(b.name)));
+    slash.innerHTML = rows.length ? rows.map((p) => {
+      const [cls, label] = packStatus(p);
+      return `
       <button class="slash-item" data-name="${esc(p.name)}">
         <b>/${esc(p.name)}</b>
-        <span class="muted">${esc(p.title || "")}</span></button>`).join("")
+        <span class="muted slash-title">${esc(p.title || "")}</span>
+        <span class="sub-status slash-status ${cls}">${label}</span></button>`;
+    }).join("")
       : `<div class="muted slash-none">No skill starts with “/${
           esc(m[1])}” — the Skills tab lists them all.</div>`;
     slash.hidden = false;
+    placeSlash();
     for (const b of slash.querySelectorAll(".slash-item")) {
       b.addEventListener("click", () => pickSlash(b.dataset.name));
     }

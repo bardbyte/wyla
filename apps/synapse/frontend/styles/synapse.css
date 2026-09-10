@@ -517,3 +517,12 @@
 .review-file summary { cursor: pointer; color: var(--ink-3); font-size: var(--fs-13); }
 .kind-toggle .btn.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .kind-toggle .search { flex: 1; min-width: 160px; }
+
+/* ── the slash menu: the whole shelf, each pack with its status ── */
+.chat-slash { min-width: min(520px, calc(100% - 24px)); max-width: calc(100% - 24px); }
+.chat-slash.below { top: calc(100% + 6px); bottom: auto; }
+.slash-item { align-items: center; }
+.slash-item .slash-title {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.slash-item .slash-status { flex: none; margin-left: auto; }

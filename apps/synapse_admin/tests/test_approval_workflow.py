@@ -205,6 +205,15 @@ def test_the_composer_reads_as_asked():
         assert gone not in CHAT, gone
     # a bare /name from the Skills page becomes the chip, text stays text
     assert 'const bare = prefill.match(' in CHAT and "pickSlash(bare[1])" in CHAT
+    # the slash menu lists the whole shelf with each pack's status, yours
+    # first, and opens where there is room
+    assert ".slice(0, 8)" not in CHAT
+    for piece in ("packStatus(", '"Built in"', '"Published"', '"Shared"',
+                  "slash-status", "packRank(", "placeSlash()",
+                  'slash.classList.toggle("below", below)'):
+        assert piece in CHAT, piece
+    for cls in (".slash-item .slash-status", ".chat-slash.below", ".slash-item .slash-title"):
+        assert cls in CSS, cls
     for cls in (".chat-skills", ".skill-chip", ".skill-chip .skill-x", ".chat-mode-select"):
         assert cls in APP_CSS, cls
     assert ".chat-modes {" not in APP_CSS
