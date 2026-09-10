@@ -4,7 +4,24 @@
  * artifacts published inside the transcript, no drawer. */
 
 /* ── sidebar ── */
-.sidenav { gap: var(--s-2); }
+/* the nav is wider than the console's (220px): chat titles read, and the
+   star and archive buttons sit at the far edge, away from the name */
+.sidenav { gap: var(--s-2); width: 264px; }
+.main-col { margin-left: 264px; }
+@media (max-width: 860px) { .main-col { margin-left: 0; } }
+.chat-row { gap: 10px; padding: 7px 10px; }
+.chat-row .chat-title { flex: 1 1 auto; min-width: 0; }
+.chat-row .row-tools { margin-left: auto; gap: 4px; flex: none; }
+.chat-row .row-btn { padding: 2px 6px; font-size: 13px; line-height: 1; }
+.chat-row:hover .chat-when { display: none; }
+.chat-row .chat-when { flex: none; }
+.navlist.customize { padding-top: var(--s-3); }
+.nav-badge {
+  margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 999px; background: var(--accent); color: #fff;
+  font-size: var(--fs-11); font-weight: 700; display: inline-flex;
+  align-items: center; justify-content: center;
+}
 .brand { padding-bottom: var(--s-3); }
 .brand .wordmark { font-size: var(--fs-16); letter-spacing: 0.04em;
                    text-transform: uppercase; }
@@ -435,3 +452,68 @@
 @media (max-width: 720px) {
   .shelf-table .shelf-kind, .shelf-table th:nth-child(2) { display: none; }
 }
+
+/* ── the approval workflow on the Skills shelf: statuses, the queue,
+   the notices, and the review panel in the reader ── */
+.shelf-table .shelf-status { white-space: nowrap; }
+.sub-status {
+  display: inline-block; font-size: var(--fs-11); font-weight: 600;
+  padding: 2px 8px; border-radius: 999px; border: 1px solid transparent;
+  background: var(--surface-2); color: var(--ink-2);
+}
+.sub-status.s-pending { background: #fff4d6; color: #7a5200; border-color: #f2d48a; }
+.sub-status.s-published { background: #e3f6e8; color: #1d6b3a; border-color: #a9dfbb; }
+.sub-status.s-rejected { background: #fde5e5; color: #9a2222; border-color: #f2b3b3; }
+.sub-status.s-builtin, .sub-status.s-shared { color: var(--ink-3); }
+:root[data-theme="dark"] .sub-status.s-pending,
+:root:not([data-theme="light"]) .sub-status.s-pending { background: #3d2f08; color: #ffd47a; border-color: #6b5312; }
+:root[data-theme="dark"] .sub-status.s-published,
+:root:not([data-theme="light"]) .sub-status.s-published { background: #0f3320; color: #8fe0a8; border-color: #1d6b3a; }
+:root[data-theme="dark"] .sub-status.s-rejected,
+:root:not([data-theme="light"]) .sub-status.s-rejected { background: #3f1414; color: #ff9f9f; border-color: #7a2a2a; }
+:root[data-theme="light"] .sub-status.s-pending { background: #fff4d6; color: #7a5200; border-color: #f2d48a; }
+:root[data-theme="light"] .sub-status.s-published { background: #e3f6e8; color: #1d6b3a; border-color: #a9dfbb; }
+:root[data-theme="light"] .sub-status.s-rejected { background: #fde5e5; color: #9a2222; border-color: #f2b3b3; }
+.sk-queue.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.notices {
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px;
+  margin: 0 0 12px; background: var(--surface-2); font-size: var(--fs-13);
+}
+.notices-head { display: flex; align-items: center; gap: 10px; }
+.notices ul { margin: 6px 0 0; padding-left: 18px; }
+.notices li { margin: 2px 0; }
+.notice-link {
+  border: 0; background: transparent; color: var(--accent); cursor: pointer;
+  font: inherit; padding: 0; text-align: left;
+}
+.notice-link:hover { text-decoration: underline; }
+.review { display: flex; flex-direction: column; gap: 12px; }
+.review-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.review-block { border-top: 1px solid var(--line); padding-top: 10px; }
+.review-block h4 { margin: 0 0 8px; font-size: var(--fs-13); }
+.review-block h4 .muted { font-weight: 400; margin-left: 6px; }
+.review-summary { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: var(--fs-13); }
+.review-summary dt { color: var(--ink-3); }
+.review-summary dd { margin: 0; }
+.review-rec {
+  display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+  border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; font-size: var(--fs-13);
+  background: var(--surface-2); border-left: 4px solid var(--line-strong);
+}
+.review-rec.r-ready { border-left-color: #1d6b3a; }
+.review-rec.r-minor { border-left-color: #c8891a; }
+.review-rec.r-significant { border-left-color: #9a2222; }
+.review-insights { width: 100%; border-collapse: collapse; font-size: var(--fs-12); margin-top: 8px; }
+.review-insights th { text-align: left; color: var(--ink-3); font-weight: 500; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.review-insights td { padding: 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.conf { font-size: var(--fs-11); font-weight: 600; padding: 1px 6px; border-radius: 999px; background: var(--surface-2); }
+.conf-high { color: #9a2222; }
+.conf-medium { color: #7a5200; }
+.conf-low { color: var(--ink-3); }
+.review-history { margin: 0; padding-left: 18px; font-size: var(--fs-13); }
+.review-history li { margin: 4px 0; }
+.review-history li div { color: var(--ink-2); margin-top: 2px; }
+.rv-comment, .rv-text { width: 100%; box-sizing: border-box; margin-bottom: 8px; }
+.review-file summary { cursor: pointer; color: var(--ink-3); font-size: var(--fs-13); }
+.kind-toggle .btn.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.kind-toggle .search { flex: 1; min-width: 160px; }

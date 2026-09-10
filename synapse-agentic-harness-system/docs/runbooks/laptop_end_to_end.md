@@ -510,6 +510,52 @@ knowledge file is still staged through `POST /api/meridian/artifacts`;
 the page no longer offers it. `#/knowledge` and `#/artifacts` still
 answer, on this page.
 
+**The composer, plainer still.** The "?" explains Quick, Standard and
+Deep alone; the model select names the model and each option's hover
+says what riding it means. Chat or Autopilot is a select beside the
+model and the depth (Chat hands queries over for you to run;
+Autopilot runs under the limits and builds the deliverable). A new
+chat lands on Gemini 3.1 Pro Preview whenever the Vertex contract is
+in the `.env`; `SAHS_MODEL_PLANE=eag` names the other default.
+
+**A skill on the chat.** Type `/` and pick a pack: it sits in the
+composer as a chip where the mode pill used to be — pinned on the
+conversation, so every message rides with it — until you × it, the
+way an attached image sits in a chat. Up to four. Use in chat on the
+Skills page does the same. Typing `/name and your words` still works
+as one message.
+
+**Skills go to your manager first.** Bring a file, Write a skill or
+Draft with Synapse: every way ends as a submission — the name, a
+description and the intended purpose from you; the submitter, the
+date, the version and the status from the system — to your direct
+manager (`LUMI_USER_MANAGER` and `LUMI_USER_MANAGER_BAND` in the
+silo `.env`; band 40 or above may approve; unset, you review your
+own on the laptop and the record says so). The shelf shows it as
+Pending approval with Synapse's read beside it: a summary (executive,
+key business topics, intended purpose, suggested audience), the
+insights that need a reader's attention (ambiguous statements,
+inconsistent terminology, contradictions, missing context, duplicate
+content, outdated references — each with a confidence and where it
+is), and an advisory recommendation. The checks land at once; the
+model's read follows in the background. The manager opens the row,
+downloads the file if they like, adds comments, and approves —
+Published: an own pack loads for you from the next chat, a
+knowledge file is staged for its business unit — or rejects, with
+the comments shown; you update and resubmit, a new version. Pending
+and rejected files never reach the agent. The notices land at the
+top of the Skills page and on the nav badge; a Bring a file can be a
+knowledge file too (pick the kind, name the business unit). The
+ledger is `graph/runs/reviews/ledger.jsonl`, the versions beside it.
+
+**Charts that are right.** A built-in skill, `/charts`, says which
+chart for which question and how the spec is built: every series on
+ONE shared x axis, a null where a series has no value, a forecast as
+a second dashed series that starts at the last actual. The renderer
+places every point by its label — a forecast over July to December
+draws over July to December, never over the actuals — and the pptx
+export draws the same axis.
+
 **Memory under Customize.** `memory.md`: what Synapse remembers about
 you as a document, one line per memory. Edit the lines and save — a
 line you add is remembered, a line you remove is retired, the rest

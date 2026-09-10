@@ -467,6 +467,52 @@ handoff, the eval suites.
    whole, simplifying is a choice of which tables to write, not a
    second schema.
 
+22. The composer's dials, once more (2026-09-10): the "?" explains
+   the depth alone; the model select names the model; Chat or
+   Autopilot is a select beside them, the pill gone; and
+   `SAHS_MODEL_PLANE=auto` lands a new chat on Vertex (Gemini 3.1 Pro
+   Preview) whenever its contract is present, EAG only when EAG alone
+   is configured. Reason: the person asked for the plain thing —
+   three depths, one model name, one mode word — and for the better
+   model as the default.
+
+23. A skill rides the chat as a chip (2026-09-10): picking one from
+   the slash menu, or Use in chat on the shelf, pins the pack on the
+   session where the mode pill used to sit, × unpins, four at most;
+   the typed `/name words` form stays. Reason: a chosen skill is a
+   state of the conversation, not a word in one message, and the
+   composer already had the place for it.
+
+24. Skills and knowledge files go to the manager first (2026-09-10,
+   the PRD): every way into the shelf is a submission with a name,
+   a description and the intended purpose; the approver is the
+   submitter's direct manager (band 40 or above), assigned, never
+   chosen; pending and rejected files never reach the loader; the
+   model reads the file for the manager (summary, insights with
+   confidence and a reference, an advisory recommendation) with a
+   local set of checks standing in until it does; approve publishes
+   through the same two doors the creators used, reject carries the
+   comments, resubmit is a new version; the ledger is append-only
+   JSONL under `graph/runs/reviews/` and the notices are read off it.
+   The E14 door (an own pack usable at once, labelled unreviewed)
+   stays in the API for the laptop and leaves the UI. Reason: the
+   product wants a manager between a person's words and the agent's
+   doctrine; the checks and the read make that manager fast, and the
+   ledger makes every decision explainable later. The Spanner design
+   gets a Submissions table when the store lands (§4.12 of the
+   schema document).
+
+25. Charts place points by their label (2026-09-10): every series on
+   one shared x axis, a null for a gap, a dashed series for a
+   forecast that starts at the last actual, at most six series; the
+   renderer builds the axis as the union of every series' labels and
+   the export does the same; a built-in `charts` pack says which
+   chart for which question. Reason: a transcript showed a forecast
+   for July to December drawn over January to June because the
+   renderer took the first series' labels as the axis and placed the
+   second by position; the fix is in the renderer, and the doctrine
+   keeps the model from asking for it.
+
 ## 12 · The laptop, measured (state report of 2026-09-02)
 
 What v3 is actually built against — not the fixture.

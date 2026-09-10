@@ -1046,17 +1046,35 @@ def eag_configured(env: dict[str, str] | None = None) -> bool:
                 or env.get("GEMINI_BEARER_TOKEN"))
 
 
+def vertex_configured(env: dict[str, str] | None = None) -> bool:
+    """The Vertex contract is in the environment: a key file that
+    exists (LUMI_VERTEX_SA_KEY or GOOGLE_APPLICATION_CREDENTIALS) and
+    a project."""
+    env = dict(os.environ if env is None else env)
+    key = (env.get("LUMI_VERTEX_SA_KEY")
+           or env.get("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
+    project = (env.get("VERTEX_PROJECT_ID")
+               or env.get("LUMI_VERTEX_PROJECT") or "").strip()
+    if not key or not project:
+        return False
+    from pathlib import Path
+    return Path(key).expanduser().exists()
+
+
 def model_plane(env: dict[str, str] | None = None) -> str:
     """Which plane the chat's model calls ride by default: ``vertex``
     or ``eag``. SAHS_MODEL_PLANE names one; ``auto`` (the default)
-    picks EAG when its credentials are in the environment and Vertex
-    otherwise. A chat can switch from the composer; this is the plane
-    a new chat starts on."""
+    lands on Vertex (Gemini 3.1 Pro Preview) whenever its contract is
+    in the environment and falls back to EAG only when EAG alone is
+    configured. A chat can switch from the composer; this is the
+    plane a new chat starts on."""
     env = dict(os.environ if env is None else env)
     wanted = (env.get(PLANE_VAR) or "auto").strip().lower()
     if wanted in ("vertex", "eag"):
         return wanted
-    return "eag" if eag_configured(env) else "vertex"
+    if eag_configured(env) and not vertex_configured(env):
+        return "eag"
+    return "vertex"
 
 
 def plane_note(env: dict[str, str] | None = None) -> str:
@@ -1065,10 +1083,14 @@ def plane_note(env: dict[str, str] | None = None) -> str:
     wanted = (env.get(PLANE_VAR) or "auto").strip().lower()
     if wanted in ("vertex", "eag"):
         return f"{PLANE_VAR}={wanted}"
-    has_eag = bool((env.get("APP_ID") and env.get("APP_SECRET"))
-                   or env.get("GEMINI_BEARER_TOKEN"))
-    return (f"{PLANE_VAR} unset: EAG credentials present" if has_eag
-            else f"{PLANE_VAR} unset: no EAG credentials")
+    has_eag = eag_configured(env)
+    has_vertex = vertex_configured(env)
+    if has_vertex:
+        return f"{PLANE_VAR} unset: the Vertex contract is present"
+    if has_eag:
+        return (f"{PLANE_VAR} unset: EAG credentials present, no Vertex "
+                "key")
+    return f"{PLANE_VAR} unset: no Vertex key and no EAG credentials"
 
 
 # ── thinking as a budget (2.5) ─────────────────────────────────

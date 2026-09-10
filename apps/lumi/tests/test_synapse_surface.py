@@ -81,11 +81,13 @@ def test_shell_is_stripped_and_renamed():
     assert 'href="#/memory"' in customize
     assert customize.index("#/skills") < customize.index("#/memory")
     assert "#/knowledge" not in INDEX
+    # Customize sits above Explore: the things a person shapes first
     order = [INDEX.index('href="#/chat/new"'), INDEX.index('href="#/search"'),
-             INDEX.index('class="chats"'), INDEX.index('aria-label="Explore"'),
-             INDEX.index('aria-label="Customize"'),
+             INDEX.index('class="chats"'), INDEX.index('aria-label="Customize"'),
+             INDEX.index('aria-label="Explore"'),
              INDEX.index('class="account"')]
     assert order == sorted(order)
+    assert 'id="nav-skills-badge"' in customize
     assert "Search chats" in INDEX
     # served under /synapse/: relative asset paths, no vendored three.js
     assert 'src="js/main.js"' in INDEX and 'href="styles/synapse.css"' in INDEX
@@ -287,8 +289,10 @@ def test_the_second_surface_switches_models_and_explains_the_dials(client):
     for piece in ('id="chat-model"', 'id="chat-help"', "chat-help-pop",
                   "api.chatDials()", "api.chatSetModel(",
                   "state.mode, state.plane", "help-group",
-                  "Depth <span>", "Model <span>"):
+                  "Depth <span>"):
         assert piece in CHAT, piece
+    # the "?" explains the depth alone; the model select names the model
+    assert "Model <span>" not in CHAT
     app_css = (FRONT / "styles" / "app.css").read_text(encoding="utf-8")
     for cls in (".chat-plane", ".chat-help", ".chat-help-pop",
                 ".help-group + .help-group", ".help-row"):
@@ -453,7 +457,7 @@ def test_skills_showcase_what_the_agent_knows(client, tmp_path, monkeypatch):
     assert files["tls_reference.md"]["author"] == "Sources"
     assert all(f["updated"] for f in files.values())
     page = (FRONT / "js" / "pages" / "skills.js").read_text(encoding="utf-8")
-    for piece in ("shelf-table", "<th>Skill</th><th>Kind</th><th>Last updated</th><th>Author</th>",
+    for piece in ("shelf-table", "<th>Skill</th><th>Kind</th><th>Status</th><th>Last updated</th><th>Author</th>",
                   'id="sk-search"', 'id="sk-browse"', 'id="sk-add"',
                   'f.family === "pack"', "Use in chat", "synapse.prefill",
                   "api.artifactFile(", "createPullout(", "sk-delete"):
@@ -530,13 +534,18 @@ def test_own_skills_and_the_creators(client):
     for piece in ("export function openAddSkill", 'data-tab="upload"',
                   'data-tab="write"', 'data-tab="draft"', "Bring a file",
                   "Write a skill", "Draft with Synapse", "SKILL_TEMPLATE",
-                  "api.chatDraft(", "api.chatFileText(", "api.chatSaveSkill(",
+                  "api.chatDraft(", "api.chatFileText(", "api.chatSubmitReview(",
                   'data-step="1"', 'data-step="2"', 'data-step="3"',
-                  "Save skill", 'role="dialog"'):
+                  "Submit for approval", 'role="dialog"',
+                  # the PRD's fields, and a knowledge file as a kind of upload
+                  'data-kind="knowledge"', "as-upload-purpose", "as-upload-bu",
+                  "as-write-purpose"):
         assert piece in popup, piece
-    assert "Draft with the model" not in popup and "knowledge" not in popup.lower()
+    assert "Draft with the model" not in popup and "Add a knowledge file" not in popup
+    assert "api.chatSaveSkill(" not in popup       # every way in is a submission
     skills_js = (FRONT / "js" / "pages" / "skills.js").read_text(encoding="utf-8")
-    for piece in ('openAddSkill("upload", afterSave)', 'openAddSkill("draft", afterSave)',
+    for piece in ('openAddSkill("upload", afterSubmit, board.approver)',
+                  'openAddSkill("draft", afterSubmit, board.approver)',
                   "api.chatDeleteSkill(", 'id="sk-browse"', 'id="sk-add"'):
         assert piece in skills_js, piece
     for gone in ("Add a knowledge file", "api.stageArtifact(", "creatorPanel",

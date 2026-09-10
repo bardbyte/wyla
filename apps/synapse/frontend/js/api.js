@@ -124,6 +124,20 @@ export const api = {
   chatFileText: (name, data_b64) => post("/api/chat/files/text", { name, data_b64 }),
   chatSetSkills: (id, names) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/skills`, { names }),
+  // the approval workflow: a submission goes to the manager with the
+  // model's read; approve publishes, reject sends it back, resubmit
+  // bumps the version; the board lists them all with the notices
+  chatReviews: () => get("/api/chat/reviews"),
+  chatReview: (id) => get(`/api/chat/reviews/${encodeURIComponent(id)}`),
+  chatSubmitReview: (body) => post("/api/chat/reviews", body),
+  chatDecideReview: (id, decision, comment = "") =>
+    post(`/api/chat/reviews/${encodeURIComponent(id)}/decision`, { decision, comment }),
+  chatResubmitReview: (id, body) =>
+    post(`/api/chat/reviews/${encodeURIComponent(id)}/resubmit`, body),
+  chatWithdrawReview: (id) =>
+    post(`/api/chat/reviews/${encodeURIComponent(id)}/withdraw`, {}),
+  chatReviewFileUrl: (id) => `/api/chat/reviews/${encodeURIComponent(id)}/file`,
+  chatReviewsSeen: () => post("/api/chat/reviews/seen", {}),
   chatProjects: () => get("/api/chat/projects"),
   chatNewProject: (name, instructions = "") =>
     post("/api/chat/projects", { name, instructions }),

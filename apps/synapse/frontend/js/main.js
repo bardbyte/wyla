@@ -14,6 +14,7 @@ import { renderMetric } from "./pages/metric.js";
 import { renderSkills } from "./pages/skills.js";
 import { renderMemory } from "./pages/memory.js";
 import { refreshChats } from "./chats.js";
+import { api } from "./api.js";
 
 const outlet = document.getElementById("outlet");
 let teardown = null;
@@ -108,6 +109,24 @@ async function brandLogo() {
   img.src = `/api/lumi/logo?v=${encodeURIComponent(got.stamp || "")}`;
 }
 
+/* the Skills badge: what waits on the approval board — submissions
+ * awaiting review first, unread notices otherwise */
+async function refreshReviewsBadge() {
+  const badge = document.getElementById("nav-skills-badge");
+  if (!badge) return;
+  const got = await api.chatReviews().catch(() => ({}));
+  if (!got || !got.available) { badge.hidden = true; return; }
+  const pending = got.pending || 0;
+  const unread = got.unread || 0;
+  const n = pending || unread;
+  badge.hidden = n === 0;
+  badge.textContent = n ? String(n) : "";
+  badge.title = pending
+    ? `${pending} awaiting review` : `${unread} unread`;
+}
+window.addEventListener("synapse:reviews", refreshReviewsBadge);
+
 route();
 refreshChats();
 brandLogo();
+refreshReviewsBadge();
