@@ -103,8 +103,8 @@ def _load_expressions(sources: Path, registry: TableRegistry,
         records.extend(recs)
         quarantined.extend(quar)
         backlog.extend(back)
-    p = sources / "metrics_dmp.json"
-    if p.exists():
+    p = _dmp_path(sources)
+    if p is not None:
         _take("metrics_dmp", load_metrics_dmp(p))
     p = sources / "extended_gmns_semantics.json"
     if p.exists():
@@ -120,6 +120,19 @@ def _load_expressions(sources: Path, registry: TableRegistry,
     if p.exists():
         _take("skill_contract", load_skill_contracts(p))
     return records, quarantined, backlog
+
+
+def _dmp_path(sources: Path) -> Path | None:
+    """The governed catalog ships under its plain name and under dated
+    or suffixed export names (`metrics_dmp_recent.json`). Binding to
+    one exact spelling meant a renamed export loaded ZERO certified
+    metrics silently — the most authoritative source in the build,
+    absent, with no error. Exact name first, then the newest match."""
+    exact = sources / "metrics_dmp.json"
+    if exact.exists():
+        return exact
+    matches = sorted(sources.glob("metrics_dmp*.json"))
+    return matches[-1] if matches else None
 
 
 def _std_tech_path(sources: Path) -> Path | None:
@@ -404,6 +417,9 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
         terms = (load_business_terms(terms_path)[0]
                  if terms_path.exists() else [])
         reports["vocab"] = emit_vocab(glossary, terms, graph, run_id)
+        dmp_path = _dmp_path(sources)
+        if dmp_path is not None:
+            ledger.consumed(dmp_path)
         std_path = _std_tech_path(sources)
         if std_path is not None:
             console.emit("phase_start", phase="load:std_tech",
@@ -438,7 +454,7 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
     if args.sources_dir:
         sources = Path(args.sources_dir)
         for name in ("blue_business_insights.csv",
-                     "extracted_gold_queries.json", "metrics_dmp.json",
+                     "extracted_gold_queries.json",
                      "extended_gmns_semantics.json",
                      "measures_catalog.json", "data_cleaned.csv",
                      "business_terms.csv"):
@@ -448,6 +464,9 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
         for pack_file in sorted(sources.glob("skills/**/skill.yaml")) + \
                 sorted(sources.glob("skills/**/metric_contracts.yaml")):
             ledger.consumed(pack_file)
+        dmp_path = _dmp_path(sources)
+        if dmp_path is not None:
+            ledger.consumed(dmp_path)
         std_path = _std_tech_path(sources)
         if std_path is not None:
             for p in ([std_path] if std_path.is_file()

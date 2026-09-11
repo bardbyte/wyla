@@ -212,6 +212,14 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                     record.extra.get("line_of_business") or "",
                 "scope": record.extra.get("metric_scope") or "",
                 "requestor": record.extra.get("requestor") or "",
+                # the author's own declaration of what the metric
+                # reads and who owns it — stronger evidence than the
+                # SQL parse, and previously dark in the real catalog
+                "base_tables": record.extra.get("base_tables") or [],
+                "product_ids": record.extra.get("product_ids") or [],
+                "approval": record.extra.get("approval") or {},
+                "join_conditions":
+                    record.extra.get("join_conditions") or [],
                 "products": record.extra.get("products") or [],
                 "confidence": record.extra.get("confidence"),
                 "execution_count": record.extra.get("execution_count"),

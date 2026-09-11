@@ -587,3 +587,65 @@ def test_glossary_parses_both_header_spellings(tmp_path: Path):
     assert a[0].business_unit == b[0].business_unit == "Technology"
     assert a[0].region == b[0].region == "LACC"
     assert a[0].entry_type == b[0].entry_type == "Acronym"
+
+
+def test_governed_metric_catalog_reads_the_real_export_schema(
+        tmp_path: Path):
+    """The real metrics_dmp export carries fields no earlier generation
+    did, under spellings the loader did not know: `grain` (it read
+    `metricGrain`), `joinConditionRaw` (it read `joinCondition`),
+    plus baseTables / dataOwners / associatedDataProductIds /
+    reviewers. Every one was dark on the most authoritative source in
+    the build. The file also ships under suffixed export names, and
+    binding to one exact spelling loaded ZERO certified metrics with
+    no error at all."""
+    from sahs.loaders.sources.catalogs import load_metrics_dmp
+    from scripts.laptop import _dmp_path
+
+    payload = {"metric_catalog": [{
+        "metricCatalogId": "M-1",
+        "metricName": "Approval Rate",
+        "businessFriendlyMetricName": "Approval Rate",
+        "sqlExpression": "SELECT COUNT(*) FROM dw.gms_transaction",
+        "status": "Published",
+        "grain": "one row per account per day",
+        "baseTables": ["dw.gms_transaction", "dw.wwcas_authorization"],
+        "dataOwners": ["own_a@corp"],
+        "associatedDataProductNames": ["GMNS Spine"],
+        "associatedDataProductIds": ["DP-9"],
+        "joinConditionRaw": "a.cm13 = b.card_no",
+        "reviewers": {"workflowMode": "SEQUENTIAL",
+                      "currentApprovalCycle": 2,
+                      "aceProcessId": "ACE-77",
+                      "reviewers": [{"assigneeId": "rev_a",
+                                     "level": 1}]},
+    }]}
+    src = tmp_path / "sources"
+    src.mkdir()
+    (src / "metrics_dmp_recent.json").write_text(
+        json.dumps(payload), encoding="utf-8")
+
+    # a suffixed export name still resolves
+    found = _dmp_path(src)
+    assert found is not None and found.name == "metrics_dmp_recent.json"
+
+    records, quarantined = load_metrics_dmp(found)
+    assert not quarantined and len(records) == 1
+    extra = records[0].extra
+    assert extra["metric_grain"] == "one row per account per day"
+    assert extra["base_tables"] == ["dw.gms_transaction",
+                                    "dw.wwcas_authorization"]
+    assert extra["data_owners"] == ["own_a@corp"]
+    assert extra["product_ids"] == ["DP-9"]
+    # the eight metrics whose join could not be structured keep it
+    assert extra["join_condition"] == "a.cm13 = b.card_no"
+    assert extra["approval"] == {"workflow_mode": "SEQUENTIAL",
+                                 "current_cycle": 2,
+                                 "process_id": "ACE-77",
+                                 "reviewer_ids": ["rev_a"]}
+    # NO WORKFLOW RECORDED is not rejection: 43 of 86 carry null
+    (src / "metrics_dmp.json").write_text(json.dumps(
+        {"metric_catalog": [dict(payload["metric_catalog"][0],
+                                 reviewers=None)]}), encoding="utf-8")
+    assert _dmp_path(src).name == "metrics_dmp.json"   # exact wins
+    assert load_metrics_dmp(_dmp_path(src))[0][0].extra["approval"] == {}

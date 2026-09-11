@@ -23,6 +23,25 @@ def _read(path: Path) -> object:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def _approval_summary(reviewers) -> dict:
+    """The governed catalog's approval workflow, compacted. The full
+    tree (cycles, task ids, assignee ids per cycle) is operational
+    routing; what a reader needs is whether the metric is through
+    review and how many cycles it took. ``None`` and ``{}`` both mean
+    NO WORKFLOW RECORDED, which is not the same as rejected."""
+    if not isinstance(reviewers, dict) or not reviewers:
+        return {}
+    people = [str(r.get("assigneeId")) for r in
+              (reviewers.get("reviewers") or [])
+              if isinstance(r, dict) and r.get("assigneeId")]
+    return {k: v for k, v in {
+        "workflow_mode": str(reviewers.get("workflowMode") or ""),
+        "current_cycle": reviewers.get("currentApprovalCycle"),
+        "process_id": str(reviewers.get("aceProcessId") or ""),
+        "reviewer_ids": people,
+    }.items() if v not in (None, "", [])}
+
+
 def load_metrics_dmp(path: Path) -> tuple[list[ExpressionRecord],
                                           list[Quarantined]]:
     payload = _read(path)
@@ -63,15 +82,43 @@ def load_metrics_dmp(path: Path) -> tuple[list[ExpressionRecord],
                    "description": row.get("metricDescription"),
                    "calculation": row.get("calculation"),
                    "approved_dimensions": row.get("approvedDimensions"),
-                   "metric_grain": row.get("metricGrain"),
+                   # the real export spells it `grain`; an earlier
+                   # generation spelled it `metricGrain`. The emitter
+                   # already reads either — the loader never supplied
+                   # the newer spelling, so grain was dark on every
+                   # governed metric in the real catalog.
+                   "metric_grain": (row.get("grain")
+                                    or row.get("metricGrain")),
                    "metric_scope": row.get("metricScope"),
+                   # ── fields the real catalog carries that no
+                   # earlier generation did ──
+                   # baseTables is the AUTHORITATIVE table list, as
+                   # the metric's author declared it; inferring it
+                   # from the SQL parse is a guess by comparison
+                   "base_tables": [str(t) for t in
+                                   (row.get("baseTables") or [])],
+                   "data_owners": [str(o) for o in
+                                   (row.get("dataOwners") or [])],
+                   "product_ids": [str(i) for i in
+                                   (row.get("associatedDataProductIds")
+                                    or [])],
+                   "approval": _approval_summary(row.get("reviewers")),
                    # the full author SQL rides WHOLE as a doc node —
                    # this field sat unread in the catalog until the
                    # studio recon surfaced it (full utilization)
                    "referenced_query":
                        str(row.get("referencedSqlQuery") or "").strip(),
+                   # joins arrive two ways in ONE export: three
+                   # metrics carry structured objects, eight carry a
+                   # raw SQL fragment the source could not structure.
+                   # Keep both — dropping the raw form loses the join
+                   # entirely for those eight.
                    "join_condition":
-                       str(row.get("joinCondition") or "").strip(),
+                       str(row.get("joinCondition")
+                           or row.get("joinConditionRaw") or "").strip(),
+                   "join_conditions": [c for c in
+                                       (row.get("joinConditions") or [])
+                                       if isinstance(c, dict)],
                    "products": [str(p) for p in products]}))
     return records, quarantined
 
@@ -152,8 +199,27 @@ def load_extended_gmns(path: Path) -> tuple[list[ExpressionRecord],
             extra={"question_answered": row.get("questionAnswered"),
                    "calculation": row.get("calculation"),
                    "approved_dimensions": row.get("approvedDimensions"),
-                   "metric_grain": row.get("metricGrain"),
+                   # the real export spells it `grain`; an earlier
+                   # generation spelled it `metricGrain`. The emitter
+                   # already reads either — the loader never supplied
+                   # the newer spelling, so grain was dark on every
+                   # governed metric in the real catalog.
+                   "metric_grain": (row.get("grain")
+                                    or row.get("metricGrain")),
                    "metric_scope": row.get("metricScope"),
+                   # ── fields the real catalog carries that no
+                   # earlier generation did ──
+                   # baseTables is the AUTHORITATIVE table list, as
+                   # the metric's author declared it; inferring it
+                   # from the SQL parse is a guess by comparison
+                   "base_tables": [str(t) for t in
+                                   (row.get("baseTables") or [])],
+                   "data_owners": [str(o) for o in
+                                   (row.get("dataOwners") or [])],
+                   "product_ids": [str(i) for i in
+                                   (row.get("associatedDataProductIds")
+                                    or [])],
+                   "approval": _approval_summary(row.get("reviewers")),
                    "requestor": row.get("requestor"),
                    "author": row.get("author"),
                    "author_id": row.get("authorId"),
