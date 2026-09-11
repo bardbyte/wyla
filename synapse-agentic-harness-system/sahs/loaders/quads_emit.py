@@ -208,6 +208,17 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                     record.extra.get("line_of_business") or "",
                 "scope": record.extra.get("metric_scope") or "",
                 "requestor": record.extra.get("requestor") or "",
+                # the catalog's declared grain, served but NOT part of
+                # this node's identity (see the loader's note)
+                "grain_declared":
+                    record.extra.get("grain_declared") or "",
+                "base_tables": record.extra.get("base_tables") or [],
+                "data_owners_dmp": (record.extra.get("data_owners")
+                                    or []),
+                "product_ids": record.extra.get("product_ids") or [],
+                "approval": record.extra.get("approval") or {},
+                "join_conditions":
+                    record.extra.get("join_conditions") or [],
                 "products": record.extra.get("products") or [],
                 "confidence": record.extra.get("confidence"),
                 "execution_count": record.extra.get("execution_count"),

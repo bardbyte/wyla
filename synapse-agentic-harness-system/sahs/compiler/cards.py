@@ -311,10 +311,42 @@ def metric_card(metric: dict[str, Any],
             "- ⚠ associated but NOT referenced by the SQL: "
             + ", ".join(metric["tables_associated_not_referenced"])
             + " (declared lineage the query never reads) [prov:studio]")
+    if metric.get("base_tables"):
+        # the author's own declaration of what the metric reads —
+        # stronger than the SQL parse, which is a guess by comparison
+        lines.append("- reads: " + ", ".join(metric["base_tables"])
+                     + " (author-declared) [prov:dmp]")
     if metric.get("data_owners"):
         lines.append("- data owners: "
                      + ", ".join(metric["data_owners"])
                      + " [prov:studio]")
+    if metric.get("data_owners_dmp"):
+        lines.append("- data owners: "
+                     + ", ".join(metric["data_owners_dmp"])
+                     + " [prov:dmp]")
+    if metric.get("product_ids"):
+        lines.append("- data product ids: "
+                     + ", ".join(metric["product_ids"]) + " [prov:dmp]")
+    if metric.get("approval"):
+        a = metric["approval"]
+        bits = []
+        if a.get("workflow_mode"):
+            bits.append(str(a["workflow_mode"]).lower())
+        if a.get("current_cycle") is not None:
+            bits.append(f"cycle {a['current_cycle']}")
+        if a.get("reviewer_ids"):
+            bits.append("reviewers " + ", ".join(a["reviewer_ids"]))
+        if a.get("process_id"):
+            bits.append(f"process {a['process_id']}")
+        lines.append("- approval: " + " · ".join(bits or ["recorded"])
+                     + " [prov:dmp]")
+    for j in metric.get("join_conditions") or []:
+        left = f"{j.get('leftTable') or '?'}.{j.get('leftKey') or '?'}"
+        right = f"{j.get('rightTable') or '?'}.{j.get('rightKey') or '?'}"
+        kind = str(j.get("joinType") or "join").lower()
+        on = f" on `{j['onClause']}`" if j.get("onClause") else ""
+        lines.append(f"- structured join: {left} = {right} ({kind})"
+                     f"{on} [prov:dmp]")
     if metric.get("join_condition"):
         lines.append(f"- declared join condition: "
                      f"`{metric['join_condition']}` [prov:dmp]")
