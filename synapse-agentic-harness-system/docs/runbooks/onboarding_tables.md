@@ -20,6 +20,30 @@ author and one report you read.
 | MDM archive (run 2) | `$MDM/<table>/` | same per-table layout as the existing 46 |
 | registry (if used) | `_batch_summary.csv` | one row per table |
 
+**If the delivery arrives as suffixed roots** (`real_extractions_production_patched_12/`,
+`std_metadata_12/`): the archive loader walks ONE root per run and the
+catalog loader reads ONE directory, so do not point the build at both
+roots at once.
+
+- **Warehouse archive:** point `--bq-archive` at the `_12` root for
+  this run. The graph is append-only; the 46 already in it stay, the
+  12 are appended, and the run report and ledger cover exactly the 12.
+  No copying. (Merging the 12 dirs into the original root works too
+  and gives the same graph; it just re-walks the 46 for nothing.)
+- **Atlas catalog:** copy the 12 JSONs into `sources/std_tech_metadata/`.
+  The loader reads that one directory — and if a combined
+  `std_tech_metadata_all.json` sits beside it, the combined file WINS
+  and the directory is ignored; delete or regenerate the combined file.
+- **Registry:** if you pass `--registry <root>/_batch_summary.csv`, use
+  the `_12` root's summary for this run.
+- **Crosswalk first.** An archive dir with no crosswalk row does not
+  skip — it BLOCKS the build (`gate crosswalk_resolution`). Author the
+  12 rows before you point the build at the `_12` root.
+
+`scripts/rebuild_and_compare.py` runs the whole sequence — freeze at
+graph and build grain, build-graph, compile, diff both, gates — in one
+command and leaves every JSON under `graph/runs/<run-id>/`.
+
 Nothing else changes for the semantic sources: the glossary, business
 terms, governed metrics, mined measures and the value-synonym index are
 warehouse-wide files and already cover a new table the moment its name
