@@ -439,3 +439,110 @@ def test_extended_gmns_adapts_to_unknown_wrapper_key(tmp_path):
     assert r.extra["author_id"] == "dvashi"
     assert r.extra["line_of_business"] == "Global Merchant & Network Svcs"
     assert r.last_seen == "2026-08-23"
+
+
+def test_governed_catalog_reads_the_current_contract(tmp_path: Path):
+    """The catalog's current export carries fields the older one did
+    not, under spellings the loader did not know: `grain` (it read
+    `metricGrain`), `joinConditions[]` and `joinConditionRaw` (it read
+    the singular `joinCondition`, which the current export no longer
+    emits at all), plus baseTables, dataOwners,
+    associatedDataProductIds and reviewers. Every one now reaches the
+    record, and an older export still parses."""
+    from sahs.loaders.sources.catalogs import load_metrics_dmp
+    current = {"metric_catalog": [{
+        "metricCatalogId": "8a66a89d", "author": "auth_a",
+        "authorId": "auth_a",
+        "baseTables": ["blueprint_bloc_loan_summary",
+                       "blueprint_bloc_account_summary"],
+        "associatedDataProductNames": ["Commercial — BLOC Loan"],
+        "associatedDataProductIds": ["e9dcdd17", "e129d634"],
+        "metricDomain": "Portfolio Performance",
+        "lineOfBusiness": "Global Commercial Services",
+        "metricName": "gcs_bloc_avg_loan_size",
+        "businessFriendlyMetricName": "GCS BLOC Average Loan Size",
+        "metricDescription": "Average loan amount.",
+        "questionAnswered": "What is the average loan size?",
+        "sqlExpression": "AVG(b.loan_amt)",
+        "referencedSqlQuery": "WITH fdsa AS (...) SELECT ...",
+        "status": "staging", "grain": "Transaction",
+        "dataOwners": ["own_a@corp", "own_b@corp"],
+        "reviewers": None,
+        "joinConditions": [{
+            "leftTable": "blueprint_bloc_loan_summary", "leftAlias": "b",
+            "rightTable": "blueprint_bloc_account_summary",
+            "rightAlias": "a", "leftKey": "user_id",
+            "rightKey": "user_id", "joinType": "left",
+            "onClause": "a.user_id = b.user_id", "order": 1,
+            "source": "dataProductRelationship"}],
+    }]}
+    src = tmp_path / "metrics_dmp.json"
+    src.write_text(json.dumps(current), encoding="utf-8")
+    records, quarantined = load_metrics_dmp(src)
+    assert not quarantined and len(records) == 1
+    extra = records[0].extra
+    assert extra["grain_declared"] == "Transaction"
+    assert extra["base_tables"] == ["blueprint_bloc_loan_summary",
+                                    "blueprint_bloc_account_summary"]
+    assert extra["data_owners"] == ["own_a@corp", "own_b@corp"]
+    assert extra["product_ids"] == ["e9dcdd17", "e129d634"]
+    assert extra["join_conditions"][0]["onClause"] == \
+        "a.user_id = b.user_id"
+    # no workflow recorded is not rejection
+    assert extra["approval"] == {}
+
+    # the metrics whose relationship could not be structured carry the
+    # raw fragment, and it is the only join they have
+    raw = json.loads(json.dumps(current))
+    del raw["metric_catalog"][0]["joinConditions"]
+    raw["metric_catalog"][0]["joinConditionRaw"] = "a.uid = b.uid"
+    src.write_text(json.dumps(raw), encoding="utf-8")
+    assert load_metrics_dmp(src)[0][0].extra["join_condition"] == \
+        "a.uid = b.uid"
+
+    # a workflow that IS recorded compacts to its decision-bearing part
+    wf = json.loads(json.dumps(current))
+    wf["metric_catalog"][0]["reviewers"] = {
+        "workflowMode": "SEQUENTIAL", "currentApprovalCycle": 2,
+        "aceProcessId": "ACE-77",
+        "reviewers": [{"level": 1, "assigneeId": "rev_a",
+                       "cycles": [{"status": "done"}]}]}
+    src.write_text(json.dumps(wf), encoding="utf-8")
+    assert load_metrics_dmp(src)[0][0].extra["approval"] == {
+        "workflow_mode": "SEQUENTIAL", "current_cycle": 2,
+        "process_id": "ACE-77", "reviewer_ids": ["rev_a"]}
+
+    # an OLDER export still parses: the previous spellings are read
+    legacy = {"metric_catalog": [{
+        "metricCatalogId": "old-1", "metricName": "Legacy",
+        "sqlExpression": "COUNT(*)", "status": "Published",
+        "metricGrain": "account", "joinCondition": "a.k = b.k"}]}
+    src.write_text(json.dumps(legacy), encoding="utf-8")
+    old_extra = load_metrics_dmp(src)[0][0].extra
+    assert old_extra["metric_grain"] == "account"
+    assert old_extra["join_condition"] == "a.k = b.k"
+
+
+def test_every_governed_status_is_served_certified(tmp_path: Path):
+    """DECISION: the catalog's own status is varied and inconsistently
+    cased (Published / staging / Staging / METRIC_TESTING, and
+    absent). All of them enter as CERTIFIED and are served as
+    certified — none is withheld or demoted for its status. Two links
+    make that true; this pins both so nobody re-introduces status
+    gating by accident. The catalog's wording is still carried as
+    evidence: collapsing what we SERVE is not rewriting what it said."""
+    from sahs.canon.authority import Authority
+    from sahs.loaders.quads_emit import _INITIAL_STATE
+    from sahs.loaders.sources.catalogs import load_metrics_dmp
+    statuses = ["Published", "staging", "Staging", "METRIC_TESTING",
+                "", None]
+    src = tmp_path / "metrics_dmp.json"
+    src.write_text(json.dumps({"metric_catalog": [
+        {"metricCatalogId": f"M-{i}", "metricName": f"Metric {i}",
+         "sqlExpression": "COUNT(*)", "status": st}
+        for i, st in enumerate(statuses)]}), encoding="utf-8")
+    records, quarantined = load_metrics_dmp(src)
+    assert not quarantined and len(records) == len(statuses)
+    assert {r.authority for r in records} == {Authority.CERTIFIED}
+    assert _INITIAL_STATE[Authority.CERTIFIED] == "certified"
+    assert [r.extra["status"] for r in records] == statuses
