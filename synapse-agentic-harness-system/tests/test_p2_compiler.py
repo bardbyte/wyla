@@ -518,3 +518,23 @@ def test_coverage_ledger_accounts_for_every_prop_and_edge(tmp_path):
                       if r["status"] == "rendered"}
     assert {"fk_references", "has_domain", "mapped_term", "owned_by",
             "upstream_of", "derived_from", "described_by"} <= rendered_edges
+
+
+def test_vocabulary_scope_splits_multi_valued_business_units():
+    """Acropedia's Business_Unit column is multi-valued: a symbol owned
+    by two units ships as "GSG, GMNS" in ONE cell. Compared whole that
+    string matches neither unit, so an entry explicitly scoped to GMNS
+    went unoffered on a GMNS table. It must be offered — and an entry
+    from a genuinely foreign unit must still be withheld."""
+    from sahs.compiler.facts import match_vocabulary
+    columns = [{"name": "abp_am", "business_name": "Auto Bill Pay"}]
+    rows = [
+        {"kind": "acronym", "text": "ABP", "bu": "GSG, GMNS",
+         "region": "All", "definition": "Automatic Bill Pay"},
+        {"kind": "acronym", "text": "ABP", "bu": "Legal",
+         "region": "All", "definition": "Abandoned Property"},
+    ]
+    hits = match_vocabulary(rows, columns, {"GMNS"})
+    assert [h["definition"] for h in hits] == ["Automatic Bill Pay"]
+    # the foreign-unit entry is withheld, not merely ranked lower
+    assert all("Abandoned" not in h["definition"] for h in hits)

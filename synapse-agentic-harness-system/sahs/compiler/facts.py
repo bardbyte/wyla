@@ -55,6 +55,16 @@ SCHEMA = "meridian.table_facts/1"
 _TOKEN = re.compile(r"[^a-z0-9]+")
 
 
+def _bu_scopes(raw: str) -> set[str]:
+    """Acropedia's Business_Unit column is multi-valued: a symbol that
+    belongs to two units ships as ``"GSG, GMNS"`` in ONE cell. Compared
+    whole, that string matches neither unit, so an entry explicitly
+    scoped to GMNS went unoffered on GMNS tables. Split it; an empty
+    cell stays unknown, which the caller reads as unscoped."""
+    return {part.strip().lower()
+            for part in str(raw or "").split(",") if part.strip()}
+
+
 def _norm_symbol(text: str) -> str:
     """Acronym symbols and column tokens meet on one spelling:
     lower-case alphanumerics only (``A/R`` → ``ar``, ``CM13`` →
@@ -114,7 +124,8 @@ def match_vocabulary(vocab_rows: list[dict[str, Any]],
         if row.get("kind") not in ("acronym", "term"):
             continue
         bu = str(row.get("bu") or "all").lower()
-        if bu not in scopes:
+        row_scopes = _bu_scopes(bu) or {"all"}
+        if not (row_scopes & scopes):
             continue
         symbol = _norm_symbol(str(row.get("text") or ""))
         if len(symbol) < 2:
@@ -480,7 +491,8 @@ def build_lob_facts(lob_rows: list[dict[str, Any]],
     vocab_by_bu: dict[str, int] = defaultdict(int)
     for row in vocab_rows:
         if row.get("kind") in ("acronym", "term"):
-            vocab_by_bu[str(row.get("bu") or "all").lower()] += 1
+            for unit in (_bu_scopes(row.get("bu")) or {"all"}):
+                vocab_by_bu[unit] += 1
     out = []
     for lob in sorted(lob_rows, key=lambda r: str(r.get("code")
                                                   or r.get("lob"))):

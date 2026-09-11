@@ -562,3 +562,28 @@ def test_extended_gmns_adapts_to_unknown_wrapper_key(tmp_path):
     assert r.extra["author_id"] == "dvashi"
     assert r.extra["line_of_business"] == "Global Merchant & Network Svcs"
     assert r.last_seen == "2026-08-23"
+
+
+def test_glossary_parses_both_header_spellings(tmp_path: Path):
+    """The real Acropedia export ships the SAME five columns under two
+    spellings: data_cleaned.csv writes `Business_Unit`,
+    potential_common_word_acronyms.csv writes `Business Unit`. Matching
+    one spelling made the other file's scope default to "All" — an
+    entry scoped to Technology would then be offered on every table.
+    Both spellings must yield the same record."""
+    spaced = tmp_path / "spaced.csv"
+    spaced.write_text(
+        "Symbol,Definition,Business Unit,Global Region,Entry Type\n"
+        "CARE,Customer Assistance and Relief Environment,"
+        "Technology,LACC,Acronym\n", encoding="utf-8")
+    under = tmp_path / "under.csv"
+    under.write_text(
+        "Symbol,Definition,Business_Unit,Global_Region,Entry_Type\n"
+        "CARE,Customer Assistance and Relief Environment,"
+        "Technology,LACC,Acronym\n", encoding="utf-8")
+    a, qa = load_glossary(spaced)
+    b, qb = load_glossary(under)
+    assert not qa and not qb
+    assert a[0].business_unit == b[0].business_unit == "Technology"
+    assert a[0].region == b[0].region == "LACC"
+    assert a[0].entry_type == b[0].entry_type == "Acronym"

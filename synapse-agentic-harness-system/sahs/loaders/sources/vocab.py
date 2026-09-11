@@ -74,8 +74,16 @@ def load_glossary(path: Path) -> tuple[list[VocabRecord], list[Quarantined]]:
     records, quarantined = [], []
     with Path(path).open(encoding="utf-8-sig", newline="") as f:
         for i, row in enumerate(csv.DictReader(f), start=2):
-            low = {(k or "").strip().lower(): (v or "").strip()
-                   for k, v in row.items()}
+            # the SAME five columns ship under two spellings in the
+            # real export: data_cleaned.csv writes `Business_Unit`,
+            # potential_common_word_acronyms.csv writes `Business
+            # Unit`. Matching on one spelling made the other file's
+            # scope silently default to "All" — an entry scoped to one
+            # business unit would then be offered on every table, which
+            # is exactly the confident wrong answer BU-scoping exists
+            # to prevent. Fold spaces to underscores and both parse.
+            low = {(k or "").strip().lower().replace(" ", "_"):
+                   (v or "").strip() for k, v in row.items()}
             symbol = low.get("symbol", "")
             definition = low.get("definition", "")
             if not symbol or not definition:
