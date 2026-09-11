@@ -804,42 +804,43 @@ def test_std_tech_full_utilization_reaches_the_graph(tmp_path):
     assert std["terms_minted_from_link"] == 2
 
 
-def test_the_sensitivity_hold_keeps_every_declaration_out_of_the_graph(
-        tmp_path):
-    """The hold (sahs/loaders/sensitivity.py) is a DEFAULT-build claim:
-    a build nobody configures must carry no compliance declaration from
-    either catalog plane. The fixtures assert PII loudly — gms declares
-    has_pii, names cm13 and cm15_hash in pii_columns[], and the MDM
-    schema marks columns is_pii — so silence here is the hold working,
-    not a thin fixture.
+def test_the_sensitivity_hold_withholds_atlas_and_only_atlas(tmp_path):
+    """The hold (sahs/loaders/sensitivity.py) is scoped to ONE source:
+    std_tech_metadata. A default build must carry no compliance
+    declaration from the Atlas catalog — and must still carry the MDM
+    plane's and BigQuery's, which the hold does not touch.
 
-    Row-access policy is NOT sensitivity and must survive: it is what
-    BigQuery itself enforces, and the sandbox's only honest gate."""
+    The fixtures assert PII loudly on both planes — gms declares
+    has_pii, names cm13 and cm15_hash in pii_columns[], and the MDM
+    schema marks cm13 is_pii — so Atlas silence beside MDM speech is
+    the SCOPE working, not a thin fixture."""
     graph_dir, out_dir = tmp_path / "g", tmp_path / "run"
     assert _build(graph_dir, out_dir).returncode == 0
     graph = GraphDir(graph_dir)
     nodes, edges = graph.fold_nodes(), graph.fold_edges()
 
-    # no compliance edge of any regime, from any witness
+    # ── withheld: nothing sensitivity-shaped carries the atlas witness
     held = {"policy:pii", "policy:gdpr", "policy:oncop"}
-    assert not [(s, o) for (s, r, o, _w) in edges
-                if r == "has_policy" and o in held]
+    assert not [(s, o) for (s, r, o, w) in edges
+                if r == "has_policy" and o in held and w == "atlas"]
 
-    # no table-level flag
     table = nodes["table:dw.gms_transaction"].props
     assert not {"has_pii_atlas", "has_gdpr_atlas",
                 "has_oncop_atlas"} & set(table)
 
-    # no column-level role, from Atlas or from MDM
     for node in nodes.values():
-        assert not {"pii_role_id", "sde_group", "is_pii_mdm",
+        assert not {"pii_role_id", "sde_group",
                     "pii_role_id_table_declared"} & set(node.props), node.id
 
-    # cm15_hash exists ONLY as a pii_columns[] declaration — with the
-    # hold on, the declaration is never read, so the column is never
-    # minted from it at all
+    # cm15_hash exists ONLY as an atlas pii_columns[] declaration, so
+    # with the hold on it is never minted from one at all
     assert "col:dw.gms_transaction.cm15_hash" not in nodes
 
-    # row-access policy is untouched: the warehouse's own answer
-    assert [o for (s, r, o, _w) in edges
-            if r == "has_policy" and s == "table:dw.wwcas_authorization"]
+    # ── untouched: the MDM plane still declares, under its own witness
+    assert nodes["col:dw.gms_transaction.cm13"].props["is_pii_mdm"] is True
+    assert ("col:dw.gms_transaction.cm13", "has_policy",
+            "policy:pii", "lumi") in edges
+
+    # ── untouched: row-access policy is the warehouse's own answer
+    assert ("table:dw.wwcas_authorization", "has_policy",
+            "policy:unknown_denied", "bq") in edges

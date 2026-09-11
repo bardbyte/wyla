@@ -359,9 +359,10 @@ SENSITIVITY_HELD_KEYS: dict[str, tuple[str, ...]] = {
                          "oncop_columns"),
     "pdeAttribute": ("pii_role_id", "sde_group"),
 }
-_HOLD_REASON = ("withheld by decision while the sensitivity hold is "
-                "on: a sensitive column produces a validate_sql "
-                "REFUSAL, not a flag — see sahs/loaders/sensitivity.py")
+_HOLD_REASON = ("withheld by decision: the sensitivity hold keeps "
+                "THIS source's compliance declarations out of the "
+                "graph (the MDM plane's still flow) — see "
+                "sahs/loaders/sensitivity.py")
 
 if not sensitivity.LOAD_SENSITIVITY:
     for _section, _keys in SENSITIVITY_HELD_KEYS.items():

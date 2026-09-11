@@ -31,9 +31,10 @@ dataset) · `dataserver` (`Lumi`) · `technology` (`BigQuery`) ·
 - sensitivity: `has_pii`, `has_oncop`, `has_gdpr`, and the three
   parallel declaration lists `pii_columns[]` / `gdpr_columns[]` /
   `oncop_columns[]` — **all WITHHELD under the sensitivity hold**
-  (`sahs/loaders/sensitivity.py`). The feed sends them and the loader
-  parses them; nothing reaches the graph until the hold lifts. See
-  "The sensitivity hold" below.
+  (`sahs/loaders/sensitivity.py`), which is scoped to this source
+  alone. The feed sends them and the loader parses them; nothing
+  reaches the graph until the hold lifts. See "The sensitivity hold"
+  below.
 - `ownership` dict: DI tech owner, VP, business owner, VP
 
 ## Layer 4 — `pde[]` (one element per column)
@@ -51,26 +52,36 @@ dataset) · `dataserver` (`Lumi`) · `technology` (`BigQuery`) ·
 
 ## The sensitivity hold
 
-Every compliance declaration this feed makes is currently withheld at
-the parse boundary: `has_pii` / `has_gdpr` / `has_oncop`, the three
-declaration lists, and `pii_role_id` / `sde_group` on the column. The
-MDM plane's `is_pii` is held the same way.
+**Scoped to this source.** Every compliance declaration *this feed*
+makes is withheld at the parse boundary: `has_pii` / `has_gdpr` /
+`has_oncop`, the three declaration lists, and `pii_role_id` /
+`sde_group` on the column.
 
-The reason is downstream, not here. A sensitive column today produces
-a `sensitive_column` VIOLATION in `validate_sql`, and a violation is a
-REFUSAL — the agent cannot project the column at all. The intent was
-to FLAG. Until the loader decides what sensitivity should mean, none
-of it is loaded: an append-only graph cannot un-say what it has said.
+Nothing else is held. The MDM plane's `is_pii` and the `policy:pii`
+edge it mints flow exactly as they always have — the MDM registry is
+what these declarations are *relayed from*, and holding the relay back
+does not mean doubting the source. Row-access policy is not
+sensitivity at all: `policy:unknown_denied` and `policy:row_access_N`
+come from BigQuery's own extraction and describe access control the
+WAREHOUSE enforces, so a query really does fail for a caller outside
+the grant. `data_classification`, a table-wide handling label rather
+than a claim about a column's contents, also stays.
 
-Row-access policy is NOT sensitivity and is untouched. The
-`policy:unknown_denied` and `policy:row_access_N` edges come from
-BigQuery's own extraction and describe access control the WAREHOUSE
-enforces — a query really does fail for a caller outside the grant.
-`data_classification` is a table-wide handling label and also stays.
+### What it costs while it is on
+
+E1's D5 fires when exactly ONE plane calls a column sensitive. With
+this plane silent by construction, every MDM-flagged column reads
+"flagged by lumi only" and opens a `sensitivity_conflict` ticket that
+cannot be closed — closing it needs the withheld witness. A column
+named ONLY by a declaration list here is never minted at all. Neither
+is new compiler behaviour; it is the existing design meeting a
+systematically absent plane.
+
+### Where it is on record
 
 The key census (`scripts/std_tech_keys.py`) reports every held key as
-a DEFERRAL with this reason, so the withholding is on record rather
-than looking like a field gone dark. Lift it for one run with
+a DEFERRAL naming the hold, so the withholding reads as a decision
+rather than a field gone dark. Lift it for one run with
 `SAHS_LOAD_SENSITIVITY=1`, or change the default in
 `sahs/loaders/sensitivity.py`.
 
