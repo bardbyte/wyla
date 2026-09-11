@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 
 from sahs.canon.authority import Authority
+from sahs.canon.canonical import try_canon
 from sahs.loaders.records import ExpressionRecord, Quarantined
 
 
@@ -42,6 +43,33 @@ def _approval_summary(reviewers) -> dict:
     }.items() if v not in (None, "", [])}
 
 
+def _pick_metric_sql(expression: str, referenced: str
+                     ) -> tuple[str, str, str]:
+    """Which of the catalog's two SQL fields feeds identity.
+
+    ``sqlExpression`` is the metric's formula and wins whenever it
+    canonicalizes. In the current export roughly one governed metric
+    in five carries PROSE there instead — "Net Sales / Total number of
+    tickets issued", "List all cntpty_ids having count(distinct …) > 1"
+    — the author's calculation description, not SQL. For those the
+    ``referencedSqlQuery`` is the only SQL the catalog has, so it feeds
+    the fingerprint and the words ride along as ``expression_prose``:
+    hand-written meaning, worth serving, never worth parsing.
+
+    Returns ``(sql, source, prose)``. ``source`` is ``"expression"`` or
+    ``"referenced_query"``; ``prose`` is the unparseable expression
+    text when the fallback fired, else empty. A metric where NEITHER
+    parses keeps its expression, so the census quarantines it under
+    its own id — the blocker gate must still name it, not lose it."""
+    if expression and try_canon(expression)[1] is None:
+        return expression, "expression", ""
+    if referenced and try_canon(referenced)[1] is None:
+        return referenced, "referenced_query", expression
+    if expression:
+        return expression, "expression", ""
+    return referenced, "referenced_query", ""
+
+
 def load_metrics_dmp(path: Path) -> tuple[list[ExpressionRecord],
                                           list[Quarantined]]:
     payload = _read(path)
@@ -51,8 +79,9 @@ def load_metrics_dmp(path: Path) -> tuple[list[ExpressionRecord],
     for row in rows:
         mid = str(row.get("metricCatalogId") or row.get("metricName") or "?")
         ref = f"{Path(path).name}#metric={mid}"
-        sql = str(row.get("sqlExpression")
-                  or row.get("referencedSqlQuery") or "").strip()
+        sql, sql_source, prose = _pick_metric_sql(
+            str(row.get("sqlExpression") or "").strip(),
+            str(row.get("referencedSqlQuery") or "").strip())
         if not sql:
             quarantined.append(Quarantined(
                 source="metrics_dmp", category="missing_field",
@@ -111,6 +140,11 @@ def load_metrics_dmp(path: Path) -> tuple[list[ExpressionRecord],
                    # studio recon surfaced it (full utilization)
                    "referenced_query":
                        str(row.get("referencedSqlQuery") or "").strip(),
+                   # which of the two SQL fields fed identity, and the
+                   # author's calculation prose when sqlExpression was
+                   # not SQL (see _pick_metric_sql)
+                   "sql_source": sql_source,
+                   "expression_prose": prose,
                    # joins arrive two ways in ONE export: a few
                    # metrics carry structured objects, several carry a
                    # raw fragment the source could not structure, and

@@ -273,6 +273,9 @@ def compile_build(graph_root: Path, builds_root: Path
             "join_conditions":
                 record.props.get("join_conditions") or [],
             "author_id": record.props.get("author_id", ""),
+            "sql_source": record.props.get("sql_source", ""),
+            "expression_prose":
+                record.props.get("expression_prose", ""),
             # the metric's filters are part of its IDENTITY (the page,
             # channel, or method it is scoped to) — serving + enricher
             # context both need them
@@ -324,7 +327,8 @@ def compile_build(graph_root: Path, builds_root: Path
                     "author", "description", "domain",
                     "line_of_business", "scope", "grain_observed",
                     "join_condition", "confidence", "business_unit",
-                    "data_category", "author_id"):
+                    "data_category", "author_id", "sql_source",
+                    "expression_prose"):
             held[key] = held[key] or row[key]
         if row.get("execution_count") and not held.get("execution_count"):
             held["execution_count"] = row["execution_count"]
