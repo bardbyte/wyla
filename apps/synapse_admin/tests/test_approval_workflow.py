@@ -188,19 +188,20 @@ def test_the_skills_page_and_the_popup_carry_the_workflow():
 
 
 def test_the_composer_reads_as_asked():
-    """The mode is a select, no pill; the "?" explains the depth alone;
-    a picked skill is a chip where the pill was, pinned on the chat
-    and removable; the nav is wider with Customize above Explore and
-    the hover tools apart from the name."""
-    for piece in ('id="chat-mode"', "chat-mode-select", '<option value="chat" selected>Chat</option>',
-                  '<option value="autopilot">Autopilot</option>', "synapse-chat-mode",
-                  "modeSel.addEventListener", "state.mode, state.plane",
+    """The mode is fixed on the page — no select, no pill — and the
+    model is the chat's own, no picker; the "?" explains the depth
+    alone; a picked skill is a chip where the pill was, pinned on the
+    chat and removable; the nav is wider with Customize above Explore
+    and the hover tools apart from the name."""
+    for piece in ('const MODE = "chat"', 'state.mode, ""',
                   'id="chat-skills"', "skill-chip", "skill-x", "paintSkills()",
                   "pinSkills(", "api.chatSetSkills(", "boot.session.skills",
                   "four skills at most", "rides every message of this chat",
                   'title="What Quick, Standard and Deep mean"'):
         assert piece in CHAT, piece
     for gone in ('class="chat-modes"', "chat-mode on", "Model <span>",
+                 'id="chat-mode"', 'id="chat-model"', "synapse-chat-mode",
+                 "chatSetModel", "state.plane",
                  'role="radiogroup"\n                aria-label="How Synapse works this ask"'):
         assert gone not in CHAT, gone
     # a bare /name from the Skills page becomes the chip, text stays text
@@ -214,8 +215,9 @@ def test_the_composer_reads_as_asked():
         assert piece in CHAT, piece
     for cls in (".slash-item .slash-status", ".chat-slash.below", ".slash-item .slash-title"):
         assert cls in CSS, cls
-    for cls in (".chat-skills", ".skill-chip", ".skill-chip .skill-x", ".chat-mode-select"):
+    for cls in (".chat-skills", ".skill-chip", ".skill-chip .skill-x"):
         assert cls in APP_CSS, cls
+    assert ".chat-mode-select" not in APP_CSS
     assert ".chat-modes {" not in APP_CSS
     # the nav
     assert "width: 264px" in CSS and ".main-col { margin-left: 264px; }" in CSS

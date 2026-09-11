@@ -98,10 +98,8 @@ export const api = {
       }/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
     return r.json();
   },
-  // the dials explained, and the model switch remembered on the chat
+  // the dials explained — this surface reads the depth entries alone
   chatDials: () => get("/api/chat/dials"),
-  chatSetModel: (id, model) =>
-    post(`/api/chat/sessions/${encodeURIComponent(id)}/model`, { model }),
   // the person pressed Run on a proposed query: no model call
   chatRun: (id, body) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/run`, body),

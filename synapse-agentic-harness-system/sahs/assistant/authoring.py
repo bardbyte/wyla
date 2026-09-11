@@ -25,7 +25,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from sahs.loop.skills import MAX_SKILL_CHARS, Skill, _parse
+from sahs.loop.skills import Skill, _parse, max_skill_chars
 
 from .skills_loader import BUILTIN, builtin_skills, owner_slug, user_root
 
@@ -105,7 +105,8 @@ def prompt_for(kind: str, title: str, material: str,
     """(system, user) for the drafting call."""
     if kind not in KINDS:
         raise ValueError(f"kind is skill or knowledge, not {kind!r}")
-    cap = MAX_SKILL_CHARS - 200 if kind == "skill" else MAX_SAVE_CHARS - 500
+    cap = (max_skill_chars() - 200 if kind == "skill"
+           else MAX_SAVE_CHARS - 500)
     what = ("a SKILL: doctrine for the agent — the moves for a kind of "
             "ask and the checks each move must run. It steers where the "
             "agent looks; it never asserts a fact about the data."
@@ -200,7 +201,9 @@ def save_skill(graph_root: Path, owner: str, name: str,
     return {"ok": True, "name": parsed.name, "title": parsed.title,
             "description": parsed.description, "owner": owner_slug(owner),
             "origin": "unreviewed", "replaced": existed,
-            "truncated": len(text) > MAX_SKILL_CHARS,
+            # over the load ceiling: saved whole, will refuse to load
+            # until SAHS_MAX_SKILL_CHARS is raised or the text is cut
+            "truncated": len(text) > max_skill_chars(),
             "path": str(path)}
 
 

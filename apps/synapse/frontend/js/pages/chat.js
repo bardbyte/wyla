@@ -56,13 +56,6 @@ export async function renderChat(outlet, wanted = "") {
               <div class="chat-skills" id="chat-skills" hidden
                 aria-label="Skills on this chat"></div>
               <span class="spacer"></span>
-              <select id="chat-mode" class="chat-depth chat-mode-select"
-                title="How Synapse works this ask">
-                <option value="chat" selected>Chat</option>
-                <option value="autopilot">Autopilot</option>
-              </select>
-              <select id="chat-model" class="chat-depth chat-plane"
-                title="Which model answers this chat"></select>
               <select id="chat-depth" class="chat-depth"
                 title="How deeply Synapse thinks on this ask">
                 <option value="quick">Quick</option>
@@ -143,13 +136,11 @@ export async function renderChat(outlet, wanted = "") {
   const first = String(boot.user_name || "").trim().split(/\s+/)[0];
   el("chat-greet").textContent = first
     ? `${dayPart}, ${first}.` : `${dayPart}, how are things?`;
-  // ── the dials, explained: the model switch shows the chat's plane
-  //    now; one catalog from the backend then fills the switch, the
-  //    option titles and the "?" popover — one source for both surfaces
-  const planeSel = el("chat-model");
-  state.plane = boot.plane || "";
-  planeSel.innerHTML = `<option value="${esc(state.plane)}" selected>${
-    esc(boot.model || "")}</option>`;
+  // ── the dial, explained: one catalog from the backend fills the
+  //    depth options' titles and the "?" popover — the same source the
+  //    admin console reads. This surface carries no model switch and
+  //    no chat/autopilot switch: the chat rides the plane it has, in
+  //    the one mode (below)
   const helpPop = el("chat-help-pop");
   const helpRow = (label, text, fact = "") => `
     <div class="help-row"><b>${esc(label)}</b><span>${esc(text)}${
@@ -158,23 +149,12 @@ export async function renderChat(outlet, wanted = "") {
     let dials = null;
     try { dials = await api.chatDials(); } catch { dials = null; }
     if (!dials || !dials.available) return;
-    if (!planeSel.isConnected || !el("chat-depth")) return;   // page left
-    const planes = dials.planes || [];
-    planeSel.innerHTML = planes.map((p) => `
-      <option value="${esc(p.id)}"${p.id === state.plane ? " selected" : ""}${
-        p.available ? "" : " disabled"} title="${
-        esc(p.available ? p.means : p.reason)}">${esc(p.label)}${
-        p.available ? "" : " · not configured"}</option>`).join("");
+    if (!el("chat-depth")) return;                              // page left
     for (const o of el("chat-depth").options) {
       const d = (dials.depths || []).find((x) => x.id === o.value);
       if (d) o.title = d.means;
     }
-    for (const o of el("chat-mode").options) {
-      const m = (dials.modes || []).find((x) => x.id === o.value);
-      if (m) o.title = m.means;
-    }
-    // the "?" explains the depth alone: the model select names the
-    // model, and each option's hover says what riding it means
+    // the "?" explains the depth alone
     helpPop.innerHTML = `
       <div class="help-group">
         <div class="help-head">Depth <span>how much Synapse thinks before each step</span></div>
@@ -198,26 +178,6 @@ export async function renderChat(outlet, wanted = "") {
     helpPop.hidden = !helpPop.hidden;
     el("chat-help").setAttribute("aria-expanded", String(!helpPop.hidden));
     if (!helpPop.hidden) placeHelp();
-  });
-  // the switch is remembered on the chat and rides the next message;
-  // a plane this machine cannot ride is refused with the reason and
-  // the switch goes back to the one that works
-  planeSel.addEventListener("change", async () => {
-    const wanted = planeSel.value;
-    const got = await api.chatSetModel(state.session.id, wanted);
-    if (!got.available) {
-      setEmpty(false);                 // the refusal must be seen
-      say(`<b>model not switched.</b> ${esc(got.reason || "")}`, "error");
-      planeSel.value = state.plane;
-      return;
-    }
-    state.plane = got.plane || wanted;
-    // before the first message the select itself is the confirmation;
-    // mid-conversation the thread says so, where the person is looking
-    if (!shell.classList.contains("empty")) {
-      const shown = planeSel.selectedOptions[0]?.textContent || got.model || wanted;
-      say(`Switched to <b>${esc(shown)}</b> from the next message on.`);
-    }
   });
   function setEmpty(empty) {
     shell.classList.toggle("empty", empty);
@@ -357,18 +317,12 @@ export async function renderChat(outlet, wanted = "") {
     if (!f.sent_turn) state.files.push(f);
   }
   paintFiles();
-  // the mode (§5): Chat hands queries over for you to run; Autopilot
-  // runs and builds without stopping. A select beside the model and
-  // the depth, kept per browser.
-  const MODE_KEY = "synapse-chat-mode";
-  const modeSel = el("chat-mode");
-  state.mode = localStorage.getItem(MODE_KEY) === "autopilot"
-    ? "autopilot" : "chat";
-  modeSel.value = state.mode;
-  modeSel.addEventListener("change", () => {
-    state.mode = modeSel.value === "autopilot" ? "autopilot" : "chat";
-    localStorage.setItem(MODE_KEY, state.mode);
-  });
+  // the mode (§5) is fixed on this surface: Chat hands every query
+  // over for the person to run. The run-and-build-without-stopping
+  // mode stays a runtime mode the admin console can pick; there is
+  // no switch here, and no remembered preference can steer it
+  const MODE = "chat";
+  state.mode = MODE;
   // "/" lists the skills: pick one and it rides the chat as a chip
   // where the mode pill used to be — pinned on the session, so every
   // turn loads it until the × — the way an attached image sits in a
@@ -1861,7 +1815,7 @@ export async function renderChat(outlet, wanted = "") {
     input.value = "";
     const accepted = await api.chatSend(state.session.id, text,
                                         el("chat-depth").value,
-                                        state.mode, state.plane,
+                                        state.mode, "",   // the chat's own plane
                                         files.map((f) => f.id));
     if (!accepted.available) {
       say(`<b>not sent.</b> ${esc(accepted.reason || "")}`, "error");

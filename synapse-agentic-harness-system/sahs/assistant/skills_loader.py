@@ -32,7 +32,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from sahs.loop.skills import MAX_LOADED, Skill, _parse, skills_root
+from sahs.loop.skills import (
+    Skill,
+    _parse,
+    check_size,
+    max_loaded,
+    skills_root,
+)
 
 BUILTIN = "built-in"
 UNREVIEWED = "unreviewed"      # the E14 door: usable now, labeled
@@ -127,15 +133,17 @@ def load_packs(graph_root: Path | None,
                names: list[str],
                owner: str = "") -> tuple[list[Pack], list[str]]:
     """(loaded, missing) across the shelves — the session-preload
-    resolver. Missing names are reported, never invented."""
+    resolver. Missing names are reported, never invented; a pack over
+    the size ceiling raises ``SkillTooLarge`` (see sahs.loop.skills)
+    rather than reaching the model as a cut of itself."""
     available = {p.name: p for p in all_skills(graph_root, owner)}
     loaded, missing = [], []
-    for name in names[:MAX_LOADED]:
+    for name in names[:max_loaded()]:
         pack = available.get(name)
         if pack is None:
             missing.append(name)
         else:
-            loaded.append(pack)
+            loaded.append(check_size(pack))
     return loaded, missing
 
 
