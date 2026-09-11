@@ -94,7 +94,13 @@ def load_glossary(path: Path) -> tuple[list[VocabRecord], list[Quarantined]]:
                 continue
             records.append(VocabRecord(
                 symbol=symbol, definition=definition,
-                business_unit=low.get("business_unit") or "All",
+                # an EMPTY Business_Unit is unknown scope, not
+                # global scope. Defaulting it to "All" made an entry
+                # whose owning unit nobody recorded match every table
+                # in the warehouse — the widest possible claim built
+                # from the least possible evidence. It stays empty and
+                # the compiler withholds it from table matching.
+                business_unit=low.get("business_unit") or "",
                 region=low.get("global_region") or low.get("region") or "All",
                 entry_type=low.get("entry_type") or "Acronym",
                 evidence_ref=f"{Path(path).name}#L{i}"))

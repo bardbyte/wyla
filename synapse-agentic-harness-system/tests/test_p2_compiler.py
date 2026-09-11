@@ -538,3 +538,38 @@ def test_vocabulary_scope_splits_multi_valued_business_units():
     assert [h["definition"] for h in hits] == ["Automatic Bill Pay"]
     # the foreign-unit entry is withheld, not merely ranked lower
     assert all("Abandoned" not in h["definition"] for h in hits)
+
+
+def test_unscoped_vocabulary_is_withheld_but_all_still_matches():
+    """DECISION: an empty Business_Unit is unknown scope, not global
+    scope, so the entry is withheld from table matching rather than
+    offered everywhere. An entry spelled "All" is a statement that it
+    applies everywhere and still matches — silence and a claim of
+    universality are not the same thing."""
+    from sahs.compiler.facts import match_vocabulary
+    columns = [{"name": "abp_am", "business_name": "Auto Bill Pay"}]
+    rows = [
+        {"kind": "acronym", "text": "ABP", "bu": "", "region": "All",
+         "definition": "unknown scope — withheld"},
+        {"kind": "acronym", "text": "ABP", "bu": "All", "region": "All",
+         "definition": "Automatic Bill Pay"},
+    ]
+    hits = match_vocabulary(rows, columns, {"GMNS"})
+    assert [h["definition"] for h in hits] == ["Automatic Bill Pay"]
+    # and it is withheld on EVERY table, not just foreign ones
+    assert not [h for h in match_vocabulary(rows[:1], columns, {"GMNS"})]
+    assert not [h for h in match_vocabulary(rows[:1], columns, set())]
+
+
+def test_unscoped_vocabulary_counts_toward_no_business_unit():
+    """The business-unit card's vocabulary count is 'acronyms scoped to
+    this unit'. An entry nobody scoped belongs to no unit, so it must
+    not inflate any unit's count."""
+    from sahs.compiler.facts import build_lob_facts
+    rows = [{"kind": "acronym", "text": "A", "bu": "", "region": "All"},
+            {"kind": "acronym", "text": "B", "bu": "GMNS, GSG",
+             "region": "All"}]
+    lobs = build_lob_facts([{"code": "GMNS", "tables": []},
+                            {"code": "GSG", "tables": []}], {}, rows)
+    counts = {r["code"]: r.get("vocabulary_entries", 0) for r in lobs}
+    assert counts == {"GMNS": 1, "GSG": 1}

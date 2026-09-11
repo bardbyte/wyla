@@ -95,8 +95,12 @@ def concept_id(label_norm: str, physical_table: str) -> str:
 
 
 def acr_id(symbol: str, bu: str, region: str) -> str:
+    """``bu`` empty means UNKNOWN scope and gets its own sentinel: an
+    entry nobody scoped and an entry explicitly scoped to every unit
+    are different claims, and folding them onto one id would let the
+    unscoped one inherit the global one's reach."""
     clean = lambda v, d: (v or d).strip().lower().replace("@", "_") or d
-    return (f"acr:{clean(symbol, '?')}@{clean(bu, 'all')}"
+    return (f"acr:{clean(symbol, '?')}@{clean(bu, 'unscoped')}"
             f"@{clean(region, 'all')}")
 
 

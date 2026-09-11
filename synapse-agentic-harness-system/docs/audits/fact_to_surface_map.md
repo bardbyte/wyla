@@ -88,6 +88,21 @@ section, a profile card, and (where relevant) a tool.
 | owners across tables | Atlas + MDM `owned_by` | `owners[]` | `## owners` | unit profile OWNERS | card |
 | vocabulary scoped to the unit | Acropedia `Business_Unit` | `vocabulary_entries` | line 4 | list VOCAB | `search_semantics(kind=vocab)` |
 
+## Pinned decisions
+
+Two rules the compiler applies that no source states outright. Both
+are fenced by tests so a later change has to be deliberate.
+
+| decision | rule | why | test |
+|---|---|---|---|
+| **governed metric status** | every status in the DMP catalog (`Published`, `staging`, `Staging`, `METRIC_TESTING`, absent) collapses to **CERTIFIED**, and every metric is served on the card as certified. None is withheld or demoted. The catalog's own wording is still carried as evidence. | the catalog is the governed registry; being in it is the certification. Casing drift is a data-entry artifact, not a governance signal. | `test_p2_graph.py::test_every_governed_metric_is_certified_whatever_its_status` |
+| **unscoped vocabulary** | an entry with an EMPTY `Business_Unit` is withheld from table matching and counts toward no unit. An entry spelled `All` still matches everywhere. | silence is not a claim of universality. Offering an entry nobody scoped on every table is the widest possible claim from the least possible evidence — the confident wrong answer BU-scoping exists to prevent. | `test_p2_compiler.py::test_unscoped_vocabulary_is_withheld_but_all_still_matches` |
+
+Because the two are now different claims, they are different nodes:
+`acr_id` gives an unscoped entry an `unscoped` sentinel rather than
+folding it onto the `all` id, where it would have inherited the
+global entry's reach.
+
 ## Deferred, with reasons (pinned in `sahs/compiler/coverage.py`)
 
 | kind | key | reason |

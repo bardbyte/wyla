@@ -380,7 +380,8 @@ def compile_build(graph_root: Path, builds_root: Path
             vocab_rows.append({
                 "text": record.props.get("symbol", ""),
                 "kind": "acronym", "ref": node_id,
-                "bu": record.props.get("business_unit", "All").lower(),
+                "bu": str(record.props.get("business_unit")
+                          or "").lower(),
                 "region": record.props.get("region", "All").lower(),
                 "definition": record.props.get("definition", "")})
         elif kind == "term":

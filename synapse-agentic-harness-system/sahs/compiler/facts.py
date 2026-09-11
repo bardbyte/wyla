@@ -109,7 +109,7 @@ def match_vocabulary(vocab_rows: list[dict[str, Any]],
     is what resolves ``ABP`` to "Automatic Bill Pay" on a GMNS table
     and to "Abandoned Property" elsewhere; an entry from a foreign BU
     is not offered, because offering it would be a guess."""
-    scopes = {b.lower() for b in business_units if b} | {"all", ""}
+    scopes = {b.lower() for b in business_units if b} | {"all"}
     # inverted index token → columns, built once per table: the real
     # warehouse pairs ~12K acronyms with ~1.3K columns per table, and a
     # per-symbol scan of every column would be ~20M set lookups per
@@ -123,8 +123,13 @@ def match_vocabulary(vocab_rows: list[dict[str, Any]],
     for row in vocab_rows:
         if row.get("kind") not in ("acronym", "term"):
             continue
-        bu = str(row.get("bu") or "all").lower()
-        row_scopes = _bu_scopes(bu) or {"all"}
+        row_scopes = _bu_scopes(row.get("bu"))
+        if not row_scopes:
+            # no unit recorded: unknown scope, withheld. Offering it
+            # on every table would be the widest claim on the least
+            # evidence. An entry spelled "All" IS scoped to all and
+            # still matches — that is a statement, not a silence.
+            continue
         if not (row_scopes & scopes):
             continue
         symbol = _norm_symbol(str(row.get("text") or ""))
@@ -133,6 +138,9 @@ def match_vocabulary(vocab_rows: list[dict[str, Any]],
         matched = sorted(columns_by_token.get(symbol, ()))
         if not matched:
             continue
+        # the dedup key keeps the entry's OWN scope spelling, so two
+        # rows for one symbol under different units stay two entries
+        bu = ",".join(sorted(row_scopes))
         key = (str(row.get("text")), bu, str(row.get("region") or "all"))
         entry = hits.setdefault(key, {
             "symbol": row.get("text", ""),
@@ -491,7 +499,8 @@ def build_lob_facts(lob_rows: list[dict[str, Any]],
     vocab_by_bu: dict[str, int] = defaultdict(int)
     for row in vocab_rows:
         if row.get("kind") in ("acronym", "term"):
-            for unit in (_bu_scopes(row.get("bu")) or {"all"}):
+            # an unscoped entry counts toward no unit's vocabulary
+            for unit in _bu_scopes(row.get("bu")):
                 vocab_by_bu[unit] += 1
     out = []
     for lob in sorted(lob_rows, key=lambda r: str(r.get("code")

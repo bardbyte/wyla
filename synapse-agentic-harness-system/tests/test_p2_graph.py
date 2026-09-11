@@ -738,3 +738,41 @@ def test_csv_reader_tolerates_giant_fields(tmp_path):
     assert nodes[doc_id].props["text"] == big         # VERBATIM, whole
     assert ("table:dw.gms_transaction", "described_by", doc_id,
             "bq") in graph.fold_edges()
+
+
+def test_every_governed_metric_is_certified_whatever_its_status(
+        tmp_path: Path):
+    """DECISION: the governed catalog's own status field is varied and
+    inconsistently cased (Published / staging / Staging /
+    METRIC_TESTING, and absent). All of them collapse to CERTIFIED and
+    every metric is served as certified — none is withheld or demoted
+    for its status. Two links make that true: the loader assigns one
+    authority regardless of status, and that authority maps to one
+    served state. This test pins both so nobody re-introduces status
+    gating by accident."""
+    from sahs.canon.authority import Authority
+    from sahs.loaders.quads_emit import _INITIAL_STATE
+    from sahs.loaders.sources.catalogs import load_metrics_dmp
+
+    statuses = ["Published", "staging", "Staging", "METRIC_TESTING",
+                "", None]
+    payload = {"metric_catalog": [
+        {"metricCatalogId": f"M-{i}",
+         "metricName": f"Metric {i}",
+         "businessFriendlyMetricName": f"Metric {i}",
+         "sqlExpression": "SELECT COUNT(*) FROM dw.gms_transaction",
+         "status": st}
+        for i, st in enumerate(statuses)]}
+    src = tmp_path / "metrics_dmp.json"
+    src.write_text(json.dumps(payload), encoding="utf-8")
+
+    records, quarantined = load_metrics_dmp(src)
+    assert not quarantined
+    assert len(records) == len(statuses)
+    # link 1: one authority for every status, including absent
+    assert {r.authority for r in records} == {Authority.CERTIFIED}
+    # link 2: that authority is served as "certified"
+    assert _INITIAL_STATE[Authority.CERTIFIED] == "certified"
+    # the catalog's own wording is still carried, unaltered, as
+    # evidence — collapsing the SERVED state is not rewriting history
+    assert [r.extra["status"] for r in records] == statuses
