@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from sahs.loop.skills import SkillTooLarge, check_size
 from sahs.loop.tools import ROW_CAP, ToolSpec, toolkit as v1_toolkit
 from sahs.tools.api import Build
 from sahs.tools.sandbox import (DEFAULT_MAX_BYTES, execute_sandboxed,
@@ -378,6 +379,14 @@ def build_kit(build: Build, state: AssistantState, *,
                 or "none"
             return {"error": f"no skill named {name!r}",
                     "hint": f"available: {names}"}
+        try:
+            check_size(pack)
+        except SkillTooLarge as e:
+            # on the shelf, over the ceiling: nothing loads, and the
+            # model is told so rather than handed a cut of the pack
+            return {"error": str(e),
+                    "hint": "the pack exists but nothing was loaded; "
+                            "the person can raise the ceiling"}
         state.skills_loaded.append(name)
         return {"ok": True, "name": pack.name, "title": pack.title,
                 "origin": pack.origin, "text": pack.text}

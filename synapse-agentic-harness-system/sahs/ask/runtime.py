@@ -145,16 +145,26 @@ class AskRuntime:
         """Replace the session's loaded skills. Unknown names are
         refused by name — a skill that does not exist cannot be
         silently 'loaded'."""
-        from sahs.loop.skills import MAX_LOADED, load_skills
+        from sahs.loop.skills import (
+            LOADED_VAR,
+            SkillTooLarge,
+            load_skills,
+            max_loaded,
+        )
         session = self.store.get_session(session_id)
         if session is None:
             raise KeyError(session_id)
-        if len(names) > MAX_LOADED:
+        cap = max_loaded()
+        if len(names) > cap:
             return {"ok": False,
-                    "reason": f"at most {MAX_LOADED} skills load at "
-                              "once: choose what matters for this "
-                              "session"}
-        loaded, missing = load_skills(self.graph_root, list(names))
+                    "reason": f"at most {cap} skills load at once "
+                              f"({LOADED_VAR} raises it): choose what "
+                              "matters for this session"}
+        try:
+            loaded, missing = load_skills(self.graph_root, list(names))
+        except SkillTooLarge as e:
+            # over the size ceiling: refused by name, never cut
+            return {"ok": False, "reason": str(e)}
         if missing:
             return {"ok": False,
                     "reason": "no such skill: " + ", ".join(missing),

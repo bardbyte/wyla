@@ -282,24 +282,29 @@ def test_logo_from_the_env_replaces_the_words(client, tmp_path, monkeypatch):
     assert ".brand-logo" in CSS
 
 
-def test_the_second_surface_switches_models_and_explains_the_dials(client):
-    """The same switch and the same "?" as the admin console, from the
-    same catalog: the composer's model select, the popover with the
-    three groups, and the send that carries the chat's plane."""
-    for piece in ('id="chat-model"', 'id="chat-help"', "chat-help-pop",
-                  "api.chatDials()", "api.chatSetModel(",
-                  "state.mode, state.plane", "help-group",
-                  "Depth <span>"):
+def test_the_second_surface_keeps_one_dial(client):
+    """DECISION: the composer on this surface carries the depth dial
+    and its "?" alone. No chat/autopilot switch — the mode is fixed
+    on the page — and no model picker: the send carries no plane, so
+    the chat rides the one it has. The "?" still reads the catalog
+    the admin console reads. The admin console keeps both switches."""
+    for piece in ('id="chat-depth"', 'id="chat-help"', "chat-help-pop",
+                  "api.chatDials()", 'const MODE = "chat"',
+                  'state.mode, ""', "help-group", "Depth <span>"):
         assert piece in CHAT, piece
-    # the "?" explains the depth alone; the model select names the model
-    assert "Model <span>" not in CHAT
+    for gone in ('id="chat-model"', 'id="chat-mode"', "chatSetModel",
+                 "Autopilot", "synapse-chat-mode", "state.plane",
+                 "planeSel", "Model <span>"):
+        assert gone not in CHAT, gone
     app_css = (FRONT / "styles" / "app.css").read_text(encoding="utf-8")
-    for cls in (".chat-plane", ".chat-help", ".chat-help-pop",
+    for cls in (".chat-depth", ".chat-help", ".chat-help-pop",
                 ".help-group + .help-group", ".help-row"):
         assert cls in app_css, cls
+    for gone in (".chat-plane", ".chat-mode-select"):
+        assert gone not in app_css, gone
     dials = client.get("/api/chat/dials").json()
-    assert len(dials["planes"]) == 2 and len(dials["depths"]) == 3
-    assert client.get("/synapse/js/api.js").text.count("chatSetModel") == 1
+    assert len(dials["depths"]) == 3
+    assert "chatSetModel" not in client.get("/synapse/js/api.js").text
 
 
 def test_data_products_filter_by_line_of_business(client):

@@ -93,14 +93,14 @@ def _user_shelf(tmp_path: Path) -> Path:
 def test_builtin_packs_are_real_and_speak_the_v3_kit(compiled,
                                                      tmp_path):
     from sahs.assistant.skills_loader import builtin_skills
-    from sahs.loop.skills import MAX_SKILL_CHARS
+    from sahs.loop.skills import DEFAULT_MAX_SKILL_CHARS
     packs = {p.name: p for p in builtin_skills()}
     assert sorted(packs) == sorted(PACKS)
     tools, _state = _kit(compiled, tmp_path)
     for pack in packs.values():
         assert pack.origin == "built-in"
         assert pack.title and pack.description
-        assert len(pack.text) <= MAX_SKILL_CHARS
+        assert len(pack.text) <= DEFAULT_MAX_SKILL_CHARS
         assert "truncated" not in pack.text
         # doctrine names only tools that exist: a pack teaching a
         # ghost tool (the v2 kit's names) is worse than no pack
@@ -125,6 +125,59 @@ def test_shelves_merge_and_builtin_wins(tmp_path):
     assert [p.name for p in loaded] == ["executive-summary",
                                         "fiscal-notes"]
     assert missing == ["ghost"]
+
+
+def test_skill_size_is_a_ceiling_from_the_env_never_a_silent_cut(
+        tmp_path, monkeypatch):
+    """DECISION: a skill loads whole or not at all. The size and count
+    ceilings come from the env; the defaults keep a skill a briefing.
+    Over the ceiling a skill is still LISTED (the shelf hides nothing)
+    but REFUSES to load, naming itself, its size and the variable —
+    a cut briefing reads as a different briefing, and nobody would
+    know. Unreadable or non-positive values fall back to the default,
+    never to "no ceiling"."""
+    from sahs.loop.skills import (
+        CHARS_VAR,
+        LOADED_VAR,
+        SkillTooLarge,
+        list_skills,
+        load_skills,
+        max_loaded,
+        max_skill_chars,
+    )
+    graph_root = _user_shelf(tmp_path)
+    big = "# Bundle\n\nThe whole doctrine, unabridged.\n" + "x" * 6000
+    (graph_root / "skills" / "bundle.md").write_text(big, encoding="utf-8")
+    monkeypatch.delenv(CHARS_VAR, raising=False)
+    monkeypatch.delenv(LOADED_VAR, raising=False)
+    assert (max_skill_chars(), max_loaded()) == (4000, 4)
+
+    # listed whole — no "truncated" tail, ever
+    listed = {s.name: s for s in list_skills(graph_root)}
+    assert listed["bundle"].text == big and listed["bundle"].chars == len(big)
+    assert "truncated" not in listed["bundle"].text
+
+    # under the default ceiling it refuses, and says exactly why
+    with pytest.raises(SkillTooLarge) as err:
+        load_skills(graph_root, ["bundle"])
+    said = str(err.value)
+    assert "'bundle'" in said and "4,000" in said and CHARS_VAR in said
+
+    # the env raises the ceiling: the skill reaches the session whole
+    monkeypatch.setenv(CHARS_VAR, "128_000")
+    loaded, missing = load_skills(graph_root, ["bundle", "fiscal-notes"])
+    assert [s.name for s in loaded] == ["bundle", "fiscal-notes"]
+    assert loaded[0].text == big and not missing
+
+    # the count is a ceiling from the env too
+    monkeypatch.setenv(LOADED_VAR, "1")
+    loaded, _ = load_skills(graph_root, ["fiscal-notes", "bundle"])
+    assert [s.name for s in loaded] == ["fiscal-notes"]
+
+    # garbage or zero falls back to the default, never to "unlimited"
+    monkeypatch.setenv(LOADED_VAR, "lots")
+    monkeypatch.setenv(CHARS_VAR, "0")
+    assert (max_skill_chars(), max_loaded()) == (4000, 4)
 
 
 # ─── the tool: load whole, teach on a miss, record ───────────
@@ -221,3 +274,53 @@ def test_runtime_serves_both_shelves(compiled, tmp_path):
                                                "fiscal-notes"]
     bad = runtime.set_skills(session["id"], ["ghost"])
     assert not bad["ok"] and "ghost" in bad["reason"]
+
+
+def test_runtime_refuses_an_oversized_pack_by_name(compiled, tmp_path,
+                                                   monkeypatch):
+    """The session picker gets the loader's refusal as a reason, not
+    a traceback: the pack, its size, the ceiling and the variable.
+    Raise the ceiling in the env and the same pack pins whole."""
+    from sahs.assistant.agent import ScriptedAgent
+    from sahs.loop.skills import CHARS_VAR, LOADED_VAR
+    runtime = _runtime(compiled, ScriptedAgent(), tmp_path)
+    graph_root = _user_shelf(tmp_path)
+    (graph_root / "skills" / "bundle.md").write_text(
+        "# Bundle\n\nAll of it.\n" + "z" * 5000, encoding="utf-8")
+    monkeypatch.delenv(CHARS_VAR, raising=False)
+    monkeypatch.delenv(LOADED_VAR, raising=False)
+    session = runtime.create_session()
+    refused = runtime.set_skills(session["id"], ["bundle"])
+    assert not refused["ok"]
+    assert "'bundle'" in refused["reason"] and CHARS_VAR in refused["reason"]
+    # still on the shelf, whole
+    assert any(r["name"] == "bundle" and len(r["text"]) > 5000
+               for r in runtime.skills())
+    # the count ceiling names its variable too
+    too_many = runtime.set_skills(session["id"], ["a", "b", "c", "d", "e"])
+    assert not too_many["ok"] and LOADED_VAR in too_many["reason"]
+    monkeypatch.setenv(CHARS_VAR, "20000")
+    saved = runtime.set_skills(session["id"], ["bundle"])
+    assert saved["ok"] and saved["skills"] == ["bundle"]
+
+
+def test_the_tool_refuses_an_oversized_pack_until_the_ceiling_is_raised(
+        compiled, tmp_path, monkeypatch):
+    """load_skill on a pack over the ceiling: an error the model can
+    read (the pack, its size, the variable), nothing recorded as
+    loaded, nothing cut. Raise the ceiling in the env and the same
+    call hands the pack over whole."""
+    from sahs.loop.skills import CHARS_VAR
+    graph_root = _user_shelf(tmp_path)
+    (graph_root / "skills" / "bundle.md").write_text(
+        "# Bundle\n\nAll of it.\n" + "w" * 5000, encoding="utf-8")
+    monkeypatch.delenv(CHARS_VAR, raising=False)
+    tools, state = _kit(compiled, tmp_path, graph_root=graph_root)
+    got = tools["load_skill"].fn("bundle")
+    assert "error" in got and CHARS_VAR in got["error"]
+    assert "5,0" in got["error"]                  # the size, formatted
+    assert "bundle" not in state.skills_loaded
+    monkeypatch.setenv(CHARS_VAR, "20000")
+    got = tools["load_skill"].fn("bundle")
+    assert got["ok"] and got["text"].endswith("w" * 5000)
+    assert state.skills_loaded == ["bundle"]

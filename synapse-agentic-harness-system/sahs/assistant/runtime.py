@@ -488,18 +488,23 @@ class AssistantRuntime:
                 "min_band": MIN_BAND, "me": self.user_name, **board}
 
     def set_skills(self, session_id: str, names: list[str]) -> dict:
-        from sahs.loop.skills import MAX_LOADED
+        from sahs.loop.skills import LOADED_VAR, SkillTooLarge, max_loaded
 
         from .skills_loader import load_packs
         session = self.store.get_session(session_id)
         if session is None:
             raise KeyError(session_id)
-        if len(names) > MAX_LOADED:
+        cap = max_loaded()
+        if len(names) > cap:
             return {"ok": False,
-                    "reason": f"at most {MAX_LOADED} skills load at "
-                              "once"}
-        loaded, missing = load_packs(self.graph_root, list(names),
-                                     owner=self.owner)
+                    "reason": f"at most {cap} skills load at once "
+                              f"({LOADED_VAR} raises it)"}
+        try:
+            loaded, missing = load_packs(self.graph_root, list(names),
+                                         owner=self.owner)
+        except SkillTooLarge as e:
+            # over the size ceiling: refused by name, never cut
+            return {"ok": False, "reason": str(e)}
         if missing:
             return {"ok": False,
                     "reason": "no such skill: " + ", ".join(missing)}
