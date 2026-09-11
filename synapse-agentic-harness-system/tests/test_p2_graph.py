@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -22,7 +23,11 @@ CROSSWALK = FX / "identity" / "crosswalk.jsonl"
 
 def _build(graph_dir: Path, out_dir: Path,
            crosswalk: Path = CROSSWALK,
-           *extra: str) -> subprocess.CompletedProcess:
+           *extra: str,
+           sensitivity: bool = False) -> subprocess.CompletedProcess:
+    """``sensitivity=True`` lifts the hold in
+    sahs/loaders/sensitivity.py for this build — the default build, the
+    one a graph append actually runs, carries no PII declaration."""
     return subprocess.run(
         [sys.executable, str(SILO / "scripts" / "pipeline.py"), "build-graph",
          "--graph", str(graph_dir), "--crosswalk", str(crosswalk),
@@ -32,7 +37,9 @@ def _build(graph_dir: Path, out_dir: Path,
          "--registry", str(FX / "sources" / "tables_registry.txt"),
          "--out", str(out_dir), "--plain", "--run-id", "test_r1",
          *extra],
-        capture_output=True, text=True, cwd=SILO)
+        capture_output=True, text=True, cwd=SILO,
+        env={**os.environ,
+             "SAHS_LOAD_SENSITIVITY": "1" if sensitivity else "0"})
 
 
 def test_no_jobs_30d_excludes_the_witness_and_ledgers_deferred(tmp_path):
@@ -692,7 +699,11 @@ def test_std_tech_full_utilization_reaches_the_graph(tmp_path):
     card_sourcing_audit_2026_09.md) found ~20 documented fields going
     dark between the file and the graph; this is the fence."""
     graph_dir, out_dir = tmp_path / "g", tmp_path / "run"
-    assert _build(graph_dir, out_dir).returncode == 0
+    # utilization is the claim, so the sensitivity hold is lifted here:
+    # the compliance fields are part of what the loader parses. That a
+    # DEFAULT build withholds them is
+    # test_the_sensitivity_hold_keeps_every_declaration_out_of_the_graph
+    assert _build(graph_dir, out_dir, sensitivity=True).returncode == 0
     graph = GraphDir(graph_dir)
     nodes, edges = graph.fold_nodes(), graph.fold_edges()
 
@@ -791,3 +802,44 @@ def test_std_tech_full_utilization_reaches_the_graph(tmp_path):
     # column is not filed under PII when the feed said GDPR
     assert std["column_policy_from_declaration"] >= 3
     assert std["terms_minted_from_link"] == 2
+
+
+def test_the_sensitivity_hold_keeps_every_declaration_out_of_the_graph(
+        tmp_path):
+    """The hold (sahs/loaders/sensitivity.py) is a DEFAULT-build claim:
+    a build nobody configures must carry no compliance declaration from
+    either catalog plane. The fixtures assert PII loudly — gms declares
+    has_pii, names cm13 and cm15_hash in pii_columns[], and the MDM
+    schema marks columns is_pii — so silence here is the hold working,
+    not a thin fixture.
+
+    Row-access policy is NOT sensitivity and must survive: it is what
+    BigQuery itself enforces, and the sandbox's only honest gate."""
+    graph_dir, out_dir = tmp_path / "g", tmp_path / "run"
+    assert _build(graph_dir, out_dir).returncode == 0
+    graph = GraphDir(graph_dir)
+    nodes, edges = graph.fold_nodes(), graph.fold_edges()
+
+    # no compliance edge of any regime, from any witness
+    held = {"policy:pii", "policy:gdpr", "policy:oncop"}
+    assert not [(s, o) for (s, r, o, _w) in edges
+                if r == "has_policy" and o in held]
+
+    # no table-level flag
+    table = nodes["table:dw.gms_transaction"].props
+    assert not {"has_pii_atlas", "has_gdpr_atlas",
+                "has_oncop_atlas"} & set(table)
+
+    # no column-level role, from Atlas or from MDM
+    for node in nodes.values():
+        assert not {"pii_role_id", "sde_group", "is_pii_mdm",
+                    "pii_role_id_table_declared"} & set(node.props), node.id
+
+    # cm15_hash exists ONLY as a pii_columns[] declaration — with the
+    # hold on, the declaration is never read, so the column is never
+    # minted from it at all
+    assert "col:dw.gms_transaction.cm15_hash" not in nodes
+
+    # row-access policy is untouched: the warehouse's own answer
+    assert [o for (s, r, o, _w) in edges
+            if r == "has_policy" and s == "table:dw.wwcas_authorization"]

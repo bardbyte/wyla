@@ -4,6 +4,7 @@ determinism, DIFF, CURRENT (E4)."""
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -20,6 +21,10 @@ FX = SILO / "tests" / "fixtures"
 
 
 def _build_graph(graph_dir: Path, out_dir: Path) -> None:
+    # The sensitivity hold (sahs/loaders/sensitivity.py) keeps catalog
+    # compliance declarations out of a DEFAULT build. This suite proves
+    # what the compiler DOES with them, so it builds with the hold
+    # lifted; that the hold withholds them is proved separately.
     result = subprocess.run(
         [sys.executable, str(SILO / "scripts" / "pipeline.py"), "build-graph",
          "--graph", str(graph_dir),
@@ -29,7 +34,8 @@ def _build_graph(graph_dir: Path, out_dir: Path) -> None:
          "--sources-dir", str(FX / "sources"),
          "--registry", str(FX / "sources" / "tables_registry.txt"),
          "--out", str(out_dir), "--plain", "--run-id", "test_r1"],
-        capture_output=True, text=True, cwd=SILO)
+        capture_output=True, text=True, cwd=SILO,
+        env={**os.environ, "SAHS_LOAD_SENSITIVITY": "1"})
     assert result.returncode == 0, result.stderr[-800:]
 
 

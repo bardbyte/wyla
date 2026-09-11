@@ -160,3 +160,46 @@ time a trigger fires. Status: `active` | `expired` | `resolved`.
   acceptance test for what real usage adds (support corroboration, true
   recency, joins_via, cost priors), exactly the A7 pattern.
 - **status**: active
+
+## A9 — catalog sensitivity is withheld from the graph entirely
+
+- **component**: `sahs/loaders/sensitivity.py`; std_tech (Atlas) and
+  mdm46 loaders; E1 D5; `acl.json`; `validate_sql`
+- **bet**: no compliance DECLARATION reaches the graph. Atlas
+  `has_pii`/`has_gdpr`/`has_oncop`, the three parallel declaration
+  lists (`pii_columns`/`gdpr_columns`/`oncop_columns`), column
+  `pii_role_id`/`sde_group`, and the MDM plane's `is_pii` are all read
+  and deliberately not carried. The reason is downstream: a sensitive
+  column produces a `sensitive_column` VIOLATION in `validate_sql`,
+  and a violation is a REFUSAL — the agent cannot project the column
+  at all. The intent was to FLAG a column while still answering over
+  it. Until the loader decides what sensitivity should MEAN, none of
+  it is loaded; an append-only store cannot un-say what it has said.
+  KNOWN LOSSES, accepted: D5 (sensitivity_conflict) has nothing to
+  reconcile and reports 0; `acl.json` carries empty `pii_columns` so
+  cards render no sensitivity line and `select_star_over_sensitive`
+  never fires; a column named ONLY by a table-level declaration
+  (`cm15_hash` in the fixtures) is not minted at all, so D1 drops by
+  one. NOT AFFECTED, deliberately: row-access policy
+  (`policy:unknown_denied`, `policy:row_access_N`) comes from
+  BigQuery's own extraction and describes access control the
+  WAREHOUSE enforces — the one legitimate live-execution gate, and it
+  stays; so does `data_classification`, a table-wide handling label
+  rather than a statement about a column's contents.
+- **evidence**: user decision 2026-09-11 ("Leave out PII information
+  for now to be considered in the loader we will decide after. No PII
+  info flows in"). `scripts/std_tech_keys.py` reports every held key
+  as a DEFERRAL naming this hold, so the withholding is on record
+  rather than looking like a field gone dark;
+  `test_the_sensitivity_hold_keeps_every_declaration_out_of_the_graph`
+  is the fence on a default build.
+- **date**: 2026-09-11
+- **revisit_trigger**: the loader decides what a sensitive column
+  should do — most likely demote `sensitive_column` from violation to
+  warning, so the agent is told rather than refused. Lift with
+  `SAHS_LOAD_SENSITIVITY=1` for one run to see exactly what the
+  declarations would add before committing the default. The graph is
+  append-only, so lifting ADDS the declarations on the next build
+  rather than needing a rebuild — but it is not retroactive for rows
+  nobody re-registers.
+- **status**: active

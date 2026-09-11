@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import statistics
+import os
 import subprocess
 import sys
 import time
@@ -56,7 +57,10 @@ def build(tmp_path_factory) -> Build:
          "--sources-dir", str(FX / "sources"),
          "--registry", str(FX / "sources" / "tables_registry.txt"),
          "--out", str(tmp / "run"), "--plain", "--run-id", "p3_r1"],
-        capture_output=True, text=True, cwd=SILO)
+        capture_output=True, text=True, cwd=SILO,
+        # the sensitivity hold is lifted for this suite: the validator's
+        # sensitivity rules are exactly what it exists to prove
+        env={**os.environ, "SAHS_LOAD_SENSITIVITY": "1"})
     assert result.returncode == 0, result.stderr[-800:]
     # through the CLI on purpose: every pipeline.py subcommand must run
     # end-to-end on fixtures in CI (the runbook-drift guard)

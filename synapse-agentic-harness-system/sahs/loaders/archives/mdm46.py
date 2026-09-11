@@ -21,6 +21,7 @@ from pathlib import Path
 from sahs.graph.crosswalk import Crosswalk
 from sahs.graph.ids import col_id, owner_id, table_id
 from sahs.graph.quads import GraphDir, NodeRecord, Prov, Quad
+from sahs.loaders import sensitivity
 
 SOURCE = "lumi"
 
@@ -116,14 +117,17 @@ def load_mdm_archive(root: Path, graph: GraphDir, crosswalk: Crosswalk,
                     "data_type_mdm": column.get("data_type", ""),
                     "business_name": column.get("business_name", ""),
                     "description_mdm": column.get("description", ""),
-                    "is_pii_mdm": bool(column.get("is_pii")),
+                    # withheld while the hold is on: see
+                    # sahs/loaders/sensitivity.py
+                    **({"is_pii_mdm": bool(column.get("is_pii"))}
+                       if sensitivity.LOAD_SENSITIVITY else {}),
                 },
                 prov=prov(evidence=f"{rel_ev}/schema.json")))
             graph.append_edge(Quad(
                 s=tid, r="has_column", o=cid,
                 prov=prov(evidence=f"{rel_ev}/schema.json")))
             report["columns"] += 1
-            if column.get("is_pii"):
+            if sensitivity.LOAD_SENSITIVITY and column.get("is_pii"):
                 graph.append_edge(Quad(
                     s=cid, r="has_policy", o="policy:pii",
                     prov=prov(evidence=f"{rel_ev}/schema.json")))

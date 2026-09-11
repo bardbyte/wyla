@@ -28,9 +28,12 @@ dataset) · `dataserver` (`Lumi`) · `technology` (`BigQuery`) ·
 - technical: `type` (`DERIVED`…), `load_type`
   (`SNAPSHOT_DEDUPE_MAX`…), `is_partitioned`, `data_type_name`
   (`ODL`/`SOR` — the layer type), `target_system`
-- sensitivity: `has_pii`, `has_oncop`, `has_gdpr` (each feeds the E1
-  union-most-restrictive plane; oncop/gdpr also emit `has_policy`
-  edges)
+- sensitivity: `has_pii`, `has_oncop`, `has_gdpr`, and the three
+  parallel declaration lists `pii_columns[]` / `gdpr_columns[]` /
+  `oncop_columns[]` — **all WITHHELD under the sensitivity hold**
+  (`sahs/loaders/sensitivity.py`). The feed sends them and the loader
+  parses them; nothing reaches the graph until the hold lifts. See
+  "The sensitivity hold" below.
 - `ownership` dict: DI tech owner, VP, business owner, VP
 
 ## Layer 4 — `pde[]` (one element per column)
@@ -38,12 +41,38 @@ dataset) · `dataserver` (`Lumi`) · `technology` (`BigQuery`) ·
 - `pdeAttribute`: `column_name`, `data_type_name`, `description`,
   `business_name`, `position`, `column_length_number`,
   `nullable_indicator`, `primary_key_indicator`,
-  `partition_indicator`, `pii_role_id` (null when not PII),
+  `partition_indicator`, `pii_role_id` (null when not PII — withheld
+  under the sensitivity hold, as is `sde_group`),
   `derived_logic` (SQL if computed — unparsed today; a future
   semantic source)
 - `businessMetadata[]`: `businessTermName`, `businessTermDescription`,
   `businessTermId` (null where no formal id assigned), `sourceName`
   (`LumiMDM`), `sourceType` (`Declared`), `confidenceScore`
+
+## The sensitivity hold
+
+Every compliance declaration this feed makes is currently withheld at
+the parse boundary: `has_pii` / `has_gdpr` / `has_oncop`, the three
+declaration lists, and `pii_role_id` / `sde_group` on the column. The
+MDM plane's `is_pii` is held the same way.
+
+The reason is downstream, not here. A sensitive column today produces
+a `sensitive_column` VIOLATION in `validate_sql`, and a violation is a
+REFUSAL — the agent cannot project the column at all. The intent was
+to FLAG. Until the loader decides what sensitivity should mean, none
+of it is loaded: an append-only graph cannot un-say what it has said.
+
+Row-access policy is NOT sensitivity and is untouched. The
+`policy:unknown_denied` and `policy:row_access_N` edges come from
+BigQuery's own extraction and describe access control the WAREHOUSE
+enforces — a query really does fail for a caller outside the grant.
+`data_classification` is a table-wide handling label and also stays.
+
+The key census (`scripts/std_tech_keys.py`) reports every held key as
+a DEFERRAL with this reason, so the withholding is on record rather
+than looking like a field gone dark. Lift it for one run with
+`SAHS_LOAD_SENSITIVITY=1`, or change the default in
+`sahs/loaders/sensitivity.py`.
 
 ## Loader contract
 

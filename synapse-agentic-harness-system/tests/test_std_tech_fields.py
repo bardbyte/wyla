@@ -15,12 +15,25 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from sahs.loaders import sensitivity
 from sahs.loaders.sources.vocab import load_std_tech_metadata
 
 FX = Path(__file__).resolve().parent / "fixtures" / "sources"
 
 
-def test_std_tech_parses_every_documented_field():
+@pytest.fixture
+def lift_hold(monkeypatch):
+    """The sensitivity hold (sahs/loaders/sensitivity.py) withholds
+    every compliance declaration from the graph. The PARSE underneath
+    it still has to be right — a hold that rots the code it holds back
+    is a hold nobody can lift. Tests of the sensitivity contract run
+    with the flag raised; the hold itself is proved separately."""
+    monkeypatch.setattr(sensitivity, "LOAD_SENSITIVITY", True)
+
+
+def test_std_tech_parses_every_documented_field(lift_hold):
     """Full utilization at field grain (docs/contracts/
     std_tech_metadata_layout.md): every documented key reaches a
     record. A regression here is a field going quietly dark again."""
@@ -104,7 +117,8 @@ def test_std_tech_unmatchable_terms_keep_their_text(tmp_path: Path):
         {"name": "Unknown Term B", "description": "definition B"}]
 
 
-def test_std_tech_compliance_flags_absent_is_unknown(tmp_path: Path):
+def test_std_tech_compliance_flags_absent_is_unknown(
+        tmp_path: Path, lift_hold):
     """ABSENT IS NOT FALSE holds for has_pii / has_oncop / has_gdpr too:
     an entry that never sent the flag has not denied PII. The record
     keeps None, the graph gets neither a `has_*_atlas` prop nor a
@@ -148,7 +162,7 @@ def test_std_tech_compliance_flags_absent_is_unknown(tmp_path: Path):
 
 
 def test_the_real_feed_spells_the_sensitive_column_key_differently(
-        tmp_path: Path):
+        tmp_path: Path, lift_hold):
     """The column key inside the table-level sensitivity lists has two
     spellings: `column` in the documented contract, `column_name` in
     the feed itself. The loader read one, so on the real export every
