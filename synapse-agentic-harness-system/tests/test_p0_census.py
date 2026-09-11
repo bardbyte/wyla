@@ -546,3 +546,58 @@ def test_every_governed_status_is_served_certified(tmp_path: Path):
     assert {r.authority for r in records} == {Authority.CERTIFIED}
     assert _INITIAL_STATE[Authority.CERTIFIED] == "certified"
     assert [r.extra["status"] for r in records] == statuses
+
+
+def test_dmp_prose_expression_falls_back_to_referenced_query(
+        tmp_path: Path):
+    """DECISION: in the current export roughly one governed metric in
+    five carries PROSE in sqlExpression ("Net Sales / Total number of
+    tickets issued") — the author's calculation description, not SQL.
+    The referencedSqlQuery is the only SQL the catalog has for them:
+    it feeds identity, the prose rides along as expression_prose, and
+    sql_source records which field was used. A metric where NEITHER
+    parses keeps its expression, so the census still quarantines it
+    under its own id — the blocker gate names it instead of losing
+    it."""
+    from sahs.canon.census import canonicalize_records
+    from sahs.loaders.sources.catalogs import load_metrics_dmp
+    src = tmp_path / "metrics_dmp.json"
+    src.write_text(json.dumps({"metric_catalog": [
+        {"metricCatalogId": "sql-ok", "metricName": "Net spend",
+         "sqlExpression": "SUM(t.usd)",
+         "referencedSqlQuery": "SELECT SUM(usd) FROM dw.t"},
+        {"metricCatalogId": "prose", "metricName": "Avg ticket price",
+         "sqlExpression": "Net Sales / Total number of tickets issued",
+         "referencedSqlQuery": "SELECT SUM(net_sales) / COUNT(ticket_id)"
+                               " FROM dw.tlsarpt_travel_sales"},
+        {"metricCatalogId": "dark", "metricName": "On-Us Spend",
+         "sqlExpression": "At transaction grain, filter and sum debit",
+         "referencedSqlQuery": "Apply standard exclusions, then sum"},
+    ]}), encoding="utf-8")
+    records, quarantined = load_metrics_dmp(src)
+    assert not quarantined and len(records) == 3
+    by_ref = {r.metric_ref: r for r in records}
+
+    # a parseable expression is untouched — no identity moves
+    ok = by_ref["dmp:sql-ok"]
+    assert ok.raw_sql == "SUM(t.usd)"
+    assert ok.extra["sql_source"] == "expression"
+    assert ok.extra["expression_prose"] == ""
+
+    # prose in the expression → the full query feeds identity, the
+    # words are kept, the choice is recorded
+    prose = by_ref["dmp:prose"]
+    assert prose.raw_sql.startswith("SELECT SUM(net_sales)")
+    assert prose.extra["sql_source"] == "referenced_query"
+    assert prose.extra["expression_prose"] == \
+        "Net Sales / Total number of tickets issued"
+
+    # neither parses → the expression stays, and the census names it
+    dark = by_ref["dmp:dark"]
+    assert dark.raw_sql == "At transaction grain, filter and sum debit"
+    assert dark.extra["sql_source"] == "expression"
+    done, quar = canonicalize_records(records)
+    assert [r.metric_ref for r, _ in done] == ["dmp:sql-ok", "dmp:prose"]
+    assert [q.evidence_ref for q in quar] == \
+        ["metrics_dmp.json#metric=dark"]
+    assert quar[0].category == "parse_error"

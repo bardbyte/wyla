@@ -311,6 +311,13 @@ def metric_card(metric: dict[str, Any],
             "- ⚠ associated but NOT referenced by the SQL: "
             + ", ".join(metric["tables_associated_not_referenced"])
             + " (declared lineage the query never reads) [prov:studio]")
+    if metric.get("expression_prose"):
+        # the catalog's sqlExpression was the author's calculation in
+        # words, not SQL: identity came from the full referencedSqlQuery
+        # and the words are served verbatim — meaning, never parsed
+        lines.append("- calculation, as the author wrote it: "
+                     f"{metric['expression_prose']} (identity from the "
+                     "full referenced query) [prov:dmp]")
     if metric.get("base_tables"):
         # the author's own declaration of what the metric reads —
         # stronger than the SQL parse, which is a guess by comparison

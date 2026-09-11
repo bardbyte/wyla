@@ -214,6 +214,11 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                 # this node's identity (see the loader's note)
                 "grain_declared":
                     record.extra.get("grain_declared") or "",
+                # which catalog field fed identity, and the author's
+                # calculation prose when sqlExpression was not SQL
+                "sql_source": record.extra.get("sql_source") or "",
+                "expression_prose":
+                    record.extra.get("expression_prose") or "",
                 "base_tables": record.extra.get("base_tables") or [],
                 "data_owners_dmp": (record.extra.get("data_owners")
                                     or []),
