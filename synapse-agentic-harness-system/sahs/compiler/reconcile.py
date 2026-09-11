@@ -95,7 +95,17 @@ def reconcile(graph: GraphDir) -> dict[str, TableConsensus]:
             present_bq = bool(bq_type) or props.get("ordinal") is not None
             present_catalog = bool(mdm_type or atlas_type
                                    or props.get("description_mdm")
-                                   or props.get("description_atlas"))
+                                   or props.get("description_atlas")
+                                   # a column the table-level PII
+                                   # declaration names and the pde
+                                   # listing missed: the catalog
+                                   # asserts it exists, so it belongs
+                                   # in D1 (ticketed, in the graph for
+                                   # governance, off the card) rather
+                                   # than falling through every
+                                   # handler as a typeless phantom row
+                                   or props.get("observed_via")
+                                   == "table_pii_declaration")
             column = ColumnConsensus(
                 name=name, present_bq=present_bq,
                 present_catalog=present_catalog)
