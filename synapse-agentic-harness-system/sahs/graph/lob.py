@@ -12,6 +12,12 @@ Strict like the alias sidecar: a row whose ``physical`` is not a
 crosswalk row refuses to load — classification never mints identity.
 Multi-membership is legal and deliberate (a table serving two LOBs gets
 two rows; the graph holds one ``in_lob`` edge per witness family each).
+A row may say which kind of membership it is: ``"role": "home"`` (the
+default — this LOB owns the table) or ``"role": "shared"`` (this LOB
+uses a table another LOB owns). A table with one home and N shared rows
+is the common cross-LOB shape; the role rides on the steward's edge, so
+the card and the cosmos can say "shared from GMNS" instead of
+flattening two different claims into one ownership.
 The dmp catalog and mined measures corroborate these edges with their
 own witnesses at emit time (quads_emit); this module only carries the
 HUMAN declaration.
@@ -22,7 +28,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from sahs.graph.crosswalk import Crosswalk
 from sahs.graph.ids import lob_id, table_id
@@ -44,6 +50,22 @@ class LobRow(BaseModel):
     # corroboration splits. Aliases are that human declaration: every
     # listed spelling resolves onto THIS code's node.
     aliases: list[str] = []
+    # home: this LOB owns the table (default, so every existing row is
+    # unchanged). shared: this LOB uses a table another LOB owns.
+    # Anything else refuses to load — a third word would be a new claim
+    # nobody has defined.
+    role: str = "home"
+
+    @model_validator(mode="after")
+    def _role_is_defined(self) -> "LobRow":
+        if self.role not in LOB_ROLES:
+            raise ValueError(
+                f"lob_map.jsonl: {self.lob_code!r} -> {self.physical!r} "
+                f"role {self.role!r} is not one of {sorted(LOB_ROLES)}")
+        return self
+
+
+LOB_ROLES = frozenset({"home", "shared"})
 
 
 def lob_alias_map(rows: list[LobRow]) -> dict[str, str]:
@@ -189,11 +211,37 @@ def emit_lob_map(rows: list[LobRow], graph: GraphDir,
             id=tid, props={},
             prov=Prov(source=SOURCE, run=run_id,
                       evidence="identity/lob_map.jsonl")))
+        edge_props: dict = {"role": row.role}
+        if row.notes:
+            edge_props["note"] = row.notes
         graph.append_edge(Quad(
-            s=tid, r="in_lob", o=lid,
-            props={"note": row.notes} if row.notes else {},
+            s=tid, r="in_lob", o=lid, props=edge_props,
             prov=Prov(source=SOURCE, run=run_id,
                       actor=row.verified_by,
                       evidence="identity/lob_map.jsonl")))
         report["memberships"] += 1
+        if row.role == "shared":
+            report["shared_memberships"] = report.get(
+                "shared_memberships", 0) + 1
+    # a shared row says "owned elsewhere" — if no home row exists for
+    # that table anywhere in the map, the owner is unrecorded and the
+    # sky has no home well to place it in. Counted and named, not
+    # refused: the steward may not know the owner yet, but must know
+    # that the map does not say.
+    homes = {r.physical for r in rows if r.role == "home"}
+    orphans = sorted({r.physical for r in rows
+                      if r.role == "shared" and r.physical not in homes})
+    if orphans:
+        report["shared_without_home"] = orphans
+    # two HOME rows for one table is legal but ambiguous: the sky can
+    # place a body in one well only and falls back to the first mapped
+    # code. Named here so the steward decides which is home and marks
+    # the other shared, instead of an alphabet deciding.
+    home_count: dict[str, int] = {}
+    for r in rows:
+        if r.role == "home":
+            home_count[r.physical] = home_count.get(r.physical, 0) + 1
+    contested = sorted(t for t, n in home_count.items() if n > 1)
+    if contested:
+        report["multiple_homes"] = contested
     return report

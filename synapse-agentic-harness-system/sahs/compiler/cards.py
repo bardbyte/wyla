@@ -24,12 +24,18 @@ def _tokens_of(text: str) -> int:
 def _lob_line(lob_info: list[dict[str, Any]]) -> str:
     """One line per card: every LOB membership with its witnesses named
     — `GMNS — Global Merchant & Network Services (steward; corroborated
-    by 12 dmp metrics)`. Multi-membership renders every entry; the card
-    never picks a winner."""
+    by 12 dmp metrics)`. Multi-membership renders every entry, each
+    naming whether it is the table's home or a share of one another
+    LOB owns; the card never picks a winner."""
     rendered = []
+    # name the KIND of membership only when there is more than one —
+    # on a single-LOB table "home" says nothing the reader needs
+    say_role = len(lob_info) > 1
     for entry in lob_info:
         witnesses = entry.get("witnesses", {})
         notes = []
+        if say_role and entry.get("role"):
+            notes.append(entry["role"])
         if "steward" in witnesses:
             notes.append("steward")
         if witnesses.get("dmp"):
