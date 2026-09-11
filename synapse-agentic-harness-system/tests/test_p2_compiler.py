@@ -161,7 +161,14 @@ def test_lob_index_joins_sources_and_pedigree_serving(tmp_path):
     assert by_code["gmns"]["tables"] == ["dw.gms_transaction",
                                          "dw.wwcas_authorization"]
     assert by_code["gmns"]["domains"] == ["merchant"]
-    assert by_code["sbs"]["tables"] == ["dw.sbs_new_accounts"]
+    # SBS holds its own table AND the GMNS spine it is shared; the
+    # steward's role rides on the index so a reader can tell which
+    assert by_code["sbs"]["tables"] == ["dw.gms_transaction",
+                                        "dw.sbs_new_accounts"]
+    assert by_code["sbs"]["table_roles"] == {
+        "dw.gms_transaction": "shared", "dw.sbs_new_accounts": "home"}
+    assert by_code["sbs"]["shared_tables"] == ["dw.gms_transaction"]
+    assert by_code["gmns"]["shared_tables"] == []
     # the usage plane compiled: the CRO org unit (child of SBS) with
     # its used tables; the LOB's own usage rides on the gmns row
     assert by_code["cro"]["kind"] == "org_unit"
@@ -181,8 +188,14 @@ def test_lob_index_joins_sources_and_pedigree_serving(tmp_path):
 
     gms_card = (build_dir / "cards" / "tables"
                 / "dw__gms_transaction.md").read_text()
+    # the spine now has TWO memberships, so each names its kind
     assert ("- line of business: GMNS: Global Merchant & Network "
-            "Services (steward; corroborated by") in gms_card
+            "Services (home; steward; corroborated by") in gms_card
+    assert "SBS: Small Business Services (shared; steward" in gms_card
+    # a single-LOB table does not narrate a role it does not need
+    wwcas_card = (build_dir / "cards" / "tables"
+                  / "dw__wwcas_authorization.md").read_text()
+    assert "(home;" not in wwcas_card
     assert "payment_detail.card.network" in gms_card   # nested, full path
     assert "- used by: " in gms_card
     wwcas_card = (build_dir / "cards" / "tables"
