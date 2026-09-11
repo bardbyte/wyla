@@ -21,12 +21,16 @@
     "has_pii": true,
     "pii_columns": [
      {
-      "column": "cm13",
-      "pii_role_id": "R3"
+      "column_name": "cm13",
+      "pii_role_id": "R3",
+      "data_type_name": "STRING",
+      "is_mandatory": "Y"
      },
      {
-      "column": "cm15_hash",
-      "pii_role_id": "R4"
+      "column_name": "cm15_hash",
+      "pii_role_id": "R4",
+      "data_type_name": "STRING",
+      "is_mandatory": "N"
      }
     ],
     "ownership": {
@@ -39,7 +43,35 @@
     "table_name": "gms_transaction",
     "type": "DERIVED",
     "is_partitioned": "Y",
-    "target_system": "Lumi BigQuery"
+    "target_system": "Lumi BigQuery",
+    "business_unit": "Finance",
+    "data_classification": "Confidential",
+    "host_region": "US",
+    "decommissioned": "N",
+    "partitioned_columns": [
+     "part_dt"
+    ],
+    "gdpr_columns": [
+     {
+      "column_name": "cm15_hash",
+      "pii_role_id": "R4"
+     }
+    ],
+    "oncop_columns": [
+     {
+      "column_name": "se_no"
+     }
+    ],
+    "dataset_source_details": {
+     "base_or_view": "base",
+     "country": "USA",
+     "region": "us-east4",
+     "dataset_name": "data",
+     "feed_id": "FEED-9001",
+     "platform_dedupe_column": "part_dt",
+     "project_id": "axp-lumi",
+     "require_partition_filter": true
+    }
    },
    "pde": [
     {
@@ -56,7 +88,12 @@
       "nullable_indicator": "Y",
       "primary_key_indicator": "N",
       "partition_indicator": "N",
-      "derived_logic": "CASE WHEN se_cr_dr_in = 'C' THEN -se_trans_usd_am ELSE se_trans_usd_am END"
+      "derived_logic": "CASE WHEN se_cr_dr_in = 'C' THEN -se_trans_usd_am ELSE se_trans_usd_am END",
+      "is_clustered": "N",
+      "cluster_position": null,
+      "partition_position": null,
+      "attribute_scale": 2,
+      "publish_code": "P"
      },
      "businessMetadata": [
       {
@@ -82,7 +119,12 @@
       "column_length_number": 13,
       "nullable_indicator": "N",
       "primary_key_indicator": "N",
-      "partition_indicator": "N"
+      "partition_indicator": "N",
+      "is_clustered": "Y",
+      "cluster_position": 1,
+      "partition_position": 1,
+      "attribute_scale": 0,
+      "publish_code": "P"
      },
      "businessMetadata": [
       {

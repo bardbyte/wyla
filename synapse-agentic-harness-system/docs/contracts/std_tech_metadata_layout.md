@@ -28,9 +28,13 @@ dataset) · `dataserver` (`Lumi`) · `technology` (`BigQuery`) ·
 - technical: `type` (`DERIVED`…), `load_type`
   (`SNAPSHOT_DEDUPE_MAX`…), `is_partitioned`, `data_type_name`
   (`ODL`/`SOR` — the layer type), `target_system`
-- sensitivity: `has_pii`, `has_oncop`, `has_gdpr` (each feeds the E1
-  union-most-restrictive plane; oncop/gdpr also emit `has_policy`
-  edges)
+- sensitivity: `has_pii`, `has_oncop`, `has_gdpr`, and the three
+  parallel declaration lists `pii_columns[]` / `gdpr_columns[]` /
+  `oncop_columns[]` — **all WITHHELD under the sensitivity hold**
+  (`sahs/loaders/sensitivity.py`), which is scoped to this source
+  alone. The feed sends them and the loader parses them; nothing
+  reaches the graph until the hold lifts. See "The sensitivity hold"
+  below.
 - `ownership` dict: DI tech owner, VP, business owner, VP
 
 ## Layer 4 — `pde[]` (one element per column)
@@ -38,12 +42,48 @@ dataset) · `dataserver` (`Lumi`) · `technology` (`BigQuery`) ·
 - `pdeAttribute`: `column_name`, `data_type_name`, `description`,
   `business_name`, `position`, `column_length_number`,
   `nullable_indicator`, `primary_key_indicator`,
-  `partition_indicator`, `pii_role_id` (null when not PII),
+  `partition_indicator`, `pii_role_id` (null when not PII — withheld
+  under the sensitivity hold, as is `sde_group`),
   `derived_logic` (SQL if computed — unparsed today; a future
   semantic source)
 - `businessMetadata[]`: `businessTermName`, `businessTermDescription`,
   `businessTermId` (null where no formal id assigned), `sourceName`
   (`LumiMDM`), `sourceType` (`Declared`), `confidenceScore`
+
+## The sensitivity hold
+
+**Scoped to this source.** Every compliance declaration *this feed*
+makes is withheld at the parse boundary: `has_pii` / `has_gdpr` /
+`has_oncop`, the three declaration lists, and `pii_role_id` /
+`sde_group` on the column.
+
+Nothing else is held. The MDM plane's `is_pii` and the `policy:pii`
+edge it mints flow exactly as they always have — the MDM registry is
+what these declarations are *relayed from*, and holding the relay back
+does not mean doubting the source. Row-access policy is not
+sensitivity at all: `policy:unknown_denied` and `policy:row_access_N`
+come from BigQuery's own extraction and describe access control the
+WAREHOUSE enforces, so a query really does fail for a caller outside
+the grant. `data_classification`, a table-wide handling label rather
+than a claim about a column's contents, also stays.
+
+### What it costs while it is on
+
+E1's D5 fires when exactly ONE plane calls a column sensitive. With
+this plane silent by construction, every MDM-flagged column reads
+"flagged by lumi only" and opens a `sensitivity_conflict` ticket that
+cannot be closed — closing it needs the withheld witness. A column
+named ONLY by a declaration list here is never minted at all. Neither
+is new compiler behaviour; it is the existing design meeting a
+systematically absent plane.
+
+### Where it is on record
+
+The key census (`scripts/std_tech_keys.py`) reports every held key as
+a DEFERRAL naming the hold, so the withholding reads as a decision
+rather than a field gone dark. Lift it for one run with
+`SAHS_LOAD_SENSITIVITY=1`, or change the default in
+`sahs/loaders/sensitivity.py`.
 
 ## Loader contract
 

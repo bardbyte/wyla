@@ -50,12 +50,16 @@ def test_reconcile_d1_to_d5_counts_and_handlers(tmp_path):
     # bq-only table — no 00 resource, no atlas/mdm plane — is honestly
     # all coverage gap) + the 03-minted nested field path (typed by BQ,
     # undocumented by any catalog plane)
-    # D1 = 2: mdm_only_col, plus cm15_hash — a column the table-level
-    # PII declaration names that the pde listing missed. The catalog
-    # asserting it exists makes it catalog-present, so it routes
-    # through D1 (ticketed, in the graph for governance, off the card)
-    # instead of falling through every handler as a typeless row
-    assert totals == {"D1": 2, "D2": 4, "D3": 1, "D4": 2, "D5": 1}
+    # D1 = 1: mdm_only_col alone. cm15_hash was the second — a column
+    # only the Atlas table-level PII declaration named — and the
+    # sensitivity hold (sahs/loaders/sensitivity.py) withholds that
+    # declaration, so nothing mints the column at all.
+    # D5 = 2: the hold's real cost. D5 fires when exactly ONE plane
+    # calls a column sensitive, and the Atlas plane is now silent by
+    # construction — so every MDM-flagged column reads as
+    # "flagged by lumi only" and can never be corroborated. cm13 was
+    # the corroborated case before the hold; it is a ticket now.
+    assert totals == {"D1": 1, "D2": 4, "D3": 1, "D4": 2, "D5": 2}
     tickets = [json.loads(x) for x in
                (build_dir / "tickets.jsonl").read_text().splitlines()]
     kinds = {t["ticket"] for t in tickets}
@@ -65,8 +69,7 @@ def test_reconcile_d1_to_d5_counts_and_handlers(tmp_path):
                 / "dw__gms_transaction.md").read_text()
     assert "mdm_only_col" not in gms_card.split("## conflicts")[0].replace(
         "omitted catalog-only", "")  # D1 never renders as a column row
-    assert "omitted catalog-only columns (D1): cm15_hash, mdm_only_col" \
-        in gms_card
+    assert "omitted catalog-only columns (D1): mdm_only_col" in gms_card
     assert "ungoverned, no business meaning on record" in gms_card  # D2
     assert "| lumi: Signed transaction amount" in gms_card           # D4
 

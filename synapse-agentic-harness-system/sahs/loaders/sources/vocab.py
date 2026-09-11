@@ -14,6 +14,7 @@ import csv
 import json
 from pathlib import Path
 
+from sahs.loaders import sensitivity
 from sahs.loaders.records import (
     Quarantined,
     StdTechColumn,
@@ -52,6 +53,12 @@ def _opt_int(value) -> int | None:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return None
+
+
+def _kept_cell(cell: dict) -> dict:
+    """Empty is ABSENT: a sensitivity cell carries only what the feed
+    actually said about that column."""
+    return {k: v for k, v in cell.items() if v not in (None, "")}
 
 
 def _opt_str(value) -> str | None:
@@ -242,14 +249,23 @@ STD_TECH_CONSUMED_KEYS: dict[str, frozenset[str]] = {
         "description", "business_name", "data_category",
         "data_sub_category", "data_type_name", "has_pii", "has_oncop",
         "has_gdpr", "ownership", "table_name", "type", "load_type",
-        "is_partitioned", "target_system", "pii_columns"}),
-    "pii_columns[]": frozenset({"column", "pii_role_id"}),
+        "is_partitioned", "target_system", "pii_columns",
+        "gdpr_columns", "oncop_columns", "business_unit",
+        "data_classification", "host_region", "decommissioned",
+        "partitioned_columns", "dataset_source_details"}),
+    "dataset_source_details": frozenset({
+        "require_partition_filter", "platform_dedupe_column",
+        "base_or_view", "country", "region", "feed_id"}),
+    "pii_columns[]": frozenset({"column", "column_name", "pii_role_id",
+                                "data_type_name", "is_mandatory"}),
     "pde": frozenset({"pdeRelPath", "pdeAttribute", "businessMetadata"}),
     "pdeAttribute": frozenset({
         "column_name", "description", "business_name", "data_type_name",
         "pii_role_id", "sde_group", "position", "column_length_number",
         "nullable_indicator", "primary_key_indicator",
-        "partition_indicator", "derived_logic"}),
+        "partition_indicator", "derived_logic", "is_clustered",
+        "cluster_position", "partition_position", "attribute_scale",
+        "publish_code"}),
     "businessMetadata[]": frozenset({
         "businessTermId", "businessTermName", "businessTermDescription",
         "sourceName", "sourceType", "confidenceScore"}),
@@ -257,10 +273,109 @@ STD_TECH_CONSUMED_KEYS: dict[str, frozenset[str]] = {
 # keys read and deliberately NOT carried, with the reason pinned
 
 
+# Read and deliberately NOT carried, each with the reason. A key here
+# is a DECISION on record; a key in neither table is an UNCONSUMED
+# finding the census reports until someone decides.
 STD_TECH_DEFERRED_KEYS: dict[str, dict[str, str]] = {
     "envelope": {"page_info": "pagination bookkeeping about the API "
                               "call, not a fact about the table"},
+    "entry": {
+        "applId": "the envelope's appl_id under a second spelling; "
+                  "the same value, already carried",
+        "updatedTime": "catalog row mtime: when the CATALOG changed, "
+                       "not when the table did — the warehouse's own "
+                       "last_modified is the freshness fact",
+        "version": "catalog row version: internal optimistic-locking "
+                   "bookkeeping",
+    },
+    "dataset_source_details": {
+        "dataset_name": "the dataset under a second spelling; "
+                        "datasetGroup on the entry is already read",
+        "project_id": "the GCP project under a second spelling; "
+                      "datasource on the entry is already read",
+    },
+    "datasetAttribute": {
+        "dataset_parent_id": "catalog-internal parent pointer; "
+                             "identity comes from the crosswalk",
+        "schema_id": "catalog-internal schema row id",
+        "schema_parent_id": "catalog-internal schema parent pointer",
+        "table_grouping": "catalog-internal grouping key",
+        "version": "catalog row version: internal bookkeeping",
+        "lumi_first_table_in": "catalog onboarding marker: when the "
+                               "table entered the catalog, not a fact "
+                               "about the data",
+        "ownership_id": "an id for the ownership record; the people "
+                        "themselves ride on owned_by edges",
+        "data_type": "the attribute's own type word, duplicated by "
+                     "data_type_name which the layer prop already reads",
+    },
+    "pde": {
+        "isActive": "per-column activity flag; the TABLE's isActive is "
+                    "the governed signal and a column's own is unused "
+                    "by any surface",
+        "isLatest": "per-column latest flag, empty across the feed",
+        "isLineageExist": "per-column lineage flag; lineage edges come "
+                          "from the MDM plane, which states them",
+        "type": "the pde's own kind word (column vs nested field); the "
+                "dotted path in the name already says which",
+        "updatedTime": "catalog row mtime for the column",
+    },
+    "businessMetadata[]": {
+        "businessTermAssetId": "catalog-internal asset pointer",
+        "businessTermDomainName": "the term's domain in the glossary; "
+                                  "served when a term card exists",
+        "businessTermStatus": "the term's governance status, already "
+                              "carried on the term node from the "
+                              "glossary export which is its registry",
+        "activationIndicator": "catalog-internal activation flag",
+        "aemp70Indicator": "internal compliance-programme marker",
+        "confidenceLevel": "a word form of confidenceScore, which is "
+                           "already read as a number on the edge",
+        "informationClassification": "the TERM's classification; the "
+                                     "column's own sensitivity is the "
+                                     "governed fact and is read",
+        "metadataInfoClass": "catalog-internal class marker",
+        "scopeSegmentName": "catalog-internal scope marker",
+        "sdeNames": "the sde group under a second spelling; sde_group "
+                    "on the column is already read",
+        "dataCustodianEmailAddress": "the TERM's custodian, not the "
+                                     "table's owner; served when a "
+                                     "term card exists",
+        "dataCustodianFullName": "see dataCustodianEmailAddress",
+        "dataCustodianUserId": "see dataCustodianEmailAddress",
+        "userList": "empty across the feed; a list of viewers, not a "
+                    "fact about the term",
+    },
 }
+# The sensitivity hold moves the compliance keys between the two
+# tables rather than hiding them. While the hold is on the loader
+# READS each one and deliberately does not carry it, which is
+# what "deferred" means — so the census reports the withholding as a
+# decision on record instead of silently claiming the key is consumed.
+# Flip the flag and the keys move back with no edit here.
+SENSITIVITY_HELD_KEYS: dict[str, tuple[str, ...]] = {
+    "datasetAttribute": ("has_pii", "has_oncop", "has_gdpr",
+                         "pii_columns", "gdpr_columns",
+                         "oncop_columns"),
+    "pdeAttribute": ("pii_role_id", "sde_group"),
+}
+_HOLD_REASON = ("withheld by decision: the sensitivity hold keeps "
+                "THIS source's compliance declarations out of the "
+                "graph (the MDM plane's still flow) — see "
+                "sahs/loaders/sensitivity.py")
+
+if not sensitivity.LOAD_SENSITIVITY:
+    for _section, _keys in SENSITIVITY_HELD_KEYS.items():
+        STD_TECH_CONSUMED_KEYS[_section] = (
+            STD_TECH_CONSUMED_KEYS[_section] - frozenset(_keys))
+        STD_TECH_DEFERRED_KEYS.setdefault(_section, {}).update(
+            {_key: _HOLD_REASON for _key in _keys})
+    # the whole pii_columns[] cell shape goes with the list itself
+    STD_TECH_DEFERRED_KEYS["pii_columns[]"] = {
+        _key: _HOLD_REASON
+        for _key in STD_TECH_CONSUMED_KEYS.pop("pii_columns[]")}
+
+
 # ``ownership`` is consumed WHOLE as the ``ownership_atlas`` prop; a key
 # that names a person (owner / VP) ALSO becomes an ``owned_by`` edge.
 # The census reports which of the two each real key got, so a role the
@@ -373,8 +488,12 @@ def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                         business_name=str(
                             pattr.get("business_name") or ""),
                         data_type=str(pattr.get("data_type_name") or ""),
-                        pii_role_id=_opt_str(pattr.get("pii_role_id")),
-                        sde_group=_opt_str(pattr.get("sde_group")),
+                        pii_role_id=(
+                            _opt_str(pattr.get("pii_role_id"))
+                            if sensitivity.LOAD_SENSITIVITY else None),
+                        sde_group=(
+                            _opt_str(pattr.get("sde_group"))
+                            if sensitivity.LOAD_SENSITIVITY else None),
                         column_name=str(pattr.get("column_name") or ""),
                         position=_opt_int(pattr.get("position")),
                         column_length=_opt_int(
@@ -384,6 +503,15 @@ def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                             pattr.get("primary_key_indicator")),
                         partition_key=_yn(
                             pattr.get("partition_indicator")),
+                        is_clustered=_yn(pattr.get("is_clustered")),
+                        cluster_position=_opt_int(
+                            pattr.get("cluster_position")),
+                        partition_position=_opt_int(
+                            pattr.get("partition_position")),
+                        attribute_scale=_opt_int(
+                            pattr.get("attribute_scale")),
+                        publish_code=str(
+                            pattr.get("publish_code") or ""),
                         derived_logic=str(
                             pattr.get("derived_logic") or "").strip(),
                         linked_terms=[t for t in
@@ -393,12 +521,42 @@ def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                 # normalized at the parse boundary: the emitter should
                 # never have to know that Atlas writes `false` for "no
                 # role" (same loose typing as sde_group/pii_role_id)
-                pii_columns = [
-                    {"column": str(c["column"]).strip().lower(),
-                     "pii_role_id": _opt_str(c.get("pii_role_id"))}
-                    for c in (attr.get("pii_columns") or [])
-                    if isinstance(c, dict) and str(
-                        c.get("column") or "").strip()]
+                # the column key has TWO spellings across exports:
+                # `column` in the documented contract, `column_name` in
+                # the feed itself. Reading one meant every row of the
+                # real feed's list was skipped and the second
+                # sensitivity witness produced nothing at all.
+
+                def _sensitive(key: str) -> list[dict]:
+                    if not sensitivity.LOAD_SENSITIVITY:
+                        return []
+                    out = []
+                    for c in (attr.get(key) or []):
+                        if not isinstance(c, dict):
+                            continue
+                        name = str(c.get("column")
+                                   or c.get("column_name") or "").strip()
+                        if not name:
+                            continue
+                        out.append(_kept_cell({
+                            "column": name.lower(),
+                            "pii_role_id": _opt_str(c.get("pii_role_id")),
+                            "data_type": str(
+                                c.get("data_type_name") or ""),
+                            "mandatory": _yn(c.get("is_mandatory"))}))
+                    return out
+
+                source_details = attr.get("dataset_source_details")
+                if not isinstance(source_details, dict):
+                    source_details = {}
+                # the hold: with LOAD_SENSITIVITY off the record
+                # carries no compliance declaration at all, so the
+                # emitter's `_kept` drops every sensitivity prop and
+                # no policy edge is ever minted — the withholding
+                # lives at the parse boundary, not in the emitter
+                pii_columns = _sensitive("pii_columns")
+                gdpr_columns = _sensitive("gdpr_columns")
+                oncop_columns = _sensitive("oncop_columns")
                 records.append(StdTechEntry(
                     table=table,
                     description=str(attr.get("description") or ""),
@@ -407,9 +565,12 @@ def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                     data_sub_category=str(
                         attr.get("data_sub_category") or ""),
                     layer_type=str(attr.get("data_type_name") or ""),
-                    has_pii=_yn(attr.get("has_pii")),
-                    has_oncop=_yn(attr.get("has_oncop")),
-                    has_gdpr=_yn(attr.get("has_gdpr")),
+                    has_pii=(_yn(attr.get("has_pii"))
+                             if sensitivity.LOAD_SENSITIVITY else None),
+                    has_oncop=(_yn(attr.get("has_oncop"))
+                               if sensitivity.LOAD_SENSITIVITY else None),
+                    has_gdpr=(_yn(attr.get("has_gdpr"))
+                              if sensitivity.LOAD_SENSITIVITY else None),
                     ownership=(ownership
                                if isinstance(ownership, dict) else {}),
                     columns=columns,
@@ -428,7 +589,31 @@ def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                     load_type=str(attr.get("load_type") or ""),
                     is_partitioned=_yn(attr.get("is_partitioned")),
                     target_system=str(attr.get("target_system") or ""),
-                    pii_columns=pii_columns))
+                    pii_columns=pii_columns,
+                    gdpr_columns=gdpr_columns,
+                    oncop_columns=oncop_columns,
+                    business_unit=str(attr.get("business_unit") or ""),
+                    data_classification=str(
+                        attr.get("data_classification") or ""),
+                    host_region=str(attr.get("host_region") or ""),
+                    decommissioned=_yn(attr.get("decommissioned")),
+                    require_partition_filter=_yn(
+                        source_details.get("require_partition_filter")),
+                    dedupe_column=str(
+                        source_details.get("platform_dedupe_column")
+                        or "").strip().lower(),
+                    base_or_view=str(
+                        source_details.get("base_or_view") or ""),
+                    source_country=str(
+                        source_details.get("country") or ""),
+                    source_region=str(
+                        source_details.get("region") or ""),
+                    feed_id=str(source_details.get("feed_id") or ""),
+                    partitioned_columns=[
+                        str(c.get("column") or c.get("column_name") or c)
+                        if isinstance(c, dict) else str(c)
+                        for c in (attr.get("partitioned_columns") or [])
+                        if c]))
             except Exception as e:      # one weird entry ≠ a dead run
                 quarantined.append(Quarantined(
                     source="std_tech_metadata",

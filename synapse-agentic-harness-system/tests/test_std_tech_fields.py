@@ -15,12 +15,25 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from sahs.loaders import sensitivity
 from sahs.loaders.sources.vocab import load_std_tech_metadata
 
 FX = Path(__file__).resolve().parent / "fixtures" / "sources"
 
 
-def test_std_tech_parses_every_documented_field():
+@pytest.fixture
+def lift_hold(monkeypatch):
+    """The sensitivity hold (sahs/loaders/sensitivity.py) withholds
+    every compliance declaration from the graph. The PARSE underneath
+    it still has to be right — a hold that rots the code it holds back
+    is a hold nobody can lift. Tests of the sensitivity contract run
+    with the flag raised; the hold itself is proved separately."""
+    monkeypatch.setattr(sensitivity, "LOAD_SENSITIVITY", True)
+
+
+def test_std_tech_parses_every_documented_field(lift_hold):
     """Full utilization at field grain (docs/contracts/
     std_tech_metadata_layout.md): every documented key reaches a
     record. A regression here is a field going quietly dark again."""
@@ -41,9 +54,13 @@ def test_std_tech_parses_every_documented_field():
     assert gms.is_partitioned is True
     assert gms.target_system == "Lumi BigQuery"
     assert gms.data_sub_category == "Payments"
-    assert gms.pii_columns == [{"column": "cm13", "pii_role_id": "R3"},
-                               {"column": "cm15_hash",
-                                "pii_role_id": "R4"}]
+    # the feed states a type and a mandatory flag beside each
+    # sensitive column, and both ride along
+    assert gms.pii_columns == [
+        {"column": "cm13", "pii_role_id": "R3",
+         "data_type": "STRING", "mandatory": True},
+        {"column": "cm15_hash", "pii_role_id": "R4",
+         "data_type": "STRING", "mandatory": False}]
     # Layer 4 pdeAttribute
     amount = next(c for c in gms.columns if c.name == "trans_usd_am")
     assert amount.column_name == "trans_usd_am" and amount.position == 5
@@ -100,7 +117,8 @@ def test_std_tech_unmatchable_terms_keep_their_text(tmp_path: Path):
         {"name": "Unknown Term B", "description": "definition B"}]
 
 
-def test_std_tech_compliance_flags_absent_is_unknown(tmp_path: Path):
+def test_std_tech_compliance_flags_absent_is_unknown(
+        tmp_path: Path, lift_hold):
     """ABSENT IS NOT FALSE holds for has_pii / has_oncop / has_gdpr too:
     an entry that never sent the flag has not denied PII. The record
     keeps None, the graph gets neither a `has_*_atlas` prop nor a
@@ -141,3 +159,140 @@ def test_std_tech_compliance_flags_absent_is_unknown(tmp_path: Path):
     assert table["has_gdpr_atlas"] is False
     assert not [q for q in graph.iter_edges("has_policy")
                 if q.s == "table:dw.gms_transaction"]
+
+
+def test_the_real_feed_spells_the_sensitive_column_key_differently(
+        tmp_path: Path, lift_hold):
+    """The column key inside the table-level sensitivity lists has two
+    spellings: `column` in the documented contract, `column_name` in
+    the feed itself. The loader read one, so on the real export every
+    row of every list was skipped and the second sensitivity witness —
+    a shipped feature — produced nothing at all. Both spellings parse,
+    and the other two compliance regimes are read beside PII: the feed
+    sends three parallel lists of the same shape and a column named by
+    any of them is sensitive."""
+    from sahs.loaders.sources.vocab import load_std_tech_metadata
+    src = tmp_path / "std"
+    src.mkdir()
+    (src / "t.json").write_text(json.dumps({
+        "dataset": "gms_transaction",
+        "tech_metadata_list": [{"datasetAttribute": {
+            "description": "x",
+            "pii_columns": [{"column_name": "cm13", "pii_role_id": "R3",
+                             "data_type_name": "STRING",
+                             "is_mandatory": "Y"}],
+            "gdpr_columns": [{"column": "cm15", "pii_role_id": "R4"}],
+            "oncop_columns": [{"column_name": "se_no"}]}, "pde": []}]}),
+        encoding="utf-8")
+    e = load_std_tech_metadata(src)[0][0]
+    assert e.pii_columns == [{"column": "cm13", "pii_role_id": "R3",
+                              "data_type": "STRING", "mandatory": True}]
+    assert e.gdpr_columns == [{"column": "cm15", "pii_role_id": "R4"}]
+    assert e.oncop_columns == [{"column": "se_no"}]
+
+
+def test_the_catalog_carries_its_own_business_unit(tmp_path: Path):
+    """The contract said the catalog had no business-unit axis and only
+    the MDM plane did. The real feed carries one on every entry. It is
+    read under its OWN name so the two planes can agree, disagree, or
+    fill each other's gaps — one plane silently overwriting the other's
+    answer is the failure this avoids."""
+    from sahs.loaders.sources.vocab import load_std_tech_metadata
+    src = tmp_path / "std"
+    src.mkdir()
+    (src / "t.json").write_text(json.dumps({
+        "dataset": "gms_transaction",
+        "tech_metadata_list": [{"datasetAttribute": {
+            "description": "x", "business_unit": "Finance",
+            "data_classification": "Confidential", "host_region": "US",
+            "decommissioned": "N",
+            "partitioned_columns": ["part_dt"]}, "pde": []}]}),
+        encoding="utf-8")
+    e = load_std_tech_metadata(src)[0][0]
+    assert e.business_unit == "Finance"
+    assert e.data_classification == "Confidential"
+    assert e.host_region == "US"
+    assert e.decommissioned is False        # "N" is a denial, not absence
+    assert e.partitioned_columns == ["part_dt"]
+
+
+def test_column_clustering_reaches_the_record(tmp_path: Path):
+    """Which columns a query should filter on to stay affordable: the
+    feed states clustering and partition ordinals per column and the
+    loader read neither."""
+    from sahs.loaders.sources.vocab import load_std_tech_metadata
+    src = tmp_path / "std"
+    src.mkdir()
+    (src / "t.json").write_text(json.dumps({
+        "dataset": "gms_transaction",
+        "tech_metadata_list": [{"datasetAttribute": {"description": "x"},
+                                "pde": [{"pdeRelPath": "part_dt",
+                                         "pdeAttribute": {
+                                             "is_clustered": "Y",
+                                             "cluster_position": 1,
+                                             "partition_position": 2,
+                                             "attribute_scale": 0,
+                                             "publish_code": "P"}}]}]}),
+        encoding="utf-8")
+    c = load_std_tech_metadata(src)[0][0].columns[0]
+    assert c.is_clustered is True
+    assert c.cluster_position == 1 and c.partition_position == 2
+    assert c.attribute_scale == 0 and c.publish_code == "P"
+
+
+def test_the_source_details_blob_holds_query_correctness_facts(
+        tmp_path: Path):
+    """`dataset_source_details` was deferred as a catalog-internal
+    blob. It is not: it holds the two facts that decide whether a
+    query runs at all and whether its aggregate is right.
+
+    `require_partition_filter` — the warehouse rejects a query with no
+    partition filter outright, so a card that does not say so sends
+    the reader into a guaranteed failure.
+
+    `platform_dedupe_column` — on a SNAPSHOT_DEDUPE_MAX table this is
+    the column the dedupe keys on. Summing without it double counts
+    every restatement, silently and plausibly, which is the worst
+    output this system can produce."""
+    from sahs.loaders.sources.vocab import load_std_tech_metadata
+    src = tmp_path / "std"
+    src.mkdir()
+    (src / "t.json").write_text(json.dumps({
+        "dataset": "gms_transaction",
+        "tech_metadata_list": [{"datasetAttribute": {
+            "description": "x", "load_type": "SNAPSHOT_DEDUPE_MAX",
+            "dataset_source_details": {
+                "base_or_view": "base", "country": "USA",
+                "region": "us-east4", "feed_id": "FEED-9001",
+                "platform_dedupe_column": "part_dt",
+                "require_partition_filter": True}}, "pde": []}]}),
+        encoding="utf-8")
+    e = load_std_tech_metadata(src)[0][0]
+    assert e.require_partition_filter is True
+    assert e.dedupe_column == "part_dt"
+    assert e.base_or_view == "base"
+    assert e.source_country == "USA" and e.source_region == "us-east4"
+    assert e.feed_id == "FEED-9001"
+    # a blob that is absent leaves every one of them unknown, never
+    # a fabricated False
+    (src / "t.json").write_text(json.dumps({
+        "dataset": "gms_transaction",
+        "tech_metadata_list": [{"datasetAttribute": {"description": "x"},
+                                "pde": []}]}), encoding="utf-8")
+    bare = load_std_tech_metadata(src)[0][0]
+    assert bare.require_partition_filter is None
+    assert bare.dedupe_column == ""
+
+
+def test_the_census_walks_nested_objects_it_does_not_just_name_them():
+    """A nested object is not a leaf. Reporting only its shape let two
+    query-correctness facts hide inside a blob nobody opened — which
+    is exactly the failure the census exists to prevent."""
+    from scripts.std_tech_keys import Census, LAYERS
+    assert "dataset_source_details" in LAYERS
+    c = Census()
+    c.load(FX / "std_tech_metadata")
+    rows = {(r["layer"], r["key"]): r for r in c.report()["rows"]}
+    assert ("dataset_source_details", "require_partition_filter") in rows
+    assert rows[("dataset_source_details",
+                 "platform_dedupe_column")]["status"] == "consumed"

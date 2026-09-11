@@ -157,7 +157,9 @@ def test_vocab_adapters_and_degenerates():
     assert len(entries) == 3 and not sq
     assert sum(1 for e in entries if e.table == "gms_transaction") == 2
     gms = next(e for e in entries if e.table == "gms_transaction")
-    assert gms.layer_type == "SOR" and gms.has_pii
+    # the sensitivity hold: layer type still lands, the compliance
+    # flag is withheld at the parse boundary (sensitivity.py)
+    assert gms.layer_type == "SOR" and gms.has_pii is None
     assert gms.columns[0].linked_terms[0]["sourceName"] == "LumiMDM"
 
 
@@ -329,10 +331,12 @@ def test_std_tech_real_envelope_shape(tmp_path: Path):
     assert len(entries) == 2                  # every tech entry harvested
     first = entries[0]
     assert first.table == "acqdw_acquisition_us"   # envelope name flows down
-    assert first.layer_type == "ODL" and first.has_pii
-    assert first.has_oncop is True and first.has_gdpr is False
+    assert first.layer_type == "ODL"
+    # withheld by the hold — all three flags and the column's role
+    assert (first.has_pii, first.has_oncop, first.has_gdpr) == (
+        None, None, None)
     assert [c.name for c in first.columns] == ["acct_open_dt", "cm_dob"]
-    assert first.columns[1].pii_role_id == "NGBD-SDE-Date-of-Birth"
+    assert first.columns[1].pii_role_id is None
     assert first.columns[0].linked_terms[0]["sourceName"] == "LumiMDM"
 
 
@@ -362,8 +366,11 @@ def test_std_tech_loose_types_never_crash(tmp_path: Path):
     entries, quarantined = load_std_tech_metadata(f)
     assert len(entries) == 2 and not quarantined
     a, b = entries[0].columns
-    assert a.sde_group is None and a.pii_role_id is None   # false → absent
-    assert b.sde_group == "true" and b.pii_role_id == "R9"
+    # the hold withholds BOTH columns' sensitivity; the loose-type
+    # normalization it would otherwise do is proved in
+    # test_std_tech_fields.py with the flag lifted
+    assert a.sde_group is None and a.pii_role_id is None
+    assert b.sde_group is None and b.pii_role_id is None
     assert entries[1].ownership == {}          # non-dict → empty, counted
     assert entries[1].columns[0].linked_terms == []
     # a truly unparsable entry quarantines, never raises

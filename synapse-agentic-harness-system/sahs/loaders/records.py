@@ -96,6 +96,13 @@ class StdTechColumn(BaseModel):
     nullable: bool | None = None            # nullable_indicator
     primary_key: bool | None = None         # primary_key_indicator
     partition_key: bool | None = None       # partition_indicator
+    # the real feed's clustering + partition ordinals: which columns
+    # a query should filter on to stay affordable
+    is_clustered: bool | None = None
+    cluster_position: int | None = None
+    partition_position: int | None = None
+    attribute_scale: int | None = None
+    publish_code: str = ""
     derived_logic: str = ""                 # SQL when the column is
     #                                         computed — doc evidence
 
@@ -145,3 +152,32 @@ class StdTechEntry(BaseModel):
     # SECOND, independent PII witness beside each column's own
     # pdeAttribute.pii_role_id
     pii_columns: list[dict] = Field(default_factory=list)
+    # the SAME shape as pii_columns, for the other two compliance
+    # regimes. The feed sends three parallel lists and the loader read
+    # one of them; a column named by the GDPR or ONCOP list was as
+    # sensitive as one named by the PII list and reached nothing
+    gdpr_columns: list[dict] = Field(default_factory=list)
+    oncop_columns: list[dict] = Field(default_factory=list)
+    # Atlas's OWN business unit. The contract said the catalog had no
+    # business-unit axis and only the MDM plane did; the real feed
+    # carries one on every entry. Kept under its own name so the two
+    # planes can agree, disagree, or fill each other's gaps rather
+    # than one silently overwriting the other.
+    business_unit: str = ""
+    data_classification: str = ""
+    host_region: str = ""
+    decommissioned: bool | None = None
+    partitioned_columns: list[str] = Field(default_factory=list)
+    # from dataset_source_details — operational facts that decide
+    # whether a query RUNS and whether its aggregate is CORRECT:
+    #   require_partition_filter — the warehouse rejects a query with
+    #     no partition filter outright;
+    #   platform_dedupe_column — on a SNAPSHOT_DEDUPE_MAX table this
+    #     is the column the dedupe keys on; summing without it double
+    #     counts every restatement, silently and plausibly.
+    require_partition_filter: bool | None = None
+    dedupe_column: str = ""
+    base_or_view: str = ""
+    source_country: str = ""
+    source_region: str = ""
+    feed_id: str = ""

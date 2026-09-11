@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -22,7 +23,11 @@ CROSSWALK = FX / "identity" / "crosswalk.jsonl"
 
 def _build(graph_dir: Path, out_dir: Path,
            crosswalk: Path = CROSSWALK,
-           *extra: str) -> subprocess.CompletedProcess:
+           *extra: str,
+           sensitivity: bool = False) -> subprocess.CompletedProcess:
+    """``sensitivity=True`` lifts the hold in
+    sahs/loaders/sensitivity.py for this build — the default build, the
+    one a graph append actually runs, carries no PII declaration."""
     return subprocess.run(
         [sys.executable, str(SILO / "scripts" / "pipeline.py"), "build-graph",
          "--graph", str(graph_dir), "--crosswalk", str(crosswalk),
@@ -32,7 +37,9 @@ def _build(graph_dir: Path, out_dir: Path,
          "--registry", str(FX / "sources" / "tables_registry.txt"),
          "--out", str(out_dir), "--plain", "--run-id", "test_r1",
          *extra],
-        capture_output=True, text=True, cwd=SILO)
+        capture_output=True, text=True, cwd=SILO,
+        env={**os.environ,
+             "SAHS_LOAD_SENSITIVITY": "1" if sensitivity else "0"})
 
 
 def test_no_jobs_30d_excludes_the_witness_and_ledgers_deferred(tmp_path):
@@ -692,7 +699,11 @@ def test_std_tech_full_utilization_reaches_the_graph(tmp_path):
     card_sourcing_audit_2026_09.md) found ~20 documented fields going
     dark between the file and the graph; this is the fence."""
     graph_dir, out_dir = tmp_path / "g", tmp_path / "run"
-    assert _build(graph_dir, out_dir).returncode == 0
+    # utilization is the claim, so the sensitivity hold is lifted here:
+    # the compliance fields are part of what the loader parses. That a
+    # DEFAULT build withholds them is
+    # test_the_sensitivity_hold_keeps_every_declaration_out_of_the_graph
+    assert _build(graph_dir, out_dir, sensitivity=True).returncode == 0
     graph = GraphDir(graph_dir)
     nodes, edges = graph.fold_nodes(), graph.fold_edges()
 
@@ -783,5 +794,53 @@ def test_std_tech_full_utilization_reaches_the_graph(tmp_path):
     assert std.get("term_links_unmatched", 0) == 0   # id-first matching
     assert std["ownership_edges"] == 3
     assert std["derived_logic_docs"] == 1
-    assert std["columns_from_pii_declaration"] == 1
+    # 2: cm15_hash, named by the PII list and again by the GDPR list,
+    # and se_no, named by the ONCOP list — the feed sends three
+    # parallel sensitivity lists and a column in any of them exists
+    assert std["columns_from_pii_declaration"] == 2
+    # every regime the feed names mints its own policy edge, so a
+    # column is not filed under PII when the feed said GDPR
+    assert std["column_policy_from_declaration"] >= 3
     assert std["terms_minted_from_link"] == 2
+
+
+def test_the_sensitivity_hold_withholds_atlas_and_only_atlas(tmp_path):
+    """The hold (sahs/loaders/sensitivity.py) is scoped to ONE source:
+    std_tech_metadata. A default build must carry no compliance
+    declaration from the Atlas catalog — and must still carry the MDM
+    plane's and BigQuery's, which the hold does not touch.
+
+    The fixtures assert PII loudly on both planes — gms declares
+    has_pii, names cm13 and cm15_hash in pii_columns[], and the MDM
+    schema marks cm13 is_pii — so Atlas silence beside MDM speech is
+    the SCOPE working, not a thin fixture."""
+    graph_dir, out_dir = tmp_path / "g", tmp_path / "run"
+    assert _build(graph_dir, out_dir).returncode == 0
+    graph = GraphDir(graph_dir)
+    nodes, edges = graph.fold_nodes(), graph.fold_edges()
+
+    # ── withheld: nothing sensitivity-shaped carries the atlas witness
+    held = {"policy:pii", "policy:gdpr", "policy:oncop"}
+    assert not [(s, o) for (s, r, o, w) in edges
+                if r == "has_policy" and o in held and w == "atlas"]
+
+    table = nodes["table:dw.gms_transaction"].props
+    assert not {"has_pii_atlas", "has_gdpr_atlas",
+                "has_oncop_atlas"} & set(table)
+
+    for node in nodes.values():
+        assert not {"pii_role_id", "sde_group",
+                    "pii_role_id_table_declared"} & set(node.props), node.id
+
+    # cm15_hash exists ONLY as an atlas pii_columns[] declaration, so
+    # with the hold on it is never minted from one at all
+    assert "col:dw.gms_transaction.cm15_hash" not in nodes
+
+    # ── untouched: the MDM plane still declares, under its own witness
+    assert nodes["col:dw.gms_transaction.cm13"].props["is_pii_mdm"] is True
+    assert ("col:dw.gms_transaction.cm13", "has_policy",
+            "policy:pii", "lumi") in edges
+
+    # ── untouched: row-access policy is the warehouse's own answer
+    assert ("table:dw.wwcas_authorization", "has_policy",
+            "policy:unknown_denied", "bq") in edges

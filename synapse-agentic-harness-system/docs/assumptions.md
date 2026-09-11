@@ -160,3 +160,59 @@ time a trigger fires. Status: `active` | `expired` | `resolved`.
   acceptance test for what real usage adds (support corroboration, true
   recency, joins_via, cost priors), exactly the A7 pattern.
 - **status**: active
+
+## A9 — std_tech_metadata sensitivity is withheld from the graph
+
+- **component**: `sahs/loaders/sensitivity.py`; the std_tech (Atlas)
+  loader only; E1 D5; `acl.json`
+- **bet**: no compliance declaration from **std_tech_metadata** reaches
+  the graph. Atlas `has_pii`/`has_gdpr`/`has_oncop`, the three parallel
+  declaration lists (`pii_columns`/`gdpr_columns`/`oncop_columns`), and
+  column `pii_role_id`/`sde_group` are read and deliberately not
+  carried. SCOPE IS ONE SOURCE: the MDM plane's `is_pii` and its
+  `policy:pii` edge flow exactly as before, and so does every BigQuery
+  row-access policy (`policy:unknown_denied`, `policy:row_access_N`) —
+  row-access is access control the WAREHOUSE enforces, not a claim
+  about a column's contents, and it remains the one honest
+  live-execution gate. `data_classification`, a table-wide handling
+  label, also stays.
+- **KNOWN LOSSES, accepted**:
+  - **D5 inflates and cannot be closed.** D5 fires when exactly ONE
+    plane calls a column sensitive. With the Atlas plane silent by
+    construction, every MDM-flagged column now reads "flagged by lumi
+    only" and opens a `sensitivity_conflict` ticket that nobody can
+    resolve, because resolving it needs the withheld witness. On the
+    fixture, D5 goes 1 → 2 (cm13 was corroborated before the hold and
+    is a ticket now). This is the pre-existing D5 design meeting a
+    systematically absent plane, not new logic — no compiler code
+    changed — but the ticket backlog it produces is real.
+  - **A column named ONLY by an Atlas declaration is never minted.**
+    `cm15_hash` in the fixtures; D1 drops 2 → 1 accordingly.
+  - **Atlas can no longer corroborate or contradict MDM on
+    sensitivity.** The disagreement still exists in the feeds; it is
+    simply no longer visible.
+- **NOT a loss**: `validate_sql` still refuses a column MDM calls
+  sensitive. The hold changes which SOURCES may declare sensitivity,
+  not what sensitivity MEANS downstream. Whether a violation (refusal)
+  is the right meaning, versus a warning (flag), remains open — see
+  the revisit trigger.
+- **evidence**: user decision 2026-09-11 ("Leave out PII information
+  for now to be considered in the loader we will decide after"),
+  narrowed the same day to "just avoid sensitivity from
+  std_tech_metadata". `scripts/std_tech_keys.py` reports every held key
+  as a DEFERRAL naming this hold, so the withholding is on record
+  rather than looking like a field gone dark;
+  `test_the_sensitivity_hold_withholds_atlas_and_only_atlas` is the
+  fence on a default build, asserting both halves — Atlas silent, MDM
+  and BigQuery untouched.
+- **date**: 2026-09-11
+- **revisit_trigger**: two separable decisions. (1) Whether Atlas may
+  declare sensitivity again — lift with `SAHS_LOAD_SENSITIVITY=1` for
+  one run to see exactly what it would add, and watch D5 fall back as
+  corroboration returns. (2) Whether `sensitive_column` should stay a
+  violation (refusal) or become a warning (flag); this one is
+  independent of the hold and applies to the MDM plane today. The
+  graph is append-only, so lifting ADDS the declarations on the next
+  build rather than needing a rebuild — but it is not retroactive for
+  rows nobody re-registers.
+- **status**: active
