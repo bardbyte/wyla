@@ -23,6 +23,25 @@ def _read(path: Path) -> object:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def _approval_summary(reviewers) -> dict:
+    """The catalog's approval workflow, compacted. The full tree
+    (per-cycle task ids, assignee ids, timestamps) is operational
+    routing; a reader needs whether the metric is through review and
+    how many cycles it took. ``None`` and ``{}`` both mean NO WORKFLOW
+    RECORDED — which is not the same as rejected."""
+    if not isinstance(reviewers, dict) or not reviewers:
+        return {}
+    people = [str(r.get("assigneeId")) for r in
+              (reviewers.get("reviewers") or [])
+              if isinstance(r, dict) and r.get("assigneeId")]
+    return {k: v for k, v in {
+        "workflow_mode": str(reviewers.get("workflowMode") or ""),
+        "current_cycle": reviewers.get("currentApprovalCycle"),
+        "process_id": str(reviewers.get("aceProcessId") or ""),
+        "reviewer_ids": people,
+    }.items() if v not in (None, "", [])}
+
+
 def load_metrics_dmp(path: Path) -> tuple[list[ExpressionRecord],
                                           list[Quarantined]]:
     payload = _read(path)
@@ -64,14 +83,47 @@ def load_metrics_dmp(path: Path) -> tuple[list[ExpressionRecord],
                    "calculation": row.get("calculation"),
                    "approved_dimensions": row.get("approvedDimensions"),
                    "metric_grain": row.get("metricGrain"),
+                   # The catalog's own grain, under the CURRENT
+                   # contract's spelling. Deliberately NOT folded into
+                   # `metric_grain`: that key feeds the metric
+                   # fingerprint, so filling it would re-mint every
+                   # governed metric that carries a grain and strand
+                   # the node the old id built. Served as a fact,
+                   # promoted into identity only by a deliberate
+                   # re-mint. `metricGrain` above is the older
+                   # spelling, still read so old catalogs parse.
+                   "grain_declared": str(row.get("grain") or "").strip(),
                    "metric_scope": row.get("metricScope"),
+                   # ── the current contract's own fields ──
+                   # baseTables is the AUTHOR's declaration of what the
+                   # metric reads — stronger evidence than inferring
+                   # the table set from the SQL parse
+                   "base_tables": [str(t) for t in
+                                   (row.get("baseTables") or [])],
+                   "data_owners": [str(o) for o in
+                                   (row.get("dataOwners") or [])],
+                   "product_ids": [str(i) for i in
+                                   (row.get("associatedDataProductIds")
+                                    or [])],
+                   "approval": _approval_summary(row.get("reviewers")),
                    # the full author SQL rides WHOLE as a doc node —
                    # this field sat unread in the catalog until the
                    # studio recon surfaced it (full utilization)
                    "referenced_query":
                        str(row.get("referencedSqlQuery") or "").strip(),
+                   # joins arrive two ways in ONE export: a few
+                   # metrics carry structured objects, several carry a
+                   # raw fragment the source could not structure, and
+                   # the current contract no longer emits the old
+                   # singular key at all. Read all three — dropping
+                   # the raw form loses the join entirely for the
+                   # metrics that only have it.
                    "join_condition":
-                       str(row.get("joinCondition") or "").strip(),
+                       str(row.get("joinCondition")
+                           or row.get("joinConditionRaw") or "").strip(),
+                   "join_conditions": [c for c in
+                                       (row.get("joinConditions") or [])
+                                       if isinstance(c, dict)],
                    "products": [str(p) for p in products]}))
     return records, quarantined
 
@@ -153,7 +205,29 @@ def load_extended_gmns(path: Path) -> tuple[list[ExpressionRecord],
                    "calculation": row.get("calculation"),
                    "approved_dimensions": row.get("approvedDimensions"),
                    "metric_grain": row.get("metricGrain"),
+                   # The catalog's own grain, under the CURRENT
+                   # contract's spelling. Deliberately NOT folded into
+                   # `metric_grain`: that key feeds the metric
+                   # fingerprint, so filling it would re-mint every
+                   # governed metric that carries a grain and strand
+                   # the node the old id built. Served as a fact,
+                   # promoted into identity only by a deliberate
+                   # re-mint. `metricGrain` above is the older
+                   # spelling, still read so old catalogs parse.
+                   "grain_declared": str(row.get("grain") or "").strip(),
                    "metric_scope": row.get("metricScope"),
+                   # ── the current contract's own fields ──
+                   # baseTables is the AUTHOR's declaration of what the
+                   # metric reads — stronger evidence than inferring
+                   # the table set from the SQL parse
+                   "base_tables": [str(t) for t in
+                                   (row.get("baseTables") or [])],
+                   "data_owners": [str(o) for o in
+                                   (row.get("dataOwners") or [])],
+                   "product_ids": [str(i) for i in
+                                   (row.get("associatedDataProductIds")
+                                    or [])],
+                   "approval": _approval_summary(row.get("reviewers")),
                    "requestor": row.get("requestor"),
                    "author": row.get("author"),
                    "author_id": row.get("authorId"),

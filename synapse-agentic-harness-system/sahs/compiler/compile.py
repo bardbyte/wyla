@@ -230,6 +230,12 @@ def compile_build(graph_root: Path, builds_root: Path
             question_source = "llm_enriched"
         grain = record.props.get("grain", "")
         grain_source = "catalog" if grain else ""
+        # the catalog's declared grain, when this node's identity was
+        # minted before the catalog supplied one: a served fact, and
+        # the card says which of the two it is reading
+        if not grain and record.props.get("grain_declared"):
+            grain = record.props["grain_declared"]
+            grain_source = "catalog"
         if not grain and record.props.get("grain_enriched"):
             grain = record.props["grain_enriched"]
             grain_source = "llm_enriched"
@@ -258,6 +264,15 @@ def compile_build(graph_root: Path, builds_root: Path
             "line_of_business":
                 record.props.get("line_of_business", ""),
             "scope": record.props.get("scope", ""),
+            # the current catalog contract's own declarations
+            "base_tables": record.props.get("base_tables") or [],
+            "data_owners_dmp":
+                record.props.get("data_owners_dmp") or [],
+            "product_ids": record.props.get("product_ids") or [],
+            "approval": record.props.get("approval") or {},
+            "join_conditions":
+                record.props.get("join_conditions") or [],
+            "author_id": record.props.get("author_id", ""),
             # the metric's filters are part of its IDENTITY (the page,
             # channel, or method it is scoped to) — serving + enricher
             # context both need them
@@ -309,14 +324,15 @@ def compile_build(graph_root: Path, builds_root: Path
                     "author", "description", "domain",
                     "line_of_business", "scope", "grain_observed",
                     "join_condition", "confidence", "business_unit",
-                    "data_category"):
+                    "data_category", "author_id"):
             held[key] = held[key] or row[key]
         if row.get("execution_count") and not held.get("execution_count"):
             held["execution_count"] = row["execution_count"]
         for key in ("approved_dimensions", "query_shape", "data_owners",
                     "tables_associated_not_referenced",
                     "common_filters", "group_by_patterns",
-                    "joined_tables"):
+                    "joined_tables", "base_tables", "data_owners_dmp",
+                    "product_ids", "approval", "join_conditions"):
             if row[key] and not held[key]:
                 held[key] = row[key]
     for row in collapsed.values():
