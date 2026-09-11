@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sahs.graph.quads import SOURCE_WITNESS
+
 TOKEN_BUDGET_TABLE = 3000
 _PROTECTED = ("grain", "conflicts", "access")
 
@@ -604,16 +606,23 @@ def metric_card(metric: dict[str, Any],
             + " [prov:witness]")
     pedigree = [f"{key}: {metric[field]}" for key, field in
                 (("domain", "domain"), ("lob", "line_of_business"),
-                 ("author", "author"), ("scope", "scope"))
+                 ("author", "author"), ("author id", "author_id"),
+                 ("requestor", "requestor"), ("scope", "scope"))
                 if metric.get(field)]
     if pedigree:
         lines.append(f"- {' · '.join(pedigree)} "
                      f"[prov:{metric['source']}]")
     if metric.get("question"):
         q_src = metric.get("question_source") or "dmp"
+        conf = metric.get("enrich_confidence")
         lines.append(f"- answers: “{metric['question']}” "
-                     + ("[prov:llm_enriched·unreviewed]"
+                     + ("[prov:llm_enriched·unreviewed"
+                        + (f"·conf={conf:.2f}" if isinstance(
+                            conf, (int, float)) else "") + "]"
                         if q_src == "llm_enriched" else "[prov:dmp]"))
+    if metric.get("enrich_caveat"):
+        lines.append(f"- caveat: {metric['enrich_caveat']} "
+                     "[prov:llm_enriched·unreviewed]")
     if metric.get("description"):
         # the catalog's own hand-written guidance — what it measures,
         # the "do not use for…" list, disambiguation instructions.
@@ -644,13 +653,88 @@ def metric_card(metric: dict[str, Any],
             "- ⚠ associated but NOT referenced by the SQL: "
             + ", ".join(metric["tables_associated_not_referenced"])
             + " (declared lineage the query never reads) [prov:studio]")
+    # a fused metric's `source` is whichever witness won the node; a
+    # FIELD keeps the provenance of the catalog that declares it. The
+    # governed catalog alone writes base tables, products, approval
+    # and join conditions, so those say dmp whatever source won;
+    # data owners come from dmp and studio both, so they carry the
+    # node's witness family
+    src = SOURCE_WITNESS.get(metric["source"], metric["source"])
+    if metric.get("base_tables"):
+        # the author's own declaration of what the metric reads —
+        # stronger than the SQL parse, which is a guess by comparison
+        lines.append("- reads: " + ", ".join(metric["base_tables"])
+                     + " (author-declared) [prov:dmp]")
     if metric.get("data_owners"):
         lines.append("- data owners: "
                      + ", ".join(metric["data_owners"])
-                     + " [prov:studio]")
+                     + f" [prov:{src}]")
+    if metric.get("products") or metric.get("product_ids"):
+        names = list(metric.get("products") or [])
+        ids = list(metric.get("product_ids") or [])
+        cell = ", ".join(names) if names else ""
+        if ids:
+            cell += (" " if cell else "") + "(" + ", ".join(ids) + ")"
+        lines.append(f"- data products: {cell} [prov:dmp]")
+    if metric.get("approval"):
+        a = metric["approval"]
+        bits = []
+        if a.get("workflow_mode"):
+            bits.append(str(a["workflow_mode"]).lower())
+        if a.get("current_cycle") is not None:
+            bits.append(f"cycle {a['current_cycle']}")
+        if a.get("reviewer_ids"):
+            bits.append("reviewers " + ", ".join(a["reviewer_ids"]))
+        if a.get("process_id"):
+            bits.append(f"process {a['process_id']}")
+        lines.append("- approval: " + " · ".join(bits or ["recorded"])
+                     + " [prov:dmp]")
     if metric.get("join_condition"):
         lines.append(f"- declared join condition: "
                      f"`{metric['join_condition']}` [prov:dmp]")
+    for j in metric.get("join_conditions") or []:
+        left = f"{j.get('leftTable', '?')}.{j.get('leftKey') or '?'}"
+        right = f"{j.get('rightTable', '?')}.{j.get('rightKey') or '?'}"
+        kind = str(j.get("joinType") or "join").lower()
+        on = f" on `{j['onClause']}`" if j.get("onClause") else ""
+        lines.append(f"- structured join: {left} = {right} ({kind}){on} "
+                     "[prov:dmp]")
+    # ── mined texture: what the miner saw, never a claim of meaning ──
+    if metric.get("agg_function") or metric.get("measure_column"):
+        lines.append(
+            f"- mined shape: {metric.get('agg_function') or '?'}"
+            f"({metric.get('measure_column') or '?'}) [prov:catalog_mined]")
+    usage = []
+    if metric.get("execution_count") is not None:
+        usage.append(f"{metric['execution_count']} executions")
+    if metric.get("query_count") is not None:
+        usage.append(f"{metric['query_count']} queries")
+    if metric.get("confidence"):
+        usage.append(f"miner confidence {metric['confidence']}")
+    if metric.get("score") is not None:
+        usage.append(f"score {metric['score']}")
+    if metric.get("complexity_tier") is not None:
+        usage.append(f"complexity {metric['complexity_tier']}")
+    if metric.get("group_by_patterns"):
+        usage.append("grouped by " + ", ".join(
+            metric["group_by_patterns"][:4]))
+    if metric.get("common_filters"):
+        usage.append("filtered on " + ", ".join(
+            metric["common_filters"][:4]))
+    if metric.get("joined_tables"):
+        usage.append("joined with " + ", ".join(
+            metric["joined_tables"][:4]))
+    if usage:
+        lines.append("- mined usage: " + " · ".join(usage)
+                     + " [prov:catalog_mined]")
+    if metric.get("business_unit") or metric.get("data_category"):
+        cat = " › ".join(c for c in (metric.get("data_category"),
+                                     metric.get("data_sub_category"))
+                         if c)
+        cell = " · ".join(c for c in (
+            f"unit {metric['business_unit']}"
+            if metric.get("business_unit") else "", cat) if c)
+        lines.append(f"- mined category: {cell} [prov:catalog_mined]")
     if metric.get("approved_dimensions"):
         lines.append("- approved dimensions: "
                      + ", ".join(metric["approved_dimensions"])

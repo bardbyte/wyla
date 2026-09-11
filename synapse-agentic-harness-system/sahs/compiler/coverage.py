@@ -148,6 +148,62 @@ EDGE_DEFERRED: dict[str, str] = {
 }
 
 
+# ── metric props → where the metric row / card carries them ───────
+# The audit closed this for tables and columns and left metrics out;
+# eleven props then landed on metric nodes from the real catalogs and
+# reached no card, and nothing failed. Same ledger, same rule.
+METRIC_RENDERED: dict[str, str] = {
+    "canonical_sql": "metric card `- expression:` / bindings index",
+    "label": "metric card title / bindings index",
+    "grain": "metric card `- grain:`",
+    "grain_observed": "metric card `- grain:` (observed)",
+    "grain_enriched": "metric card `- grain:` [llm_enriched]",
+    "question_answered": "metric card `- answers:`",
+    "question_enriched": "metric card `- answers:` [llm_enriched]",
+    "enrich_confidence": "metric card enriched lines `(conf …)`",
+    "enrich_caveat": "metric card `- caveat:`",
+    "description": "metric card `- guidance:`",
+    "author": "metric card pedigree line",
+    "author_id": "metric card pedigree line",
+    "requestor": "metric card pedigree line",
+    "domain": "metric card pedigree line",
+    "line_of_business": "metric card pedigree line / lob index",
+    "scope": "metric card pedigree line",
+    "approved_dimensions": "metric card `- approved dimensions:`",
+    "sign_convention": "metric card `- calculation notes:`",
+    "data_owners": "metric card `- data owners:`",
+    "join_condition": "metric card `- declared join condition:`",
+    "join_conditions": "metric card `- structured joins:`",
+    "base_tables": "metric card `- reads:` (author-declared)",
+    "products": "metric card `- data products:`",
+    "product_ids": "metric card `- data products:`",
+    "approval": "metric card `- approval:`",
+    "query_shape": "metric card `- query shape:`",
+    "tables_associated_not_referenced":
+        "metric card `- ⚠ associated but NOT referenced`",
+    "common_filters": "metric card `- mined usage:` / enricher context",
+    "group_by_patterns": "metric card `- mined usage:`",
+    "joined_tables": "metric card `- mined usage:`",
+    "execution_count": "metric card `- mined usage:`",
+    "query_count": "metric card `- mined usage:`",
+    "confidence": "metric card `- mined usage:`",
+    "score": "metric card `- mined usage:`",
+    "complexity_tier": "metric card `- mined usage:`",
+    "agg_function": "metric card `- mined shape:`",
+    "measure_column": "metric card `- mined shape:`",
+    "business_unit": "metric card `- mined category:` / used_by edges",
+    "data_category": "metric card `- mined category:`",
+    "data_sub_category": "metric card `- mined category:`",
+}
+METRIC_DEFERRED: dict[str, str] = {
+    "canon_version": "fingerprint versioning: internal to the canon",
+    "label_usage": "a WEAK alias from usage — groups the mgroup, never "
+                   "shown as the metric's name",
+    "enrich_prompt_version": "enricher bookkeeping: which prompt "
+                             "produced the text",
+}
+
+
 def build_coverage(nodes: dict[str, Any],
                    edges: dict[tuple[str, str, str, str], Any]
                    ) -> dict[str, Any]:
@@ -155,12 +211,15 @@ def build_coverage(nodes: dict[str, Any],
     prop key and every edge predicate. Deterministic (sorted)."""
     table_props: set[str] = set()
     column_props: set[str] = set()
+    metric_props: set[str] = set()
     for node_id, record in nodes.items():
         kind = node_id.split(":", 1)[0]
         if kind == "table":
             table_props.update(record.props)
         elif kind == "col":
             column_props.update(record.props)
+        elif kind == "metric":
+            metric_props.update(record.props)
     predicates = {r for (_s, r, _o, _w) in edges}
 
     def account(seen: set[str], rendered: dict[str, str],
@@ -187,15 +246,18 @@ def build_coverage(nodes: dict[str, Any],
 
     table = account(table_props, TABLE_RENDERED, TABLE_DEFERRED)
     column = account(column_props, COLUMN_RENDERED, COLUMN_DEFERRED)
+    metric = account(metric_props, METRIC_RENDERED, METRIC_DEFERRED)
     edge = account(predicates, EDGE_RENDERED, EDGE_DEFERRED)
     return {
         "schema": "meridian.coverage/1",
         "table_props": table,
         "column_props": column,
+        "metric_props": metric,
         "edge_predicates": edge,
         "unaccounted": (
             [f"table.{k}" for k in table["unaccounted"]]
             + [f"col.{k}" for k in column["unaccounted"]]
+            + [f"metric.{k}" for k in metric["unaccounted"]]
             + [f"edge.{k}" for k in edge["unaccounted"]]),
         "meta": {
             "rendered": "projected into indexes/tables.jsonl (the "

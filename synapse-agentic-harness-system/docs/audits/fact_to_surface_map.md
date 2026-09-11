@@ -78,6 +78,35 @@ number the agent reasoned from are the same number by construction.
 Bold rows are the audit's headline misses — every one now has a card
 section, a profile card, and (where relevant) a tool.
 
+## Metric facts — the same rule, applied late
+
+The audit closed prop-grain coverage for tables and columns and left
+metric nodes out. Holding the loaders against the real exports then
+put eleven new props on metric nodes (the governed catalog's
+`baseTables`, `dataOwners`, `reviewers`, structured joins, product ids;
+the miner's `agg_function`, `column`, `score`, `complexity_tier`,
+`query_count`, `data_sub_category`) and NONE reached the metric card —
+and nothing failed, because the ledger did not look. It looks now:
+`indexes/coverage.json` carries `metric_props`, pinned in
+`METRIC_RENDERED` / `METRIC_DEFERRED`, and CI holds its `unaccounted`
+at empty with the rest.
+
+| fact family | source | metric card line |
+|---|---|---|
+| what the metric reads, as its author declared | DMP `baseTables` | `- reads: … (author-declared)` |
+| owners · data products (names + ids) | DMP `dataOwners`, `associatedDataProduct*` | `- data owners:` · `- data products:` |
+| approval workflow, compacted | DMP `reviewers` | `- approval: mode · cycle · reviewers · process` |
+| joins, structured and raw | DMP `joinConditions[]`, `joinConditionRaw` | `- structured join: a.k = b.k (type) on …` · `- declared join condition:` |
+| pedigree | DMP `author`, `authorId`, `requestor`, `metricDomain`, `lineOfBusiness`, `metricScope` | pedigree line |
+| what the aggregate IS | mined `agg_function`, `column` | `- mined shape: SUM(col)` |
+| how the miner saw it used and ranked it | mined `execution_count`, `query_count`, `confidence`, `score`, `complexity_tier`, `group_by_patterns`, `common_filters`, `joined_tables` | `- mined usage: …` |
+| the miner's category | mined `business_unit`, `data_category`, `data_sub_category` | `- mined category: unit · cat › sub` |
+| how sure the enricher was | `enrich_confidence`, `enrich_caveat` | `[prov:llm_enriched·unreviewed·conf=0.72]` · `- caveat:` |
+
+Deferred: `canon_version` (fingerprint internals), `label_usage` (a
+weak usage alias that groups but never names), `enrich_prompt_version`
+(enricher bookkeeping).
+
 ## Business-unit facts
 
 | fact | source | facts row (`lobs.jsonl`) | lob card | Explorer › business units | agent |
@@ -122,6 +151,10 @@ global entry's reach.
 
 ## Still open (not in this pass)
 
+- `potential_common_word_acronyms.csv` is deferred as a view of the
+  consolidated glossary; its one extra fact — which symbols read as
+  ordinary words — awaits a `common_word` marker on the `acr:` node so
+  the vocabulary section can mark or suppress those matches.
 - The four **prose deferrals** (`knowledge.md`, `data_specs.md`,
   `qa_checks.yaml`, `tls_reference.md`) — left deferred by decision;
   the Artifacts staging surface is where they will land.

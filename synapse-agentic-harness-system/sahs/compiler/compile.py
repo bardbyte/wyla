@@ -283,6 +283,32 @@ def compile_build(graph_root: Path, builds_root: Path
             "tables_associated_not_referenced":
                 record.props.get("tables_associated_not_referenced")
                 or [],
+            # ── the governed catalog's own declarations (real export) ──
+            "base_tables": record.props.get("base_tables") or [],
+            "join_conditions": record.props.get("join_conditions") or [],
+            "products": record.props.get("products") or [],
+            "product_ids": record.props.get("product_ids") or [],
+            "approval": record.props.get("approval") or {},
+            "author_id": record.props.get("author_id", ""),
+            "requestor": record.props.get("requestor", ""),
+            # ── the miner's own texture (real measures catalog) ──
+            "agg_function": record.props.get("agg_function", ""),
+            "measure_column": record.props.get("measure_column", ""),
+            "confidence": record.props.get("confidence"),
+            "execution_count": record.props.get("execution_count"),
+            "query_count": record.props.get("query_count"),
+            "score": record.props.get("score"),
+            "complexity_tier": record.props.get("complexity_tier"),
+            "group_by_patterns":
+                record.props.get("group_by_patterns") or [],
+            "joined_tables": record.props.get("joined_tables") or [],
+            "business_unit": record.props.get("business_unit", ""),
+            "data_category": record.props.get("data_category", ""),
+            "data_sub_category":
+                record.props.get("data_sub_category", ""),
+            # ── enricher texture, so the card can say how sure it was ──
+            "enrich_confidence": record.props.get("enrich_confidence"),
+            "enrich_caveat": record.props.get("enrich_caveat", ""),
         })
         members_by_group[o].append(s)
     # collapse per metric id: a metric fused across catalogs (same fp)
@@ -311,11 +337,18 @@ def compile_build(graph_root: Path, builds_root: Path
                     "grain_source", "label", "sign_convention",
                     "author", "description", "domain",
                     "line_of_business", "scope", "grain_observed",
-                    "join_condition"):
+                    "join_condition", "author_id", "requestor",
+                    "agg_function", "measure_column", "confidence",
+                    "execution_count", "query_count", "score",
+                    "complexity_tier", "business_unit",
+                    "data_category", "data_sub_category",
+                    "enrich_confidence", "enrich_caveat"):
             held[key] = held[key] or row[key]
         for key in ("approved_dimensions", "query_shape", "data_owners",
                     "tables_associated_not_referenced",
-                    "common_filters"):
+                    "common_filters", "base_tables", "join_conditions",
+                    "products", "product_ids", "approval",
+                    "group_by_patterns", "joined_tables"):
             if row[key] and not held[key]:
                 held[key] = row[key]
     for row in collapsed.values():

@@ -520,6 +520,9 @@ def test_coverage_ledger_accounts_for_every_prop_and_edge(tmp_path):
         (build_dir / "indexes" / "coverage.json").read_text())
     assert coverage["unaccounted"] == [], coverage["unaccounted"]
     assert manifest["counts"]["coverage_unaccounted"] == 0
+    # metric props are held to the same rule as table props
+    assert coverage["metric_props"]["unaccounted"] == []
+    assert coverage["metric_props"]["summary"]["rendered"] >= 10
     rendered_table = {r["key"]: r["where"]
                       for r in coverage["table_props"]["rows"]
                       if r["status"] == "rendered"}
@@ -700,3 +703,79 @@ def test_an_org_unit_may_own_tables_and_share_others(tmp_path):
                if n["id"] == "table:dw.gms_transaction")
     assert gms["well"] == "GMNS"
     assert set(gms["shared_with"]) == {"CRO", "SBS"}
+
+
+def test_metric_card_serves_the_real_catalog_fields():
+    """Every field the real governed and mined catalogs carry reaches
+    the metric card, labeled by its witness: the author's declared
+    base tables and products, the approval workflow, structured joins,
+    and the miner's shape, usage and category. The coverage ledger
+    holds metric props to the same rule as table props — a prop on a
+    metric node that no card serves fails the build."""
+    from sahs.compiler.cards import metric_card
+    from sahs.compiler.coverage import METRIC_RENDERED, METRIC_DEFERRED
+    metric = {
+        "id": "metric:abc", "label": "Approval Rate",
+        "source": "metrics_dmp",
+        "status": "certified", "status_served": "certified",
+        "evidence_origin": "governed_catalog", "fp": "abc",
+        "canonical_sql": "SELECT COUNT(*) FROM dw.gms_transaction",
+        "table": "dw.gms_transaction", "grain": "per account per day",
+        "grain_source": "catalog", "question": "How many approved?",
+        "question_source": "dmp", "author": "auth_a",
+        "author_id": "u-9", "requestor": "req_b", "domain": "Acq",
+        "line_of_business": "SBS",
+        "base_tables": ["dw.gms_transaction", "dw.wwcas_authorization"],
+        "data_owners": ["own_a@corp"],
+        "products": ["GMNS Spine"], "product_ids": ["DP-9"],
+        "approval": {"workflow_mode": "SEQUENTIAL", "current_cycle": 2,
+                     "reviewer_ids": ["rev_a"], "process_id": "ACE-7"},
+        "join_condition": "a.cm13 = b.card_no",
+        "join_conditions": [{"leftTable": "dw.gms_transaction",
+                             "leftKey": "cm13",
+                             "rightTable": "dw.wwcas_authorization",
+                             "rightKey": "card_no", "joinType": "LEFT",
+                             "onClause": "a.cm13 = b.card_no"}],
+        "agg_function": "SUM", "measure_column": "trans_usd_am",
+        "execution_count": 40, "query_count": 12, "confidence": "high",
+        "score": 0.87, "complexity_tier": 1,
+        "group_by_patterns": ["country_cd"], "common_filters": ["yr"],
+        "joined_tables": ["dw.wwcas_authorization"],
+        "business_unit": "CFR", "data_category": "Merchant Services",
+        "data_sub_category": "Payments",
+    }
+    card = metric_card(metric, [])
+    for line in (
+        "- domain: Acq · lob: SBS · author: auth_a · author id: u-9 · "
+        "requestor: req_b [prov:metrics_dmp]",
+        "- reads: dw.gms_transaction, dw.wwcas_authorization "
+        "(author-declared) [prov:dmp]",
+        "- data owners: own_a@corp [prov:dmp]",
+        "- data products: GMNS Spine (DP-9) [prov:dmp]",
+        "- approval: sequential · cycle 2 · reviewers rev_a · "
+        "process ACE-7 [prov:dmp]",
+        "- declared join condition: `a.cm13 = b.card_no` [prov:dmp]",
+        "- structured join: dw.gms_transaction.cm13 = "
+        "dw.wwcas_authorization.card_no (left) on `a.cm13 = b.card_no` "
+        "[prov:dmp]",
+        "- mined shape: SUM(trans_usd_am) [prov:catalog_mined]",
+        "- mined usage: 40 executions · 12 queries · miner confidence "
+        "high · score 0.87 · complexity 1 · grouped by country_cd · "
+        "filtered on yr · joined with dw.wwcas_authorization "
+        "[prov:catalog_mined]",
+        "- mined category: unit CFR · Merchant Services › Payments "
+        "[prov:catalog_mined]",
+    ):
+        assert line in card, line
+    # an enriched answer says how sure the enricher was, and its caveat
+    enriched = dict(metric, question="Guessed?",
+                    question_source="llm_enriched",
+                    enrich_confidence=0.72, enrich_caveat="thin sample")
+    card = metric_card(enriched, [])
+    assert "[prov:llm_enriched·unreviewed·conf=0.72]" in card
+    assert "- caveat: thin sample [prov:llm_enriched·unreviewed]" in card
+    # the ledger's two maps are disjoint and name every field above
+    assert not set(METRIC_RENDERED) & set(METRIC_DEFERRED)
+    for key in ("base_tables", "approval", "join_conditions",
+                "agg_function", "score", "enrich_caveat"):
+        assert key in METRIC_RENDERED, key

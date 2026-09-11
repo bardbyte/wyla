@@ -819,3 +819,23 @@ def test_a_shared_row_without_a_home_row_is_named_in_the_report(
     with pytest.raises(ValueError, match="role 'borrowed' is not one of"):
         LobRow(lob_code="CFR", physical="dw.b", role="borrowed",
                verified_by="t", verified_on="2026-09-11")
+
+
+def test_the_two_glossary_views_are_deferred_with_a_reason(tmp_path):
+    """glossary_terms.csv and potential_common_word_acronyms.csv are
+    views of data_cleaned.csv; loading them would duplicate rows the
+    graph already holds. They must read as DEFERRED with that reason,
+    never as inventoried — a file on the dock with no label."""
+    from sahs.loaders.ledger import UtilizationLedger
+    src = tmp_path / "sources"
+    src.mkdir()
+    for name in ("glossary_terms.csv",
+                 "potential_common_word_acronyms.csv"):
+        (src / name).write_text("Symbol,Definition\n", encoding="utf-8")
+    rows = UtilizationLedger().build([src])
+    status = {Path(r["path"]).name: (r["status"], r.get("reason", ""))
+              for r in rows}
+    for name in ("glossary_terms.csv",
+                 "potential_common_word_acronyms.csv"):
+        assert status[name][0] == "deferred", status[name]
+        assert "data_cleaned.csv" in status[name][1]

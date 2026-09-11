@@ -23,6 +23,15 @@ from typing import Any
 
 # pinned deliberate deferrals (exact filename → reason)
 DEFERRALS: tuple[tuple[str, str], ...] = (
+    ("glossary_terms.csv",
+     "a filtered view of data_cleaned.csv (Entry_Type = Glossary "
+     "Term): its rows are already in the graph from the consolidated "
+     "file; loading it again would duplicate them"),
+    ("potential_common_word_acronyms.csv",
+     "a review subset of data_cleaned.csv (symbols that read as "
+     "ordinary words): every row is already in the graph from the "
+     "consolidated file; its one extra fact — the ambiguity flag — "
+     "awaits a common_word marker on the acr: node"),
     ("audit_30d.jsonl.gz",
      "corroboration digests only: raw audit gz unread by design "
      "(two witnesses of the same events don't vote twice)"),
