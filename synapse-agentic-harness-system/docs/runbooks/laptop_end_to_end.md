@@ -64,8 +64,10 @@ synapse-agentic-harness-system/
 │   ├── identity/lob_map.jsonl         # YOU author — line-of-business map
 │   │   # {"lob_code": "GMNS", "lob_name": "…", "physical": "dw.<t>",
 │   │   #  "verified_by": …, "verified_on": …, "notes": "",
-│   │   #  "aliases": [<catalog spellings of the same LOB>]} — one row
-│   │   # per (LOB, table); multi-membership = several rows. Strict:
+│   │   #  "aliases": [<catalog spellings of the same LOB>],
+│   │   #  "role": "home" | "shared"} — one row per (LOB, table);
+│   │   # multi-membership = several rows, one home + N shared
+│   │   # (docs/runbooks/onboarding_tables.md). Strict:
 │   │   # physical must be a crosswalk row. Steward witness; the
 │   │   # catalogs corroborate with their own witnesses via aliases.
 │   ├── identity/org_map.jsonl         # YOU author — org units

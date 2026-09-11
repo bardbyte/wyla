@@ -520,11 +520,23 @@ def build_lob_facts(lob_rows: list[dict[str, Any]],
     for lob in sorted(lob_rows, key=lambda r: str(r.get("code")
                                                   or r.get("lob"))):
         code = str(lob.get("code") or lob.get("lob") or "?")
+        roles = lob.get("table_roles") or {}
         tables = []
         for physical in lob.get("tables", []):
             facts = table_facts.get(physical, {})
+            role = roles.get(physical, "")
+            # a shared table names the LOB it is shared FROM — its
+            # home per the steward — so the shelf reads as a shelf:
+            # "this is ours" beside "this we borrow from GMNS"
+            home_lob = ""
+            if role == "shared":
+                home_lob = next(
+                    (m["code"] for m in facts.get("business", {})
+                     .get("lobs", []) if m.get("role") == "home"), "")
             tables.append(_kept({
                 "physical": physical,
+                "role": role,
+                "home_lob": home_lob,
                 "business_name": facts.get("identity", {})
                 .get("business_name", ""),
                 "description": facts.get("identity", {})
@@ -538,6 +550,8 @@ def build_lob_facts(lob_rows: list[dict[str, Any]],
                 .get("business_unit", ""),
             }))
         witnessed = sum(1 for t in tables if t.get("metrics_here"))
+        shared = [t["physical"] for t in tables
+                  if t.get("role") == "shared"]
         owners: dict[str, set[str]] = defaultdict(set)
         for t in tables:
             for o in table_facts.get(t["physical"], {}).get(
@@ -546,6 +560,7 @@ def build_lob_facts(lob_rows: list[dict[str, Any]],
         out.append(_kept({
             "code": code,
             "name": lob.get("name", ""),
+            "shared_tables": shared,
             "kind": lob.get("kind", "lob"),
             "parent": lob.get("parent", ""),
             "domains": lob.get("domains", []),

@@ -231,6 +231,13 @@ def emit_expressions(pairs: list[tuple[ExpressionRecord, CanonResult]],
                     record.extra.get("joined_tables") or [],
                 "business_unit": record.extra.get("business_unit") or "",
                 "data_category": record.extra.get("data_category") or "",
+                "data_sub_category":
+                    record.extra.get("data_sub_category") or "",
+                "agg_function": record.extra.get("agg_function") or "",
+                "measure_column": record.extra.get("measure_column") or "",
+                "query_count": record.extra.get("query_count"),
+                "complexity_tier": record.extra.get("complexity_tier"),
+                "score": record.extra.get("score"),
                 # Studio-export texture (observed SQL shape + lineage
                 # mismatch + stewardship contacts). grain_observed is
                 # DELIBERATELY outside the identity fingerprint: the

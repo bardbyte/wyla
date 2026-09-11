@@ -44,6 +44,7 @@ number the agent reasoned from are the same number by construction.
 | rows · bytes · partitions · schema | BQ `13_table_metrics`, `10_partitions`, schema node | `total_rows`, `table_metrics`, `n_partitions`, `partition_latest`, `schema_fingerprint` | `operations.*`, `identity.schema_fingerprint` | `## grain` | IDENTITY & GRAIN | `list_tables[].rows` |
 | **business unit** | MDM `pipeline.business_unit` | `business_unit` | `business.business_unit` | header line 4 | IDENTITY & GRAIN, Explorer › tables | `list_tables[].business_unit` |
 | line of business (+ witnesses) | steward `lob_map`, dmp/gmns `lineOfBusiness` | `in_lob` edges | `business.lobs[]` | `- line of business:` | WHO (link → unit profile) | `list_tables(lob=…)`, `read_card("lob:…")` |
+| **home vs shared membership** | steward `lob_map.role` | `role` prop on the steward `in_lob` edge | `business.lobs[].role` | `(home; steward)` / `(shared; steward)` when >1 membership | WHO row `· home` / `· shared`; Cosmos home well + gold tether, rail `★ home X · shared with Y` | `list_tables[].lobs` |
 | who runs queries | mined `business_unit` via `org_map` | `used_by` edges | `business.used_by[]` | `- used by:` | WHO | card, lob card |
 | **owners with roles + witnesses** | Atlas `ownership` (per role), MDM `ownership.json` | `owned_by` edges, `ownership_atlas` | `business.owners[]`, `business.ownership_ids` | `- owner:` (chain) | WHO | `list_tables[].owner` |
 | top users | BQ `jobs_top_users` | `top_users` | `business.top_users[]` | `## trust & operations` | WHO | card |
@@ -84,6 +85,7 @@ section, a profile card, and (where relevant) a tool.
 | code · name · kind · parent | steward `lob_map` / `org_map` | `code/name/kind/parent` | title + line 1 | list row | `read_card("lob:<code>")`, `list_tables(lob=)` |
 | metric domains | dmp `metricDomain` via `in_lob` | `domains` | line 1 | — | card |
 | tables as a shelf (business name, description, tier, metrics, lifecycle, PII, MDM unit) | table facts | `tables[]` | `## tables` with `read_card` addresses | unit profile TABLES | card |
+| shared tables (owned elsewhere, used here) | steward `lob_map.role=shared` | `tables[].role`, `tables[].home_lob`, `shared_tables[]` | `- shared: N of M …` + `shared from GMNS` per row | TABLES label count + `shared from GMNS` chip | card |
 | readiness | compiled (witnessed metric per table) | `readiness{pct}` | line 2 | list WITNESSED column | SYNAPSE.md `## business units` |
 | usage (who runs queries) | mined `business_unit` via `used_by` | `used_tables`, `usage_support` | `## queries these tables` | list USAGE | card |
 | owners across tables | Atlas + MDM `owned_by` | `owners[]` | `## owners` | unit profile OWNERS | card |

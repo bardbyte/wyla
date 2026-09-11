@@ -126,6 +126,10 @@ def graph_hash(graph_root: Path) -> str:
     return digest.hexdigest()[:12]
 
 
+def _kept_row(row: dict) -> dict:
+    return {k: v for k, v in row.items() if v not in ("", None)}
+
+
 def compile_build(graph_root: Path, builds_root: Path
                   ) -> tuple[Path, dict[str, Any], list[str]]:
     """→ (build_dir, manifest, gate_failures). CURRENT moves only when
@@ -421,14 +425,21 @@ def compile_build(graph_root: Path, builds_root: Path
                  if nid.startswith("lob:")}
     lob_tables: dict[str, dict[str, dict[str, int]]] = {}
     lob_domains: dict[str, set[str]] = {}
+    # (lob, table) → home | shared, from the STEWARD edge alone: a
+    # catalog corroborating membership says "this table serves this
+    # LOB", never which kind of membership it is
+    lob_roles: dict[str, dict[str, str]] = {}
     for (s, r, o, w), quad in sorted(edges.items()):
         if r != "in_lob" or quad.prov.status != "active":
             continue
         family = w or "unknown"
         if s.startswith("table:"):
-            cell = lob_tables.setdefault(o, {}).setdefault(
-                s.split(":", 1)[1], {})
+            physical = s.split(":", 1)[1]
+            cell = lob_tables.setdefault(o, {}).setdefault(physical, {})
             cell[family] = cell.get(family, 0) + (quad.prov.support or 1)
+            if family == "steward":
+                lob_roles.setdefault(o, {})[physical] = str(
+                    quad.props.get("role") or "home")
         elif s.startswith("mdom:"):
             lob_domains.setdefault(o, set()).add(s.split(":", 1)[1])
     # usage plane (used_by): who RUNS the queries — aggregated per
@@ -464,6 +475,13 @@ def compile_build(graph_root: Path, builds_root: Path
             "kind": (rec.props.get("kind", "lob") if rec else "lob"),
             "parent": (rec.props.get("parent", "") if rec else ""),
             "tables": sorted(lob_tables.get(lid, {})),
+            # the steward's word on WHICH KIND of membership each is;
+            # a table here without a steward row was corroborated by a
+            # catalog only and carries no role
+            "table_roles": dict(sorted(lob_roles.get(lid, {}).items())),
+            "shared_tables": sorted(
+                t for t, role in lob_roles.get(lid, {}).items()
+                if role == "shared"),
             "domains": sorted(lob_domains.get(lid, set())),
             "used_tables": sorted(usage_tables.get(lid, {})),
             "usage_support": sum(usage_tables.get(lid, {}).values()),
@@ -472,12 +490,15 @@ def compile_build(graph_root: Path, builds_root: Path
     for lid, per_table in sorted(lob_tables.items()):
         rec = lob_nodes.get(lid)
         for physical, witnesses in sorted(per_table.items()):
-            lob_by_table[physical].append({
+            lob_by_table[physical].append(_kept_row({
                 "code": ((rec.props.get("code") if rec else "")
                          or lid.split(":", 1)[1]),
                 "name": (rec.props.get("name", "") if rec else ""),
                 "witnesses": dict(sorted(witnesses.items())),
-            })
+                # home | shared when the steward said; absent when only
+                # a catalog corroborated the membership
+                "role": lob_roles.get(lid, {}).get(physical, ""),
+            }))
 
     # ── cards ──
     budget: dict[str, Any] = {"over_budget": 0, "dropped": {}}

@@ -649,3 +649,34 @@ def test_governed_metric_catalog_reads_the_real_export_schema(
                                  reviewers=None)]}), encoding="utf-8")
     assert _dmp_path(src).name == "metrics_dmp.json"   # exact wins
     assert load_metrics_dmp(_dmp_path(src))[0][0].extra["approval"] == {}
+
+
+def test_measures_catalog_reads_the_six_keys_the_real_file_carries(
+        tmp_path: Path):
+    """The real measures_catalog.json carries twenty keys per measure;
+    the fixture never had six of them, so the loader never read them:
+    what the aggregate IS (agg_function + column), the finer category,
+    and the miner's own ranking (query_count, complexity_tier, score).
+    Every one now reaches the record."""
+    from sahs.loaders.sources.catalogs import load_measures_catalog
+    src = tmp_path / "measures_catalog.json"
+    src.write_text(json.dumps({"measures": [{
+        "id": "m1", "name": "Total USD", "table": "dw.gms_transaction",
+        "expression": "SUM(trans_usd_am)", "agg_function": "SUM",
+        "column": "trans_usd_am", "confidence": "high",
+        "execution_count": 40, "user_count": 3, "query_count": 12,
+        "first_seen": "2026-06-01", "last_seen": "2026-08-30",
+        "group_by_patterns": ["country_cd"], "common_filters": [],
+        "joined_tables": [], "business_unit": "GMNS",
+        "data_category": "Merchant Services",
+        "data_sub_category": "Payments",
+        "complexity_tier": 1, "score": 0.87}]}), encoding="utf-8")
+    records, quarantined = load_measures_catalog(src)
+    assert not quarantined and len(records) == 1
+    extra = records[0].extra
+    assert extra["agg_function"] == "SUM"
+    assert extra["measure_column"] == "trans_usd_am"
+    assert extra["data_sub_category"] == "Payments"
+    assert extra["query_count"] == 12
+    assert extra["complexity_tier"] == 1
+    assert extra["score"] == 0.87

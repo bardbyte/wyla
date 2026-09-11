@@ -76,10 +76,20 @@ def build_graph_map(consensus: dict[str, Any],
     lobs = sorted(lob_rows, key=lambda r: str(r.get("code")
                                               or r.get("lob") or ""))
     table_wells: dict[str, list[str]] = {}
+    shared_in: dict[str, set[str]] = {}
     for row in lobs:
         code = str(row.get("code") or row.get("lob") or "?")
         for physical in row.get("tables", []):
             table_wells.setdefault(physical, []).append(code)
+        for physical in row.get("shared_tables", []):
+            shared_in.setdefault(physical, set()).add(code)
+    # a body sits in its HOME well; the wells that share it get a
+    # tether. Without the steward's role the first mapped LOB is the
+    # home — the previous behaviour, kept for catalog-only membership
+    for physical, codes in table_wells.items():
+        order = {c: i for i, c in enumerate(codes)}
+        shared = shared_in.get(physical, set())
+        codes.sort(key=lambda c: (c in shared, order[c]))
     # only domains that actually hold something get a well — an empty
     # domain is not information the sky should showcase (org rows with
     # no tables would otherwise render "0 tables · 0% witnessed")
@@ -151,6 +161,9 @@ def build_graph_map(consensus: dict[str, Any],
                 physical in table_wells),
             "usage": usage, "well": well,
             "star": len(set(my_wells)) >= 2,
+            # the wells that SHARE this body, home excluded — the rail
+            # reads "home GMNS · shared with SBS"
+            "shared_with": sorted(set(my_wells[1:])),
             "pos": pos,
             "columns": len(getattr(consensus.get(
                 f"table:{physical}", None), "columns", {}) or {})
@@ -201,7 +214,10 @@ def build_graph_map(consensus: dict[str, Any],
                                   or ["UNMAPPED"])):
             map_edges.append({"a": f"table:{physical}",
                               "b": f"domain:{well_id}",
-                              "kind": "membership"})
+                              "kind": "membership",
+                              "role": ("shared" if well_id in
+                                       shared_in.get(physical, set())
+                                       else "home")})
 
     return {
         "schema": "meridian.graph_map/1",

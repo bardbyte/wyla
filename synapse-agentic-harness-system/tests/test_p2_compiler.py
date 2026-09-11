@@ -169,7 +169,14 @@ def test_lob_index_joins_sources_and_pedigree_serving(tmp_path):
     assert by_code["gmns"]["tables"] == ["dw.gms_transaction",
                                          "dw.wwcas_authorization"]
     assert by_code["gmns"]["domains"] == ["merchant"]
-    assert by_code["sbs"]["tables"] == ["dw.sbs_new_accounts"]
+    # SBS holds its own table AND the GMNS spine it is shared; the
+    # steward's role rides on the index so a reader can tell which
+    assert by_code["sbs"]["tables"] == ["dw.gms_transaction",
+                                        "dw.sbs_new_accounts"]
+    assert by_code["sbs"]["table_roles"] == {
+        "dw.gms_transaction": "shared", "dw.sbs_new_accounts": "home"}
+    assert by_code["sbs"]["shared_tables"] == ["dw.gms_transaction"]
+    assert by_code["gmns"]["shared_tables"] == []
     # the usage plane compiled: the CRO org unit (child of SBS) with
     # its used tables; the LOB's own usage rides on the gmns row
     assert by_code["cro"]["kind"] == "org_unit"
@@ -189,8 +196,9 @@ def test_lob_index_joins_sources_and_pedigree_serving(tmp_path):
 
     gms_card = (build_dir / "cards" / "tables"
                 / "dw__gms_transaction.md").read_text()
+    # two memberships now, so each names its kind: home for GMNS
     assert ("- line of business: GMNS: Global Merchant & Network "
-            "Services (steward; corroborated by") in gms_card
+            "Services (home; steward; corroborated by") in gms_card
     assert "payment_detail.card.network" in gms_card   # nested, full path
     assert "- used by: " in gms_card
     wwcas_card = (build_dir / "cards" / "tables"
@@ -580,3 +588,44 @@ def test_unscoped_vocabulary_counts_toward_no_business_unit():
                             {"code": "GSG", "tables": []}], {}, rows)
     counts = {r["code"]: r.get("vocabulary_entries", 0) for r in lobs}
     assert counts == {"GMNS": 1, "GSG": 1}
+
+
+def test_a_shared_table_reads_as_shared_on_every_surface(tmp_path):
+    """The cross-LOB shape: GMNS owns the spine, SBS uses it. One
+    steward row with role=shared, and every surface says so in its
+    own words — the table card names which membership is home, the
+    SBS shelf says "shared from GMNS", the GMNS shelf does not, and the
+    cosmos places the body in its HOME well with a tether to the
+    sharing well. The agent and the human read one relationship, not
+    two equal claims."""
+    _, build_dir, _ = _compiled(tmp_path)
+    facts = {json.loads(x)["physical"]: json.loads(x) for x in
+             (build_dir / "indexes" / "tables.jsonl")
+             .read_text().splitlines()}
+    lobs = facts["dw.gms_transaction"]["business"]["lobs"]
+    assert {(m["code"], m.get("role")) for m in lobs} == {
+        ("GMNS", "home"), ("SBS", "shared")}
+    card = (build_dir / "cards" / "tables"
+            / "dw__gms_transaction.md").read_text()
+    assert "GMNS: Global Merchant & Network Services (home; steward" in card
+    assert "SBS: Small Business Services (shared; steward" in card
+    sbs = (build_dir / "cards" / "lob" / "sbs.md").read_text()
+    assert "shared: 1 of 2 tables are shared from another LOB" in sbs
+    assert "dw.gms_transaction — Merchant Transactions" in sbs
+    assert "shared from GMNS" in sbs
+    gmns = (build_dir / "cards" / "lob" / "gmns.md").read_text()
+    assert "shared from" not in gmns
+    sky = json.loads((build_dir / "indexes" / "graph_map.json")
+                     .read_text())
+    spine = next(n for n in sky["nodes"]
+                 if n["id"] == "table:dw.gms_transaction")
+    assert spine["well"] == "GMNS" and spine["star"] is True
+    assert spine["shared_with"] == ["SBS"]
+    tethers = {(e["b"], e["role"]) for e in sky["edges"]
+               if e["kind"] == "membership"
+               and e["a"] == "table:dw.gms_transaction"}
+    assert tethers == {("domain:GMNS", "home"), ("domain:SBS", "shared")}
+    # a single-LOB table does not narrate a role it does not need
+    wwcas = (build_dir / "cards" / "tables"
+             / "dw__wwcas_authorization.md").read_text()
+    assert "(home;" not in wwcas

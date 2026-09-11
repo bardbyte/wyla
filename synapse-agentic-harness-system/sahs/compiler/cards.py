@@ -38,9 +38,14 @@ def _lob_line(lob_info: list[dict[str, Any]]) -> str:
     by 12 dmp metrics)`. Multi-membership renders every entry; the card
     never picks a winner."""
     rendered = []
+    # name the kind of membership only when there is more than one —
+    # on a single-LOB table "home" says nothing the reader needs
+    say_role = len(lob_info) > 1
     for entry in lob_info:
         witnesses = entry.get("witnesses", {})
         notes = []
+        if say_role and entry.get("role"):
+            notes.append(entry["role"])
         if "steward" in witnesses:
             notes.append("steward")
         if witnesses.get("dmp"):
@@ -536,6 +541,11 @@ def lob_card(lob: dict[str, Any]) -> str:
             f"- vocabulary: {lob['vocabulary_entries']} Acropedia "
             f"entries scoped to {code} → search_semantics(kind=vocab) "
             "[prov:glossary]")
+    if lob.get("shared_tables"):
+        lines.append(
+            f"- shared: {len(lob['shared_tables'])} of "
+            f"{len(lob.get('tables', []))} tables are shared from "
+            "another LOB — owned elsewhere, used here [prov:in_lob]")
     lines.append("## tables")
     if not lob.get("tables"):
         lines.append("- none steward-mapped: read the used tables below")
@@ -552,6 +562,8 @@ def lob_card(lob: dict[str, Any]) -> str:
             bits.append("PII")
         if t.get("business_unit") and t["business_unit"] != code:
             bits.append(f"MDM unit {t['business_unit']}")
+        if t.get("role") == "shared":
+            bits.append("shared from " + (t.get("home_lob") or "another LOB"))
         bits.append(f'read_card("table:{t["physical"]}")')
         lines.append("- " + " · ".join(bits) + " [prov:in_lob]")
     if lob.get("used_tables"):

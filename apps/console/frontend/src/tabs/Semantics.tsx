@@ -833,7 +833,9 @@ function TableProfile({ physical, onBack, onMetric, onTable, onLob }: {
                 {l.code}{l.name ? ` — ${l.name}` : ""}
               </button>
               <span className="m-muted">
-                line of business · {Object.entries(l.witnesses)
+                line of business
+                {(biz.lobs ?? []).length > 1 && l.role && ` · ${l.role}`}
+                {" · "}{Object.entries(l.witnesses)
                   .map(([w, n]) => `${w}${n > 1 ? ` ×${n}` : ""}`).join(", ")}
               </span>
             </div>
@@ -1089,7 +1091,11 @@ function LobProfile({ code, onBack, onTable }: {
       </div>
 
       <div className="m-card">
-        <div className="m-card-label">TABLES — the shelf</div>
+        <div className="m-card-label">
+          TABLES — the shelf
+          {(l.shared_tables ?? []).length > 0 &&
+            ` · ${l.shared_tables!.length} shared from another LOB`}
+        </div>
         {l.tables.length === 0 && (
           <span className="m-muted">none steward-mapped; see the tables it queries below</span>
         )}
@@ -1110,6 +1116,12 @@ function LobProfile({ code, onBack, onTable }: {
                 {t.pii && <span className="m-chip m-chip-pii">⊘ PII</span>}
                 {t.business_unit && t.business_unit !== l.code && (
                   <span className="m-chip m-chip-soft">MDM unit {t.business_unit}</span>
+                )}
+                {t.role === "shared" && (
+                  <span className="m-chip m-chip-soft"
+                    title="owned by another LOB, used by this unit">
+                    shared from {t.home_lob || "another LOB"}
+                  </span>
                 )}
               </span>
             </div>

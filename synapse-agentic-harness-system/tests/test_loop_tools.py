@@ -251,7 +251,8 @@ def test_list_tables_filters_on_the_steward_lob_map(kit):
                  if t["table"] == "dw.gms_transaction")
     assert spine["business_name"] == "Merchant Transactions"
     assert spine["business_unit"] == "GMNS"
-    assert spine["lobs"] == ["GMNS"] and spine["pii"] is True
+    # the spine is GMNS's and shared with SBS — both memberships list
+    assert spine["lobs"] == ["GMNS", "SBS"] and spine["pii"] is True
     assert "lifecycle certified" in spine["readiness"]
     # an org unit answers through its used_tables
     cro = tools["list_tables"].fn(lob="cro")

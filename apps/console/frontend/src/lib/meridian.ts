@@ -184,7 +184,10 @@ export interface TableFacts extends Record<string, unknown> {
   business: {
     business_unit?: string; business_units?: string[];
     lobs?: { code: string; name?: string;
-             witnesses: Record<string, number> }[];
+             witnesses: Record<string, number>;
+             /** home | shared per the steward; absent when only a
+              * catalog corroborated the membership */
+             role?: "home" | "shared" }[];
     used_by?: { code: string; name?: string; parent?: string;
                 support: number }[];
     owners?: OwnerFact[];
@@ -236,11 +239,14 @@ export interface LobTableFact {
   physical: string; business_name?: string; description?: string;
   tier?: MeridianTier | ""; metrics_here?: number;
   lifecycle?: string | null; pii?: boolean; business_unit?: string;
+  /** shared: owned by home_lob, used by this unit */
+  role?: "home" | "shared"; home_lob?: string;
 }
 
 export interface LobFacts {
   code: string; name?: string; kind: string; parent?: string;
   domains?: string[]; tables: LobTableFact[]; used_tables?: string[];
+  shared_tables?: string[];
   usage_support?: number;
   readiness?: { tables: number; witnessed: number; pct: number };
   owners?: { owner: string; roles: string[] }[];

@@ -562,7 +562,16 @@ def test_lob_layer_steward_declares_catalogs_corroborate(tmp_path):
     manifest = json.loads((graph_dir / "runs" / "test_r1" /
                            "manifest.json").read_text())
     assert manifest["reports"]["lob_map"] == {
-        "lobs": 2, "memberships": 3, "duplicate_rows": 0}
+        "lobs": 2, "memberships": 4, "duplicate_rows": 0,
+        "shared_memberships": 1}
+    # the steward's role rides on the edge; a catalog corroboration of
+    # the same membership carries none (it cannot know which kind)
+    role_of = {(q.s, q.o, q.prov.witness): q.props.get("role")
+               for q in graph.iter_edges("in_lob")}
+    assert role_of[("table:dw.gms_transaction", "lob:sbs",
+                    "steward")] == "shared"
+    assert role_of[("table:dw.gms_transaction", "lob:gmns",
+                    "steward")] == "home"
     assert manifest["reports"]["org_map"] == {"org_units": 1}
     ex = manifest["reports"]["expressions"]
     assert ex["used_by_edges"] >= 2

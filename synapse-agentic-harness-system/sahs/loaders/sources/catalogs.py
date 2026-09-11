@@ -268,5 +268,15 @@ def load_measures_catalog(path: Path) -> tuple[list[ExpressionRecord],
                    "common_filters": row.get("common_filters"),
                    "joined_tables": row.get("joined_tables"),
                    "business_unit": row.get("business_unit"),
-                   "data_category": row.get("data_category")}))
+                   "data_category": row.get("data_category"),
+                   # the six the real catalog carries that the fixture
+                   # never did: what the aggregate IS (function +
+                   # column), how the miner ranked it, and the finer
+                   # category
+                   "data_sub_category": row.get("data_sub_category"),
+                   "agg_function": row.get("agg_function"),
+                   "measure_column": row.get("column"),
+                   "query_count": row.get("query_count"),
+                   "complexity_tier": row.get("complexity_tier"),
+                   "score": row.get("score")}))
     return records, quarantined

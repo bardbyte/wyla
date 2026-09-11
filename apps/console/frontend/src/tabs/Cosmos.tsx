@@ -14,12 +14,15 @@ interface MapNode {
   id: string; label: string; kind: "table" | "metric";
   tier: "ha" | "gr" | "in" | "gu"; usage: number; well: string;
   star: boolean; pos: [number, number, number];
+  /** wells that share this body, its home well excluded */
+  shared_with?: string[];
   columns?: number | null; metrics_here?: number; status?: string;
   business_name?: string; business_unit?: string; lifecycle?: string;
   pii?: boolean; description?: string;
 }
 interface MapEdge {
   a: string; b: string; kind: string; source?: string; scope?: string;
+  role?: "home" | "shared";
 }
 interface Well {
   id: string; label: string; sub: string;
@@ -37,7 +40,7 @@ const TIER_COLOR: Record<MapNode["tier"], number> = {
 const TIER_GLOW: Record<MapNode["tier"], number> = {
   ha: 0.9, gr: 0.55, in: 0.45, gu: 0.15,
 };
-const EDGE_KINDS = ["joins", "computed-from", "all"] as const;
+const EDGE_KINDS = ["joins", "computed-from", "membership", "all"] as const;
 
 export function CosmosTab() {
   const stage = useRef<HTMLDivElement>(null);
@@ -109,10 +112,15 @@ export function CosmosTab() {
     const positions = new Map(
       payload.nodes.map((n) => [n.id, new THREE.Vector3(...n.pos)]));
     edgeGroups.current = {};
-    for (const kind of ["joins", "computed-from"]) {
+    // membership tethers: only a body held by more than one well
+    // draws them — a star's second tether IS its story, and a
+    // single-home tether would just underline the well it sits in
+    const multi = new Set(payload.nodes.filter((n) => n.star).map((n) => n.id));
+    for (const kind of ["joins", "computed-from", "membership"]) {
       const points: THREE.Vector3[] = [];
       for (const edge of payload.edges) {
         if (edge.kind !== kind) continue;
+        if (kind === "membership" && !multi.has(edge.a)) continue;
         const a = positions.get(edge.a);
         const b = positions.get(edge.b);
         if (a && b) points.push(a, b);
@@ -120,8 +128,9 @@ export function CosmosTab() {
       const geometry = new THREE.BufferGeometry().setFromPoints(points);
       const line = new THREE.LineSegments(geometry,
         new THREE.LineBasicMaterial({
-          transparent: true, opacity: kind === "joins" ? 0.35 : 0.16,
-          color: dark ? 0x8fa8d8 : 0x9aa8c0,
+          transparent: true,
+          opacity: kind === "joins" ? 0.35 : kind === "membership" ? 0.28 : 0.16,
+          color: kind === "membership" ? 0xe8c98a : dark ? 0x8fa8d8 : 0x9aa8c0,
         }));
       edgeGroups.current[kind] = line;
       root.add(line);
@@ -301,7 +310,9 @@ export function CosmosTab() {
                 {picked.business_unit && ` · MDM unit ${picked.business_unit}`}
                 {picked.lifecycle && ` · ${picked.lifecycle}`}
                 {picked.pii && " · ⊘ PII"}
-                {picked.star && " · ★ held by multiple domains"}
+                {picked.star && (picked.shared_with?.length
+                  ? ` · ★ home ${picked.well} · shared with ${picked.shared_with.join(", ")}`
+                  : " · ★ held by multiple domains")}
               </div>
               <div className="m-muted">
                 usage <span className="m-mono">{picked.usage}</span>
