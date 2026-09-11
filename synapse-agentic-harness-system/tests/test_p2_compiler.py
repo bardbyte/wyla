@@ -629,3 +629,74 @@ def test_a_shared_table_reads_as_shared_on_every_surface(tmp_path):
     wwcas = (build_dir / "cards" / "tables"
              / "dw__wwcas_authorization.md").read_text()
     assert "(home;" not in wwcas
+
+
+def test_an_org_unit_may_own_tables_and_share_others(tmp_path):
+    """CFR's shape: an org unit under a parent LOB (who QUERIES, per
+    org_map) that also OWNS tables and is SHARED others (per lob_map
+    rows under the same code). Both files name one node; the fold
+    merges them. The unit's card must then read as an org unit with a
+    parent AND carry a shelf with home and shared rows, its own well
+    in the sky, and its mined usage — one unit, three facts."""
+    import shutil
+    ident = tmp_path / "identity"
+    shutil.copytree(FX / "identity", ident)
+    with (ident / "lob_map.jsonl").open("a", encoding="utf-8") as f:
+        # CRO (org unit, parent SBS) now owns wwcas and shares gms
+        f.write(json.dumps({
+            "lob_code": "CRO", "lob_name": "Credit Risk Ops",
+            "physical": "dw.wwcas_authorization", "role": "home",
+            "verified_by": "t", "verified_on": "2026-09-11"}) + "\n")
+        f.write(json.dumps({
+            "lob_code": "CRO", "lob_name": "Credit Risk Ops",
+            "physical": "dw.gms_transaction", "role": "shared",
+            "verified_by": "t", "verified_on": "2026-09-11"}) + "\n")
+    graph_dir = tmp_path / "graph"
+    result = subprocess.run(
+        [sys.executable, str(SILO / "scripts" / "laptop.py"),
+         "build-graph", "--graph", str(graph_dir),
+         "--crosswalk", str(ident / "crosswalk.jsonl"),
+         "--bq-archive", str(FX / "real_extractions_production"),
+         "--mdm-archive", str(FX / "mdm_46_patched_v2"),
+         "--sources-dir", str(FX / "sources"),
+         "--registry", str(FX / "sources" / "tables_registry.txt"),
+         "--out", str(tmp_path / "run"), "--plain", "--run-id", "org1"],
+        capture_output=True, text=True, cwd=SILO)
+    assert result.returncode == 0, result.stderr[-800:]
+    build_dir, _m, failures = compile_build(graph_dir, tmp_path / "builds")
+    assert not failures
+    build_dir = Path(build_dir)
+    lobs = {json.loads(x)["code"]: json.loads(x) for x in
+            (build_dir / "indexes" / "lobs.jsonl").read_text().splitlines()}
+    cro = lobs["CRO"]
+    assert cro["kind"] == "org_unit" and cro["parent"] == "SBS"
+    assert {t["physical"]: t.get("role") for t in cro["tables"]} == {
+        "dw.wwcas_authorization": "home", "dw.gms_transaction": "shared"}
+    assert cro["shared_tables"] == ["dw.gms_transaction"]
+    assert cro["used_tables"] == ["dw.wwcas_authorization"]   # usage kept
+    card = (build_dir / "cards" / "lob" / "cro.md").read_text()
+    assert card.startswith("# org unit CRO — Credit Risk Ops")
+    assert "parent LOB: SBS" in card
+    assert "shared: 1 of 2 tables are shared from another LOB" in card
+    assert "dw.gms_transaction — Merchant Transactions" in card
+    assert "shared from GMNS" in card
+    assert "## queries these tables" in card
+    sky = json.loads((build_dir / "indexes" / "graph_map.json").read_text())
+    assert "CRO" in {w["id"] for w in sky["wells"]}
+    wwcas = next(n for n in sky["nodes"]
+                 if n["id"] == "table:dw.wwcas_authorization")
+    # wwcas now has two HOME rows (GMNS from the fixture, CRO here).
+    # Legal but ambiguous: the sky places a body in one well and falls
+    # back to the first mapped code — alphabetical, so CRO. The build
+    # report NAMES the contested table so the steward decides which
+    # is home rather than the alphabet
+    assert wwcas["star"] is True and wwcas["well"] == "CRO"
+    manifest = json.loads((graph_dir / "runs" / "org1"
+                           / "manifest.json").read_text())
+    assert manifest["reports"]["lob_map"]["multiple_homes"] == [
+        "dw.wwcas_authorization"]
+    assert "shared_without_home" not in manifest["reports"]["lob_map"]
+    gms = next(n for n in sky["nodes"]
+               if n["id"] == "table:dw.gms_transaction")
+    assert gms["well"] == "GMNS"
+    assert set(gms["shared_with"]) == {"CRO", "SBS"}

@@ -222,4 +222,26 @@ def emit_lob_map(rows: list[LobRow], graph: GraphDir,
         if row.role == "shared":
             report["shared_memberships"] = report.get(
                 "shared_memberships", 0) + 1
+    # a shared row says "owned elsewhere" — if no home row exists for
+    # that table anywhere in the map, the owner is unrecorded and the
+    # sky has no home well to place it in. Counted and named, not
+    # refused: the steward may not know the owner yet, but must know
+    # that the map does not say
+    homes = {table_id(r.physical) for r in rows if r.role == "home"}
+    orphans = sorted({r.physical for r in rows
+                      if r.role == "shared"
+                      and table_id(r.physical) not in homes})
+    if orphans:
+        report["shared_without_home"] = orphans
+    # two HOME rows for one table is legal but ambiguous: the sky can
+    # place a body in one well only and falls back to the first mapped
+    # code. Named here so the steward can decide which is home and
+    # mark the other shared, instead of an alphabet deciding
+    home_count: dict[str, int] = {}
+    for r in rows:
+        if r.role == "home":
+            home_count[r.physical] = home_count.get(r.physical, 0) + 1
+    contested = sorted(t for t, n in home_count.items() if n > 1)
+    if contested:
+        report["multiple_homes"] = contested
     return report

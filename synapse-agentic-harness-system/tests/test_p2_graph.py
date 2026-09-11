@@ -785,3 +785,37 @@ def test_every_governed_metric_is_certified_whatever_its_status(
     # the catalog's own wording is still carried, unaltered, as
     # evidence — collapsing the SERVED state is not rewriting history
     assert [r.extra["status"] for r in records] == statuses
+
+
+def test_a_shared_row_without_a_home_row_is_named_in_the_report(
+        tmp_path: Path):
+    """"shared" means owned elsewhere. If no row anywhere says where,
+    the owner is unrecorded — the sky has no home well to place the
+    body in, and the unit shelf can only say "shared from another
+    LOB". The build names such tables rather than refusing: the
+    steward may not know the owner yet, but must know the map does
+    not say. A third role word does refuse."""
+    from sahs.graph.crosswalk import Crosswalk
+    from sahs.graph.lob import LobRow, emit_lob_map, load_lob_map
+    from sahs.graph.quads import GraphDir
+    cw = tmp_path / "crosswalk.jsonl"
+    cw.write_text("\n".join(json.dumps({
+        "physical": t, "verified_by": "t", "verified_on": "2026-09-11"})
+        for t in ("dw.a", "dw.b")) + "\n", encoding="utf-8")
+    lm = tmp_path / "lob_map.jsonl"
+    lm.write_text("\n".join(json.dumps(r) for r in [
+        {"lob_code": "CFR", "lob_name": "Credit & Fraud Risk",
+         "physical": "dw.a", "role": "home",
+         "verified_by": "t", "verified_on": "2026-09-11"},
+        {"lob_code": "CFR", "lob_name": "Credit & Fraud Risk",
+         "physical": "dw.b", "role": "shared",
+         "verified_by": "t", "verified_on": "2026-09-11"},
+    ]) + "\n", encoding="utf-8")
+    rows = load_lob_map(lm, Crosswalk.load(cw))
+    report = emit_lob_map(rows, GraphDir(tmp_path / "g"), "r1")
+    assert report["shared_memberships"] == 1
+    assert report["shared_without_home"] == ["dw.b"]
+    import pytest
+    with pytest.raises(ValueError, match="role 'borrowed' is not one of"):
+        LobRow(lob_code="CFR", physical="dw.b", role="borrowed",
+               verified_by="t", verified_on="2026-09-11")
