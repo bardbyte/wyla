@@ -185,6 +185,9 @@ def build_table_facts(
     policies_of: dict[str, dict[str, set[str]]] = defaultdict(
         lambda: defaultdict(set))
     domain_of: dict[str, list[dict[str, Any]]] = {}
+    # value → readings, mined; rides beside the profiled values on the
+    # SAME domain node, so one column has one domain with two witnesses
+    synonyms_of: dict[str, dict[str, list[str]]] = {}
     for (s, r, o, w), quad in sorted(edges.items()):
         if quad.prov.status != "active":
             continue
@@ -226,6 +229,7 @@ def build_table_facts(
             record = nodes.get(o)
             if record is not None:
                 domain_of[s] = list(record.props.get("values") or [])
+                synonyms_of[s] = dict(record.props.get("synonyms") or {})
     # domains are also reachable by node id alone (the loader mints
     # the node and the edge together; be robust to either)
     for node_id, record in nodes.items():
@@ -233,6 +237,9 @@ def build_table_facts(
             cid = "col:" + node_id.split(":", 1)[1]
             domain_of.setdefault(cid, list(record.props.get("values")
                                            or []))
+            if record.props.get("synonyms"):
+                synonyms_of.setdefault(
+                    cid, dict(record.props["synonyms"]))
 
     out: dict[str, dict[str, Any]] = {}
     for tid, table in sorted(consensus.items()):
@@ -255,6 +262,7 @@ def build_table_facts(
             crec = nodes.get(cid)
             cprops = crec.props if crec is not None else {}
             domain = domain_of.get(cid)
+            readings = synonyms_of.get(cid) or {}
             fk_targets = fks_by_col.get(cid, [])
             # a nested field path carries its description from BQ
             # alone — reconcile's Atlas-first/Lumi-second order has
@@ -297,11 +305,17 @@ def build_table_facts(
                 "approx_distinct": _int(cprops.get("approx_distinct")),
                 "null_count": _int(cprops.get("null_count")),
                 "profile_coverage": cprops.get("profile_coverage"),
-                "domain": ({"n_values": len(domain),
-                            "top": [{"value": v.get("value"),
-                                     "pct": v.get("pct")}
-                                    for v in domain[:3]]}
-                           if domain else None),
+                "domain": ({
+                    "n_values": len(domain),
+                    # a mined reading of THIS value rides beside it:
+                    # the profile says a value exists, the synonym
+                    # index says what it means
+                    "top": [_kept({"value": v.get("value"),
+                                   "pct": v.get("pct"),
+                                   "means": readings.get(
+                                       str(v.get("value")), [])})
+                            for v in domain[:3]],
+                    "n_read": len(readings)} if domain else None),
                 "terms": terms_of.get(cid, []),
                 "declared_terms": cprops.get("declared_terms") or [],
                 "derived_logic": cprops.get("derived_logic", ""),

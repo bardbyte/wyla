@@ -48,6 +48,13 @@ SOURCE_DISPLAY: dict[str, dict[str, str]] = {
         "chip": "Atlas MDM", "sub": "profile archive",
         "blurb": "Table profiling and field-level metadata from the "
                  "MDM extraction."},
+    "value_synonyms": {
+        "family": "acropedia",
+        "display": "Value Synonym Index",
+        "chip": "Value Synonyms", "sub": "mined",
+        "blurb": "Mined readings for stored codes — what `1` means in "
+                 "a column that holds it. Never outranks an authored "
+                 "column description."},
     "business_terms": {
         "family": "atlas_catalog",
         "display": "Atlas Data Federated Catalog",
@@ -170,6 +177,7 @@ UTILIZATION_PATTERNS: tuple[tuple[str, str], ...] = (
     ("extended_gmns", "extended_gmns"),
     ("studio_results", "studio_queries"),
     ("measures_catalog", "measures_catalog"),
+    ("low_cardinality_synonyms", "value_synonyms"),
     ("business_terms", "business_terms"),
     ("data_cleaned", "glossary"),
     ("std_tech", "std_tech_metadata"),

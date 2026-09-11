@@ -144,11 +144,27 @@ def _column_line(c: dict[str, Any]) -> str:
         parts.append(", ".join(texture))
     domain = c.get("domain")
     if domain:
-        top = ", ".join(
-            f"{v.get('value')} {v.get('pct')}%" if v.get("pct") is not None
-            else str(v.get("value")) for v in domain.get("top", []))
+        cells = []
+        for v in domain.get("top", []):
+            cell = str(v.get("value"))
+            # the mined reading, when there is one: a card that says
+            # `1 = KYC done` is the difference between a value the
+            # agent can filter on and a code it can only echo. It
+            # NEVER overrides the column's authored description —
+            # different grain, weaker witness — so it is marked mined.
+            means = v.get("means") or []
+            if means:
+                cell += f"={means[0]}"
+                if len(means) > 1:
+                    cell += f" (+{len(means) - 1})"
+            if v.get("pct") is not None:
+                cell += f" {v.get('pct')}%"
+            cells.append(cell)
+        top = ", ".join(cells)
+        read = domain.get("n_read") or 0
         parts.append(f"{domain['n_values']} known values"
                      + (f" ({top})" if top else "")
+                     + (f" · {read} read [prov:mined]" if read else "")
                      + " → sample_values")
     for term in c.get("terms", [])[:2]:
         line = f"term: {term.get('name', '?')}"

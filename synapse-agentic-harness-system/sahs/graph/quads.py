@@ -66,6 +66,9 @@ RANKING_WITNESSES = tuple(w for w in WITNESSES
 # explicitly (jobs_30d/audit_30d/user_variant/llm_enriched always do).
 SOURCE_WITNESS = {
     "measures_catalog": "catalog_mined",
+    # mined value readings ("1" = "KYC done") — never outranks an
+    # authored column description
+    "value_synonyms": "catalog_mined",
     "blue_insights": "snippet",
     "metrics_dmp": "dmp",
     "extended_gmns": "gmns",

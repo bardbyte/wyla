@@ -55,6 +55,9 @@ from sahs.loaders.sources.studio_csv import (                     # noqa: E402
     load_studio_csv,
     mine_join_witnesses,
 )
+from sahs.loaders.sources.value_synonyms import (
+    load_value_synonyms,
+)
 from sahs.loaders.sources.vocab import (                          # noqa: E402
     load_business_terms,
     load_glossary,
@@ -122,6 +125,16 @@ def _load_expressions(sources: Path, registry: TableRegistry,
     return records, quarantined, backlog
 
 
+def _synonyms_path(sources: Path) -> Path | None:
+    """The mined value-reading index, under its export name or a
+    suffixed one — same resilience as the governed catalog."""
+    exact = sources / "low_cardinality_synonyms_index.json"
+    if exact.exists():
+        return exact
+    matches = sorted(sources.glob("low_cardinality_synonyms*.json"))
+    return matches[-1] if matches else None
+
+
 def _dmp_path(sources: Path) -> Path | None:
     """The governed catalog ships under its plain name and under dated
     or suffixed export names (`metrics_dmp_recent.json`). Binding to
@@ -164,6 +177,11 @@ def _vocab_counts(sources: Path) -> tuple[dict[str, int],
     if p is not None:
         recs, quar = load_std_tech_metadata(p)
         counts["std_tech_metadata"] = len(recs)
+        quarantined.extend(quar)
+    p = _synonyms_path(sources)
+    if p is not None:
+        recs, quar = load_value_synonyms(p)
+        counts["value_synonyms"] = len(recs)
         quarantined.extend(quar)
     return counts, quarantined
 
@@ -308,6 +326,7 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
     from sahs.loaders.quads_emit import (
         emit_expressions,
         emit_std_tech,
+        emit_value_synonyms,
         emit_vocab,
     )
 
@@ -427,6 +446,20 @@ def cmd_build_graph(args: argparse.Namespace, console: RunConsole) -> int:
             entries = load_std_tech_metadata(std_path)[0]
             reports["std_tech"] = emit_std_tech(
                 entries, terms, graph, crosswalk, run_id)
+
+        # mined value readings LAST among the semantic sources: they
+        # attach to domain nodes the BQ profile minted and to columns
+        # the authored catalogs declared, so both must already exist.
+        # A reading for a column nobody declared is counted, not
+        # minted — the weakest witness never creates schema.
+        syn_path = _synonyms_path(sources)
+        if syn_path is not None:
+            console.emit("phase_start", phase="load:value_synonyms",
+                         detail=f"reading {syn_path.name}")
+            syn_records = load_value_synonyms(syn_path)[0]
+            reports["value_synonyms"] = emit_value_synonyms(
+                syn_records, graph, crosswalk, run_id)
+            ledger.consumed(syn_path)
 
     # jobs witness AFTER the semantic catalogs: a jobs sighting of an
     # already-governed metric is testimony, never a fresh seed (E7)

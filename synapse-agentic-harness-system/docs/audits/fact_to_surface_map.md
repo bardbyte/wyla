@@ -62,6 +62,7 @@ number the agent reasoned from are the same number by construction.
 | column descriptions (both planes) | Atlas › MDM › BQ | `description_*` | `column_facts[].description(+_supplementary)` | column line | COLUMNS | card |
 | column profile (distinct / null / length) | BQ `14_column_profile`, Atlas `column_length_number` | `approx_distinct`, `null_count`, `profile_coverage`, `column_length` | `column_facts[].*` | column line texture | COLUMNS right rail | card |
 | **value domains** | BQ `15_low_cardinality_values` | `domain:` nodes + `has_domain` | `column_facts[].domain{n_values, top}` | column line `N known values (…) → sample_values` | COLUMNS | `sample_values` |
+| **what a stored value MEANS** (mined) | `low_cardinality_synonyms_index.json` | `synonyms` prop on the SAME `domain:` node | `column_facts[].domain.top[].means`, `.n_read` | column line `US=United States 72.0% · N read [prov:mined]` | COLUMNS | `sample_values` |
 | **business terms with definitions** | Atlas `businessMetadata` (id-first), business_terms.csv | `mapped_term` edges, `term:` nodes with `description` | `column_facts[].terms[]`, `declared_terms[]` | column line `term: … — definition` | COLUMNS | `search_semantics(kind=vocab)` |
 | **declared foreign keys** | BQ `11_logical_constraints` | `fk_references` edges | `joins.declared[]`, `column_facts[].fk_references` | `## joins` first rows | JOINS & LINEAGE (● declared) | `get_join_paths` (constraints tier) |
 | observed / scoped joins | jobs co-query digest, studio ON-clauses | `co_queried_with`, `joins_via` | `joins.observed[]`, `joins.scoped[]` | `## joins` | JOINS & LINEAGE | `get_join_paths` |
@@ -98,7 +99,10 @@ are fenced by tests so a later change has to be deliberate.
 | **governed metric status** | every status in the DMP catalog (`Published`, `staging`, `Staging`, `METRIC_TESTING`, absent) collapses to **CERTIFIED**, and every metric is served on the card as certified. None is withheld or demoted. The catalog's own wording is still carried as evidence. | the catalog is the governed registry; being in it is the certification. Casing drift is a data-entry artifact, not a governance signal. | `test_p2_graph.py::test_every_governed_metric_is_certified_whatever_its_status` |
 | **unscoped vocabulary** | an entry with an EMPTY `Business_Unit` is withheld from table matching and counts toward no unit. An entry spelled `All` still matches everywhere. | silence is not a claim of universality. Offering an entry nobody scoped on every table is the widest possible claim from the least possible evidence — the confident wrong answer BU-scoping exists to prevent. | `test_p2_compiler.py::test_unscoped_vocabulary_is_withheld_but_all_still_matches` |
 
-Because the two are now different claims, they are different nodes:
+| **mined value readings** | a reading never outranks an authored column description, and never mints a column. A reading for a column the graph does not carry is counted, not created. | the profile mints a column it did not expect because OBSERVING a value proves the column exists. A mined reading proves nothing of the kind, and letting the weakest witness create schema is how a phantom column reaches a card. | `test_value_synonyms.py::test_mined_readings_never_create_schema` |
+
+Because the unscoped and global vocabulary entries are different
+claims, they are different nodes:
 `acr_id` gives an unscoped entry an `unscoped` sentinel rather than
 folding it onto the `all` id, where it would have inherited the
 global entry's reach.

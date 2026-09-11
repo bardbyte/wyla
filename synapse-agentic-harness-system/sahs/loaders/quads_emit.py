@@ -390,6 +390,65 @@ def _kept(props: dict) -> dict:
             if v not in (None, "", [], {})}
 
 
+def emit_value_synonyms(records: list[dict], graph: GraphDir,
+                        crosswalk: Crosswalk, run_id: str) -> dict:
+    """Mined value readings ride ON the domain node the warehouse
+    profile already minted, as a `synonyms` prop beside its `values`.
+    A fold merges props per key, so the two witnesses compose: BQ says
+    which values exist and how often, this says what they mean.
+
+    Two refusals, both deliberate:
+
+    - a column this index names that the graph does not carry is NOT
+      minted. The BQ profile mints such a column because OBSERVING a
+      value proves it exists; a mined reading proves nothing of the
+      kind, and letting the weakest witness create schema is how a
+      phantom column reaches a card. It is counted instead, so the
+      drift stays visible.
+    - a table that does not resolve through the crosswalk is skipped
+      and counted, never guessed at.
+
+    Provenance is `catalog_mined`: nothing here outranks an authored
+    description, and the card labels it so a reader can tell.
+    """
+    report: dict = defaultdict(int)
+    known_columns = {n.id for n in graph.iter_nodes()
+                     if n.id.startswith("col:")}
+    for record in records:
+        report["records"] += 1
+        raw = str(record.get("table") or "")
+        physical = (crosswalk.physical_for_atlas(raw)
+                    or crosswalk.physical_for_short(raw.split(".")[-1]))
+        if physical is None:
+            report["skipped_unresolvable_table"] += 1
+            continue
+        column = str(record.get("column") or "")
+        cid = col_id(physical, column)
+        if cid not in known_columns:
+            # mined evidence never mints schema (see docstring)
+            report["skipped_unknown_column"] += 1
+            continue
+        synonyms = {str(v): [str(r) for r in readings]
+                    for v, readings in (record.get("synonyms")
+                                        or {}).items() if readings}
+        if not synonyms:
+            continue
+        domain = f"domain:{physical}.{column}"
+        graph.append_node(NodeRecord(
+            id=domain, props={"synonyms": synonyms},
+            prov=Prov(source="value_synonyms", run=run_id,
+                      witness="catalog_mined",
+                      evidence=str(record.get("evidence_ref") or ""))))
+        graph.append_edge(Quad(
+            s=cid, r="has_domain", o=domain,
+            prov=Prov(source="value_synonyms", run=run_id,
+                      witness="catalog_mined",
+                      evidence=str(record.get("evidence_ref") or ""))))
+        report["columns"] += 1
+        report["readings"] += sum(len(r) for r in synonyms.values())
+    return dict(report)
+
+
 def emit_std_tech(entries: list[StdTechEntry], terms: list[TermRecord],
                   graph: GraphDir, crosswalk: Crosswalk,
                   run_id: str) -> dict:

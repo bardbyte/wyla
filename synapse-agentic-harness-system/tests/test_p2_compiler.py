@@ -455,7 +455,14 @@ def test_table_card_renders_the_facts(tmp_path):
     assert "se_no string (PK) · “Service Establishment Number”" in columns
     assert "part_dt date (PARTITION)" in columns
     assert "cm13 string (SENSITIVE R3/SDE1" in columns
-    assert "3 known values (US 72.0%" in columns and "sample_values" in columns
+    # the value-domain marker now carries the MINED reading of each
+    # value beside its share: `US=United States 72.0%` is the line
+    # that turns a code the agent can only echo into one it can
+    # filter on. The reading is labeled mined — it never outranks
+    # the column's own authored description.
+    assert "3 known values (US=United States 72.0%" in columns
+    assert "read [prov:mined]" in columns
+    assert "sample_values" in columns
     assert "term: Transaction United States Dollar Amount [Approved] — " \
         "USD amount of a transaction" in columns
     assert "FK → dw.wwcas_authorization.card_no" in columns

@@ -1,0 +1,16 @@
+{
+  "value lookup": {
+    "dw.gms_transaction": {
+      "US": [{"column": "country_cd", "synonym": "United States"}],
+      "GB": [{"column": "country_cd", "synonym": "United Kingdom"}],
+      "0": [
+        {"column": "country_cd", "synonym": "Unclassified"},
+        {"column": "country_cd", "synonym": "Not Provided"}
+      ],
+      "01": [{"column": "never_declared_col", "synonym": "phantom"}]
+    },
+    "dw.table_that_does_not_exist": {
+      "X": [{"column": "whatever", "synonym": "nothing"}]
+    }
+  }
+}
