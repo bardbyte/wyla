@@ -585,6 +585,14 @@ def emit_std_tech(entries: list[StdTechEntry], terms: list[TermRecord],
             "load_type_atlas": entry.load_type,
             "is_partitioned_atlas": entry.is_partitioned,
             "target_system_atlas": entry.target_system,
+            # Atlas's OWN business unit, under its own name: the MDM
+            # plane writes `business_unit`, and one plane must never
+            # silently overwrite the other's answer
+            "business_unit_atlas": entry.business_unit,
+            "data_classification_atlas": entry.data_classification,
+            "host_region_atlas": entry.host_region,
+            "decommissioned_atlas": entry.decommissioned,
+            "partition_columns_declared_atlas": entry.partitioned_columns,
         })
         if put_node(tid, table_props, entry.evidence_ref):
             report["tables"] += 1
@@ -611,10 +619,18 @@ def emit_std_tech(entries: list[StdTechEntry], terms: list[TermRecord],
                         entry.evidence_ref, props={"role": role}):
                 report["ownership_edges"] += 1
 
-        # table-level PII declaration, indexed for the column pass
+        # the three table-level sensitivity declarations, indexed for
+        # the column pass. The feed sends them as parallel lists of the
+        # same shape and each names a real regime; a column in any of
+        # them is sensitive, so all three mint policy edges and the PII
+        # list additionally supplies a role where the column carried none
         declared_pii: dict[str, str | None] = {
             str(cell["column"]): cell.get("pii_role_id")
             for cell in entry.pii_columns if cell.get("column")}
+        declared_regimes: list[tuple[str, list[dict]]] = [
+            ("policy:pii", entry.pii_columns),
+            ("policy:gdpr", entry.gdpr_columns),
+            ("policy:oncop", entry.oncop_columns)]
 
         for column in entry.columns:
             cid = col_id(physical, column.name)
@@ -630,6 +646,11 @@ def emit_std_tech(entries: list[StdTechEntry], terms: list[TermRecord],
                 # visibly; E1's D5 handler arbitrates at compile time
                 report["pii_role_disagreements"] += 1
             props = _kept({
+                "is_clustered_atlas": column.is_clustered,
+                "cluster_position": column.cluster_position,
+                "partition_position": column.partition_position,
+                "column_scale": column.attribute_scale,
+                "publish_code": column.publish_code,
                 "description_atlas": column.description,
                 "business_name_atlas": column.business_name,
                 "data_type_atlas": column.data_type,
@@ -720,17 +741,26 @@ def emit_std_tech(entries: list[StdTechEntry], terms: list[TermRecord],
         # the endpoint, counted, so the 02-vs-catalog drift stays
         # visible instead of the PII flag vanishing with the column
         listed = {c.name for c in entry.columns}
-        for cname, cell_role in sorted(declared_pii.items()):
-            if cname in listed:
-                continue
-            cid = col_id(physical, cname)
-            if put_node(cid, _kept({"pii_role_id": cell_role,
-                                    "observed_via":
-                                        "table_pii_declaration"}),
-                        entry.evidence_ref):
-                report["columns_from_pii_declaration"] += 1
-            put_edge(tid, "has_column", cid, entry.evidence_ref)
-            put_edge(cid, "has_policy", "policy:pii", entry.evidence_ref)
+        for policy, cells in declared_regimes:
+            for cell in cells:
+                cname = str(cell.get("column") or "")
+                if not cname:
+                    continue
+                cid = col_id(physical, cname)
+                if cname not in listed:
+                    if put_node(cid, _kept({
+                            "pii_role_id": cell.get("pii_role_id"),
+                            "data_type_atlas": cell.get("data_type"),
+                            "nullable_atlas": (
+                                None if cell.get("mandatory") is None
+                                else not cell["mandatory"]),
+                            "observed_via": "table_pii_declaration"}),
+                            entry.evidence_ref):
+                        report["columns_from_pii_declaration"] += 1
+                    put_edge(tid, "has_column", cid, entry.evidence_ref)
+                if put_edge(cid, "has_policy", policy,
+                            entry.evidence_ref):
+                    report["column_policy_from_declaration"] += 1
 
     # a business term Atlas names with neither an id nor a spelling the
     # glossary knows: no identity can be minted from that without

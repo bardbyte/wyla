@@ -41,9 +41,13 @@ def test_std_tech_parses_every_documented_field():
     assert gms.is_partitioned is True
     assert gms.target_system == "Lumi BigQuery"
     assert gms.data_sub_category == "Payments"
-    assert gms.pii_columns == [{"column": "cm13", "pii_role_id": "R3"},
-                               {"column": "cm15_hash",
-                                "pii_role_id": "R4"}]
+    # the feed states a type and a mandatory flag beside each
+    # sensitive column, and both ride along
+    assert gms.pii_columns == [
+        {"column": "cm13", "pii_role_id": "R3",
+         "data_type": "STRING", "mandatory": True},
+        {"column": "cm15_hash", "pii_role_id": "R4",
+         "data_type": "STRING", "mandatory": False}]
     # Layer 4 pdeAttribute
     amount = next(c for c in gms.columns if c.name == "trans_usd_am")
     assert amount.column_name == "trans_usd_am" and amount.position == 5
@@ -141,3 +145,82 @@ def test_std_tech_compliance_flags_absent_is_unknown(tmp_path: Path):
     assert table["has_gdpr_atlas"] is False
     assert not [q for q in graph.iter_edges("has_policy")
                 if q.s == "table:dw.gms_transaction"]
+
+
+def test_the_real_feed_spells_the_sensitive_column_key_differently(
+        tmp_path: Path):
+    """The column key inside the table-level sensitivity lists has two
+    spellings: `column` in the documented contract, `column_name` in
+    the feed itself. The loader read one, so on the real export every
+    row of every list was skipped and the second sensitivity witness —
+    a shipped feature — produced nothing at all. Both spellings parse,
+    and the other two compliance regimes are read beside PII: the feed
+    sends three parallel lists of the same shape and a column named by
+    any of them is sensitive."""
+    from sahs.loaders.sources.vocab import load_std_tech_metadata
+    src = tmp_path / "std"
+    src.mkdir()
+    (src / "t.json").write_text(json.dumps({
+        "dataset": "gms_transaction",
+        "tech_metadata_list": [{"datasetAttribute": {
+            "description": "x",
+            "pii_columns": [{"column_name": "cm13", "pii_role_id": "R3",
+                             "data_type_name": "STRING",
+                             "is_mandatory": "Y"}],
+            "gdpr_columns": [{"column": "cm15", "pii_role_id": "R4"}],
+            "oncop_columns": [{"column_name": "se_no"}]}, "pde": []}]}),
+        encoding="utf-8")
+    e = load_std_tech_metadata(src)[0][0]
+    assert e.pii_columns == [{"column": "cm13", "pii_role_id": "R3",
+                              "data_type": "STRING", "mandatory": True}]
+    assert e.gdpr_columns == [{"column": "cm15", "pii_role_id": "R4"}]
+    assert e.oncop_columns == [{"column": "se_no"}]
+
+
+def test_the_catalog_carries_its_own_business_unit(tmp_path: Path):
+    """The contract said the catalog had no business-unit axis and only
+    the MDM plane did. The real feed carries one on every entry. It is
+    read under its OWN name so the two planes can agree, disagree, or
+    fill each other's gaps — one plane silently overwriting the other's
+    answer is the failure this avoids."""
+    from sahs.loaders.sources.vocab import load_std_tech_metadata
+    src = tmp_path / "std"
+    src.mkdir()
+    (src / "t.json").write_text(json.dumps({
+        "dataset": "gms_transaction",
+        "tech_metadata_list": [{"datasetAttribute": {
+            "description": "x", "business_unit": "Finance",
+            "data_classification": "Confidential", "host_region": "US",
+            "decommissioned": "N",
+            "partitioned_columns": ["part_dt"]}, "pde": []}]}),
+        encoding="utf-8")
+    e = load_std_tech_metadata(src)[0][0]
+    assert e.business_unit == "Finance"
+    assert e.data_classification == "Confidential"
+    assert e.host_region == "US"
+    assert e.decommissioned is False        # "N" is a denial, not absence
+    assert e.partitioned_columns == ["part_dt"]
+
+
+def test_column_clustering_reaches_the_record(tmp_path: Path):
+    """Which columns a query should filter on to stay affordable: the
+    feed states clustering and partition ordinals per column and the
+    loader read neither."""
+    from sahs.loaders.sources.vocab import load_std_tech_metadata
+    src = tmp_path / "std"
+    src.mkdir()
+    (src / "t.json").write_text(json.dumps({
+        "dataset": "gms_transaction",
+        "tech_metadata_list": [{"datasetAttribute": {"description": "x"},
+                                "pde": [{"pdeRelPath": "part_dt",
+                                         "pdeAttribute": {
+                                             "is_clustered": "Y",
+                                             "cluster_position": 1,
+                                             "partition_position": 2,
+                                             "attribute_scale": 0,
+                                             "publish_code": "P"}}]}]}),
+        encoding="utf-8")
+    c = load_std_tech_metadata(src)[0][0].columns[0]
+    assert c.is_clustered is True
+    assert c.cluster_position == 1 and c.partition_position == 2
+    assert c.attribute_scale == 0 and c.publish_code == "P"

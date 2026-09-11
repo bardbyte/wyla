@@ -783,5 +783,11 @@ def test_std_tech_full_utilization_reaches_the_graph(tmp_path):
     assert std.get("term_links_unmatched", 0) == 0   # id-first matching
     assert std["ownership_edges"] == 3
     assert std["derived_logic_docs"] == 1
-    assert std["columns_from_pii_declaration"] == 1
+    # 2: cm15_hash, named by the PII list and again by the GDPR list,
+    # and se_no, named by the ONCOP list — the feed sends three
+    # parallel sensitivity lists and a column in any of them exists
+    assert std["columns_from_pii_declaration"] == 2
+    # every regime the feed names mints its own policy edge, so a
+    # column is not filed under PII when the feed said GDPR
+    assert std["column_policy_from_declaration"] >= 3
     assert std["terms_minted_from_link"] == 2
