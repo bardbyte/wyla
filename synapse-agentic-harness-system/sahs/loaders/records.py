@@ -168,3 +168,16 @@ class StdTechEntry(BaseModel):
     host_region: str = ""
     decommissioned: bool | None = None
     partitioned_columns: list[str] = Field(default_factory=list)
+    # from dataset_source_details — operational facts that decide
+    # whether a query RUNS and whether its aggregate is CORRECT:
+    #   require_partition_filter — the warehouse rejects a query with
+    #     no partition filter outright;
+    #   platform_dedupe_column — on a SNAPSHOT_DEDUPE_MAX table this
+    #     is the column the dedupe keys on; summing without it double
+    #     counts every restatement, silently and plausibly.
+    require_partition_filter: bool | None = None
+    dedupe_column: str = ""
+    base_or_view: str = ""
+    source_country: str = ""
+    source_region: str = ""
+    feed_id: str = ""

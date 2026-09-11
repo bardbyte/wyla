@@ -46,7 +46,8 @@ from sahs.loaders.sources.vocab import (          # noqa: E402
 
 SCHEMA = "meridian.std_tech_key_census/1"
 LAYERS = ["envelope", "entry", "datasetAttribute", "ownership",
-          "pii_columns[]", "pde", "pdeAttribute", "businessMetadata[]"]
+          "dataset_source_details", "pii_columns[]", "pde",
+          "pdeAttribute", "businessMetadata[]"]
 _SAMPLE_LEN = 48
 
 
@@ -128,6 +129,12 @@ class Census:
             self.see("datasetAttribute", attr)
             if isinstance(attr.get("ownership"), dict):
                 self.see("ownership", attr["ownership"])
+            # a nested object is NOT a leaf: reporting only its shape
+            # lets real facts hide inside a blob nobody opened. This
+            # one holds require_partition_filter and the dedupe column
+            if isinstance(attr.get("dataset_source_details"), dict):
+                self.see("dataset_source_details",
+                         attr["dataset_source_details"])
             for cell in attr.get("pii_columns") or []:
                 if isinstance(cell, dict):
                     self.see("pii_columns[]", cell)

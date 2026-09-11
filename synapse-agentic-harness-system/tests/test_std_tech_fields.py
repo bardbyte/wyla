@@ -224,3 +224,61 @@ def test_column_clustering_reaches_the_record(tmp_path: Path):
     assert c.is_clustered is True
     assert c.cluster_position == 1 and c.partition_position == 2
     assert c.attribute_scale == 0 and c.publish_code == "P"
+
+
+def test_the_source_details_blob_holds_query_correctness_facts(
+        tmp_path: Path):
+    """`dataset_source_details` was deferred as a catalog-internal
+    blob. It is not: it holds the two facts that decide whether a
+    query runs at all and whether its aggregate is right.
+
+    `require_partition_filter` — the warehouse rejects a query with no
+    partition filter outright, so a card that does not say so sends
+    the reader into a guaranteed failure.
+
+    `platform_dedupe_column` — on a SNAPSHOT_DEDUPE_MAX table this is
+    the column the dedupe keys on. Summing without it double counts
+    every restatement, silently and plausibly, which is the worst
+    output this system can produce."""
+    from sahs.loaders.sources.vocab import load_std_tech_metadata
+    src = tmp_path / "std"
+    src.mkdir()
+    (src / "t.json").write_text(json.dumps({
+        "dataset": "gms_transaction",
+        "tech_metadata_list": [{"datasetAttribute": {
+            "description": "x", "load_type": "SNAPSHOT_DEDUPE_MAX",
+            "dataset_source_details": {
+                "base_or_view": "base", "country": "USA",
+                "region": "us-east4", "feed_id": "FEED-9001",
+                "platform_dedupe_column": "part_dt",
+                "require_partition_filter": True}}, "pde": []}]}),
+        encoding="utf-8")
+    e = load_std_tech_metadata(src)[0][0]
+    assert e.require_partition_filter is True
+    assert e.dedupe_column == "part_dt"
+    assert e.base_or_view == "base"
+    assert e.source_country == "USA" and e.source_region == "us-east4"
+    assert e.feed_id == "FEED-9001"
+    # a blob that is absent leaves every one of them unknown, never
+    # a fabricated False
+    (src / "t.json").write_text(json.dumps({
+        "dataset": "gms_transaction",
+        "tech_metadata_list": [{"datasetAttribute": {"description": "x"},
+                                "pde": []}]}), encoding="utf-8")
+    bare = load_std_tech_metadata(src)[0][0]
+    assert bare.require_partition_filter is None
+    assert bare.dedupe_column == ""
+
+
+def test_the_census_walks_nested_objects_it_does_not_just_name_them():
+    """A nested object is not a leaf. Reporting only its shape let two
+    query-correctness facts hide inside a blob nobody opened — which
+    is exactly the failure the census exists to prevent."""
+    from scripts.std_tech_keys import Census, LAYERS
+    assert "dataset_source_details" in LAYERS
+    c = Census()
+    c.load(FX / "std_tech_metadata")
+    rows = {(r["layer"], r["key"]): r for r in c.report()["rows"]}
+    assert ("dataset_source_details", "require_partition_filter") in rows
+    assert rows[("dataset_source_details",
+                 "platform_dedupe_column")]["status"] == "consumed"

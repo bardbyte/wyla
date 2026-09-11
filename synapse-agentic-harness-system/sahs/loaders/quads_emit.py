@@ -593,6 +593,13 @@ def emit_std_tech(entries: list[StdTechEntry], terms: list[TermRecord],
             "host_region_atlas": entry.host_region,
             "decommissioned_atlas": entry.decommissioned,
             "partition_columns_declared_atlas": entry.partitioned_columns,
+            # whether a query RUNS, and whether its aggregate is right
+            "require_partition_filter": entry.require_partition_filter,
+            "dedupe_column": entry.dedupe_column,
+            "base_or_view_atlas": entry.base_or_view,
+            "source_country_atlas": entry.source_country,
+            "source_region_atlas": entry.source_region,
+            "feed_id_atlas": entry.feed_id,
         })
         if put_node(tid, table_props, entry.evidence_ref):
             report["tables"] += 1

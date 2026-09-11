@@ -251,7 +251,10 @@ STD_TECH_CONSUMED_KEYS: dict[str, frozenset[str]] = {
         "is_partitioned", "target_system", "pii_columns",
         "gdpr_columns", "oncop_columns", "business_unit",
         "data_classification", "host_region", "decommissioned",
-        "partitioned_columns"}),
+        "partitioned_columns", "dataset_source_details"}),
+    "dataset_source_details": frozenset({
+        "require_partition_filter", "platform_dedupe_column",
+        "base_or_view", "country", "region", "feed_id"}),
     "pii_columns[]": frozenset({"column", "column_name", "pii_role_id",
                                 "data_type_name", "is_mandatory"}),
     "pde": frozenset({"pdeRelPath", "pdeAttribute", "businessMetadata"}),
@@ -284,12 +287,17 @@ STD_TECH_DEFERRED_KEYS: dict[str, dict[str, str]] = {
         "version": "catalog row version: internal optimistic-locking "
                    "bookkeeping",
     },
+    "dataset_source_details": {
+        "dataset_name": "the dataset under a second spelling; "
+                        "datasetGroup on the entry is already read",
+        "project_id": "the GCP project under a second spelling; "
+                      "datasource on the entry is already read",
+    },
     "datasetAttribute": {
         "dataset_parent_id": "catalog-internal parent pointer; "
                              "identity comes from the crosswalk",
         "schema_id": "catalog-internal schema row id",
         "schema_parent_id": "catalog-internal schema parent pointer",
-        "dataset_source_details": "catalog-internal source blob",
         "table_grouping": "catalog-internal grouping key",
         "version": "catalog row version: internal bookkeeping",
         "lumi_first_table_in": "catalog onboarding marker: when the "
@@ -502,6 +510,9 @@ def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                             "mandatory": _yn(c.get("is_mandatory"))}))
                     return out
 
+                source_details = attr.get("dataset_source_details")
+                if not isinstance(source_details, dict):
+                    source_details = {}
                 pii_columns = _sensitive("pii_columns")
                 gdpr_columns = _sensitive("gdpr_columns")
                 oncop_columns = _sensitive("oncop_columns")
@@ -542,6 +553,18 @@ def load_std_tech_metadata(root: Path) -> tuple[list[StdTechEntry],
                         attr.get("data_classification") or ""),
                     host_region=str(attr.get("host_region") or ""),
                     decommissioned=_yn(attr.get("decommissioned")),
+                    require_partition_filter=_yn(
+                        source_details.get("require_partition_filter")),
+                    dedupe_column=str(
+                        source_details.get("platform_dedupe_column")
+                        or "").strip().lower(),
+                    base_or_view=str(
+                        source_details.get("base_or_view") or ""),
+                    source_country=str(
+                        source_details.get("country") or ""),
+                    source_region=str(
+                        source_details.get("region") or ""),
+                    feed_id=str(source_details.get("feed_id") or ""),
                     partitioned_columns=[
                         str(c.get("column") or c.get("column_name") or c)
                         if isinstance(c, dict) else str(c)
