@@ -1,0 +1,50 @@
+{
+  "results": [
+    {
+      "dataplexEntry": {
+        "name": "projects/demo-warehouse/locations/us/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/demo-warehouse/datasets/dw/tables/gms_transaction",
+        "entryType": "projects/655216118709/locations/global/entryTypes/bigquery-table",
+        "fullyQualifiedName": "bigquery:demo-warehouse.dw.gms_transaction",
+        "entrySource": {
+          "resource": "//bigquery.googleapis.com/projects/demo-warehouse/datasets/dw/tables/gms_transaction",
+          "system": "BIGQUERY",
+          "platform": "GOOGLE_CLOUD",
+          "displayName": "gms_transaction",
+          "description": "One row per authorized card transaction, partitioned by part_dt.",
+          "location": "us"
+        }
+      }
+    },
+    {
+      "dataplexEntry": {
+        "name": "projects/demo-warehouse/locations/us/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/demo-warehouse/datasets/dw",
+        "entryType": "projects/655216118709/locations/global/entryTypes/bigquery-dataset",
+        "fullyQualifiedName": "bigquery:demo-warehouse.dw",
+        "entrySource": {
+          "resource": "//bigquery.googleapis.com/projects/demo-warehouse/datasets/dw",
+          "system": "BIGQUERY",
+          "platform": "GOOGLE_CLOUD",
+          "location": "us"
+        }
+      }
+    },
+    {
+      "dataplexEntry": {
+        "name": "projects/demo-warehouse/locations/us/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/demo-warehouse/datasets/dw/tables/merchant",
+        "entryType": "projects/655216118709/locations/global/entryTypes/bigquery-table",
+        "fullyQualifiedName": "bigquery:demo-warehouse.dw.merchant",
+        "entrySource": {
+          "resource": "//bigquery.googleapis.com/projects/demo-warehouse/datasets/dw/tables/merchant",
+          "system": "BIGQUERY",
+          "platform": "GOOGLE_CLOUD",
+          "displayName": "merchant",
+          "description": "The merchant dimension: one row per merchant id, with the category code.",
+          "location": "us"
+        }
+      }
+    }
+  ],
+  "totalSize": 3,
+  "nextPageToken": "",
+  "unreachable": []
+}
