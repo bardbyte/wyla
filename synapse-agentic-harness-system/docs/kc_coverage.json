@@ -1,0 +1,5534 @@
+{
+ "build_id": "b_6d59f72cae3f",
+ "counts": {
+  "by_representation": {
+   "DQ rule": 17,
+   "aspect field": 253,
+   "contact": 12,
+   "excluded": 57,
+   "glossary": 58,
+   "prose": 27,
+   "query": 9,
+   "related entry": 7,
+   "suggestion-only": 3
+  },
+  "observed": 443,
+  "pct_excluded_with_reason": 12.9,
+  "pct_suggestion_only": 0.7,
+  "pct_targeted": 86.5,
+  "rows": 312
+ },
+ "item_counts": {
+  "edge:alias_of": 1,
+  "edge:bound_to": 36,
+  "edge:certified_as": 23,
+  "edge:co_queried_with": 2,
+  "edge:concerns": 1,
+  "edge:derived_from": 1,
+  "edge:described_by": 3,
+  "edge:evidenced_by": 4,
+  "edge:fk_references": 1,
+  "edge:has_column": 29,
+  "edge:has_domain": 4,
+  "edge:has_policy": 7,
+  "edge:has_schema": 3,
+  "edge:in_domain": 3,
+  "edge:in_lob": 11,
+  "edge:joins_via": 3,
+  "edge:mapped_term": 3,
+  "edge:measured_on": 30,
+  "edge:member_of": 31,
+  "edge:owned_by": 6,
+  "edge:upstream_of": 1,
+  "edge:used_by": 2,
+  "edge:variant_of": 3,
+  "node:acr": 28,
+  "node:col": 31,
+  "node:concept": 30,
+  "node:doc": 6,
+  "node:domain": 6,
+  "node:lob": 5,
+  "node:mdom": 2,
+  "node:metric": 26,
+  "node:mgroup": 29,
+  "node:owner": 6,
+  "node:pred": 36,
+  "node:review": 1,
+  "node:schema": 3,
+  "node:table": 19,
+  "node:term": 26,
+  "node:tmpl": 3
+ },
+ "missing": [],
+ "observed": [
+  {
+   "item": "card:concept.bindings",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "card:concept.bindings"
+  },
+  {
+   "item": "card:concept.conflicts",
+   "kc_target": "Aspect definition-status.concept_conflicts",
+   "representation": "aspect field",
+   "row": "card:concept.conflicts"
+  },
+  {
+   "item": "card:concept.preamble",
+   "kc_target": "Glossary term (concept)",
+   "representation": "glossary",
+   "row": "card:concept.preamble"
+  },
+  {
+   "item": "card:metric.conflicts",
+   "kc_target": "Aspect definition-status.metric_conflicts",
+   "representation": "aspect field",
+   "row": "card:metric.conflicts"
+  },
+  {
+   "item": "card:metric.preamble",
+   "kc_target": "Glossary term definition + overview",
+   "representation": "glossary",
+   "row": "card:metric.preamble"
+  },
+  {
+   "item": "card:metric.variants",
+   "kc_target": "Related terms (metric family)",
+   "representation": "glossary",
+   "row": "card:metric.variants"
+  },
+  {
+   "item": "card:table.access",
+   "kc_target": "Aspect sensitivity-consensus; overview § Sensitivity",
+   "representation": "aspect field",
+   "row": "card:table.access"
+  },
+  {
+   "item": "card:table.columns",
+   "kc_target": "Column descriptions",
+   "representation": "prose",
+   "row": "card:table.columns"
+  },
+  {
+   "item": "card:table.common_filters",
+   "kc_target": "Aspect concept-bindings; overview § Concepts & filters",
+   "representation": "aspect field",
+   "row": "card:table.common_filters"
+  },
+  {
+   "item": "card:table.conflicts",
+   "kc_target": "Aspect definition-status; overview § What we don't know yet",
+   "representation": "aspect field",
+   "row": "card:table.conflicts"
+  },
+  {
+   "item": "card:table.joined_with",
+   "kc_target": "Aspect join-paths; overview § Joins",
+   "representation": "aspect field",
+   "row": "card:table.joined_with"
+  },
+  {
+   "item": "card:table.metrics_available",
+   "kc_target": "Aspect governed-metrics; overview § Metrics on this table",
+   "representation": "aspect field",
+   "row": "card:table.metrics_available"
+  },
+  {
+   "item": "card:table.preamble",
+   "kc_target": "Entry description; overview § Purpose",
+   "representation": "prose",
+   "row": "card:table.preamble"
+  },
+  {
+   "item": "edge:alias_of",
+   "kc_target": "Synonym",
+   "representation": "glossary",
+   "row": "edge:alias_of"
+  },
+  {
+   "item": "edge:bound_to",
+   "kc_target": "Aspect concept-bindings.bindings[]; Related entry term→table",
+   "representation": "related entry",
+   "row": "edge:bound_to"
+  },
+  {
+   "item": "edge:bound_to.first_seen",
+   "kc_target": "Aspect concept-bindings.bindings[].first_seen/last_seen/runs",
+   "representation": "aspect field",
+   "row": "edge:bound_to.*"
+  },
+  {
+   "item": "edge:bound_to.last_seen",
+   "kc_target": "Aspect concept-bindings.bindings[].first_seen/last_seen/runs",
+   "representation": "aspect field",
+   "row": "edge:bound_to.*"
+  },
+  {
+   "item": "edge:bound_to.run_count",
+   "kc_target": "Aspect concept-bindings.bindings[].first_seen/last_seen/runs",
+   "representation": "aspect field",
+   "row": "edge:bound_to.*"
+  },
+  {
+   "item": "edge:certified_as",
+   "kc_target": "status word in every term / aspect row",
+   "representation": "glossary",
+   "row": "edge:certified_as"
+  },
+  {
+   "item": "edge:co_queried_with",
+   "kc_target": "Suggestion: proposed join (co-usage)",
+   "representation": "suggestion-only",
+   "row": "edge:co_queried_with"
+  },
+  {
+   "item": "edge:concerns",
+   "kc_target": "Aspect definition-status.open_reviews[]",
+   "representation": "aspect field",
+   "row": "edge:concerns"
+  },
+  {
+   "item": "edge:defines_metric",
+   "kc_target": "Aspect governed-metrics.catalog_id",
+   "representation": "aspect field",
+   "row": "edge:defines_metric"
+  },
+  {
+   "item": "edge:derived_from",
+   "kc_target": "Aspect lineage-notes.column_derivations[]",
+   "representation": "aspect field",
+   "row": "edge:derived_from"
+  },
+  {
+   "item": "edge:derived_from.derivation_logic",
+   "kc_target": "Aspect lineage-notes.column_derivations[].logic",
+   "representation": "aspect field",
+   "row": "edge:derived_from.derivation_logic"
+  },
+  {
+   "item": "edge:described_by",
+   "kc_target": "Aspect lineage-notes.view_sql; Query (view definition)",
+   "representation": "query",
+   "row": "edge:described_by"
+  },
+  {
+   "item": "edge:evidenced_by",
+   "kc_target": "Query (attested SQL for a metric)",
+   "representation": "query",
+   "row": "edge:evidenced_by"
+  },
+  {
+   "item": "edge:evidenced_by.first_seen",
+   "kc_target": "Query description (first/last seen)",
+   "representation": "query",
+   "row": "edge:evidenced_by.*"
+  },
+  {
+   "item": "edge:evidenced_by.last_seen",
+   "kc_target": "Query description (first/last seen)",
+   "representation": "query",
+   "row": "edge:evidenced_by.*"
+  },
+  {
+   "item": "edge:fk_references",
+   "kc_target": "Aspect join-paths.paths[] (tier: declared); DQ rule referential",
+   "representation": "DQ rule",
+   "row": "edge:fk_references"
+  },
+  {
+   "item": "edge:fk_references.constraint",
+   "kc_target": "Aspect join-paths.paths[].constraint_name",
+   "representation": "aspect field",
+   "row": "edge:fk_references.constraint"
+  },
+  {
+   "item": "edge:has_column",
+   "kc_target": "Column entries (schema)",
+   "representation": "prose",
+   "row": "edge:has_column"
+  },
+  {
+   "item": "edge:has_domain",
+   "kc_target": "Aspect value-domain (column entry)",
+   "representation": "aspect field",
+   "row": "edge:has_domain"
+  },
+  {
+   "item": "edge:has_policy",
+   "kc_target": "Aspect sensitivity-consensus.policy",
+   "representation": "aspect field",
+   "row": "edge:has_policy"
+  },
+  {
+   "item": "edge:has_schema",
+   "kc_target": "Aspect meridian-provenance.schema_version",
+   "representation": "aspect field",
+   "row": "edge:has_schema"
+  },
+  {
+   "item": "edge:in_domain",
+   "kc_target": "Glossary category (metric domain)",
+   "representation": "glossary",
+   "row": "edge:in_domain"
+  },
+  {
+   "item": "edge:in_domain.first_seen",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "edge:in_domain.*"
+  },
+  {
+   "item": "edge:in_domain.last_seen",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "edge:in_domain.*"
+  },
+  {
+   "item": "edge:in_lob",
+   "kc_target": "Glossary category membership; Contact (LOB)",
+   "representation": "glossary",
+   "row": "edge:in_lob"
+  },
+  {
+   "item": "edge:in_lob.first_seen",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "edge:in_lob.*"
+  },
+  {
+   "item": "edge:in_lob.last_seen",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "edge:in_lob.*"
+  },
+  {
+   "item": "edge:in_lob.note",
+   "kc_target": "overview § Ownership & usage (steward note)",
+   "representation": "prose",
+   "row": "edge:in_lob.note"
+  },
+  {
+   "item": "edge:in_lob.role",
+   "kc_target": "overview § Ownership & usage (home | shared)",
+   "representation": "prose",
+   "row": "edge:in_lob.role"
+  },
+  {
+   "item": "edge:joins_via",
+   "kc_target": "Aspect join-paths.paths[] (tiered)",
+   "representation": "aspect field",
+   "row": "edge:joins_via"
+  },
+  {
+   "item": "edge:joins_via.confidence",
+   "kc_target": "Aspect join-paths.paths[].confidence",
+   "representation": "aspect field",
+   "row": "edge:joins_via.confidence"
+  },
+  {
+   "item": "edge:joins_via.first_seen",
+   "kc_target": "Aspect join-paths.paths[].first_seen/last_seen",
+   "representation": "aspect field",
+   "row": "edge:joins_via.*"
+  },
+  {
+   "item": "edge:joins_via.how",
+   "kc_target": "Aspect join-paths.paths[].how",
+   "representation": "aspect field",
+   "row": "edge:joins_via.how"
+  },
+  {
+   "item": "edge:joins_via.join_type",
+   "kc_target": "Aspect join-paths.paths[].join_type",
+   "representation": "aspect field",
+   "row": "edge:joins_via.join_type"
+  },
+  {
+   "item": "edge:joins_via.last_seen",
+   "kc_target": "Aspect join-paths.paths[].first_seen/last_seen",
+   "representation": "aspect field",
+   "row": "edge:joins_via.*"
+  },
+  {
+   "item": "edge:joins_via.measures",
+   "kc_target": "Aspect join-paths.paths[].seen_in_measures",
+   "representation": "aspect field",
+   "row": "edge:joins_via.measures"
+  },
+  {
+   "item": "edge:joins_via.on",
+   "kc_target": "Aspect join-paths.paths[].on",
+   "representation": "aspect field",
+   "row": "edge:joins_via.on"
+  },
+  {
+   "item": "edge:joins_via.scope",
+   "kc_target": "Aspect join-paths.paths[].scope",
+   "representation": "aspect field",
+   "row": "edge:joins_via.scope"
+  },
+  {
+   "item": "edge:joins_via.witness_metrics",
+   "kc_target": "Aspect join-paths.paths[].seen_in_metrics",
+   "representation": "aspect field",
+   "row": "edge:joins_via.witness_metrics"
+  },
+  {
+   "item": "edge:kc_pushed",
+   "kc_target": "Push record (Synapse side)",
+   "representation": "excluded",
+   "row": "edge:kc_pushed"
+  },
+  {
+   "item": "edge:mapped_term",
+   "kc_target": "Related entry term→column",
+   "representation": "related entry",
+   "row": "edge:mapped_term"
+  },
+  {
+   "item": "edge:mapped_term.confidence",
+   "kc_target": "Related entry note (mapping confidence)",
+   "representation": "related entry",
+   "row": "edge:mapped_term.confidence"
+  },
+  {
+   "item": "edge:mapped_term.mapping_source",
+   "kc_target": "Related entry note",
+   "representation": "related entry",
+   "row": "edge:mapped_term.mapping_source"
+  },
+  {
+   "item": "edge:mapped_term.mapping_type",
+   "kc_target": "Related entry note (declared | inferred)",
+   "representation": "related entry",
+   "row": "edge:mapped_term.mapping_type"
+  },
+  {
+   "item": "edge:mapped_term.matched_on",
+   "kc_target": "Related entry note",
+   "representation": "related entry",
+   "row": "edge:mapped_term.matched_on"
+  },
+  {
+   "item": "edge:measured_on",
+   "kc_target": "Related entry term→table; Aspect governed-metrics.metrics[]",
+   "representation": "related entry",
+   "row": "edge:measured_on"
+  },
+  {
+   "item": "edge:measured_on.first_seen",
+   "kc_target": "Aspect governed-metrics.metrics[].first_seen/last_seen/runs",
+   "representation": "aspect field",
+   "row": "edge:measured_on.*"
+  },
+  {
+   "item": "edge:measured_on.last_seen",
+   "kc_target": "Aspect governed-metrics.metrics[].first_seen/last_seen/runs",
+   "representation": "aspect field",
+   "row": "edge:measured_on.*"
+  },
+  {
+   "item": "edge:measured_on.run_count",
+   "kc_target": "Aspect governed-metrics.metrics[].first_seen/last_seen/runs",
+   "representation": "aspect field",
+   "row": "edge:measured_on.*"
+  },
+  {
+   "item": "edge:member_of",
+   "kc_target": "Aspect governed-metrics.metrics[].families",
+   "representation": "aspect field",
+   "row": "edge:member_of"
+  },
+  {
+   "item": "edge:member_of.first_seen",
+   "kc_target": "Aspect governed-metrics.metrics[].first_seen/last_seen/runs",
+   "representation": "aspect field",
+   "row": "edge:member_of.*"
+  },
+  {
+   "item": "edge:member_of.last_seen",
+   "kc_target": "Aspect governed-metrics.metrics[].first_seen/last_seen/runs",
+   "representation": "aspect field",
+   "row": "edge:member_of.*"
+  },
+  {
+   "item": "edge:member_of.run_count",
+   "kc_target": "Aspect governed-metrics.metrics[].first_seen/last_seen/runs",
+   "representation": "aspect field",
+   "row": "edge:member_of.*"
+  },
+  {
+   "item": "edge:owned_by",
+   "kc_target": "Contact",
+   "representation": "contact",
+   "row": "edge:owned_by"
+  },
+  {
+   "item": "edge:owned_by.role",
+   "kc_target": "Contact role",
+   "representation": "contact",
+   "row": "edge:owned_by.role"
+  },
+  {
+   "item": "edge:upstream_of",
+   "kc_target": "Aspect lineage-notes.upstream[]; overview § Provenance",
+   "representation": "aspect field",
+   "row": "edge:upstream_of"
+  },
+  {
+   "item": "edge:used_by",
+   "kc_target": "Aspect usage-profile.used_by_lob[]; overview § Ownership & usage",
+   "representation": "aspect field",
+   "row": "edge:used_by"
+  },
+  {
+   "item": "edge:used_by.first_seen",
+   "kc_target": "Aspect usage-profile.used_by_lob[].first_seen/last_seen",
+   "representation": "aspect field",
+   "row": "edge:used_by.*"
+  },
+  {
+   "item": "edge:used_by.last_seen",
+   "kc_target": "Aspect usage-profile.used_by_lob[].first_seen/last_seen",
+   "representation": "aspect field",
+   "row": "edge:used_by.*"
+  },
+  {
+   "item": "edge:valid_in",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "edge:valid_in"
+  },
+  {
+   "item": "edge:variant_of",
+   "kc_target": "Related term ('variant of <parent>')",
+   "representation": "glossary",
+   "row": "edge:variant_of"
+  },
+  {
+   "item": "index:acl.pii_columns",
+   "kc_target": "Aspect sensitivity-consensus.columns[] (most restrictive)",
+   "representation": "aspect field",
+   "row": "index:acl.pii_columns"
+  },
+  {
+   "item": "index:acl.restricted",
+   "kc_target": "Aspect sensitivity-consensus.policy",
+   "representation": "aspect field",
+   "row": "index:acl.restricted"
+  },
+  {
+   "item": "index:bindings.agreement",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "index:bindings.*"
+  },
+  {
+   "item": "index:bindings.authority",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "index:bindings.*"
+  },
+  {
+   "item": "index:bindings.canonical_sql",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "index:bindings.*"
+  },
+  {
+   "item": "index:bindings.fp",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "index:bindings.*"
+  },
+  {
+   "item": "index:bindings.label",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "index:bindings.*"
+  },
+  {
+   "item": "index:bindings.last_seen",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "index:bindings.*"
+  },
+  {
+   "item": "index:bindings.recency_source",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "index:bindings.*"
+  },
+  {
+   "item": "index:bindings.seen_by_witness",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "index:bindings.*"
+  },
+  {
+   "item": "index:bindings.source",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "index:bindings.*"
+  },
+  {
+   "item": "index:bindings.support",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "index:bindings.*"
+  },
+  {
+   "item": "index:bindings.support_by_witness",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "index:bindings.*"
+  },
+  {
+   "item": "index:bindings.table",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "index:bindings.*"
+  },
+  {
+   "item": "index:bindings.witness_agreement",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "representation": "aspect field",
+   "row": "index:bindings.*"
+  },
+  {
+   "item": "index:columns.agreement",
+   "kc_target": "Column description; column sensitivity; definition-status",
+   "representation": "prose",
+   "row": "index:columns.*"
+  },
+  {
+   "item": "index:columns.business_name",
+   "kc_target": "Column description; column sensitivity; definition-status",
+   "representation": "prose",
+   "row": "index:columns.*"
+  },
+  {
+   "item": "index:columns.description",
+   "kc_target": "Column description; column sensitivity; definition-status",
+   "representation": "prose",
+   "row": "index:columns.*"
+  },
+  {
+   "item": "index:columns.description_source",
+   "kc_target": "Column description; column sensitivity; definition-status",
+   "representation": "prose",
+   "row": "index:columns.*"
+  },
+  {
+   "item": "index:columns.flags",
+   "kc_target": "Column description; column sensitivity; definition-status",
+   "representation": "prose",
+   "row": "index:columns.*"
+  },
+  {
+   "item": "index:columns.name",
+   "kc_target": "Column description; column sensitivity; definition-status",
+   "representation": "prose",
+   "row": "index:columns.*"
+  },
+  {
+   "item": "index:columns.sensitive",
+   "kc_target": "Column description; column sensitivity; definition-status",
+   "representation": "prose",
+   "row": "index:columns.*"
+  },
+  {
+   "item": "index:columns.sensitivity_sources",
+   "kc_target": "Column description; column sensitivity; definition-status",
+   "representation": "prose",
+   "row": "index:columns.*"
+  },
+  {
+   "item": "index:columns.supplementary",
+   "kc_target": "Column description; column sensitivity; definition-status",
+   "representation": "prose",
+   "row": "index:columns.*"
+  },
+  {
+   "item": "index:columns.type",
+   "kc_target": "Column description; column sensitivity; definition-status",
+   "representation": "prose",
+   "row": "index:columns.*"
+  },
+  {
+   "item": "index:columns.type_source",
+   "kc_target": "Column description; column sensitivity; definition-status",
+   "representation": "prose",
+   "row": "index:columns.*"
+  },
+  {
+   "item": "index:columns.ungoverned",
+   "kc_target": "Column description; column sensitivity; definition-status",
+   "representation": "prose",
+   "row": "index:columns.*"
+  },
+  {
+   "item": "index:cost_priors.daily_days",
+   "kc_target": "Aspect usage-profile.bytes_per_query",
+   "representation": "aspect field",
+   "row": "index:cost_priors.*"
+  },
+  {
+   "item": "index:cost_priors.n_jobs",
+   "kc_target": "Aspect usage-profile.bytes_per_query",
+   "representation": "aspect field",
+   "row": "index:cost_priors.*"
+  },
+  {
+   "item": "index:cost_priors.p50_bytes",
+   "kc_target": "Aspect usage-profile.bytes_per_query",
+   "representation": "aspect field",
+   "row": "index:cost_priors.*"
+  },
+  {
+   "item": "index:cost_priors.p95_bytes",
+   "kc_target": "Aspect usage-profile.bytes_per_query",
+   "representation": "aspect field",
+   "row": "index:cost_priors.*"
+  },
+  {
+   "item": "index:domains.distinct_estimate",
+   "kc_target": "Aspect value-domain (column entry); DQ rule set membership",
+   "representation": "DQ rule",
+   "row": "index:domains.*"
+  },
+  {
+   "item": "index:domains.key",
+   "kc_target": "Aspect value-domain (column entry); DQ rule set membership",
+   "representation": "DQ rule",
+   "row": "index:domains.*"
+  },
+  {
+   "item": "index:domains.meanings",
+   "kc_target": "Aspect value-domain (column entry); DQ rule set membership",
+   "representation": "DQ rule",
+   "row": "index:domains.*"
+  },
+  {
+   "item": "index:domains.values",
+   "kc_target": "Aspect value-domain (column entry); DQ rule set membership",
+   "representation": "DQ rule",
+   "row": "index:domains.*"
+  },
+  {
+   "item": "index:graph_map.edges",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "index:graph_map.*"
+  },
+  {
+   "item": "index:graph_map.meta",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "index:graph_map.*"
+  },
+  {
+   "item": "index:graph_map.nodes",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "index:graph_map.*"
+  },
+  {
+   "item": "index:graph_map.schema",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "index:graph_map.*"
+  },
+  {
+   "item": "index:graph_map.wells",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "index:graph_map.*"
+  },
+  {
+   "item": "index:joins.a",
+   "kc_target": "Aspect join-paths.paths[]",
+   "representation": "aspect field",
+   "row": "index:joins.*"
+  },
+  {
+   "item": "index:joins.also_in_catalog",
+   "kc_target": "Aspect join-paths.paths[].corroborated_by (catalog)",
+   "representation": "aspect field",
+   "row": "index:joins.also_in_catalog"
+  },
+  {
+   "item": "index:joins.also_witnessed_by",
+   "kc_target": "Aspect join-paths.paths[].corroborated_by",
+   "representation": "aspect field",
+   "row": "index:joins.also_witnessed_by"
+  },
+  {
+   "item": "index:joins.b",
+   "kc_target": "Aspect join-paths.paths[]",
+   "representation": "aspect field",
+   "row": "index:joins.*"
+  },
+  {
+   "item": "index:joins.confidence",
+   "kc_target": "Aspect join-paths.paths[]",
+   "representation": "aspect field",
+   "row": "index:joins.*"
+  },
+  {
+   "item": "index:joins.how",
+   "kc_target": "Aspect join-paths.paths[]",
+   "representation": "aspect field",
+   "row": "index:joins.*"
+  },
+  {
+   "item": "index:joins.join_type",
+   "kc_target": "Aspect join-paths.paths[]",
+   "representation": "aspect field",
+   "row": "index:joins.*"
+  },
+  {
+   "item": "index:joins.measures",
+   "kc_target": "Aspect join-paths.paths[]",
+   "representation": "aspect field",
+   "row": "index:joins.*"
+  },
+  {
+   "item": "index:joins.note",
+   "kc_target": "Aspect join-paths.paths[].note",
+   "representation": "aspect field",
+   "row": "index:joins.note"
+  },
+  {
+   "item": "index:joins.on",
+   "kc_target": "Aspect join-paths.paths[]",
+   "representation": "aspect field",
+   "row": "index:joins.*"
+  },
+  {
+   "item": "index:joins.scope",
+   "kc_target": "Aspect join-paths.paths[]",
+   "representation": "aspect field",
+   "row": "index:joins.*"
+  },
+  {
+   "item": "index:joins.source",
+   "kc_target": "Aspect join-paths.paths[]",
+   "representation": "aspect field",
+   "row": "index:joins.*"
+  },
+  {
+   "item": "index:joins.support",
+   "kc_target": "Aspect join-paths.paths[]",
+   "representation": "aspect field",
+   "row": "index:joins.*"
+  },
+  {
+   "item": "index:joins.witness_metrics",
+   "kc_target": "Aspect join-paths.paths[]",
+   "representation": "aspect field",
+   "row": "index:joins.*"
+  },
+  {
+   "item": "index:lob.code",
+   "kc_target": "Glossary categories; Contact (LOB)",
+   "representation": "glossary",
+   "row": "index:lob.*"
+  },
+  {
+   "item": "index:lob.domains",
+   "kc_target": "Glossary categories; Contact (LOB)",
+   "representation": "glossary",
+   "row": "index:lob.*"
+  },
+  {
+   "item": "index:lob.kind",
+   "kc_target": "Glossary categories; Contact (LOB)",
+   "representation": "glossary",
+   "row": "index:lob.*"
+  },
+  {
+   "item": "index:lob.lob",
+   "kc_target": "Glossary categories; Contact (LOB)",
+   "representation": "glossary",
+   "row": "index:lob.*"
+  },
+  {
+   "item": "index:lob.name",
+   "kc_target": "Glossary categories; Contact (LOB)",
+   "representation": "glossary",
+   "row": "index:lob.*"
+  },
+  {
+   "item": "index:lob.parent",
+   "kc_target": "Glossary categories; Contact (LOB)",
+   "representation": "glossary",
+   "row": "index:lob.*"
+  },
+  {
+   "item": "index:lob.shared_tables",
+   "kc_target": "Glossary categories; Contact (LOB)",
+   "representation": "glossary",
+   "row": "index:lob.*"
+  },
+  {
+   "item": "index:lob.table_roles",
+   "kc_target": "Glossary categories; Contact (LOB)",
+   "representation": "glossary",
+   "row": "index:lob.*"
+  },
+  {
+   "item": "index:lob.tables",
+   "kc_target": "Glossary categories; Contact (LOB)",
+   "representation": "glossary",
+   "row": "index:lob.*"
+  },
+  {
+   "item": "index:lob.usage_support",
+   "kc_target": "Glossary categories; Contact (LOB)",
+   "representation": "glossary",
+   "row": "index:lob.*"
+  },
+  {
+   "item": "index:lob.used_tables",
+   "kc_target": "Glossary categories; Contact (LOB)",
+   "representation": "glossary",
+   "row": "index:lob.*"
+  },
+  {
+   "item": "index:metrics.approval",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.approved_dimensions",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.author",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.author_id",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.authority",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.base_tables",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.business_unit",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.canonical_sql",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.common_filters",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.confidence",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.data_category",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.data_owners",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.data_owners_dmp",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.description",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.domain",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.evidence_origin",
+   "kc_target": "Aspect governed-metrics.metrics[].evidence_origin",
+   "representation": "aspect field",
+   "row": "index:metrics.evidence_origin"
+  },
+  {
+   "item": "index:metrics.execution_count",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.expression_prose",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.fp",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.grain",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.grain_observed",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.grain_source",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.group_by_patterns",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.id",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.join_condition",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.join_conditions",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.joined_tables",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.label",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.last_seen",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.line_of_business",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.mgroup",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.mgroups",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.product_ids",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.query_shape",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.question",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.question_source",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.recency_source",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.scope",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.seen_by_witness",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.sign_convention",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.source",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.sql_source",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.status",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.status_served",
+   "kc_target": "status word in every term / aspect row",
+   "representation": "glossary",
+   "row": "index:metrics.status_served"
+  },
+  {
+   "item": "index:metrics.support",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.support_by_witness",
+   "kc_target": "Aspect governed-metrics.metrics[].witnesses",
+   "representation": "aspect field",
+   "row": "index:metrics.support_by_witness"
+  },
+  {
+   "item": "index:metrics.table",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.tables_associated_not_referenced",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "representation": "aspect field",
+   "row": "index:metrics.*"
+  },
+  {
+   "item": "index:metrics.witness_agreement",
+   "kc_target": "Aspect governed-metrics.metrics[].agreement",
+   "representation": "aspect field",
+   "row": "index:metrics.witness_agreement"
+  },
+  {
+   "item": "index:schema",
+   "kc_target": "Column entries (servable columns)",
+   "representation": "prose",
+   "row": "index:schema"
+  },
+  {
+   "item": "index:sources.meta",
+   "kc_target": "Aspect meridian-provenance.witnesses[] (display names)",
+   "representation": "aspect field",
+   "row": "index:sources.*"
+  },
+  {
+   "item": "index:sources.readiness",
+   "kc_target": "Aspect meridian-provenance.witnesses[] (display names)",
+   "representation": "aspect field",
+   "row": "index:sources.*"
+  },
+  {
+   "item": "index:sources.schema",
+   "kc_target": "Aspect meridian-provenance.witnesses[] (display names)",
+   "representation": "aspect field",
+   "row": "index:sources.*"
+  },
+  {
+   "item": "index:sources.sources",
+   "kc_target": "Aspect meridian-provenance.witnesses[] (display names)",
+   "representation": "aspect field",
+   "row": "index:sources.*"
+  },
+  {
+   "item": "index:tables.columns",
+   "kc_target": "Aspect meridian-provenance / overview § Grain & keys",
+   "representation": "aspect field",
+   "row": "index:tables.*"
+  },
+  {
+   "item": "index:tables.object_type",
+   "kc_target": "Aspect meridian-provenance / overview § Grain & keys",
+   "representation": "aspect field",
+   "row": "index:tables.*"
+  },
+  {
+   "item": "index:tables.partition_latest",
+   "kc_target": "Aspect meridian-provenance / overview § Grain & keys",
+   "representation": "aspect field",
+   "row": "index:tables.*"
+  },
+  {
+   "item": "index:tables.physical",
+   "kc_target": "Aspect meridian-provenance / overview § Grain & keys",
+   "representation": "aspect field",
+   "row": "index:tables.*"
+  },
+  {
+   "item": "index:tables.primary_key",
+   "kc_target": "DQ rule uniqueness",
+   "representation": "DQ rule",
+   "row": "index:tables.primary_key"
+  },
+  {
+   "item": "index:tables.total_rows",
+   "kc_target": "Aspect meridian-provenance / overview § Grain & keys",
+   "representation": "aspect field",
+   "row": "index:tables.*"
+  },
+  {
+   "item": "index:value_meanings.column",
+   "kc_target": "Aspect value-domain (column entry).values[].meaning",
+   "representation": "aspect field",
+   "row": "index:value_meanings.*"
+  },
+  {
+   "item": "index:value_meanings.synonym",
+   "kc_target": "Aspect value-domain (column entry).values[].meaning",
+   "representation": "aspect field",
+   "row": "index:value_meanings.*"
+  },
+  {
+   "item": "index:value_meanings.table",
+   "kc_target": "Aspect value-domain (column entry).values[].meaning",
+   "representation": "aspect field",
+   "row": "index:value_meanings.*"
+  },
+  {
+   "item": "index:value_meanings.value",
+   "kc_target": "Aspect value-domain (column entry).values[].meaning",
+   "representation": "aspect field",
+   "row": "index:value_meanings.*"
+  },
+  {
+   "item": "index:vocab.bu",
+   "kc_target": "Glossary term / synonym (compiled view)",
+   "representation": "glossary",
+   "row": "index:vocab.*"
+  },
+  {
+   "item": "index:vocab.common_word",
+   "kc_target": "Glossary term / synonym (compiled view)",
+   "representation": "glossary",
+   "row": "index:vocab.*"
+  },
+  {
+   "item": "index:vocab.definition",
+   "kc_target": "Glossary term / synonym (compiled view)",
+   "representation": "glossary",
+   "row": "index:vocab.*"
+  },
+  {
+   "item": "index:vocab.kind",
+   "kc_target": "Glossary term / synonym (compiled view)",
+   "representation": "glossary",
+   "row": "index:vocab.*"
+  },
+  {
+   "item": "index:vocab.ref",
+   "kc_target": "Glossary term / synonym (compiled view)",
+   "representation": "glossary",
+   "row": "index:vocab.*"
+  },
+  {
+   "item": "index:vocab.region",
+   "kc_target": "Glossary term / synonym (compiled view)",
+   "representation": "glossary",
+   "row": "index:vocab.*"
+  },
+  {
+   "item": "index:vocab.text",
+   "kc_target": "Glossary term / synonym (compiled view)",
+   "representation": "glossary",
+   "row": "index:vocab.*"
+  },
+  {
+   "item": "node:acr",
+   "kc_target": "Synonym of its expansion",
+   "representation": "glossary",
+   "row": "node:acr"
+  },
+  {
+   "item": "node:acr.business_unit",
+   "kc_target": "Glossary term description (scope: business unit)",
+   "representation": "glossary",
+   "row": "node:acr.business_unit"
+  },
+  {
+   "item": "node:acr.common_word",
+   "kc_target": "none (the anti-alias guard)",
+   "representation": "excluded",
+   "row": "node:acr.common_word"
+  },
+  {
+   "item": "node:acr.definition",
+   "kc_target": "Glossary term description (expansion)",
+   "representation": "glossary",
+   "row": "node:acr.definition"
+  },
+  {
+   "item": "node:acr.entry_type",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "node:acr.entry_type"
+  },
+  {
+   "item": "node:acr.region",
+   "kc_target": "Glossary term description (scope: region)",
+   "representation": "glossary",
+   "row": "node:acr.region"
+  },
+  {
+   "item": "node:acr.symbol",
+   "kc_target": "Synonym text",
+   "representation": "glossary",
+   "row": "node:acr.symbol"
+  },
+  {
+   "item": "node:col",
+   "kc_target": "Column entry (schema aspect field)",
+   "representation": "prose",
+   "row": "node:col"
+  },
+  {
+   "item": "node:col.approx_distinct",
+   "kc_target": "Aspect value-domain (column entry).distinct_estimate",
+   "representation": "aspect field",
+   "row": "node:col.approx_distinct"
+  },
+  {
+   "item": "node:col.business_name",
+   "kc_target": "Column description (business name prefix); glossary term candidate",
+   "representation": "glossary",
+   "row": "node:col.business_name"
+  },
+  {
+   "item": "node:col.business_name_atlas",
+   "kc_target": "Column description (business name prefix)",
+   "representation": "prose",
+   "row": "node:col.business_name_atlas"
+  },
+  {
+   "item": "node:col.column_length",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "node:col.column_length"
+  },
+  {
+   "item": "node:col.column_name_atlas",
+   "kc_target": "Aspect definition-status.name_disagreements",
+   "representation": "aspect field",
+   "row": "node:col.column_name_atlas"
+  },
+  {
+   "item": "node:col.data_type",
+   "kc_target": "Column description (type shown); schema field",
+   "representation": "aspect field",
+   "row": "node:col.data_type"
+  },
+  {
+   "item": "node:col.data_type_atlas",
+   "kc_target": "Aspect definition-status.type_disagreements (D3)",
+   "representation": "aspect field",
+   "row": "node:col.data_type_atlas"
+  },
+  {
+   "item": "node:col.data_type_mdm",
+   "kc_target": "Aspect definition-status.type_disagreements (D3)",
+   "representation": "aspect field",
+   "row": "node:col.data_type_mdm"
+  },
+  {
+   "item": "node:col.derived_logic",
+   "kc_target": "Aspect lineage-notes.column_derivations",
+   "representation": "aspect field",
+   "row": "node:col.derived_logic"
+  },
+  {
+   "item": "node:col.description_atlas",
+   "kc_target": "Column description",
+   "representation": "prose",
+   "row": "node:col.description_atlas"
+  },
+  {
+   "item": "node:col.description_bq",
+   "kc_target": "Column description (fallback)",
+   "representation": "prose",
+   "row": "node:col.description_bq"
+  },
+  {
+   "item": "node:col.description_mdm",
+   "kc_target": "Column description (supplementary)",
+   "representation": "prose",
+   "row": "node:col.description_mdm"
+  },
+  {
+   "item": "node:col.is_partitioning",
+   "kc_target": "overview § Grain & keys; DQ rule freshness",
+   "representation": "DQ rule",
+   "row": "node:col.is_partitioning"
+  },
+  {
+   "item": "node:col.is_partitioning_atlas",
+   "kc_target": "overview § Grain & keys (catalog view)",
+   "representation": "aspect field",
+   "row": "node:col.is_partitioning_atlas"
+  },
+  {
+   "item": "node:col.is_pii_mdm",
+   "kc_target": "Aspect sensitivity-consensus.columns[].declared_by (MDM)",
+   "representation": "aspect field",
+   "row": "node:col.is_pii_mdm"
+  },
+  {
+   "item": "node:col.is_primary_key",
+   "kc_target": "DQ rule uniqueness; overview § Grain & keys",
+   "representation": "DQ rule",
+   "row": "node:col.is_primary_key"
+  },
+  {
+   "item": "node:col.is_primary_key_atlas",
+   "kc_target": "DQ rule uniqueness (catalog-declared)",
+   "representation": "DQ rule",
+   "row": "node:col.is_primary_key_atlas"
+  },
+  {
+   "item": "node:col.nested_path",
+   "kc_target": "Column description (nested path shown)",
+   "representation": "prose",
+   "row": "node:col.nested_path"
+  },
+  {
+   "item": "node:col.null_count",
+   "kc_target": "DQ rule not-null (profile evidence)",
+   "representation": "DQ rule",
+   "row": "node:col.null_count"
+  },
+  {
+   "item": "node:col.nullable_atlas",
+   "kc_target": "DQ rule not-null (catalog-declared)",
+   "representation": "DQ rule",
+   "row": "node:col.nullable_atlas"
+  },
+  {
+   "item": "node:col.observed_via",
+   "kc_target": "Aspect definition-status.columns_observed_via",
+   "representation": "aspect field",
+   "row": "node:col.observed_via"
+  },
+  {
+   "item": "node:col.ordinal",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "node:col.ordinal"
+  },
+  {
+   "item": "node:col.ordinal_atlas",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "node:col.ordinal_atlas"
+  },
+  {
+   "item": "node:col.pii_role_id",
+   "kc_target": "Aspect sensitivity-consensus.columns[].pii_role",
+   "representation": "aspect field",
+   "row": "node:col.pii_role_id"
+  },
+  {
+   "item": "node:col.profile_coverage",
+   "kc_target": "Aspect value-domain (column entry).profile_coverage",
+   "representation": "aspect field",
+   "row": "node:col.profile_coverage"
+  },
+  {
+   "item": "node:col.sde_group",
+   "kc_target": "Aspect sensitivity-consensus.columns[].sde_group",
+   "representation": "aspect field",
+   "row": "node:col.sde_group"
+  },
+  {
+   "item": "node:col.stub",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "node:col.stub"
+  },
+  {
+   "item": "node:concept",
+   "kc_target": "Glossary term (certified/witnessed concept); Aspect concept-bindings",
+   "representation": "glossary",
+   "row": "node:concept"
+  },
+  {
+   "item": "node:concept.label",
+   "kc_target": "Glossary term display name",
+   "representation": "glossary",
+   "row": "node:concept.label"
+  },
+  {
+   "item": "node:doc",
+   "kc_target": "Query (SQL docs); lineage-notes (view SQL)",
+   "representation": "query",
+   "row": "node:doc"
+  },
+  {
+   "item": "node:doc.kind",
+   "kc_target": "Query description / lineage note kind",
+   "representation": "query",
+   "row": "node:doc.kind"
+  },
+  {
+   "item": "node:doc.sql",
+   "kc_target": "Query SQL",
+   "representation": "query",
+   "row": "node:doc.sql"
+  },
+  {
+   "item": "node:domain",
+   "kc_target": "Aspect value-domain (column entry).values; DQ rule set membership",
+   "representation": "DQ rule",
+   "row": "node:domain"
+  },
+  {
+   "item": "node:domain.distinct_estimate",
+   "kc_target": "Aspect value-domain (column entry).distinct_estimate",
+   "representation": "aspect field",
+   "row": "node:domain.distinct_estimate"
+  },
+  {
+   "item": "node:domain.meanings",
+   "kc_target": "Aspect value-domain (column entry).values[].meaning",
+   "representation": "aspect field",
+   "row": "node:domain.meanings"
+  },
+  {
+   "item": "node:domain.profiled",
+   "kc_target": "Aspect value-domain (column entry).profiled",
+   "representation": "aspect field",
+   "row": "node:domain.profiled"
+  },
+  {
+   "item": "node:domain.values",
+   "kc_target": "Aspect value-domain (column entry).values[] (value, share)",
+   "representation": "aspect field",
+   "row": "node:domain.values"
+  },
+  {
+   "item": "node:lob",
+   "kc_target": "Glossary category (LOB → org unit)",
+   "representation": "glossary",
+   "row": "node:lob"
+  },
+  {
+   "item": "node:lob.code",
+   "kc_target": "Glossary category display name",
+   "representation": "glossary",
+   "row": "node:lob.code"
+  },
+  {
+   "item": "node:lob.kind",
+   "kc_target": "Glossary category level (lob | org_unit)",
+   "representation": "glossary",
+   "row": "node:lob.kind"
+  },
+  {
+   "item": "node:lob.name",
+   "kc_target": "Glossary category description",
+   "representation": "glossary",
+   "row": "node:lob.name"
+  },
+  {
+   "item": "node:lob.parent",
+   "kc_target": "Glossary category parent",
+   "representation": "glossary",
+   "row": "node:lob.parent"
+  },
+  {
+   "item": "node:mdom",
+   "kc_target": "Glossary category (metric domain)",
+   "representation": "glossary",
+   "row": "node:mdom"
+  },
+  {
+   "item": "node:mdom.name",
+   "kc_target": "Glossary category display name",
+   "representation": "glossary",
+   "row": "node:mdom.name"
+  },
+  {
+   "item": "node:metric",
+   "kc_target": "Glossary term (certified) / Candidate terms (pending); Aspect governed-metrics",
+   "representation": "glossary",
+   "row": "node:metric"
+  },
+  {
+   "item": "node:metric.approval",
+   "kc_target": "Aspect governed-metrics.approval",
+   "representation": "aspect field",
+   "row": "node:metric.approval"
+  },
+  {
+   "item": "node:metric.approved_dimensions",
+   "kc_target": "Aspect governed-metrics.approved_dimensions",
+   "representation": "aspect field",
+   "row": "node:metric.approved_dimensions"
+  },
+  {
+   "item": "node:metric.author",
+   "kc_target": "Contact (metric author)",
+   "representation": "contact",
+   "row": "node:metric.author"
+  },
+  {
+   "item": "node:metric.author_id",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "node:metric.author_id"
+  },
+  {
+   "item": "node:metric.business_unit",
+   "kc_target": "Glossary category (business unit)",
+   "representation": "glossary",
+   "row": "node:metric.business_unit"
+  },
+  {
+   "item": "node:metric.canon_version",
+   "kc_target": "Aspect governed-metrics.fingerprint_version",
+   "representation": "aspect field",
+   "row": "node:metric.canon_version"
+  },
+  {
+   "item": "node:metric.canonical_sql",
+   "kc_target": "Query (certified); Aspect governed-metrics.canonical_sql",
+   "representation": "query",
+   "row": "node:metric.canonical_sql"
+  },
+  {
+   "item": "node:metric.common_filters",
+   "kc_target": "Aspect governed-metrics.filters",
+   "representation": "aspect field",
+   "row": "node:metric.common_filters"
+  },
+  {
+   "item": "node:metric.confidence",
+   "kc_target": "Aspect governed-metrics.miner_confidence",
+   "representation": "aspect field",
+   "row": "node:metric.confidence"
+  },
+  {
+   "item": "node:metric.data_category",
+   "kc_target": "Aspect governed-metrics.data_category",
+   "representation": "aspect field",
+   "row": "node:metric.data_category"
+  },
+  {
+   "item": "node:metric.data_owners",
+   "kc_target": "Contact (data owner)",
+   "representation": "contact",
+   "row": "node:metric.data_owners"
+  },
+  {
+   "item": "node:metric.data_owners_dmp",
+   "kc_target": "Contact (data owner)",
+   "representation": "contact",
+   "row": "node:metric.data_owners_dmp"
+  },
+  {
+   "item": "node:metric.description",
+   "kc_target": "Glossary term overview",
+   "representation": "glossary",
+   "row": "node:metric.description"
+  },
+  {
+   "item": "node:metric.domain",
+   "kc_target": "Glossary category (domain)",
+   "representation": "glossary",
+   "row": "node:metric.domain"
+  },
+  {
+   "item": "node:metric.execution_count",
+   "kc_target": "Aspect usage-profile.metric_runs",
+   "representation": "aspect field",
+   "row": "node:metric.execution_count"
+  },
+  {
+   "item": "node:metric.grain",
+   "kc_target": "Glossary term definition (grain); Aspect governed-metrics.grain",
+   "representation": "glossary",
+   "row": "node:metric.grain"
+  },
+  {
+   "item": "node:metric.grain_observed",
+   "kc_target": "Aspect governed-metrics.grain_observed",
+   "representation": "aspect field",
+   "row": "node:metric.grain_observed"
+  },
+  {
+   "item": "node:metric.group_by_patterns",
+   "kc_target": "Aspect governed-metrics.group_by_patterns",
+   "representation": "aspect field",
+   "row": "node:metric.group_by_patterns"
+  },
+  {
+   "item": "node:metric.join_condition",
+   "kc_target": "Aspect governed-metrics.join_condition",
+   "representation": "aspect field",
+   "row": "node:metric.join_condition"
+  },
+  {
+   "item": "node:metric.joined_tables",
+   "kc_target": "Aspect join-paths (tier: candidate)",
+   "representation": "suggestion-only",
+   "row": "node:metric.joined_tables"
+  },
+  {
+   "item": "node:metric.label",
+   "kc_target": "Glossary term display name",
+   "representation": "glossary",
+   "row": "node:metric.label"
+  },
+  {
+   "item": "node:metric.label_usage",
+   "kc_target": "Aspect usage-profile.label_usage",
+   "representation": "aspect field",
+   "row": "node:metric.label_usage"
+  },
+  {
+   "item": "node:metric.line_of_business",
+   "kc_target": "Glossary category (LOB)",
+   "representation": "glossary",
+   "row": "node:metric.line_of_business"
+  },
+  {
+   "item": "node:metric.products",
+   "kc_target": "Aspect governed-metrics.products",
+   "representation": "aspect field",
+   "row": "node:metric.products"
+  },
+  {
+   "item": "node:metric.query_shape",
+   "kc_target": "Aspect governed-metrics.query_shape",
+   "representation": "aspect field",
+   "row": "node:metric.query_shape"
+  },
+  {
+   "item": "node:metric.question_answered",
+   "kc_target": "Glossary term definition (question)",
+   "representation": "glossary",
+   "row": "node:metric.question_answered"
+  },
+  {
+   "item": "node:metric.requestor",
+   "kc_target": "Contact (requestor)",
+   "representation": "contact",
+   "row": "node:metric.requestor"
+  },
+  {
+   "item": "node:metric.scope",
+   "kc_target": "Aspect governed-metrics.scope",
+   "representation": "aspect field",
+   "row": "node:metric.scope"
+  },
+  {
+   "item": "node:metric.sign_convention",
+   "kc_target": "Aspect governed-metrics.sign_convention",
+   "representation": "aspect field",
+   "row": "node:metric.sign_convention"
+  },
+  {
+   "item": "node:metric.sql_source",
+   "kc_target": "Aspect governed-metrics.sql_source",
+   "representation": "aspect field",
+   "row": "node:metric.sql_source"
+  },
+  {
+   "item": "node:metric.tables_associated_not_referenced",
+   "kc_target": "Aspect governed-metrics.tables_associated",
+   "representation": "aspect field",
+   "row": "node:metric.tables_associated_not_referenced"
+  },
+  {
+   "item": "node:mgroup",
+   "kc_target": "Glossary term (the catalog name of a metric family)",
+   "representation": "glossary",
+   "row": "node:mgroup"
+  },
+  {
+   "item": "node:mgroup.group_key",
+   "kc_target": "Aspect governed-metrics.catalog_id",
+   "representation": "aspect field",
+   "row": "node:mgroup.group_key"
+  },
+  {
+   "item": "node:mgroup.label",
+   "kc_target": "Glossary term display name",
+   "representation": "glossary",
+   "row": "node:mgroup.label"
+  },
+  {
+   "item": "node:owner",
+   "kc_target": "Contact",
+   "representation": "contact",
+   "row": "node:owner"
+  },
+  {
+   "item": "node:owner.owner",
+   "kc_target": "Contact identity",
+   "representation": "contact",
+   "row": "node:owner.owner"
+  },
+  {
+   "item": "node:owner.role",
+   "kc_target": "Contact role",
+   "representation": "contact",
+   "row": "node:owner.role"
+  },
+  {
+   "item": "node:policy",
+   "kc_target": "Aspect sensitivity-consensus.policy",
+   "representation": "aspect field",
+   "row": "node:policy"
+  },
+  {
+   "item": "node:pred",
+   "kc_target": "Aspect concept-bindings.predicate_sql",
+   "representation": "aspect field",
+   "row": "node:pred"
+  },
+  {
+   "item": "node:pred.canon_version",
+   "kc_target": "Aspect concept-bindings.fingerprint_version",
+   "representation": "aspect field",
+   "row": "node:pred.canon_version"
+  },
+  {
+   "item": "node:pred.canonical_sql",
+   "kc_target": "Aspect concept-bindings.predicate_sql",
+   "representation": "aspect field",
+   "row": "node:pred.canonical_sql"
+  },
+  {
+   "item": "node:pred.kind",
+   "kc_target": "Aspect concept-bindings.kind",
+   "representation": "aspect field",
+   "row": "node:pred.kind"
+  },
+  {
+   "item": "node:review",
+   "kc_target": "Aspect definition-status.open_reviews",
+   "representation": "aspect field",
+   "row": "node:review"
+  },
+  {
+   "item": "node:review.agent_recommendation",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "node:review.agent_recommendation"
+  },
+  {
+   "item": "node:review.evidence",
+   "kc_target": "Aspect definition-status.open_reviews[].evidence",
+   "representation": "aspect field",
+   "row": "node:review.evidence"
+  },
+  {
+   "item": "node:review.kind",
+   "kc_target": "Aspect definition-status.open_reviews[].kind",
+   "representation": "aspect field",
+   "row": "node:review.kind"
+  },
+  {
+   "item": "node:review.priority",
+   "kc_target": "Aspect definition-status.open_reviews[].priority",
+   "representation": "aspect field",
+   "row": "node:review.priority"
+  },
+  {
+   "item": "node:review.proposal",
+   "kc_target": "Aspect definition-status.open_reviews[].proposal",
+   "representation": "aspect field",
+   "row": "node:review.proposal"
+  },
+  {
+   "item": "node:review.status",
+   "kc_target": "Aspect definition-status.open_reviews[].status",
+   "representation": "aspect field",
+   "row": "node:review.status"
+  },
+  {
+   "item": "node:review.subject",
+   "kc_target": "Aspect definition-status.open_reviews[].subject",
+   "representation": "aspect field",
+   "row": "node:review.subject"
+  },
+  {
+   "item": "node:run",
+   "kc_target": "Aspect meridian-provenance.graph_run",
+   "representation": "aspect field",
+   "row": "node:run"
+  },
+  {
+   "item": "node:schema",
+   "kc_target": "Aspect meridian-provenance.schema_version",
+   "representation": "aspect field",
+   "row": "node:schema"
+  },
+  {
+   "item": "node:schema.fingerprint",
+   "kc_target": "Aspect meridian-provenance.schema_fingerprint",
+   "representation": "aspect field",
+   "row": "node:schema.fingerprint"
+  },
+  {
+   "item": "node:schema.n_columns",
+   "kc_target": "Aspect meridian-provenance.schema_columns",
+   "representation": "aspect field",
+   "row": "node:schema.n_columns"
+  },
+  {
+   "item": "node:skill",
+   "kc_target": "Aspect governed-metrics.skill_pack",
+   "representation": "aspect field",
+   "row": "node:skill"
+  },
+  {
+   "item": "node:status",
+   "kc_target": "status word inside every glossary definition",
+   "representation": "glossary",
+   "row": "node:status"
+  },
+  {
+   "item": "node:table",
+   "kc_target": "Entry (BigQuery table)",
+   "representation": "prose",
+   "row": "node:table"
+  },
+  {
+   "item": "node:table.answerability",
+   "kc_target": "Aspect definition-status.answerability",
+   "representation": "aspect field",
+   "row": "node:table.answerability"
+  },
+  {
+   "item": "node:table.appl_id",
+   "kc_target": "Aspect meridian-provenance.application_id",
+   "representation": "aspect field",
+   "row": "node:table.appl_id"
+  },
+  {
+   "item": "node:table.business_name_atlas",
+   "kc_target": "Entry display name suggestion; glossary term",
+   "representation": "glossary",
+   "row": "node:table.business_name_atlas"
+  },
+  {
+   "item": "node:table.business_unit",
+   "kc_target": "Contact (business unit); Entry overview § Ownership & usage",
+   "representation": "contact",
+   "row": "node:table.business_unit"
+  },
+  {
+   "item": "node:table.cost_prior",
+   "kc_target": "Aspect usage-profile.bytes_per_query",
+   "representation": "aspect field",
+   "row": "node:table.cost_prior"
+  },
+  {
+   "item": "node:table.data_category",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes.data_category",
+   "representation": "aspect field",
+   "row": "node:table.data_category"
+  },
+  {
+   "item": "node:table.data_server_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, Atlas plane)",
+   "representation": "aspect field",
+   "row": "node:table.*_atlas"
+  },
+  {
+   "item": "node:table.data_sub_category",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes.data_sub_category",
+   "representation": "aspect field",
+   "row": "node:table.data_sub_category"
+  },
+  {
+   "item": "node:table.data_system_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, Atlas plane)",
+   "representation": "aspect field",
+   "row": "node:table.*_atlas"
+  },
+  {
+   "item": "node:table.dataset_group_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, Atlas plane)",
+   "representation": "aspect field",
+   "row": "node:table.*_atlas"
+  },
+  {
+   "item": "node:table.description_atlas",
+   "kc_target": "Entry description; overview § Purpose",
+   "representation": "prose",
+   "row": "node:table.description_atlas"
+  },
+  {
+   "item": "node:table.description_bq",
+   "kc_target": "Entry description (fallback); overview § Purpose",
+   "representation": "prose",
+   "row": "node:table.description_bq"
+  },
+  {
+   "item": "node:table.environment",
+   "kc_target": "Aspect meridian-provenance.environment",
+   "representation": "aspect field",
+   "row": "node:table.environment"
+  },
+  {
+   "item": "node:table.feed_type",
+   "kc_target": "Aspect lineage-notes.feed_type",
+   "representation": "aspect field",
+   "row": "node:table.feed_type"
+  },
+  {
+   "item": "node:table.has_gdpr_atlas",
+   "kc_target": "Aspect sensitivity-consensus.declared.gdpr",
+   "representation": "aspect field",
+   "row": "node:table.has_gdpr_atlas"
+  },
+  {
+   "item": "node:table.has_oncop_atlas",
+   "kc_target": "Aspect sensitivity-consensus.declared.oncop",
+   "representation": "aspect field",
+   "row": "node:table.has_oncop_atlas"
+  },
+  {
+   "item": "node:table.has_pii_atlas",
+   "kc_target": "Aspect sensitivity-consensus.declared.pii",
+   "representation": "aspect field",
+   "row": "node:table.has_pii_atlas"
+  },
+  {
+   "item": "node:table.is_active_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, Atlas plane)",
+   "representation": "aspect field",
+   "row": "node:table.*_atlas"
+  },
+  {
+   "item": "node:table.is_latest_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, Atlas plane)",
+   "representation": "aspect field",
+   "row": "node:table.*_atlas"
+  },
+  {
+   "item": "node:table.is_lineage_exist_atlas",
+   "kc_target": "Aspect lineage-notes.catalog_declares_lineage",
+   "representation": "aspect field",
+   "row": "node:table.is_lineage_exist_atlas"
+  },
+  {
+   "item": "node:table.is_partitioned_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, Atlas plane)",
+   "representation": "aspect field",
+   "row": "node:table.*_atlas"
+  },
+  {
+   "item": "node:table.layer_type",
+   "kc_target": "Entry overview § Purpose; Aspect meridian-provenance.layer",
+   "representation": "aspect field",
+   "row": "node:table.layer_type"
+  },
+  {
+   "item": "node:table.lifecycle_status",
+   "kc_target": "Entry description (status posture); definition-status.lifecycle",
+   "representation": "aspect field",
+   "row": "node:table.lifecycle_status"
+  },
+  {
+   "item": "node:table.load_type_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, Atlas plane)",
+   "representation": "aspect field",
+   "row": "node:table.*_atlas"
+  },
+  {
+   "item": "node:table.n_partitions",
+   "kc_target": "Aspect meridian-provenance.partitions",
+   "representation": "aspect field",
+   "row": "node:table.n_partitions"
+  },
+  {
+   "item": "node:table.object_type",
+   "kc_target": "Entry overview § Grain & keys; Aspect meridian-provenance.object_type",
+   "representation": "aspect field",
+   "row": "node:table.object_type"
+  },
+  {
+   "item": "node:table.ownership_atlas",
+   "kc_target": "Contact (business owner / steward)",
+   "representation": "contact",
+   "row": "node:table.ownership_atlas"
+  },
+  {
+   "item": "node:table.partition_latest",
+   "kc_target": "Entry overview § Grain & keys; DQ rule freshness",
+   "representation": "DQ rule",
+   "row": "node:table.partition_latest"
+  },
+  {
+   "item": "node:table.pipeline_name",
+   "kc_target": "Aspect lineage-notes.pipeline",
+   "representation": "aspect field",
+   "row": "node:table.pipeline_name"
+  },
+  {
+   "item": "node:table.project",
+   "kc_target": "Aspect meridian-provenance.project",
+   "representation": "aspect field",
+   "row": "node:table.project"
+  },
+  {
+   "item": "node:table.project_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, Atlas plane)",
+   "representation": "aspect field",
+   "row": "node:table.*_atlas"
+  },
+  {
+   "item": "node:table.schema_fingerprint",
+   "kc_target": "Aspect meridian-provenance.schema_fingerprint",
+   "representation": "aspect field",
+   "row": "node:table.schema_fingerprint"
+  },
+  {
+   "item": "node:table.source_system",
+   "kc_target": "Aspect lineage-notes.source_system",
+   "representation": "aspect field",
+   "row": "node:table.source_system"
+  },
+  {
+   "item": "node:table.stub",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "node:table.stub"
+  },
+  {
+   "item": "node:table.table_meta_logical",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map)",
+   "representation": "aspect field",
+   "row": "node:table.table_meta_logical"
+  },
+  {
+   "item": "node:table.table_metrics",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map)",
+   "representation": "aspect field",
+   "row": "node:table.table_metrics"
+  },
+  {
+   "item": "node:table.table_name_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, Atlas plane)",
+   "representation": "aspect field",
+   "row": "node:table.*_atlas"
+  },
+  {
+   "item": "node:table.table_type_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, Atlas plane)",
+   "representation": "aspect field",
+   "row": "node:table.*_atlas"
+  },
+  {
+   "item": "node:table.target_system_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, Atlas plane)",
+   "representation": "aspect field",
+   "row": "node:table.*_atlas"
+  },
+  {
+   "item": "node:table.technology_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, Atlas plane)",
+   "representation": "aspect field",
+   "row": "node:table.*_atlas"
+  },
+  {
+   "item": "node:table.top_users",
+   "kc_target": "Aspect usage-profile.distinct_users (count only)",
+   "representation": "aspect field",
+   "row": "node:table.top_users"
+  },
+  {
+   "item": "node:table.total_rows",
+   "kc_target": "Entry overview § Grain & keys; Aspect meridian-provenance.row_count",
+   "representation": "aspect field",
+   "row": "node:table.total_rows"
+  },
+  {
+   "item": "node:table.usage_rhythm",
+   "kc_target": "Aspect usage-profile.peak_hours",
+   "representation": "aspect field",
+   "row": "node:table.usage_rhythm"
+  },
+  {
+   "item": "node:term",
+   "kc_target": "Glossary term (business term)",
+   "representation": "glossary",
+   "row": "node:term"
+  },
+  {
+   "item": "node:term.description",
+   "kc_target": "Glossary term description",
+   "representation": "glossary",
+   "row": "node:term.description"
+  },
+  {
+   "item": "node:term.name",
+   "kc_target": "Glossary term display name",
+   "representation": "glossary",
+   "row": "node:term.name"
+  },
+  {
+   "item": "node:term.status",
+   "kc_target": "Glossary term description (status prefix)",
+   "representation": "glossary",
+   "row": "node:term.status"
+  },
+  {
+   "item": "node:term.term_id",
+   "kc_target": "Aspect meridian-provenance.term_ids (source id)",
+   "representation": "aspect field",
+   "row": "node:term.term_id"
+  },
+  {
+   "item": "node:tmpl",
+   "kc_target": "Aspect usage-profile.query_templates (count + shape)",
+   "representation": "aspect field",
+   "row": "node:tmpl"
+  },
+  {
+   "item": "node:tmpl.normalized_sql",
+   "kc_target": "Aspect usage-profile.query_templates[].shape",
+   "representation": "aspect field",
+   "row": "node:tmpl.normalized_sql"
+  },
+  {
+   "item": "node:tmpl.occurrences",
+   "kc_target": "Aspect usage-profile.query_templates[].runs",
+   "representation": "aspect field",
+   "row": "node:tmpl.occurrences"
+  },
+  {
+   "item": "node:tmpl.table",
+   "kc_target": "join key to the table",
+   "representation": "excluded",
+   "row": "node:tmpl.table"
+  },
+  {
+   "item": "prov:actor",
+   "kc_target": "Contact (steward decisions); push record signature",
+   "representation": "contact",
+   "row": "prov:actor"
+  },
+  {
+   "item": "prov:evidence",
+   "kc_target": "expandable evidence on every fact",
+   "representation": "aspect field",
+   "row": "prov:evidence"
+  },
+  {
+   "item": "prov:retrieved",
+   "kc_target": "Aspect meridian-provenance.retrieved_at",
+   "representation": "aspect field",
+   "row": "prov:retrieved"
+  },
+  {
+   "item": "prov:run",
+   "kc_target": "Aspect meridian-provenance.graph_run",
+   "representation": "aspect field",
+   "row": "prov:run"
+  },
+  {
+   "item": "prov:source",
+   "kc_target": "Aspect meridian-provenance.witnesses[].source",
+   "representation": "aspect field",
+   "row": "prov:source"
+  },
+  {
+   "item": "prov:status",
+   "kc_target": "quad status filter (active only)",
+   "representation": "excluded",
+   "row": "prov:status"
+  },
+  {
+   "item": "prov:support",
+   "kc_target": "support counts inside aspect rows",
+   "representation": "aspect field",
+   "row": "prov:support"
+  },
+  {
+   "item": "prov:valid_for",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "prov:valid_for"
+  },
+  {
+   "item": "prov:witness",
+   "kc_target": "Aspect meridian-provenance.witnesses[].family",
+   "representation": "aspect field",
+   "row": "prov:witness"
+  },
+  {
+   "item": "report:census.meta",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:census.meta"
+  },
+  {
+   "item": "report:census.schema",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:census.schema"
+  },
+  {
+   "item": "report:census.structural.handlers",
+   "kc_target": "Aspect definition-status.d_counts (handler text)",
+   "representation": "aspect field",
+   "row": "report:census.structural.handlers"
+  },
+  {
+   "item": "report:census.structural.per_table",
+   "kc_target": "Aspect definition-status.d_counts; overview § What we don't know yet",
+   "representation": "aspect field",
+   "row": "report:census.structural.per_table"
+  },
+  {
+   "item": "report:census.structural.totals",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:census.structural.totals"
+  },
+  {
+   "item": "report:census.summary.concept_cells",
+   "kc_target": "Aspect definition-status.census (build-wide counts)",
+   "representation": "aspect field",
+   "row": "report:census.summary.*"
+  },
+  {
+   "item": "report:census.summary.concept_conflicts",
+   "kc_target": "Aspect definition-status.census (build-wide counts)",
+   "representation": "aspect field",
+   "row": "report:census.summary.*"
+  },
+  {
+   "item": "report:census.summary.metric_conflicts",
+   "kc_target": "Aspect definition-status.census (build-wide counts)",
+   "representation": "aspect field",
+   "row": "report:census.summary.*"
+  },
+  {
+   "item": "report:census.summary.metric_duplicate_ids",
+   "kc_target": "Aspect definition-status.census (build-wide counts)",
+   "representation": "aspect field",
+   "row": "report:census.summary.*"
+  },
+  {
+   "item": "report:census.summary.metric_groups",
+   "kc_target": "Aspect definition-status.census (build-wide counts)",
+   "representation": "aspect field",
+   "row": "report:census.summary.*"
+  },
+  {
+   "item": "report:manifest.budget",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:manifest.*"
+  },
+  {
+   "item": "report:manifest.build_id",
+   "kc_target": "Aspect meridian-provenance.build_id",
+   "representation": "aspect field",
+   "row": "report:manifest.build_id"
+  },
+  {
+   "item": "report:manifest.census_summary",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:manifest.*"
+  },
+  {
+   "item": "report:manifest.counts",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:manifest.*"
+  },
+  {
+   "item": "report:manifest.graph_hash",
+   "kc_target": "Aspect meridian-provenance.graph_hash",
+   "representation": "aspect field",
+   "row": "report:manifest.graph_hash"
+  },
+  {
+   "item": "report:manifest.index",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:manifest.*"
+  },
+  {
+   "item": "report:manifest.resolver_constants",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:manifest.*"
+  },
+  {
+   "item": "report:manifest.schema",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:manifest.*"
+  },
+  {
+   "item": "report:manifest.structural_totals",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:manifest.*"
+  },
+  {
+   "item": "report:manifest.table_reconciliation",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:manifest.*"
+  },
+  {
+   "item": "report:run.archived",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.archived"
+  },
+  {
+   "item": "report:run.reports.bq",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.reports.*"
+  },
+  {
+   "item": "report:run.reports.expressions",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.reports.*"
+  },
+  {
+   "item": "report:run.reports.jobs_30d",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.reports.*"
+  },
+  {
+   "item": "report:run.reports.lob_map",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.reports.*"
+  },
+  {
+   "item": "report:run.reports.mdm",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.reports.*"
+  },
+  {
+   "item": "report:run.reports.org_map",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.reports.*"
+  },
+  {
+   "item": "report:run.reports.std_tech",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.reports.*"
+  },
+  {
+   "item": "report:run.reports.studio_joins",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.reports.*"
+  },
+  {
+   "item": "report:run.reports.utilization",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.reports.*"
+  },
+  {
+   "item": "report:run.reports.value_meanings",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.reports.*"
+  },
+  {
+   "item": "report:run.reports.vocab",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.reports.*"
+  },
+  {
+   "item": "report:run.roots",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.roots"
+  },
+  {
+   "item": "report:run.run_id",
+   "kc_target": "Aspect meridian-provenance.graph_run",
+   "representation": "aspect field",
+   "row": "report:run.run_id"
+  },
+  {
+   "item": "report:run.utilization",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:run.utilization"
+  },
+  {
+   "item": "report:tickets.column",
+   "kc_target": "Aspect definition-status.tickets[]; DQ rule suggestions",
+   "representation": "DQ rule",
+   "row": "report:tickets.*"
+  },
+  {
+   "item": "report:tickets.detail",
+   "kc_target": "Aspect definition-status.tickets[]; DQ rule suggestions",
+   "representation": "DQ rule",
+   "row": "report:tickets.*"
+  },
+  {
+   "item": "report:tickets.table",
+   "kc_target": "Aspect definition-status.tickets[]; DQ rule suggestions",
+   "representation": "DQ rule",
+   "row": "report:tickets.*"
+  },
+  {
+   "item": "report:tickets.ticket",
+   "kc_target": "Aspect definition-status.tickets[]; DQ rule suggestions",
+   "representation": "DQ rule",
+   "row": "report:tickets.*"
+  },
+  {
+   "item": "report:validation.error_samples",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:validation.*"
+  },
+  {
+   "item": "report:validation.errors_by_check",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:validation.*"
+  },
+  {
+   "item": "report:validation.n_errors",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:validation.*"
+  },
+  {
+   "item": "report:validation.n_warnings",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:validation.*"
+  },
+  {
+   "item": "report:validation.ok",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:validation.*"
+  },
+  {
+   "item": "report:validation.warning_samples",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:validation.*"
+  },
+  {
+   "item": "report:validation.warnings_by_check",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "report:validation.*"
+  },
+  {
+   "item": "witness:atlas",
+   "kc_target": "disclosure text 'Atlas catalog'",
+   "representation": "aspect field",
+   "row": "witness:atlas"
+  },
+  {
+   "item": "witness:audit_30d",
+   "kc_target": "disclosure text 'audit log corroboration'",
+   "representation": "aspect field",
+   "row": "witness:audit_30d"
+  },
+  {
+   "item": "witness:bq",
+   "kc_target": "disclosure text 'BigQuery catalog'",
+   "representation": "aspect field",
+   "row": "witness:bq"
+  },
+  {
+   "item": "witness:catalog_mined",
+   "kc_target": "disclosure text 'mined from the measures catalog'",
+   "representation": "aspect field",
+   "row": "witness:catalog_mined"
+  },
+  {
+   "item": "witness:dmp",
+   "kc_target": "disclosure text 'metric catalog (dmp)'",
+   "representation": "aspect field",
+   "row": "witness:dmp"
+  },
+  {
+   "item": "witness:gmns",
+   "kc_target": "disclosure text 'GMNS spec'",
+   "representation": "aspect field",
+   "row": "witness:gmns"
+  },
+  {
+   "item": "witness:gold_attested",
+   "kc_target": "Query (attested sample) only",
+   "representation": "query",
+   "row": "witness:gold_attested"
+  },
+  {
+   "item": "witness:jobs_30d",
+   "kc_target": "disclosure text 'from 30-day query history'",
+   "representation": "aspect field",
+   "row": "witness:jobs_30d"
+  },
+  {
+   "item": "witness:kc",
+   "kc_target": "none (the read-back witness)",
+   "representation": "excluded",
+   "row": "witness:kc"
+  },
+  {
+   "item": "witness:llm_enriched",
+   "kc_target": "label 'Suggested — unreviewed'",
+   "representation": "suggestion-only",
+   "row": "witness:llm_enriched"
+  },
+  {
+   "item": "witness:lumi",
+   "kc_target": "disclosure text 'MDM profile'",
+   "representation": "aspect field",
+   "row": "witness:lumi"
+  },
+  {
+   "item": "witness:skill_contract",
+   "kc_target": "disclosure text 'skill contract'",
+   "representation": "aspect field",
+   "row": "witness:skill_contract"
+  },
+  {
+   "item": "witness:snippet",
+   "kc_target": "disclosure text 'insight snippet'",
+   "representation": "aspect field",
+   "row": "witness:snippet"
+  },
+  {
+   "item": "witness:steward",
+   "kc_target": "disclosure text 'steward decision'",
+   "representation": "aspect field",
+   "row": "witness:steward"
+  },
+  {
+   "item": "witness:studio",
+   "kc_target": "disclosure text 'observed in Studio SQL'",
+   "representation": "aspect field",
+   "row": "witness:studio"
+  },
+  {
+   "item": "witness:user_variant",
+   "kc_target": "none",
+   "representation": "excluded",
+   "row": "witness:user_variant"
+  }
+ ],
+ "rows": [
+  {
+   "disclosure": "each line carries [witness · status]",
+   "extractor": "provenance",
+   "item": "witness:bq",
+   "kc_target": "disclosure text 'BigQuery catalog'",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "each line carries [witness · status]",
+   "extractor": "provenance",
+   "item": "witness:lumi",
+   "kc_target": "disclosure text 'MDM profile'",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "each line carries [witness · status]",
+   "extractor": "provenance",
+   "item": "witness:atlas",
+   "kc_target": "disclosure text 'Atlas catalog'",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "each line carries [witness · status]",
+   "extractor": "provenance",
+   "item": "witness:steward",
+   "kc_target": "disclosure text 'steward decision'",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "each line carries [witness · status]",
+   "extractor": "provenance",
+   "item": "witness:dmp",
+   "kc_target": "disclosure text 'metric catalog (dmp)'",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "each line carries [witness · status]",
+   "extractor": "provenance",
+   "item": "witness:gmns",
+   "kc_target": "disclosure text 'GMNS spec'",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "each line carries [witness · status]",
+   "extractor": "provenance",
+   "item": "witness:skill_contract",
+   "kc_target": "disclosure text 'skill contract'",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "each line carries [witness · status]",
+   "extractor": "provenance",
+   "item": "witness:catalog_mined",
+   "kc_target": "disclosure text 'mined from the measures catalog'",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "each line carries [witness · status]",
+   "extractor": "provenance",
+   "item": "witness:jobs_30d",
+   "kc_target": "disclosure text 'from 30-day query history'",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "corroborates, never votes",
+   "extractor": "provenance",
+   "item": "witness:audit_30d",
+   "kc_target": "disclosure text 'audit log corroboration'",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "each line carries [witness · status]",
+   "extractor": "provenance",
+   "item": "witness:snippet",
+   "kc_target": "disclosure text 'insight snippet'",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "each line carries [witness · status]",
+   "extractor": "provenance",
+   "item": "witness:studio",
+   "kc_target": "disclosure text 'observed in Studio SQL'",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "model text is never copied without its flag",
+   "extractor": "enrichment",
+   "item": "witness:llm_enriched",
+   "kc_target": "label 'Suggested — unreviewed'",
+   "reason": "",
+   "representation": "suggestion-only",
+   "status_rule": "review-only: never copied without a human decision"
+  },
+  {
+   "disclosure": "attested SQL; prompts and answers never leave",
+   "extractor": "queries",
+   "item": "witness:gold_attested",
+   "kc_target": "Query (attested sample) only",
+   "reason": "",
+   "representation": "query",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "witness:user_variant",
+   "kc_target": "none",
+   "reason": "a person's on-the-fly variant is not shared truth",
+   "representation": "excluded",
+   "status_rule": "never leaves the graph"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "witness:kc",
+   "kc_target": "none (the read-back witness)",
+   "reason": "what the catalog already says is input to the census, never output",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "named per fact",
+   "extractor": "provenance",
+   "item": "prov:source",
+   "kc_target": "Aspect meridian-provenance.witnesses[].source",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "named per fact",
+   "extractor": "provenance",
+   "item": "prov:witness",
+   "kc_target": "Aspect meridian-provenance.witnesses[].family",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "the graph run id",
+   "extractor": "provenance",
+   "item": "prov:run",
+   "kc_target": "Aspect meridian-provenance.graph_run",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "provenance",
+   "item": "prov:retrieved",
+   "kc_target": "Aspect meridian-provenance.retrieved_at",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "count of independent observations",
+   "extractor": "provenance",
+   "item": "prov:support",
+   "kc_target": "support counts inside aspect rows",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "prov:status",
+   "kc_target": "quad status filter (active only)",
+   "reason": "superseded/retracted quads are never assembled",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "the source file or record",
+   "extractor": "provenance",
+   "item": "prov:evidence",
+   "kc_target": "expandable evidence on every fact",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "named steward",
+   "extractor": "stewardship",
+   "item": "prov:actor",
+   "kc_target": "Contact (steward decisions); push record signature",
+   "reason": "",
+   "representation": "contact",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "prov:valid_for",
+   "kc_target": "none",
+   "reason": "schema-version validity is a serving concern",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:table",
+   "kc_target": "Entry (BigQuery table)",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:table.object_type",
+   "kc_target": "Entry overview § Grain & keys; Aspect meridian-provenance.object_type",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "absent means unknown, never zero",
+   "extractor": "identity",
+   "item": "node:table.total_rows",
+   "kc_target": "Entry overview § Grain & keys; Aspect meridian-provenance.row_count",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:table.n_partitions",
+   "kc_target": "Aspect meridian-provenance.partitions",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "latest partition as observed",
+   "extractor": "identity",
+   "item": "node:table.partition_latest",
+   "kc_target": "Entry overview § Grain & keys; DQ rule freshness",
+   "reason": "",
+   "representation": "DQ rule",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:table.lifecycle_status",
+   "kc_target": "Entry description (status posture); definition-status.lifecycle",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:table.schema_fingerprint",
+   "kc_target": "Aspect meridian-provenance.schema_fingerprint",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:table.project",
+   "kc_target": "Aspect meridian-provenance.project",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:table.layer_type",
+   "kc_target": "Entry overview § Purpose; Aspect meridian-provenance.layer",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:table.environment",
+   "kc_target": "Aspect meridian-provenance.environment",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "lineage",
+   "item": "node:table.feed_type",
+   "kc_target": "Aspect lineage-notes.feed_type",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "lineage",
+   "item": "node:table.source_system",
+   "kc_target": "Aspect lineage-notes.source_system",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "lineage",
+   "item": "node:table.pipeline_name",
+   "kc_target": "Aspect lineage-notes.pipeline",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:table.appl_id",
+   "kc_target": "Aspect meridian-provenance.application_id",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:table.stub",
+   "kc_target": "none",
+   "reason": "loader placeholder flag, no meaning",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:table.table_meta_logical",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:table.table_metrics",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "status",
+   "item": "node:table.answerability",
+   "kc_target": "Aspect definition-status.answerability",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "30-day history",
+   "extractor": "usage",
+   "item": "node:table.cost_prior",
+   "kc_target": "Aspect usage-profile.bytes_per_query",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "names never leave; the count does",
+   "extractor": "usage",
+   "item": "node:table.top_users",
+   "kc_target": "Aspect usage-profile.distinct_users (count only)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "from 30-day history",
+   "extractor": "usage",
+   "item": "node:table.usage_rhythm",
+   "kc_target": "Aspect usage-profile.peak_hours",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Atlas catalog",
+   "extractor": "description",
+   "item": "node:table.description_atlas",
+   "kc_target": "Entry description; overview § Purpose",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "BigQuery catalog",
+   "extractor": "description",
+   "item": "node:table.description_bq",
+   "kc_target": "Entry description (fallback); overview § Purpose",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "MDM profile",
+   "extractor": "description",
+   "item": "node:table.description_mdm",
+   "kc_target": "overview § Purpose (supplementary)",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Atlas catalog",
+   "extractor": "description",
+   "item": "node:table.business_name_atlas",
+   "kc_target": "Entry display name suggestion; glossary term",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "node:table.business_unit",
+   "kc_target": "Contact (business unit); Entry overview § Ownership & usage",
+   "reason": "",
+   "representation": "contact",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Atlas catalog",
+   "extractor": "stewardship",
+   "item": "node:table.ownership_atlas",
+   "kc_target": "Contact (business owner / steward)",
+   "reason": "",
+   "representation": "contact",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:table.data_category",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes.data_category",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:table.data_sub_category",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes.data_sub_category",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Atlas declaration",
+   "extractor": "sensitivity",
+   "item": "node:table.has_pii_atlas",
+   "kc_target": "Aspect sensitivity-consensus.declared.pii",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Atlas declaration",
+   "extractor": "sensitivity",
+   "item": "node:table.has_gdpr_atlas",
+   "kc_target": "Aspect sensitivity-consensus.declared.gdpr",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Atlas declaration",
+   "extractor": "sensitivity",
+   "item": "node:table.has_oncop_atlas",
+   "kc_target": "Aspect sensitivity-consensus.declared.oncop",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "lineage",
+   "item": "node:table.is_lineage_exist_atlas",
+   "kc_target": "Aspect lineage-notes.catalog_declares_lineage",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Atlas catalog",
+   "extractor": "identity",
+   "item": "node:table.*_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, Atlas plane)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "MDM profile",
+   "extractor": "identity",
+   "item": "node:table.*_mdm",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (map, MDM plane)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "columns",
+   "item": "node:col",
+   "kc_target": "Column entry (schema aspect field)",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "BigQuery is authoritative on type",
+   "extractor": "columns",
+   "item": "node:col.data_type",
+   "kc_target": "Column description (type shown); schema field",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "catalog says; BigQuery wins",
+   "extractor": "columns",
+   "item": "node:col.data_type_atlas",
+   "kc_target": "Aspect definition-status.type_disagreements (D3)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "MDM says; BigQuery wins",
+   "extractor": "columns",
+   "item": "node:col.data_type_mdm",
+   "kc_target": "Aspect definition-status.type_disagreements (D3)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Atlas catalog",
+   "extractor": "columns",
+   "item": "node:col.description_atlas",
+   "kc_target": "Column description",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "BigQuery catalog",
+   "extractor": "columns",
+   "item": "node:col.description_bq",
+   "kc_target": "Column description (fallback)",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "MDM profile",
+   "extractor": "columns",
+   "item": "node:col.description_mdm",
+   "kc_target": "Column description (supplementary)",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "columns",
+   "item": "node:col.business_name",
+   "kc_target": "Column description (business name prefix); glossary term candidate",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Atlas catalog",
+   "extractor": "columns",
+   "item": "node:col.business_name_atlas",
+   "kc_target": "Column description (business name prefix)",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "columns",
+   "item": "node:col.column_name_atlas",
+   "kc_target": "Aspect definition-status.name_disagreements",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "MDM declaration",
+   "extractor": "sensitivity",
+   "item": "node:col.is_pii_mdm",
+   "kc_target": "Aspect sensitivity-consensus.columns[].declared_by (MDM)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "MDM declaration",
+   "extractor": "sensitivity",
+   "item": "node:col.pii_role_id",
+   "kc_target": "Aspect sensitivity-consensus.columns[].pii_role",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "MDM declaration",
+   "extractor": "sensitivity",
+   "item": "node:col.sde_group",
+   "kc_target": "Aspect sensitivity-consensus.columns[].sde_group",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "declared key",
+   "extractor": "keys",
+   "item": "node:col.is_primary_key",
+   "kc_target": "DQ rule uniqueness; overview § Grain & keys",
+   "reason": "",
+   "representation": "DQ rule",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Atlas declaration",
+   "extractor": "keys",
+   "item": "node:col.is_primary_key_atlas",
+   "kc_target": "DQ rule uniqueness (catalog-declared)",
+   "reason": "",
+   "representation": "DQ rule",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "keys",
+   "item": "node:col.is_partitioning",
+   "kc_target": "overview § Grain & keys; DQ rule freshness",
+   "reason": "",
+   "representation": "DQ rule",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Atlas declaration",
+   "extractor": "keys",
+   "item": "node:col.is_partitioning_atlas",
+   "kc_target": "overview § Grain & keys (catalog view)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Atlas declaration",
+   "extractor": "columns",
+   "item": "node:col.nullable_atlas",
+   "kc_target": "DQ rule not-null (catalog-declared)",
+   "reason": "",
+   "representation": "DQ rule",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "profile scan",
+   "extractor": "columns",
+   "item": "node:col.null_count",
+   "kc_target": "DQ rule not-null (profile evidence)",
+   "reason": "",
+   "representation": "DQ rule",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "profile scan",
+   "extractor": "domains",
+   "item": "node:col.approx_distinct",
+   "kc_target": "Aspect value-domain (column entry).distinct_estimate",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "how much was profiled",
+   "extractor": "domains",
+   "item": "node:col.profile_coverage",
+   "kc_target": "Aspect value-domain (column entry).profile_coverage",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "MDM lineage",
+   "extractor": "lineage",
+   "item": "node:col.derived_logic",
+   "kc_target": "Aspect lineage-notes.column_derivations",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:col.ordinal",
+   "kc_target": "none",
+   "reason": "the catalog owns column order from the schema",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:col.ordinal_atlas",
+   "kc_target": "none",
+   "reason": "the catalog owns column order from the schema",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:col.column_length",
+   "kc_target": "none",
+   "reason": "physical length is already in the schema aspect",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "columns",
+   "item": "node:col.nested_path",
+   "kc_target": "Column description (nested path shown)",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "which plane saw the column",
+   "extractor": "columns",
+   "item": "node:col.observed_via",
+   "kc_target": "Aspect definition-status.columns_observed_via",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:col.stub",
+   "kc_target": "none",
+   "reason": "loader placeholder flag, no meaning",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "Atlas catalog",
+   "extractor": "columns",
+   "item": "node:col.*_atlas",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (column, Atlas plane)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "MDM profile",
+   "extractor": "columns",
+   "item": "node:col.*_mdm",
+   "kc_target": "Aspect meridian-provenance.catalog_attributes (column, MDM plane)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "status inside the definition",
+   "extractor": "metrics",
+   "item": "node:metric",
+   "kc_target": "Glossary term (certified) / Candidate terms (pending); Aspect governed-metrics",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.label",
+   "kc_target": "Glossary term display name",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "certified SQL only as a query; others in the aspect",
+   "extractor": "metrics",
+   "item": "node:metric.canonical_sql",
+   "kc_target": "Query (certified); Aspect governed-metrics.canonical_sql",
+   "reason": "",
+   "representation": "query",
+   "status_rule": "certified only"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.canon_version",
+   "kc_target": "Aspect governed-metrics.fingerprint_version",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.grain",
+   "kc_target": "Glossary term definition (grain); Aspect governed-metrics.grain",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.grain_declared",
+   "kc_target": "Aspect governed-metrics.grain (catalog-declared)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "observed in Studio SQL",
+   "extractor": "metrics",
+   "item": "node:metric.grain_observed",
+   "kc_target": "Aspect governed-metrics.grain_observed",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.question_answered",
+   "kc_target": "Glossary term definition (question)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.description",
+   "kc_target": "Glossary term overview",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.expression_prose",
+   "kc_target": "Glossary term overview (calculation note)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.approved_dimensions",
+   "kc_target": "Aspect governed-metrics.approved_dimensions",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.sign_convention",
+   "kc_target": "Aspect governed-metrics.sign_convention",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "filters are part of identity",
+   "extractor": "metrics",
+   "item": "node:metric.common_filters",
+   "kc_target": "Aspect governed-metrics.filters",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.author",
+   "kc_target": "Contact (metric author)",
+   "reason": "",
+   "representation": "contact",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:metric.author_id",
+   "kc_target": "none",
+   "reason": "an internal id behind the author name",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.requestor",
+   "kc_target": "Contact (requestor)",
+   "reason": "",
+   "representation": "contact",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "Studio export",
+   "extractor": "metrics",
+   "item": "node:metric.data_owners",
+   "kc_target": "Contact (data owner)",
+   "reason": "",
+   "representation": "contact",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "metric catalog",
+   "extractor": "metrics",
+   "item": "node:metric.data_owners_dmp",
+   "kc_target": "Contact (data owner)",
+   "reason": "",
+   "representation": "contact",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "the catalog's own approval record",
+   "extractor": "metrics",
+   "item": "node:metric.approval",
+   "kc_target": "Aspect governed-metrics.approval",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.business_unit",
+   "kc_target": "Glossary category (business unit)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.line_of_business",
+   "kc_target": "Glossary category (LOB)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.domain",
+   "kc_target": "Glossary category (domain)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.data_category",
+   "kc_target": "Aspect governed-metrics.data_category",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.scope",
+   "kc_target": "Aspect governed-metrics.scope",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.products",
+   "kc_target": "Aspect governed-metrics.products",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.product_ids",
+   "kc_target": "Aspect governed-metrics.products",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.base_tables",
+   "kc_target": "Aspect governed-metrics.base_tables",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "which tables, never how",
+   "extractor": "joins",
+   "item": "node:metric.joined_tables",
+   "kc_target": "Aspect join-paths (tier: candidate)",
+   "reason": "",
+   "representation": "suggestion-only",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Studio export",
+   "extractor": "metrics",
+   "item": "node:metric.join_condition",
+   "kc_target": "Aspect governed-metrics.join_condition",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "metric catalog",
+   "extractor": "metrics",
+   "item": "node:metric.join_conditions",
+   "kc_target": "Aspect governed-metrics.join_conditions",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "associated, not referenced",
+   "extractor": "metrics",
+   "item": "node:metric.tables_associated_not_referenced",
+   "kc_target": "Aspect governed-metrics.tables_associated",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "catalog usage texture",
+   "extractor": "usage",
+   "item": "node:metric.execution_count",
+   "kc_target": "Aspect usage-profile.metric_runs",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.group_by_patterns",
+   "kc_target": "Aspect governed-metrics.group_by_patterns",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.query_shape",
+   "kc_target": "Aspect governed-metrics.query_shape",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "the miner's word",
+   "extractor": "metrics",
+   "item": "node:metric.confidence",
+   "kc_target": "Aspect governed-metrics.miner_confidence",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "usage",
+   "item": "node:metric.label_usage",
+   "kc_target": "Aspect usage-profile.label_usage",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:metric.sql_source",
+   "kc_target": "Aspect governed-metrics.sql_source",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "Suggested — unreviewed",
+   "extractor": "enrichment",
+   "item": "node:metric.question_enriched",
+   "kc_target": "Suggestion: term definition (question)",
+   "reason": "",
+   "representation": "suggestion-only",
+   "status_rule": "review-only: never copied without a human decision"
+  },
+  {
+   "disclosure": "Suggested — unreviewed",
+   "extractor": "enrichment",
+   "item": "node:metric.grain_enriched",
+   "kc_target": "Suggestion: term definition (grain)",
+   "reason": "",
+   "representation": "suggestion-only",
+   "status_rule": "review-only: never copied without a human decision"
+  },
+  {
+   "disclosure": "Suggested — unreviewed",
+   "extractor": "enrichment",
+   "item": "node:metric.*_enriched",
+   "kc_target": "Suggestion",
+   "reason": "",
+   "representation": "suggestion-only",
+   "status_rule": "review-only: never copied without a human decision"
+  },
+  {
+   "disclosure": "",
+   "extractor": "enrichment",
+   "item": "node:metric.enrich_*",
+   "kc_target": "Suggestion metadata (confidence, caveat, prompt version)",
+   "reason": "",
+   "representation": "suggestion-only",
+   "status_rule": "review-only: never copied without a human decision"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:mgroup",
+   "kc_target": "Glossary term (the catalog name of a metric family)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:mgroup.label",
+   "kc_target": "Glossary term display name",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:mgroup.group_key",
+   "kc_target": "Aspect governed-metrics.catalog_id",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "concepts",
+   "item": "node:pred",
+   "kc_target": "Aspect concept-bindings.predicate_sql",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "concepts",
+   "item": "node:pred.canonical_sql",
+   "kc_target": "Aspect concept-bindings.predicate_sql",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "concepts",
+   "item": "node:pred.canon_version",
+   "kc_target": "Aspect concept-bindings.fingerprint_version",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "concepts",
+   "item": "node:pred.kind",
+   "kc_target": "Aspect concept-bindings.kind",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "mined shapes are never sample queries",
+   "extractor": "usage",
+   "item": "node:tmpl",
+   "kc_target": "Aspect usage-profile.query_templates (count + shape)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "parameterized shape, not a runnable query",
+   "extractor": "usage",
+   "item": "node:tmpl.normalized_sql",
+   "kc_target": "Aspect usage-profile.query_templates[].shape",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "30-day history",
+   "extractor": "usage",
+   "item": "node:tmpl.occurrences",
+   "kc_target": "Aspect usage-profile.query_templates[].runs",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:tmpl.table",
+   "kc_target": "join key to the table",
+   "reason": "the template's own table pointer",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "concepts",
+   "item": "node:concept",
+   "kc_target": "Glossary term (certified/witnessed concept); Aspect concept-bindings",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "concepts",
+   "item": "node:concept.label",
+   "kc_target": "Glossary term display name",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "Suggested — unreviewed",
+   "extractor": "enrichment",
+   "item": "node:concept.description_enriched",
+   "kc_target": "Suggestion: concept definition",
+   "reason": "",
+   "representation": "suggestion-only",
+   "status_rule": "review-only: never copied without a human decision"
+  },
+  {
+   "disclosure": "Suggested — unreviewed",
+   "extractor": "enrichment",
+   "item": "node:concept.disambiguation_enriched",
+   "kc_target": "Suggestion: concept disambiguation",
+   "reason": "",
+   "representation": "suggestion-only",
+   "status_rule": "review-only: never copied without a human decision"
+  },
+  {
+   "disclosure": "Suggested — unreviewed",
+   "extractor": "enrichment",
+   "item": "node:concept.*_enriched",
+   "kc_target": "Suggestion",
+   "reason": "",
+   "representation": "suggestion-only",
+   "status_rule": "review-only: never copied without a human decision"
+  },
+  {
+   "disclosure": "",
+   "extractor": "enrichment",
+   "item": "node:concept.enrich_*",
+   "kc_target": "Suggestion metadata",
+   "reason": "",
+   "representation": "suggestion-only",
+   "status_rule": "review-only: never copied without a human decision"
+  },
+  {
+   "disclosure": "Atlas catalog",
+   "extractor": "terms",
+   "item": "node:term",
+   "kc_target": "Glossary term (business term)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "terms",
+   "item": "node:term.name",
+   "kc_target": "Glossary term display name",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "terms",
+   "item": "node:term.description",
+   "kc_target": "Glossary term description",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "the catalog's own status word",
+   "extractor": "terms",
+   "item": "node:term.status",
+   "kc_target": "Glossary term description (status prefix)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "terms",
+   "item": "node:term.term_id",
+   "kc_target": "Aspect meridian-provenance.term_ids (source id)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "scope in the definition",
+   "extractor": "terms",
+   "item": "node:acr",
+   "kc_target": "Synonym of its expansion",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "terms",
+   "item": "node:acr.symbol",
+   "kc_target": "Synonym text",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "terms",
+   "item": "node:acr.definition",
+   "kc_target": "Glossary term description (expansion)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "terms",
+   "item": "node:acr.business_unit",
+   "kc_target": "Glossary term description (scope: business unit)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "terms",
+   "item": "node:acr.region",
+   "kc_target": "Glossary term description (scope: region)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:acr.entry_type",
+   "kc_target": "none",
+   "reason": "the source sheet's row type",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:acr.common_word",
+   "kc_target": "none (the anti-alias guard)",
+   "reason": "a common word flagged as acronym must never become a synonym",
+   "representation": "excluded",
+   "status_rule": "never leaves the graph"
+  },
+  {
+   "disclosure": "profile scan",
+   "extractor": "domains",
+   "item": "node:domain",
+   "kc_target": "Aspect value-domain (column entry).values; DQ rule set membership",
+   "reason": "",
+   "representation": "DQ rule",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "profile scan",
+   "extractor": "domains",
+   "item": "node:domain.values",
+   "kc_target": "Aspect value-domain (column entry).values[] (value, share)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "MDM value index",
+   "extractor": "domains",
+   "item": "node:domain.meanings",
+   "kc_target": "Aspect value-domain (column entry).values[].meaning",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "domains",
+   "item": "node:domain.distinct_estimate",
+   "kc_target": "Aspect value-domain (column entry).distinct_estimate",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "domains",
+   "item": "node:domain.profiled",
+   "kc_target": "Aspect value-domain (column entry).profiled",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "node:owner",
+   "kc_target": "Contact",
+   "reason": "",
+   "representation": "contact",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "node:owner.owner",
+   "kc_target": "Contact identity",
+   "reason": "",
+   "representation": "contact",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "node:owner.role",
+   "kc_target": "Contact role",
+   "reason": "",
+   "representation": "contact",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "node:lob",
+   "kc_target": "Glossary category (LOB → org unit)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "node:lob.code",
+   "kc_target": "Glossary category display name",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "node:lob.name",
+   "kc_target": "Glossary category description",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "node:lob.kind",
+   "kc_target": "Glossary category level (lob | org_unit)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "node:lob.parent",
+   "kc_target": "Glossary category parent",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "node:mdom",
+   "kc_target": "Glossary category (metric domain)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "node:mdom.name",
+   "kc_target": "Glossary category display name",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:schema",
+   "kc_target": "Aspect meridian-provenance.schema_version",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:schema.fingerprint",
+   "kc_target": "Aspect meridian-provenance.schema_fingerprint",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "node:schema.n_columns",
+   "kc_target": "Aspect meridian-provenance.schema_columns",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "which kind of SQL it is",
+   "extractor": "queries",
+   "item": "node:doc",
+   "kc_target": "Query (SQL docs); lineage-notes (view SQL)",
+   "reason": "",
+   "representation": "query",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "queries",
+   "item": "node:doc.kind",
+   "kc_target": "Query description / lineage note kind",
+   "reason": "",
+   "representation": "query",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "attested SQL only",
+   "extractor": "queries",
+   "item": "node:doc.sql",
+   "kc_target": "Query SQL",
+   "reason": "",
+   "representation": "query",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "queries",
+   "item": "node:doc.text",
+   "kc_target": "Aspect lineage-notes.notes",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:doc.name",
+   "kc_target": "none (read-back: the catalog's own term name)",
+   "reason": "catalog read-back is census input, never output",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:doc.category",
+   "kc_target": "none (read-back)",
+   "reason": "catalog read-back is census input, never output",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:doc.review_status",
+   "kc_target": "none (read-back review state)",
+   "reason": "the pending flag on read-back records",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:doc.*",
+   "kc_target": "none (read-back fields)",
+   "reason": "catalog read-back is census input, never output",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "open steward items about this table",
+   "extractor": "status",
+   "item": "node:review",
+   "kc_target": "Aspect definition-status.open_reviews",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "status",
+   "item": "node:review.kind",
+   "kc_target": "Aspect definition-status.open_reviews[].kind",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "status",
+   "item": "node:review.subject",
+   "kc_target": "Aspect definition-status.open_reviews[].subject",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "status",
+   "item": "node:review.proposal",
+   "kc_target": "Aspect definition-status.open_reviews[].proposal",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "status",
+   "item": "node:review.evidence",
+   "kc_target": "Aspect definition-status.open_reviews[].evidence",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "status",
+   "item": "node:review.priority",
+   "kc_target": "Aspect definition-status.open_reviews[].priority",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "status",
+   "item": "node:review.status",
+   "kc_target": "Aspect definition-status.open_reviews[].status",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "node:review.agent_recommendation",
+   "kc_target": "none",
+   "reason": "a recommendation to the steward, not a fact about the table",
+   "representation": "excluded",
+   "status_rule": "review-only: never copied without a human decision"
+  },
+  {
+   "disclosure": "",
+   "extractor": "status",
+   "item": "node:review.*",
+   "kc_target": "Aspect definition-status.open_reviews[] (decision fields)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:skill",
+   "kc_target": "Aspect governed-metrics.skill_pack",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:skill.*",
+   "kc_target": "Aspect governed-metrics.skill_pack (attributes)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "node:status",
+   "kc_target": "status word inside every glossary definition",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "UNKNOWN → 'treat as restricted'",
+   "extractor": "sensitivity",
+   "item": "node:policy",
+   "kc_target": "Aspect sensitivity-consensus.policy",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "provenance",
+   "item": "node:run",
+   "kc_target": "Aspect meridian-provenance.graph_run",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "columns",
+   "item": "edge:has_column",
+   "kc_target": "Column entries (schema)",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "edge:has_schema",
+   "kc_target": "Aspect meridian-provenance.schema_version",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "conflicts marked contested",
+   "extractor": "concepts",
+   "item": "edge:bound_to",
+   "kc_target": "Aspect concept-bindings.bindings[]; Related entry term→table",
+   "reason": "",
+   "representation": "related entry",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "concepts",
+   "item": "edge:bound_to.*",
+   "kc_target": "Aspect concept-bindings.bindings[].first_seen/last_seen/runs",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "edge:defines_metric",
+   "kc_target": "Aspect governed-metrics.catalog_id",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "edge:measured_on",
+   "kc_target": "Related entry term→table; Aspect governed-metrics.metrics[]",
+   "reason": "",
+   "representation": "related entry",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "edge:measured_on.*",
+   "kc_target": "Aspect governed-metrics.metrics[].first_seen/last_seen/runs",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "delta named",
+   "extractor": "metrics",
+   "item": "edge:variant_of",
+   "kc_target": "Related term ('variant of <parent>')",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "Atlas mapping",
+   "extractor": "terms",
+   "item": "edge:mapped_term",
+   "kc_target": "Related entry term→column",
+   "reason": "",
+   "representation": "related entry",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "terms",
+   "item": "edge:mapped_term.confidence",
+   "kc_target": "Related entry note (mapping confidence)",
+   "reason": "",
+   "representation": "related entry",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "terms",
+   "item": "edge:mapped_term.mapping_source",
+   "kc_target": "Related entry note",
+   "reason": "",
+   "representation": "related entry",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "declared vs inferred stated",
+   "extractor": "terms",
+   "item": "edge:mapped_term.mapping_type",
+   "kc_target": "Related entry note (declared | inferred)",
+   "reason": "",
+   "representation": "related entry",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "terms",
+   "item": "edge:mapped_term.matched_on",
+   "kc_target": "Related entry note",
+   "reason": "",
+   "representation": "related entry",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "anti-aliases never",
+   "extractor": "terms",
+   "item": "edge:alias_of",
+   "kc_target": "Synonym",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "witnessed vs candidate labeled; candidates never as joins",
+   "extractor": "joins",
+   "item": "edge:joins_via",
+   "kc_target": "Aspect join-paths.paths[] (tiered)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "joins",
+   "item": "edge:joins_via.on",
+   "kc_target": "Aspect join-paths.paths[].on",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "scoped_only = not raw-safe",
+   "extractor": "joins",
+   "item": "edge:joins_via.scope",
+   "kc_target": "Aspect join-paths.paths[].scope",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "joins",
+   "item": "edge:joins_via.join_type",
+   "kc_target": "Aspect join-paths.paths[].join_type",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "joins",
+   "item": "edge:joins_via.purpose",
+   "kc_target": "Aspect join-paths.paths[].purpose",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "joins",
+   "item": "edge:joins_via.preconditions",
+   "kc_target": "Aspect join-paths.paths[].preconditions",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "joins",
+   "item": "edge:joins_via.witness_metrics",
+   "kc_target": "Aspect join-paths.paths[].seen_in_metrics",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "joins",
+   "item": "edge:joins_via.measures",
+   "kc_target": "Aspect join-paths.paths[].seen_in_measures",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "the miner's word",
+   "extractor": "joins",
+   "item": "edge:joins_via.confidence",
+   "kc_target": "Aspect join-paths.paths[].confidence",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "'unknown' keeps the path a candidate",
+   "extractor": "joins",
+   "item": "edge:joins_via.how",
+   "kc_target": "Aspect join-paths.paths[].how",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "joins",
+   "item": "edge:joins_via.*",
+   "kc_target": "Aspect join-paths.paths[].first_seen/last_seen",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "co-usage alone is not a join",
+   "extractor": "joins",
+   "item": "edge:co_queried_with",
+   "kc_target": "Suggestion: proposed join (co-usage)",
+   "reason": "",
+   "representation": "suggestion-only",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "MDM lineage",
+   "extractor": "lineage",
+   "item": "edge:derived_from",
+   "kc_target": "Aspect lineage-notes.column_derivations[]",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "lineage",
+   "item": "edge:derived_from.derivation_logic",
+   "kc_target": "Aspect lineage-notes.column_derivations[].logic",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "API lineage needs process events: notes only",
+   "extractor": "lineage",
+   "item": "edge:upstream_of",
+   "kc_target": "Aspect lineage-notes.upstream[]; overview § Provenance",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "edge:owned_by",
+   "kc_target": "Contact",
+   "reason": "",
+   "representation": "contact",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "edge:owned_by.role",
+   "kc_target": "Contact role",
+   "reason": "",
+   "representation": "contact",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "edge:certified_as",
+   "kc_target": "status word in every term / aspect row",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "steward note",
+   "extractor": "metrics",
+   "item": "edge:certified_as.note",
+   "kc_target": "Aspect governed-metrics.metrics[].status_note",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "UNKNOWN → 'treat as restricted'",
+   "extractor": "sensitivity",
+   "item": "edge:has_policy",
+   "kc_target": "Aspect sensitivity-consensus.policy",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "domains",
+   "item": "edge:has_domain",
+   "kc_target": "Aspect value-domain (column entry)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "queries",
+   "item": "edge:evidenced_by",
+   "kc_target": "Query (attested SQL for a metric)",
+   "reason": "",
+   "representation": "query",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "queries",
+   "item": "edge:evidenced_by.*",
+   "kc_target": "Query description (first/last seen)",
+   "reason": "",
+   "representation": "query",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "edge:valid_in",
+   "kc_target": "none",
+   "reason": "schema-version validity is a serving concern",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "edge:member_of",
+   "kc_target": "Aspect governed-metrics.metrics[].families",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "edge:member_of.*",
+   "kc_target": "Aspect governed-metrics.metrics[].first_seen/last_seen/runs",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "queries",
+   "item": "edge:described_by",
+   "kc_target": "Aspect lineage-notes.view_sql; Query (view definition)",
+   "reason": "",
+   "representation": "query",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "edge:described_by.*",
+   "kc_target": "none (read-back link fields)",
+   "reason": "review_status / link kind on read-back edges",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "status",
+   "item": "edge:concerns",
+   "kc_target": "Aspect definition-status.open_reviews[]",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "home | shared stated",
+   "extractor": "stewardship",
+   "item": "edge:in_lob",
+   "kc_target": "Glossary category membership; Contact (LOB)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "edge:in_lob.role",
+   "kc_target": "overview § Ownership & usage (home | shared)",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "edge:in_lob.note",
+   "kc_target": "overview § Ownership & usage (steward note)",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "edge:in_lob.*",
+   "kc_target": "none",
+   "reason": "first/last seen of a membership: bookkeeping",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "edge:in_domain",
+   "kc_target": "Glossary category (metric domain)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "edge:in_domain.*",
+   "kc_target": "none",
+   "reason": "first/last seen of a membership: bookkeeping",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "usage ≠ ownership",
+   "extractor": "usage",
+   "item": "edge:used_by",
+   "kc_target": "Aspect usage-profile.used_by_lob[]; overview § Ownership & usage",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "usage",
+   "item": "edge:used_by.*",
+   "kc_target": "Aspect usage-profile.used_by_lob[].first_seen/last_seen",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "declared constraint",
+   "extractor": "keys",
+   "item": "edge:fk_references",
+   "kc_target": "Aspect join-paths.paths[] (tier: declared); DQ rule referential",
+   "reason": "",
+   "representation": "DQ rule",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "keys",
+   "item": "edge:fk_references.constraint",
+   "kc_target": "Aspect join-paths.paths[].constraint_name",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "edge:kc_pushed",
+   "kc_target": "Push record (Synapse side)",
+   "reason": "the record of what left; the catalog holds the content itself",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "edge:kc_pushed.*",
+   "kc_target": "Push record fields",
+   "reason": "the record of what left",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "index:metrics.*",
+   "kc_target": "Aspect governed-metrics (row fields mirror node props)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "governance vs evidence split",
+   "extractor": "metrics",
+   "item": "index:metrics.status_served",
+   "kc_target": "status word in every term / aspect row",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "index:metrics.evidence_origin",
+   "kc_target": "Aspect governed-metrics.metrics[].evidence_origin",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "index:metrics.support_by_witness",
+   "kc_target": "Aspect governed-metrics.metrics[].witnesses",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "index:metrics.witness_agreement",
+   "kc_target": "Aspect governed-metrics.metrics[].agreement",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "concepts",
+   "item": "index:bindings.*",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "terms",
+   "item": "index:vocab.*",
+   "kc_target": "Glossary term / synonym (compiled view)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "joins",
+   "item": "index:joins.*",
+   "kc_target": "Aspect join-paths.paths[]",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "joins",
+   "item": "index:joins.also_witnessed_by",
+   "kc_target": "Aspect join-paths.paths[].corroborated_by",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "joins",
+   "item": "index:joins.also_in_catalog",
+   "kc_target": "Aspect join-paths.paths[].corroborated_by (catalog)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "joins",
+   "item": "index:joins.note",
+   "kc_target": "Aspect join-paths.paths[].note",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "identity",
+   "item": "index:tables.*",
+   "kc_target": "Aspect meridian-provenance / overview § Grain & keys",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "declared key",
+   "extractor": "keys",
+   "item": "index:tables.primary_key",
+   "kc_target": "DQ rule uniqueness",
+   "reason": "",
+   "representation": "DQ rule",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "stewardship",
+   "item": "index:lob.*",
+   "kc_target": "Glossary categories; Contact (LOB)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "domains",
+   "item": "index:domains.*",
+   "kc_target": "Aspect value-domain (column entry); DQ rule set membership",
+   "reason": "",
+   "representation": "DQ rule",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "domains",
+   "item": "index:value_meanings.*",
+   "kc_target": "Aspect value-domain (column entry).values[].meaning",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "30-day history",
+   "extractor": "usage",
+   "item": "index:cost_priors.*",
+   "kc_target": "Aspect usage-profile.bytes_per_query",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "columns",
+   "item": "index:columns.*",
+   "kc_target": "Column description; column sensitivity; definition-status",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "union, most restrictive",
+   "extractor": "sensitivity",
+   "item": "index:acl.pii_columns",
+   "kc_target": "Aspect sensitivity-consensus.columns[] (most restrictive)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "UNKNOWN → 'treat as restricted'",
+   "extractor": "sensitivity",
+   "item": "index:acl.restricted",
+   "kc_target": "Aspect sensitivity-consensus.policy",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "columns",
+   "item": "index:schema",
+   "kc_target": "Column entries (servable columns)",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "index:graph_map.*",
+   "kc_target": "none",
+   "reason": "a rendering of the graph for the sky, not table knowledge",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "provenance",
+   "item": "index:sources.*",
+   "kc_target": "Aspect meridian-provenance.witnesses[] (display names)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "description",
+   "item": "card:table.preamble",
+   "kc_target": "Entry description; overview § Purpose",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "columns",
+   "item": "card:table.columns",
+   "kc_target": "Column descriptions",
+   "reason": "",
+   "representation": "prose",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "witnessed vs candidate",
+   "extractor": "joins",
+   "item": "card:table.joined_with",
+   "kc_target": "Aspect join-paths; overview § Joins",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "concepts",
+   "item": "card:table.common_filters",
+   "kc_target": "Aspect concept-bindings; overview § Concepts & filters",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "certified first; pending labeled",
+   "extractor": "metrics",
+   "item": "card:table.metrics_available",
+   "kc_target": "Aspect governed-metrics; overview § Metrics on this table",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "",
+   "extractor": "sensitivity",
+   "item": "card:table.access",
+   "kc_target": "Aspect sensitivity-consensus; overview § Sensitivity",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "status",
+   "item": "card:table.conflicts",
+   "kc_target": "Aspect definition-status; overview § What we don't know yet",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "card:metric.preamble",
+   "kc_target": "Glossary term definition + overview",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "card:metric.variants",
+   "kc_target": "Related terms (metric family)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "certified; pending/team_candidate only with status label"
+  },
+  {
+   "disclosure": "contested — steward pending",
+   "extractor": "status",
+   "item": "card:metric.conflicts",
+   "kc_target": "Aspect definition-status.metric_conflicts",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "metrics",
+   "item": "card:metric.*",
+   "kc_target": "Aspect governed-metrics (other card sections)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "concepts",
+   "item": "card:concept.preamble",
+   "kc_target": "Glossary term (concept)",
+   "reason": "",
+   "representation": "glossary",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "",
+   "extractor": "concepts",
+   "item": "card:concept.bindings",
+   "kc_target": "Aspect concept-bindings.bindings[]",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "witnessed by ≥1 non-model family"
+  },
+  {
+   "disclosure": "contested — steward pending",
+   "extractor": "status",
+   "item": "card:concept.conflicts",
+   "kc_target": "Aspect definition-status.concept_conflicts",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "build-wide, not per table",
+   "extractor": "status",
+   "item": "report:census.summary.*",
+   "kc_target": "Aspect definition-status.census (build-wide counts)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "D1..D5 explained",
+   "extractor": "status",
+   "item": "report:census.structural.per_table",
+   "kc_target": "Aspect definition-status.d_counts; overview § What we don't know yet",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "report:census.structural.totals",
+   "kc_target": "none",
+   "reason": "build-wide totals; the per-table cell is what an entry carries",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "status",
+   "item": "report:census.structural.handlers",
+   "kc_target": "Aspect definition-status.d_counts (handler text)",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "report:census.meta",
+   "kc_target": "none",
+   "reason": "scope notes about the census counters themselves",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "report:census.schema",
+   "kc_target": "none",
+   "reason": "envelope",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "status",
+   "item": "report:tickets.*",
+   "kc_target": "Aspect definition-status.tickets[]; DQ rule suggestions",
+   "reason": "",
+   "representation": "DQ rule",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "provenance",
+   "item": "report:manifest.build_id",
+   "kc_target": "Aspect meridian-provenance.build_id",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "provenance",
+   "item": "report:manifest.graph_hash",
+   "kc_target": "Aspect meridian-provenance.graph_hash",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "report:manifest.*",
+   "kc_target": "none",
+   "reason": "build bookkeeping (counts, gates, resolver constants), not table knowledge",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "report:diff.*",
+   "kc_target": "none",
+   "reason": "the build-to-build diff is Synapse's steward surface",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "provenance",
+   "item": "report:run.run_id",
+   "kc_target": "Aspect meridian-provenance.graph_run",
+   "reason": "",
+   "representation": "aspect field",
+   "status_rule": "any (structural fact)"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "report:run.roots",
+   "kc_target": "none",
+   "reason": "machine paths of the inputs",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "report:run.reports.*",
+   "kc_target": "none",
+   "reason": "loader counters: ingestion health, not table knowledge",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "report:run.utilization",
+   "kc_target": "none",
+   "reason": "the input ledger: ingestion health, not table knowledge",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "report:run.archived",
+   "kc_target": "none",
+   "reason": "run housekeeping",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "report:validation.*",
+   "kc_target": "none",
+   "reason": "graph integrity report, not table knowledge",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "enrichment",
+   "item": "report:enrich.*",
+   "kc_target": "Suggestion metadata (gate tier, prompt version)",
+   "reason": "",
+   "representation": "suggestion-only",
+   "status_rule": "review-only: never copied without a human decision"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "report:feedback",
+   "kc_target": "none",
+   "reason": "talk-back records are Synapse's own loop",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  },
+  {
+   "disclosure": "",
+   "extractor": "",
+   "item": "report:kc.*",
+   "kc_target": "Push record (Synapse side)",
+   "reason": "this module's own run records",
+   "representation": "excluded",
+   "status_rule": "n/a"
+  }
+ ],
+ "schema": "meridian.kc_coverage/1"
+}

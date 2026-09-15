@@ -29,6 +29,7 @@ from fastapi.staticfiles import StaticFiles
 
 from apps.synapse_admin.backend.ask import router as ask_router
 from apps.synapse_admin.backend.chat import router as chat_router
+from apps.synapse_admin.backend.kc import router as kc_router
 from apps.synapse_admin.backend.meridian import router as meridian_router
 
 _FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
@@ -239,6 +240,7 @@ def create_app() -> FastAPI:
     app.include_router(meridian_router)
     app.include_router(ask_router)      # Ask (E18), in-process
     app.include_router(chat_router)     # Synapse v2 chat, in-process
+    app.include_router(kc_router)       # KC Enrichment (E23), in-process
 
     if _SYNAPSE.exists():
         # mounted before "/" so the root mount cannot swallow it

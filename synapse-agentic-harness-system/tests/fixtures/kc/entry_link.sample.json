@@ -1,0 +1,12 @@
+{
+ "_doc": "https://docs.cloud.google.com/dataplex/docs/import-glossaries-entrylinks-json",
+ "_note": "one line of an entry-link import file: a term defining a table column",
+ "entryLink": {
+  "name": "projects/PROJECT/locations/LOCATION/entryGroups/@dataplex/entryLinks/spend-dw-t-amt-1",
+  "entryLinkType": "projects/dataplex-types/locations/global/entryLinkTypes/definition",
+  "entryReferences": [
+   {"name": "projects/PROJECT/locations/LOCATION/entryGroups/@dataplex/entries/GLOSSARY/terms/spend", "type": "SOURCE"},
+   {"name": "projects/PROJECT/locations/LOCATION/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/PROJECT/datasets/dw/tables/t", "type": "TARGET", "path": "amt"}
+  ]
+ }
+}

@@ -660,6 +660,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true", dest="json_out")
     p.add_argument("--fresh", action="store_true")
     p.set_defaults(fn=cmd_build_graph)
+
+    # Knowledge Catalog enrichment: the per-table bundle and the
+    # coverage registry (sahs/kc/cli.py owns both)
+    from sahs.kc.cli import add_parsers as _add_kc_parsers
+    _add_kc_parsers(sub, Path(__file__).resolve().parents[1])
     args = parser.parse_args(argv)
 
     # Every path flag is .env-configurable (paste once, run

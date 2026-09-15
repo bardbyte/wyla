@@ -1,0 +1,14 @@
+{
+ "_doc": "https://docs.cloud.google.com/dataplex/docs/create-aspect-types",
+ "_note": "an aspectTypes.create body: a record template with named, indexed fields",
+ "aspect_type_id": "meridian-provenance",
+ "metadataTemplate": {
+  "name": "meridian_provenance",
+  "type": "record",
+  "recordFields": [
+   {"name": "build_id", "type": "string", "index": 1, "annotations": {"displayName": "build id"}},
+   {"name": "witnesses", "type": "array", "index": 2, "arrayItems": {"name": "witnesses_item", "type": "string"}, "annotations": {"displayName": "witnesses"}},
+   {"name": "catalog_attributes", "type": "map", "index": 3, "mapItems": {"name": "catalog_attributes_value", "type": "string"}, "annotations": {"displayName": "catalog attributes"}}
+  ]
+ }
+}

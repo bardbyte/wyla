@@ -123,11 +123,11 @@ CREATE TABLE GraphEdges (
     'variant_of', 'mapped_term', 'alias_of', 'joins_via', 'co_queried_with',
     'derived_from', 'upstream_of', 'owned_by', 'certified_as', 'has_policy',
     'has_domain', 'evidenced_by', 'valid_in', 'member_of', 'described_by',
-    'concerns', 'in_lob', 'in_domain', 'used_by', 'fk_references')),
+    'concerns', 'in_lob', 'in_domain', 'used_by', 'fk_references', 'kc_pushed')),
   CONSTRAINT ck_edges_witness CHECK (Witness IN (
     'catalog_mined', 'jobs_30d', 'audit_30d', 'dmp', 'gmns', 'skill_contract',
     'snippet', 'atlas', 'lumi', 'bq', 'steward', 'user_variant',
-    'llm_enriched', 'gold_attested', 'studio')),
+    'llm_enriched', 'gold_attested', 'studio', 'kc')),
   CONSTRAINT fk_edges_subject FOREIGN KEY (SubjectId) REFERENCES GraphNodes (NodeId),
   CONSTRAINT fk_edges_object FOREIGN KEY (ObjectId) REFERENCES GraphNodes (NodeId),
 ) PRIMARY KEY (SubjectId, Relation, ObjectId, Witness);

@@ -132,4 +132,20 @@ export const api = {
       { version }),
   askStreamUrl: (id, after = 0) =>
     `/api/sessions/${encodeURIComponent(id)}/stream?after=${after}`,
+
+  /* ── KC Enrichment (E23): the catalog bundle per table ────
+   * Deterministic sections arrive at once; the model sections stream
+   * from the server, which holds the model contract. */
+  kcTables: () => get("/api/kc/tables"),
+  kcCoverage: () => get("/api/kc/coverage"),
+  kcBundle: (table, llm = 1) =>
+    get(`/api/kc/bundle/${encodeURIComponent(table)}?llm=${llm}`),
+  kcLedger: (table) =>
+    get(`/api/kc/bundle/${encodeURIComponent(table)}/ledger`),
+  kcExportUrl: (table, format) =>
+    `/api/kc/bundle/${encodeURIComponent(table)}/export?format=${format}`,
+  kcStreamUrl: (table, regenerate = 0) =>
+    `/api/kc/bundle/${encodeURIComponent(table)}/stream?regenerate=${regenerate}`,
+  kcPush: (table, body) =>
+    post(`/api/kc/push-record/${encodeURIComponent(table)}`, body),
 };
