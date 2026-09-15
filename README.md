@@ -107,6 +107,9 @@ python -m pytest synapse-agentic-harness-system/tests -q     # ~400 tests, a few
 python -m pytest apps/synapse_admin/tests -q                 # 65 tests, seconds
 ```
 
+`kc-exploration/` is a separate package with its own suite:
+`python -m pytest kc-exploration/tests -q`.
+
 Everything runs offline on the fixtures under `tests/fixtures/`. Tests that
 would need a warehouse or a model stub the plane and assert on what would have
 been sent. A failure in `test_canon.py` after a dependency change almost always
@@ -122,6 +125,7 @@ synapse-agentic-harness-system/   the silo: pipeline, graph, compiler, tools, ag
   docs/                           runbooks, contracts (export shapes), specs (design notes), evals
 apps/synapse_admin/               the admin surface: FastAPI read plane + ES-module frontend + the wireframes it came from
 apps/synapse/                     the second surface, for people who ask rather than steward (served by the same server)
+kc-exploration/                   a standalone Knowledge Catalog discovery agent on the same two model planes: its own README, .env and tests
 docs/design_inventory.md          the sweep of the design files
 archive/                          the previous platform and the design research, kept for reference only
 ```

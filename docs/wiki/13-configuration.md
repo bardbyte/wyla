@@ -289,3 +289,30 @@ The reasoning behind every table is in `docs/spanner_schema.md`.
 ## Back to
 
 ← [Wiki index](README.md) · [Page 1 · Overview](01-overview.md)
+
+---
+
+## Knowledge Catalog exploration (`kc-exploration/`)
+
+A separate, standalone package: a discovery agent that searches Google
+Cloud's Knowledge Catalog through the same two model planes (Gemini 3.1 Pro
+Preview on Vertex, Gemini 2.5 Pro through the gateway), on its own
+service-account key. It imports nothing from the silo and reads its own
+`kc-exploration/.env`; inside this repo, set `KC_EXTRA_ENV_FILE` there to
+`../synapse-agentic-harness-system/.env` and the model contract above is
+reused as it is. Its README and `.env.example` are the reference; the
+catalog-specific knobs are:
+
+| variable | default | changes |
+|---|---|---|
+| `KC_PROJECT_ID` | required | the consumer project every search runs in |
+| `KC_SA_KEY` | required | the catalog's key file; never falls back to the Vertex key |
+| `KC_QUOTA_PROJECT` | `KC_PROJECT_ID` | the quota project (`X-Goog-User-Project`); `none` omits it |
+| `KC_SEARCH_SCOPE` | unset | `projects/<id>` or `organizations/<id>` |
+| `KC_PAGE_SIZE`, `KC_SEMANTIC_SEARCH` | `50`, `1` | rows per search; semantic or keyword search |
+| `KC_MODEL_PLANE` | `auto` (`SAHS_MODEL_PLANE` read as an alias) | `vertex` \| `gateway` \| auto |
+| `KC_THINKING_LEVEL`, `KC_MAX_MODEL_CALLS`, `KC_WALL_SECONDS` | `low`, `6`, `300` | the agent's dials and ceilings |
+
+`python kc-exploration/scripts/kc_check.py` proves the catalog plane;
+`python kc-exploration/scripts/model_check.py --converse` proves a model
+plane with one tool round trip.
