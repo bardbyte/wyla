@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kcx"
+version = "0.1.0"
+description = "Knowledge Catalog exploration: a discovery agent that searches a Google Cloud data catalog through Gemini, on service-account keys"
+requires-python = ">=3.11"
+dependencies = [
+    # google-auth refreshes the service-account token; it lists requests
+    # only as an extra, and the refresh transport imports it
+    "google-auth>=2.23",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+# the OS keychain as the trust source, for networks that intercept TLS
+corp = ["truststore"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
+addopts = "-q --tb=short"
+
+[tool.setuptools.packages.find]
+include = ["kcx*"]
+
+# the instruction file is part of the package: a built wheel must carry it
+[tool.setuptools.package-data]
+kcx = ["SKILL.md"]
