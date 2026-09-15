@@ -54,6 +54,36 @@ def set_status(graph_root: Path, subject: str, state: str, actor: str,
     return True, f"{subject} → {state} (by {actor})"
 
 
+def record_kc_push(graph_root: Path, table: str, *, build_id: str,
+                   sections: list[str], hashes: dict[str, str],
+                   actor: str, run_id: str, note: str = ""
+                   ) -> tuple[bool, str]:
+    """Record that a human entered a table's enrichment bundle into the
+    Knowledge Catalog: one ``kc_pushed`` quad from the table to the kc
+    run, signed by ``actor``. The record says WHAT left (sections and
+    their content hashes against WHICH build), never that the catalog
+    now agrees: agreement is the read-back loader's job."""
+    actor = (actor or "").strip()
+    if not actor:
+        return False, "actor is required: a push record is a human signature"
+    if not table.startswith("table:"):
+        table = f"table:{table}"
+    if not run_id.startswith("run:"):
+        run_id = f"run:{run_id}"
+    graph = GraphDir(graph_root)
+    graph.append_edge(Quad(
+        s=table, r="kc_pushed", o=run_id,
+        props={"build": build_id, "sections": sorted(sections),
+               "hashes": dict(sorted(hashes.items())),
+               **({"note": note} if note else {})},
+        prov=Prov(source="clerk",
+                  run=f"clerk_{_dt.date.today().isoformat()}",
+                  retrieved=_dt.datetime.now(
+                      _dt.timezone.utc).isoformat(timespec="seconds"),
+                  actor=actor)))
+    return True, f"{table} kc_pushed {run_id} ({len(sections)} sections, by {actor})"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="clerk")
     parser.add_argument("--graph", required=True)

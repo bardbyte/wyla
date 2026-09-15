@@ -1,0 +1,49 @@
+# Knowledge Catalog enrichment (the KC Enrichment tab and `pipeline.py kc`).
+#
+# Everything the module needs to know about the catalog it targets. No
+# credentials live here: the model plane rides the same .env contract as
+# enrichment (SYNAPSE_VERTEX_SA_KEY, VERTEX_PROJECT_ID, VERTEX_MODEL) and
+# the catalog itself is never called: exports are shaped for the API, a
+# human enters them.
+
+kc:
+  # The Google Cloud project and location that hold the catalog entries
+  # and the business glossary (entries for BigQuery tables live in the
+  # system entry group `@bigquery` of the table's own project).
+  project: ""
+  location: "us"
+  # projects/{project}/locations/{location}/glossaries/{glossary}
+  glossary: ""
+  # The catalog-enabled tables, by physical name (dataset.table), in the
+  # order the picker lists them. When this list is empty the picker
+  # falls back to every table in the promoted build and says so.
+  tables: []
+  # Custom aspect types the bundle's structured facts are written into.
+  # Ids as the catalog will know them (project.location.id); the tab's
+  # "create once" panel emits the matching metadataTemplate for each.
+  aspect_types:
+    meridian-provenance: "meridian-provenance"
+    governed-metrics: "governed-metrics"
+    concept-bindings: "concept-bindings"
+    join-paths: "join-paths"
+    usage-profile: "usage-profile"
+    sensitivity-consensus: "sensitivity-consensus"
+    definition-status: "definition-status"
+    lineage-notes: "lineage-notes"
+    value-domain: "value-domain"
+  # Where push records and model-call caches land, under the graph root.
+  push_record_dir: "runs/kc"
+  # The prose writer: on by default; --no-llm / ?llm=0 renders the
+  # deterministic sections only.
+  llm: true
+  prompt_version: "kc.1"
+  # Per-table model budget (one bundle = one turn). No rate configured
+  # means the meter reports tokens, never an invented dollar figure.
+  budget:
+    turn_tokens: 120000
+    turn_calls: 8
+  # The blind gate's tiers: recovery below `halt` withholds every
+  # model-written block; between the two, blocks open review-first.
+  gate:
+    halt_below: 0.60
+    review_below: 0.80

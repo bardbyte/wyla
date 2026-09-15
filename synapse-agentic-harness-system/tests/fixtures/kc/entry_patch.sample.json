@@ -1,0 +1,13 @@
+{
+ "_doc": "https://docs.cloud.google.com/dataplex/docs/create-aspect-types",
+ "_note": "an entries.patch body: description plus the aspects map keyed PROJECT.LOCATION.ASPECT_TYPE_ID",
+ "name": "projects/PROJECT/locations/LOCATION/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/PROJECT/datasets/dw/tables/t",
+ "updateMask": "entrySource.description,aspects",
+ "entrySource": {"description": "One or two sentences."},
+ "aspects": {
+  "PROJECT.LOCATION.meridian-provenance": {"data": {"build_id": "b_x"}},
+  "dataplex-types.global.overview": {"data": {"content": "rich text"}},
+  "dataplex-types.global.contacts": {"data": {"identities": [{"role": "owner", "name": "x"}]}},
+  "dataplex-types.global.queries": {"data": {"queries": [{"sql": "SELECT 1", "description": "d", "source": "User"}]}}
+ }
+}

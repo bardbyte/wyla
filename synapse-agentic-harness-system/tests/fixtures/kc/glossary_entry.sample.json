@@ -1,0 +1,15 @@
+{
+ "_doc": "https://docs.cloud.google.com/dataplex/docs/import-glossaries-entrylinks-json",
+ "_note": "one line of a glossary metadata import file: a term entry under a glossary's entry group",
+ "entry": {
+  "name": "projects/PROJECT/locations/LOCATION/entryGroups/@dataplex/entries/GLOSSARY/terms/spend",
+  "entryType": "projects/dataplex-types/locations/global/entryTypes/glossary-term",
+  "parentEntry": "projects/PROJECT/locations/LOCATION/entryGroups/@dataplex/entries/GLOSSARY/categories/metrics",
+  "entrySource": {"displayName": "Spend", "description": "Money moved, net of reversals."},
+  "aspects": {
+   "dataplex-types.global.glossary-term-aspect": {"data": {}},
+   "dataplex-types.global.overview": {"data": {"content": "Longer text."}},
+   "dataplex-types.global.contacts": {"data": {"identities": [{"role": "steward", "name": "a steward"}]}}
+  }
+ }
+}

@@ -51,6 +51,10 @@ WITNESSES = (
     "gold_attested",    # the 158 gold pairs — the answer key
     "studio",           # Studio query/join witnesses (observed
                         # certified-metric SQL, CTE-scoped)
+    "kc",               # Knowledge Catalog exports read back (glossary
+                        # terms, published descriptions, DQ results):
+                        # a witness of what the catalog says, filed
+                        # pending; it never overrides the graph
 )
 
 # Gold contamination guard (pinned): gold_attested is a full graph
@@ -59,8 +63,10 @@ WITNESSES = (
 # on (support_effective, witness_agreement, recency). The SUT must not
 # contain its own test set. audit_30d likewise corroborates but never
 # votes (two witnesses of the same events don't count twice).
+# The catalog read-back is corroboration too: what KC says about a
+# table came, in part, from this graph, so it must never vote on it.
 RANKING_WITNESSES = tuple(w for w in WITNESSES
-                          if w not in ("gold_attested", "audit_30d"))
+                          if w not in ("gold_attested", "audit_30d", "kc"))
 
 # prov.source → default witness family; writers may set witness
 # explicitly (jobs_30d/audit_30d/user_variant/llm_enriched always do).
@@ -84,6 +90,7 @@ SOURCE_WITNESS = {
     "lob_map": "steward",       # graph/identity/lob_map.jsonl (human)
     "llm_enricher": "llm_enriched",   # B1 loop (E13)
     "studio_queries": "studio",       # Studio witness jsonl pair
+    "kc_export": "kc",                # Knowledge Catalog read-back loader
 }
 
 # ReviewItem lattice (E12/A5, pinned) — schemas land BEFORE the first
@@ -135,6 +142,10 @@ RELATIONS: dict[str, tuple[set[str], set[str]]] = {
     # skip; a declared join key beats a co-query digest at telling the
     # agent HOW two tables relate
     "fk_references":   ({"col"}, {"col"}),
+    # a human recorded that this table's enrichment bundle was entered
+    # into the Knowledge Catalog: table → the kc run that produced it;
+    # props carry build id, sections and content hashes; clerk-only
+    "kc_pushed":       ({"table"}, {"run"}),
 }
 
 

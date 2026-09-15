@@ -4,7 +4,7 @@
 
 import { esc } from "./ui.js";
 
-async function copyText(text) {
+export async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
     return true;

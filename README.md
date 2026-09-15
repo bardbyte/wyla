@@ -69,6 +69,8 @@ synapse-agentic-harness-system/sahs/assistant/kit.py       the eleven tools and 
 synapse-agentic-harness-system/sahs/assistant/hooks.py     the checks that run around every tool call
 apps/synapse_admin/backend/meridian.py                     the read plane the web surfaces share
 apps/synapse_admin/frontend/js/main.js                     hash router, no build step, plain ES modules
+synapse-agentic-harness-system/sahs/kc/coverage.py        every graph item rowed against its Knowledge Catalog home
+synapse-agentic-harness-system/sahs/kc/assemble.py        the facts behind a table's catalog bundle, with include verdicts
 ```
 
 Two decisions worth knowing before you change anything:

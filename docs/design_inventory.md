@@ -144,3 +144,22 @@ sahs.tools.api.Build.
 5. Admin Components is the component contract; new components register there + here.
 6. Carry doctrines: no numeric confidence in UI; labeled previews never unlabeled fakes;
    accumulation surfaces (pins/reviews/feedback); crimson = conflict only ever.
+
+
+## KC Enrichment (E23) — shipped components
+- `#/kc` · `#/kc/dictionary` · `#/kc/<table>` in `apps/synapse_admin/frontend/js/pages/kc.js`;
+  nav entry after Operate. Renders only `/api/kc/*` (the bundle over CURRENT + the graph
+  fold); honest empty states per section (`empty_reason`), the unavailable card when no
+  build is compiled.
+- New components (shared library, `app.css` `.kc-*`): **translation ledger** (filterable
+  table, rows expand to the facts behind them, every cell counts translated / review /
+  withheld with reasons); **bundle card** (copy button, status + witness chips, gate
+  badge, "facts used" and "facts per paragraph" disclosure, needs-review list, model
+  status label that the SSE stream updates); **gate badge** (copy / review / halt / not
+  run, shape + word, crimson only for halt); **suggestions block** (proposal + why not by
+  default + evidence, never a copy block); **right rail** (exports, model accounting with
+  tokens and the honest cost note, how-to per section, aspect types to create once with
+  their JSON, mark-pushed checklist with actor). Disclosure fields: every fact carries
+  `[witness · status]` and its id; nothing renders a number without its fact.
+- Tokens untouched; tier colors reused as-is (green copy-ready, amber review, crimson
+  halt/conflict only, dashed unknown); reduced-motion parity for the live dot.
