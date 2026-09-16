@@ -130,43 +130,8 @@ def include_of(fact: Fact) -> tuple[str, str]:
     return COPY, ""
 
 
-# ── the fold, cached per graph state ─────────────────────────────
-
-_FOLD: dict[tuple[str, tuple], tuple[dict, dict, dict]] = {}
-
-
-def _graph_stamp(graph_root: Path) -> tuple:
-    stamp = []
-    for sub in ("nodes", "edges"):
-        folder = graph_root / sub
-        if folder.exists():
-            for path in sorted(folder.glob("*.jsonl")):
-                stamp.append((path.name, path.stat().st_mtime_ns,
-                              path.stat().st_size))
-    return tuple(stamp)
-
-
-def fold(graph_root: Path) -> tuple[dict[str, NodeRecord], dict[tuple, Quad],
-                                    dict[str, dict[str, Any]]]:
-    """Current state of the graph: nodes, per-witness edges, and for
-    every node the provenance of each prop by its LAST writer (a table
-    node is written by several loaders; the folded record keeps one
-    prov, so per-prop attribution is rebuilt here). Cached on the store
-    files' stamps so a request never re-reads an unchanged graph, and
-    never serves a stale one."""
-    key = (str(graph_root), _graph_stamp(graph_root))
-    if key not in _FOLD:
-        _FOLD.clear()
-        graph = GraphDir(graph_root)
-        prop_prov: dict[str, dict[str, Any]] = defaultdict(dict)
-        for record in graph.iter_nodes():
-            if record.prov.status == "retracted":
-                prop_prov.pop(record.id, None)
-                continue
-            for prop in record.props:
-                prop_prov[record.id][prop] = record.prov
-        _FOLD[key] = (graph.fold_nodes(), graph.fold_edges(), dict(prop_prov))
-    return _FOLD[key]
+# ── the fold: sahs/kc/fold.py (indexed, cached per graph state) ──
+from sahs.kc.fold import Fold, fold, graph_stamp as _graph_stamp  # noqa: E402
 
 
 # ── context: one table's slice of everything ─────────────────────
@@ -179,6 +144,7 @@ class TableContext:
     nodes: dict[str, NodeRecord]
     edges: dict[tuple, Quad]
     prop_prov: dict[str, dict[str, Any]] = field(default_factory=dict)
+    view: Fold | None = None
 
     @property
     def tid(self) -> str:
@@ -208,13 +174,29 @@ class TableContext:
         return dict(record.props) if record else {}
 
     def out_edges(self, subject: str, relation: str) -> list[Quad]:
+        if self.view is not None:
+            return self.view.out(subject, relation)
         return [q for (s, r, _o, _w), q in self.edges.items()
                 if s == subject and r == relation
                 and q.prov.status == "active"]
 
     def in_edges(self, obj: str, relation: str) -> list[Quad]:
+        if self.view is not None:
+            return self.view.into(obj, relation)
         return [q for (_s, r, o, _w), q in self.edges.items()
                 if o == obj and r == relation and q.prov.status == "active"]
+
+    def nodes_of_kind(self, kind: str) -> list[NodeRecord]:
+        if self.view is not None:
+            return self.view.of_kind(kind)
+        return [n for nid, n in self.nodes.items()
+                if nid.split(":", 1)[0] == kind]
+
+    def edges_from(self, subject: str) -> list[Quad]:
+        if self.view is not None:
+            return self.view.by_s.get(subject, [])
+        return [q for (s, _r, _o, _w), q in self.edges.items()
+                if s == subject and q.prov.status == "active"]
 
     def column_ids(self) -> list[str]:
         return sorted({q.o for q in self.out_edges(self.tid, "has_column")})
@@ -570,9 +552,8 @@ def _usage(ctx: TableContext, em: _Emitter) -> None:
                "(usage, not ownership)", "entry.overview.ownership_usage",
                witness=q.prov.witness, status="observed", prov=_prov_of(q),
                subject=q.o, coverage_item="edge:used_by")
-    templates = [n for nid, n in ctx.nodes.items()
-                 if nid.startswith("tmpl:")
-                 and n.props.get("table") == ctx.physical]
+    templates = [n for n in ctx.nodes_of_kind("tmpl")
+                 if n.props.get("table") == ctx.physical]
     if templates:
         em.add("template", f"{len(templates)} recurring query shapes, "
                f"{sum(int(n.props.get('occurrences') or 0) for n in templates)} "
@@ -790,9 +771,8 @@ def _terms(ctx: TableContext, em: _Emitter) -> None:
         [ctx.props(ctx.tid).get("business_name_atlas")]
         + [ctx.props(c).get("business_name_atlas") for c in ctx.column_ids()]
         + [r.get("business_name") for r in ctx.column_index()]) if v}
-    for nid, node in ctx.nodes.items():
-        if not nid.startswith("acr:"):
-            continue
+    for node in ctx.nodes_of_kind("acr"):
+        nid = node.id
         definition = str(node.props.get("definition") or "").lower()
         if definition and definition in names:
             scope = (f"{node.props.get('business_unit') or 'All'}/"
@@ -1345,9 +1325,8 @@ def _status(ctx: TableContext, em: _Emitter) -> None:
             coverage_item="report:census.summary.concept_cells")
     metric_ids = {m["id"] for m in ctx.metric_rows()}
     subjects = {ctx.tid, *ctx.column_ids(), *metric_ids}
-    for nid, node in ctx.nodes.items():
-        if not nid.startswith("review:"):
-            continue
+    for node in ctx.nodes_of_kind("review"):
+        nid = node.id
         if node.props.get("subject") in subjects \
                 and node.props.get("status") == "open":
             em.add("review", f"open review ({node.props.get('kind')}): "
@@ -1496,9 +1475,9 @@ def _provenance(ctx: TableContext, em: _Emitter) -> None:
                witness="steward", status="observed", prov=prov, subject=ctx.tid,
                data=run, coverage_item="report:run.run_id")
     families = defaultdict(int)
-    for (s, _r, _o, w), q in ctx.edges.items():
-        if s == ctx.tid and q.prov.status == "active" and w:
-            families[w] += 1
+    for q in ctx.edges_from(ctx.tid):
+        if q.prov.witness:
+            families[q.prov.witness] += 1
     for cid in ctx.column_ids():
         record = ctx.node(cid)
         if record and record.prov.witness:
@@ -1569,10 +1548,10 @@ EXTRACTOR_FUNCS: dict[str, Callable[[TableContext, _Emitter], None]] = {
 # ── the assembly ─────────────────────────────────────────────────
 
 def context(build: Build, graph_root: Path, physical: str) -> TableContext:
-    nodes, edges, prop_prov = fold(graph_root)
+    view = fold(graph_root)
     return TableContext(build=build, graph_root=Path(graph_root),
-                        physical=physical, nodes=nodes, edges=edges,
-                        prop_prov=prop_prov)
+                        physical=physical, nodes=view.nodes, edges=view.edges,
+                        prop_prov=view.prop_prov, view=view)
 
 
 def assemble(build: Build, graph_root: Path, physical: str) -> FactSet:

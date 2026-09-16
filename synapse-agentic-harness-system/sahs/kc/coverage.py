@@ -34,8 +34,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from sahs.graph.ids import ID_PATTERNS
-from sahs.graph.quads import RELATIONS, WITNESSES, GraphDir, Prov
-from sahs.tools.api import Build
+from sahs.graph.quads import RELATIONS, WITNESSES, Prov
+from sahs.kc.fold import fold, open_build
 
 # ── representation vocabulary (pinned) ──────────────────────────
 PROSE = "prose"                  # entry description / overview text
@@ -491,12 +491,15 @@ def observed_items(graph_root: Path, build_root: Path) -> set[str]:
     items.update(f"node:{k}" for k in ID_PATTERNS)
     items.update(f"prov:{f}" for f in Prov.model_fields)
 
-    graph = GraphDir(graph_root)
-    for record in graph.iter_nodes():
+    # the folded state carries every prop a node ever received (props
+    # merge across writers) and every edge prop the last writer set, so
+    # the walk reads the cached fold instead of re-parsing the store
+    view = fold(Path(graph_root))
+    for record in view.nodes.values():
         kind = record.id.split(":", 1)[0]
         items.add(f"node:{kind}")
         items.update(f"node:{kind}.{p}" for p in record.props)
-    for quad in graph.iter_edges():
+    for quad in view.edges.values():
         items.add(f"edge:{quad.r}")
         items.update(f"edge:{quad.r}.{p}" for p in quad.props)
 
@@ -613,10 +616,10 @@ def item_counts(graph_root: Path) -> dict[str, int]:
     """How many records each node kind / relation holds: the weights
     behind the coverage percentages."""
     counts: Counter[str] = Counter()
-    graph = GraphDir(graph_root)
-    for record in graph.iter_nodes():
+    view = fold(Path(graph_root))
+    for record in view.nodes.values():
         counts[f"node:{record.id.split(':', 1)[0]}"] += 1
-    for quad in graph.iter_edges():
+    for quad in view.edges.values():
         counts[f"edge:{quad.r}"] += 1
     return dict(counts)
 
@@ -735,4 +738,4 @@ def write_coverage_docs(graph_root: Path, build_root: Path,
 
 
 def build_root_of(builds_root: Path) -> Path:
-    return Build.open(builds_root).root
+    return open_build(builds_root).root

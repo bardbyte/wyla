@@ -137,6 +137,7 @@ export const api = {
    * Deterministic sections arrive at once; the model sections stream
    * from the server, which holds the model contract. */
   kcTables: () => get("/api/kc/tables"),
+  kcTableNames: () => get("/api/kc/tables?light=1"),
   kcCoverage: () => get("/api/kc/coverage"),
   kcBundle: (table, llm = 1) =>
     get(`/api/kc/bundle/${encodeURIComponent(table)}?llm=${llm}`),

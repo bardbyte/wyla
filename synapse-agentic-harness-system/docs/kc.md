@@ -76,6 +76,18 @@ Two things span tables and live on their own pages:
   --out runs/kc --plain`): one folder per table with the same members as
   the single-table zip, plus the merged glossary files and a manifest.
 
+## Cost of a page
+
+The graph is folded once per graph state (the store files' names, sizes
+and mtimes) into indexed views: edges by subject and relation, by
+object and relation, nodes by kind. A table's assembly then costs what
+the table has, not what the graph has. The promoted build is opened
+once per CURRENT pointer, the coverage walk once per graph state and
+build, and list summaries once per build; every page footer prints
+where its milliseconds went ("assembled in … ms"). A push record or a
+read-back import changes the graph and refreshes these on the next
+request, by design.
+
 ## Once
 
 1. Compile and promote a build; run `python scripts/pipeline.py kc-coverage --out runs/kc_cov --plain`.
