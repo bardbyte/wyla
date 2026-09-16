@@ -595,6 +595,7 @@ def ledger(fs: FactSet) -> list[dict[str, Any]]:
         construct = construct_of(f.kc_target)
         row = cells.setdefault((f.kind, construct), {
             "meridian_kind": f.kind, "kc_construct": construct,
+            "section": section_of(f.kc_target),
             "representation": f.representation, "statuses": set(),
             "translated": 0, "review": 0, "withheld": 0,
             "reasons": defaultdict(int), "fact_ids": [], "coverage_items": set()})
@@ -617,6 +618,21 @@ def ledger(fs: FactSet) -> list[dict[str, Any]]:
                     "reasons": dict(row["reasons"]),
                     "coverage_items": sorted(row["coverage_items"])})
     return out
+
+
+def section_of(target: str) -> str:
+    """The bundle section a fact's construct lands in: the anchor a
+    ledger row jumps to. Suggestions and excluded facts land in the
+    review card, since that is where a person meets them."""
+    head, *rest = target.split(".")
+    if head == "entry":
+        return "description" if rest and rest[0] == "description" else "overview"
+    if head == "column":
+        return "columns"
+    if head == "glossary":
+        return "related_entries" if rest and rest[0] == "related_entry" else "glossary"
+    return {"aspect": "aspects", "dq": "dq", "query": "queries",
+            "contact": "contacts"}.get(head, "review")
 
 
 def construct_of(target: str) -> str:

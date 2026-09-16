@@ -83,12 +83,20 @@ def bigquery_entry_name(cfg: KcConfig, physical: str) -> str:
 
 
 def glossary_import_jsonl(bundle: "Bundle", cfg: KcConfig) -> str:
+    categories, terms = _glossary_rows(bundle)
+    return glossary_lines(categories, terms, cfg,
+                          {"build": bundle.build_id, "table": bundle.table})
+
+
+def glossary_lines(categories: list[dict], terms: list[dict], cfg: KcConfig,
+                   meta: dict[str, Any]) -> str:
+    """The glossary import file for any set of categories and terms:
+    one table's, or every table's merged (a catalog glossary is one per
+    project, so the merged file is the one an import job takes)."""
     glossary = cfg.glossary_path() or "projects/PROJECT/locations/LOCATION/glossaries/GLOSSARY"
     group = glossary.replace("/glossaries/", "/entryGroups/@dataplex/entries/")
-    categories, terms = _glossary_rows(bundle)
     lines = [json.dumps({"_comment": f"verify the shape against {DOCS['glossary_json']} "
-                                      "before the first import job",
-                         "build": bundle.build_id, "table": bundle.table})]
+                                      "before the first import job", **meta})]
     seen_cats = set()
     for c in categories + [{"name": t["category"]} for t in terms]:
         name = c.get("name")
@@ -124,13 +132,21 @@ def glossary_import_jsonl(bundle: "Bundle", cfg: KcConfig) -> str:
 
 
 def entry_links_jsonl(bundle: "Bundle", cfg: KcConfig) -> str:
+    _cats, terms = _glossary_rows(bundle)
+    return entry_link_lines(bundle.sections["related_entries"].items, terms, cfg,
+                            {"build": bundle.build_id, "table": bundle.table})
+
+
+def entry_link_lines(related: list[dict], terms: list[dict], cfg: KcConfig,
+                     meta: dict[str, Any]) -> str:
+    """Entry links for any set of term ↔ asset rows and terms (synonym
+    and related-term links ride along), one table's or every table's."""
     glossary = cfg.glossary_path() or "projects/PROJECT/locations/LOCATION/glossaries/GLOSSARY"
     group = glossary.replace("/glossaries/", "/entryGroups/@dataplex/entries/")
     link_group = glossary.rsplit("/glossaries/", 1)[0] + "/entryGroups/@dataplex"
-    lines = [json.dumps({"_comment": f"verify against {DOCS['glossary_json']}",
-                         "build": bundle.build_id, "table": bundle.table})]
+    lines = [json.dumps({"_comment": f"verify against {DOCS['glossary_json']}", **meta})]
     n = 0
-    for r in bundle.sections["related_entries"].items:
+    for r in related:
         n += 1
         target = str(r.get("target") or "")
         physical, _dot, column = target.partition(".") if target.count(".") >= 2 \
@@ -146,7 +162,6 @@ def entry_links_jsonl(bundle: "Bundle", cfg: KcConfig) -> str:
                 {"name": f"{group}/terms/{_slug(r['term'])}", "type": "SOURCE"},
                 {"name": asset, "type": "TARGET",
                  **({"path": column} if column else {})}]}}, ensure_ascii=False))
-    _cats, terms = _glossary_rows(bundle)
     for t in terms:
         for s in t.get("synonyms", []):
             n += 1
@@ -236,10 +251,14 @@ def review_csv(bundle: "Bundle") -> str:
 
 
 def glossary_sheet_csv(bundle: "Bundle") -> str:
+    _cats, terms = _glossary_rows(bundle)
+    return glossary_sheet_lines(terms)
+
+
+def glossary_sheet_lines(terms: list[dict]) -> str:
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(SHEET_COLUMNS)
-    _cats, terms = _glossary_rows(bundle)
     for t in terms:
         writer.writerow([t["term"], t.get("definition", ""),
                          t.get("definition_llm", ""), t.get("category", ""),
@@ -260,6 +279,25 @@ def as_json(bundle: "Bundle", cfg: KcConfig) -> dict[str, Any]:
     return payload
 
 
+def zip_members(bundle: "Bundle", cfg: KcConfig) -> dict[str, str]:
+    """Every file one table contributes to a zip, keyed by its path
+    under the table's folder."""
+    slug = bundle.table.replace(".", "__")
+    return {
+        f"{slug}/bundle.md": markdown(bundle),
+        f"{slug}/bundle.json": json.dumps(as_json(bundle, cfg), indent=1,
+                                          ensure_ascii=False, sort_keys=True),
+        f"{slug}/facts.csv": review_csv(bundle),
+        f"{slug}/glossary_sheet.csv": glossary_sheet_csv(bundle),
+        f"{slug}/glossary_import.jsonl": glossary_import_jsonl(bundle, cfg),
+        f"{slug}/entry_links.jsonl": entry_links_jsonl(bundle, cfg),
+        f"{slug}/entry_patch.json": json.dumps(entry_patch_payload(bundle, cfg),
+                                               indent=1, ensure_ascii=False),
+        f"{slug}/aspect_types.json": json.dumps(bundle.aspect_types, indent=1,
+                                                ensure_ascii=False),
+    }
+
+
 def export(bundle: "Bundle", fmt: str, cfg: KcConfig
            ) -> tuple[bytes, str, str]:
     """→ (bytes, media type, filename)."""
@@ -278,16 +316,7 @@ def export(bundle: "Bundle", fmt: str, cfg: KcConfig
     if fmt == "zip":
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(f"{slug}/bundle.md", markdown(bundle))
-            zf.writestr(f"{slug}/bundle.json", json.dumps(
-                as_json(bundle, cfg), indent=1, ensure_ascii=False, sort_keys=True))
-            zf.writestr(f"{slug}/facts.csv", review_csv(bundle))
-            zf.writestr(f"{slug}/glossary_sheet.csv", glossary_sheet_csv(bundle))
-            zf.writestr(f"{slug}/glossary_import.jsonl", glossary_import_jsonl(bundle, cfg))
-            zf.writestr(f"{slug}/entry_links.jsonl", entry_links_jsonl(bundle, cfg))
-            zf.writestr(f"{slug}/entry_patch.json", json.dumps(
-                entry_patch_payload(bundle, cfg), indent=1, ensure_ascii=False))
-            zf.writestr(f"{slug}/aspect_types.json", json.dumps(
-                bundle.aspect_types, indent=1, ensure_ascii=False))
+            for path, text in zip_members(bundle, cfg).items():
+                zf.writestr(path, text)
         return buffer.getvalue(), "application/zip", f"{slug}.kc.zip"
     raise ValueError(f"unknown export format {fmt!r}: md, json, csv, sheet, zip")

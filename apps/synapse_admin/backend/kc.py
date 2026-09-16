@@ -6,6 +6,9 @@ the read-back loader.
 Paths:
     GET  /api/kc/tables                       the tables, readiness, last push
     GET  /api/kc/coverage                     the coverage registry + dictionary
+    GET  /api/kc/glossary                     every term across every table, merged
+    GET  /api/kc/glossary/export?format=jsonl|links|sheet
+    GET  /api/kc/export-all                   one zip: a folder per table + the merged glossary
     GET  /api/kc/bundle/{table}?llm=1|0       the bundle (cached model sections)
     GET  /api/kc/bundle/{table}/stream        SSE: model sections as they land
     GET  /api/kc/bundle/{table}/ledger        the translation ledger alone
@@ -90,6 +93,43 @@ def coverage() -> dict:
         return _unavailable(reason)
     kc, _cfg = _kc()
     return kc.coverage_payload(builds_root=_builds_root(), graph_root=_graph_root())
+
+
+@router.get("/glossary")
+def glossary() -> dict:
+    reason = _no_build()
+    if reason:
+        return _unavailable(reason)
+    kc, cfg = _kc()
+    return kc.glossary_across(builds_root=_builds_root(), graph_root=_graph_root(),
+                              config=cfg)
+
+
+@router.get("/glossary/export")
+def glossary_export(format: str = "jsonl") -> Any:
+    reason = _no_build()
+    if reason:
+        return _unavailable(reason)
+    kc, cfg = _kc()
+    try:
+        data, media, filename = kc.glossary_export(
+            format, builds_root=_builds_root(), graph_root=_graph_root(), config=cfg)
+    except ValueError as exc:
+        return {"available": True, "error": str(exc)}
+    return Response(content=data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.get("/export-all")
+def export_all() -> Any:
+    reason = _no_build()
+    if reason:
+        return _unavailable(reason)
+    kc, cfg = _kc()
+    data, media, filename = kc.export_all(builds_root=_builds_root(),
+                                          graph_root=_graph_root(), config=cfg)
+    return Response(content=data, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 def _bundle(table: str, llm: bool, regenerate: bool = False,

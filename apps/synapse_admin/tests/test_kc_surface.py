@@ -63,6 +63,7 @@ def test_tab_is_served_and_holds_no_secret(client):
             assert banned not in text, (path, banned)
     kc_js = client.get("/js/pages/kc.js").text
     assert "renderKc" in kc_js and "renderKcDictionary" in kc_js and "renderKcTable" in kc_js
+    assert "renderKcGlossary" in kc_js and "data-copy-text" in kc_js
     assert "EventSource" in kc_js                # the model sections stream in
 
 
@@ -70,8 +71,10 @@ def test_tables_coverage_and_bundle(client):
     tables = client.get("/api/kc/tables").json()
     assert tables["available"] and tables["rows"]
     row = tables["rows"][0]
-    assert {"physical", "facts", "pct_copy", "gate", "cached", "last_push"} <= set(row)
-    assert tables["fallback"] and "names no tables yet" in tables["note"]
+    assert {"physical", "facts", "pct_copy", "gate", "cached", "last_push",
+            "sections", "columns", "metrics"} <= set(row)
+    assert tables["scope"] == "all" and "scope: every table" in tables["note"]
+    assert tables["totals"]["tables"] == len(tables["rows"]) and "lobs" in tables
     cov = client.get("/api/kc/coverage").json()
     assert cov["available"] and cov["missing"] == [] and cov["dictionary"]["forward"]
     bundle = client.get(f"/api/kc/bundle/{TABLE}").json()
@@ -89,6 +92,20 @@ def test_tables_coverage_and_bundle(client):
     assert sum(r["count"] for r in ledger["ledger"]) == len(bundle["facts"])
     missing = client.get("/api/kc/bundle/zz.nope").json()
     assert missing == {"available": True, "found": False, "table": "zz.nope"}
+
+
+def test_glossary_across_and_export_all(client):
+    merged = client.get("/api/kc/glossary").json()
+    assert merged["available"] and merged["terms"] and merged["categories"]
+    assert len(merged["tables"]) == len(client.get("/api/kc/tables").json()["rows"])
+    for fmt, media in (("jsonl", "application/x-ndjson"), ("links", "application/x-ndjson"),
+                       ("sheet", "text/csv")):
+        r = client.get(f"/api/kc/glossary/export?format={fmt}")
+        assert r.status_code == 200 and r.headers["content-type"].startswith(media), fmt
+    assert "error" in client.get("/api/kc/glossary/export?format=xml").json()
+    r = client.get("/api/kc/export-all")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/zip")
+    assert "kc_all_" in r.headers["content-disposition"]
 
 
 def test_exports_every_format(client):
@@ -142,7 +159,9 @@ def test_no_build_is_honest(tmp_path):
     os.environ["MERIDIAN_GRAPH_DIR"] = str(tmp_path / "nograph")
     c = TestClient(create_app())
     for path in ("/api/kc/tables", "/api/kc/coverage", f"/api/kc/bundle/{TABLE}",
-                 f"/api/kc/bundle/{TABLE}/ledger", f"/api/kc/bundle/{TABLE}/export?format=md"):
+                 f"/api/kc/bundle/{TABLE}/ledger", f"/api/kc/bundle/{TABLE}/export?format=md",
+                 "/api/kc/glossary", "/api/kc/glossary/export?format=jsonl",
+                 "/api/kc/export-all"):
         payload = c.get(path).json()
         assert payload["available"] is False and "no compiled build" in payload["reason"], path
     assert c.post(f"/api/kc/push-record/{TABLE}",

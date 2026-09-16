@@ -27,12 +27,13 @@ from sahs.graph.validate import validate_graph                 # noqa: E402
 from sahs.kc import coverage                                   # noqa: E402
 from sahs.kc.assemble import (COPY, NEVER, REVIEW, TIER_CANDIDATE,  # noqa: E402
                               Fact, FactSet, assemble, include_of)
-from sahs.kc.bundle import (build_bundle, coverage_payload, list_tables,  # noqa: E402
+from sahs.kc.bundle import (build_bundle, coverage_payload, export_all,  # noqa: E402
+                            glossary_across, glossary_export, list_tables,
                             record_push)
 from sahs.kc.config import KcConfig, load_config               # noqa: E402
 from sahs.kc.export import (SHEET_COLUMNS, entry_links_jsonl,  # noqa: E402
                             entry_patch_payload, export, glossary_import_jsonl)
-from sahs.kc.render import construct_of                        # noqa: E402
+from sahs.kc.render import construct_of, section_of            # noqa: E402
 from sahs.kc.verify import verify_output, verify_text          # noqa: E402
 from sahs.kc.witness import import_kc_export                   # noqa: E402
 from sahs.kc.write import (Writer, cache_path, gate_tier, leakage,  # noqa: E402
@@ -541,7 +542,7 @@ def test_cli_kc_coverage_and_bundle(compiled, tmp_path):
 def test_config_fallback_and_unknown_tables(compiled, cfg):
     listing = list_tables(builds_root=compiled["builds"], graph_root=compiled["graph"],
                           config=cfg)
-    assert listing["fallback"] and "names no tables yet" in listing["note"]
+    assert listing["fallback"] and listing["scope"] == "all" and "scope: every table" in listing["note"]
     assert {r["physical"] for r in listing["rows"]} == set(compiled["build"].schema)
     row = listing["rows"][0]
     assert row["copy"] + row["review"] + row["never"] == row["facts"]
@@ -553,6 +554,111 @@ def test_config_fallback_and_unknown_tables(compiled, cfg):
     with pytest.raises(KeyError):
         build_bundle("zz.missing", use_llm=False, builds_root=compiled["builds"],
                      graph_root=compiled["graph"], config=cfg)
+
+
+# ── 21 · the list is a cache per build, and each row says what it yields ──
+def test_list_summaries_cached_and_section_readiness(compiled, cfg, monkeypatch):
+    import sahs.kc.bundle as kc_bundle
+    kc_bundle._SUMMARIES.clear()
+    calls = {"n": 0}
+    real = kc_bundle.assemble
+
+    def counting(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+    monkeypatch.setattr(kc_bundle, "assemble", counting)
+    first = list_tables(builds_root=compiled["builds"], graph_root=compiled["graph"], config=cfg)
+    assert calls["n"] == len(first["rows"])
+    second = list_tables(builds_root=compiled["builds"], graph_root=compiled["graph"], config=cfg)
+    assert calls["n"] == len(first["rows"])              # no re-assembly
+    assert second["scope"] == "all" and "scope: every table" in second["note"]
+    assert second["totals"]["facts"] == sum(r["facts"] for r in second["rows"])
+    assert set(second["lobs"]) == {r["lob"] for r in second["rows"] if r["lob"]}
+    row = next(r for r in second["rows"] if r["physical"] == TABLE)
+    assert set(row["sections"]) == {"description", "overview", "columns", "glossary",
+                                    "related_entries", "aspects", "dq", "queries",
+                                    "contacts", "review"}
+    for key, sec in row["sections"].items():
+        assert sec["ready"] or sec["empty_reason"], key
+    assert row["sections"]["columns"]["review"] > 0     # the no-witness columns
+    assert row["columns"] == len(compiled["build"].schema[TABLE])
+
+
+# ── 22 · the glossary merges across tables the way the catalog holds it ──
+def test_glossary_across_tables_merges(compiled, cfg):
+    merged = glossary_across(builds_root=compiled["builds"], graph_root=compiled["graph"],
+                             config=cfg)
+    assert merged["tables"] == sorted(compiled["build"].schema)
+    keys = [(t["category"], t["term"]) for t in merged["terms"]]
+    assert len(keys) == len(set(keys))                   # one row per term
+    gmns = next(c for c in merged["categories"] if c["name"] == "GMNS")
+    assert len(gmns["tables"]) >= 2                      # a shared LOB category, once
+    per_table = {}
+    for t in merged["tables"]:
+        b = build_bundle(t, use_llm=False, builds_root=compiled["builds"],
+                         graph_root=compiled["graph"], config=cfg)
+        for term in (b.sections["glossary"].items[0]["terms"] if b.sections["glossary"].items else []):
+            per_table.setdefault((term["category"], term["term"]), set()).add(t)
+    for t in merged["terms"]:
+        assert set(t["tables"]) == per_table[(t["category"], t["term"])]
+        assert set(t["fact_ids"]) == set(t["tables"])
+        for e in t["related_entries"]:
+            assert e.split(".")[0] + "." + e.split(".")[1] in compiled["build"].schema
+    assert sum(merged["by_category"].values()) == len(merged["terms"])
+    for fmt, name in (("jsonl", "glossary_all.jsonl"), ("links", "entry_links_all.jsonl"),
+                      ("sheet", "glossary_all.csv")):
+        data, _m, filename = glossary_export(fmt, builds_root=compiled["builds"],
+                                             graph_root=compiled["graph"], config=cfg)
+        assert filename == name and data
+    lines = [json.loads(l) for l in glossary_export(
+        "jsonl", builds_root=compiled["builds"], graph_root=compiled["graph"],
+        config=cfg)[0].decode().splitlines()]
+    assert lines[0]["scope"].startswith("merged glossary")
+    names = [l["entry"]["name"] for l in lines[1:]]
+    assert len(names) == len(set(names))                 # no duplicate entries
+    with pytest.raises(ValueError):
+        glossary_export("xml", builds_root=compiled["builds"], graph_root=compiled["graph"],
+                        config=cfg)
+
+
+# ── 23 · one zip for everything ───────────────────────────────────
+def test_export_all_zip(compiled, cfg):
+    data, media, filename = export_all(builds_root=compiled["builds"],
+                                       graph_root=compiled["graph"], config=cfg)
+    assert media == "application/zip" and filename.startswith("kc_all_")
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        names = zf.namelist()
+        folders = {n.split("/")[0] for n in names if "/" in n}
+        assert folders == {t.replace(".", "__") for t in compiled["build"].schema}
+        assert {"glossary_all.jsonl", "entry_links_all.jsonl", "glossary_all.csv",
+                "manifest.json"} <= set(names)
+        manifest = json.loads(zf.read("manifest.json"))
+        assert set(manifest["tables"]) == set(compiled["build"].schema)
+        for folder in folders:
+            assert f"{folder}/entry_patch.json" in names and f"{folder}/bundle.md" in names
+
+
+# ── 24 · the ledger knows which card each row lands in ───────────
+def test_ledger_rows_carry_their_section(compiled, cfg):
+    bundle = build_bundle(TABLE, use_llm=False, builds_root=compiled["builds"],
+                          graph_root=compiled["graph"], config=cfg)
+    for r in bundle.ledger:
+        assert r["section"] in bundle.sections, r
+    assert section_of("entry.description") == "description"
+    assert section_of("entry.overview.joins") == "overview"
+    assert section_of("glossary.related_entry") == "related_entries"
+    assert section_of("aspect.join-paths.paths") == "aspects"
+    assert section_of("suggestion.metric") == "review"
+
+
+# ── 25 · a red gate hands you the rows to write ──────────────────
+def test_coverage_stub_rows():
+    text = coverage.stub_rows(["node:table.new_prop", "edge:joins_via.extra",
+                               "report:run.reports.newloader"])
+    assert '"node:table.new_prop"' in text and '"identity"' in text
+    assert '"edge:joins_via.extra"' in text and '"joins"' in text
+    assert 'EXCLUDED' in text and "newloader" in text
+    assert text.count("_r(") == 3
 
 
 # ── 20 · schema touches ──────────────────────────────────────────

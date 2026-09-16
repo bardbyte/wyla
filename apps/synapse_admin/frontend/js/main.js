@@ -2,7 +2,7 @@
  * theme toggle.
  * Routes: #/ask #/ask/<session> #/home #/semantics #/tables #/cosmos
  *         #/artifacts #/operate #/metric/<id> #/table/<physical>
- *         #/kc #/kc/dictionary #/kc/<physical>
+ *         #/kc #/kc/dictionary #/kc/glossary #/kc/<physical>
  * Deep links work: a metric profile is a URL you can send someone. */
 
 import { renderHome } from "./pages/home.js";
@@ -17,7 +17,9 @@ import { renderAsk } from "./pages/ask.js";
 import { refreshChats } from "./chats.js";
 import { renderChat } from "./pages/chat.js";
 import { renderSkills } from "./pages/skills.js";
-import { renderKc, renderKcDictionary, renderKcTable } from "./pages/kc.js";
+import {
+  renderKc, renderKcDictionary, renderKcGlossary, renderKcTable,
+} from "./pages/kc.js";
 
 const outlet = document.getElementById("outlet");
 let teardown = null;
@@ -54,6 +56,7 @@ async function route() {
     operate: renderOperate,
     kc: () => (arg === "" ? renderKc(outlet)
       : arg === "dictionary" ? renderKcDictionary(outlet)
+      : arg === "glossary" ? renderKcGlossary(outlet)
       : renderKcTable(outlet, arg)),
   };
   const render = pages[page] ?? renderHome;

@@ -11,7 +11,9 @@ from typing import Any
 
 def add_parsers(sub: Any, silo: Path) -> None:
     p = sub.add_parser("kc", help="one table's Knowledge Catalog bundle")
-    p.add_argument("--table", required=True, help="physical name, dataset.table")
+    p.add_argument("--table", required=True,
+                   help="physical name, dataset.table; or 'all' for every "
+                        "table in scope (one folder each plus the merged glossary)")
     p.add_argument("--graph", default=None)
     p.add_argument("--builds", default=None)
     p.add_argument("--no-llm", action="store_true",
@@ -46,12 +48,22 @@ def cmd_kc(args: argparse.Namespace, console: Any) -> int:
     from sahs.kc.export import export
     console.phase("kc bundle")
     cfg = load_config()
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    if args.table == "all":
+        from sahs.kc.bundle import export_all
+        data, _media, filename = export_all(
+            builds_root=Path(args.builds), graph_root=Path(args.graph), config=cfg,
+            use_llm=not args.no_llm, log=console.note)
+        (out / filename).write_bytes(data)
+        console.output(out / filename)
+        console.gate("kc_export_all", True, f"{len(data)} bytes, one folder per "
+                     "table plus the merged glossary")
+        return 0
     bundle = build_bundle(args.table, use_llm=not args.no_llm,
                           regenerate=args.regenerate,
                           builds_root=Path(args.builds), graph_root=Path(args.graph),
                           config=cfg, log=console.note)
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
     fmt = args.export or "md"
     data, _media, filename = export(bundle, fmt, cfg)
     (out / filename).write_bytes(data)
@@ -92,4 +104,10 @@ def cmd_kc_coverage(args: argparse.Namespace, console: Any) -> int:
                       "every item rowed" if not report["missing"]
                       else f"{len(report['missing'])} unrowed: "
                            + ", ".join(report["missing"][:8]))
+    if report["missing"]:
+        from sahs.kc.coverage import stub_rows
+        console.note("row stubs for sahs/kc/coverage.py ROWS (fill the "
+                     "<placeholders>; a row may be EXCLUDED with a reason):")
+        for line in stub_rows(report["missing"]).splitlines():
+            console.note(line)
     return 0 if ok else 3

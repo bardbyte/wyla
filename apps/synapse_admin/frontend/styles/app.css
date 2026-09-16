@@ -1456,3 +1456,32 @@ table.result tr:last-child td { border-bottom: none; }
                 animation: kc-pulse 1.2s ease-in-out infinite; }
 @keyframes kc-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .kc-live .dot { animation: none; } }
+
+/* KC: section nav, readiness dots, per-item copy */
+.kc-subnav { display: flex; gap: 4px; flex-wrap: wrap; align-items: center;
+             position: sticky; top: 0; z-index: 2; padding: 8px 0;
+             background: var(--bg); }
+.kc-subnav button { border: 1px solid var(--line); background: var(--surface);
+                    border-radius: 999px; padding: 2px 10px; font: inherit;
+                    font-size: var(--fs-11); color: var(--ink-2); cursor: pointer; }
+.kc-subnav button:hover { border-color: var(--accent); color: var(--accent); }
+.kc-subnav button.empty { border-style: dashed; color: var(--ink-3); }
+.kc-subnav button b { font-family: var(--font-mono); font-weight: 600; margin-left: 4px; }
+.kc-dots { display: inline-flex; gap: 3px; align-items: center; vertical-align: middle; }
+.kc-dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block;
+          background: var(--tier-low-soft); border: 1px solid var(--line-strong); }
+.kc-dot.ready { background: var(--tier-high); border-color: var(--tier-high); }
+.kc-dot.review { background: var(--tier-mid-soft); border-color: var(--tier-mid); }
+.kc-dot.empty { background: transparent; border-style: dashed; }
+.kc-mini { border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+           border-radius: var(--r-sm); padding: 1px 8px; font: inherit;
+           font-size: var(--fs-11); cursor: pointer; white-space: nowrap; }
+.kc-mini:hover { border-color: var(--accent); color: var(--accent); }
+.kc-ledger td.wrap, .kc-ledger th.wrap { white-space: normal; min-width: 180px; }
+.kc-ledger td .kc-sql { font-family: var(--font-mono); font-size: var(--fs-11);
+                        white-space: pre-wrap; max-width: 520px; display: block;
+                        color: var(--ink-2); }
+.kc-ledger button.linklike { font-size: inherit; }
+.kc-tools { display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: center; }
+.kc-tools select.search { padding: 5px 10px; }
+.kc-block.compact { max-height: 240px; }

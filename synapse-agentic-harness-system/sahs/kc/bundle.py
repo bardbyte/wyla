@@ -13,15 +13,18 @@ from __future__ import annotations
 
 import datetime as _dt
 import hashlib
+import io
 import json
 import os
+import zipfile
+from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
 from sahs.ask.events import EventBus
 from sahs.kc import coverage
-from sahs.kc.assemble import FactSet, assemble
+from sahs.kc.assemble import FactSet, _graph_stamp, assemble
 from sahs.kc.config import KcConfig, load_config
 from sahs.kc.render import (Section, aspect_type_templates, aspects_payload,
                             guide, ledger, render_sections, suggestions)
@@ -172,13 +175,29 @@ def build_bundle(table: str, *, use_llm: bool = True, regenerate: bool = False,
         gate=gate, push_records=records)
 
 
-def table_summary(table: str, *, builds_root: Path, graph_root: Path,
-                  cfg: KcConfig, build: Build | None = None) -> dict[str, Any]:
-    """The list row: coverage numbers, gate tier, cache state, last push."""
-    build = build or Build.open(builds_root)
+# the assemble-derived part of a list row, per (graph state, build,
+# config): 46 tables re-assembling on every list load is the difference
+# between a page and a wait. Push records and the model cache are read
+# fresh each time (they change without the graph changing).
+_SUMMARIES: dict[tuple, dict[str, dict[str, Any]]] = {}
+
+
+def _summary_key(graph_root: Path, build: Build, cfg: KcConfig) -> tuple:
+    return (str(graph_root), _graph_stamp(graph_root), build.version,
+            cfg.prompt_version, tuple(sorted(cfg.aspect_types.items())))
+
+
+def _assembled_summary(table: str, *, graph_root: Path, cfg: KcConfig,
+                       build: Build) -> dict[str, Any]:
+    key = _summary_key(graph_root, build, cfg)
+    if key not in _SUMMARIES:
+        _SUMMARIES.clear()
+        _SUMMARIES[key] = {}
+    held = _SUMMARIES[key].get(table)
+    if held is not None:
+        return held
     fs = assemble(build, graph_root, table)
-    cached = load_json(cache_path(graph_root, cfg, table, build.version))
-    records = push_records(graph_root, cfg, table)
+    sections = render_sections(fs, cfg)
     total = max(1, len(fs.facts))
     copy = fs.counts.get("copy", 0)
     review = fs.counts.get("review", 0)
@@ -188,18 +207,43 @@ def table_summary(table: str, *, builds_root: Path, graph_root: Path,
         if table in (row.get("tables") or []):
             lob = str(row.get("code") or row.get("lob") or "")
             break
-    return {
+    summary = {
         "physical": table, "lob": lob, "facts": len(fs.facts),
+        "digest": fs.digest(),
         "by_kind": {k[5:]: v for k, v in fs.counts.items() if k.startswith("kind:")},
         "copy": copy, "review": review, "never": never,
         "pct_copy": round(100 * copy / total, 1),
         "pct_review": round(100 * review / total, 1),
         "pct_never": round(100 * never / total, 1),
+        # what each section would yield: ready (has copy text), how
+        # many items wait for review, or the reason it is empty
+        "sections": {key: {"ready": bool(sec.text), "review": len(sec.review),
+                           "facts": len(sec.facts_used),
+                           "empty_reason": sec.empty_reason}
+                     for key, sec in sections.items() if key != "push"},
+        "columns": len(build.schema.get(table) or {}),
+        "metrics": sum(1 for m in build.metrics if m.get("table") == table),
+    }
+    _SUMMARIES[key][table] = summary
+    return summary
+
+
+def table_summary(table: str, *, builds_root: Path, graph_root: Path,
+                  cfg: KcConfig, build: Build | None = None) -> dict[str, Any]:
+    """The list row: coverage numbers, section readiness, gate tier,
+    cache state, last push."""
+    build = build or Build.open(builds_root)
+    summary = dict(_assembled_summary(table, graph_root=graph_root, cfg=cfg,
+                                      build=build))
+    cached = load_json(cache_path(graph_root, cfg, table, build.version))
+    records = push_records(graph_root, cfg, table)
+    summary.update({
         "gate": gate_for(graph_root, cfg, build.version).get("tier", "not run"),
-        "cached": bool(cached and cached.get("facts_digest") == fs.digest()),
+        "cached": bool(cached and cached.get("facts_digest") == summary["digest"]),
         "last_push": records[-1] if records else None,
         "build_id": build.version,
-    }
+    })
+    return summary
 
 
 def list_tables(*, builds_root: Path | None = None, graph_root: Path | None = None,
@@ -210,23 +254,34 @@ def list_tables(*, builds_root: Path | None = None, graph_root: Path | None = No
     build = Build.open(builds_root)
     configured = [t for t in cfg.tables if t in build.schema]
     unknown = [t for t in cfg.tables if t not in build.schema]
-    fallback = not cfg.tables
+    # scope: every table in the build unless the config names a subset;
+    # both are legitimate modes, and the page says which one it is in
+    scope = "configured" if configured else "all"
     tables = configured if configured else sorted(build.schema)
-    note = ""
-    if fallback:
-        shown = cfg.path or "config/kc.yaml"
-        try:
-            shown = str(Path(shown).resolve().relative_to(SILO))
-        except ValueError:
-            shown = Path(shown).name
-        note = (f"{shown} names no tables yet: showing "
-                f"every table in build {build.version}")
-    elif unknown:
-        note = f"{len(unknown)} configured table(s) not in this build: {', '.join(unknown)}"
-    return {"available": True, "build_id": build.version, "fallback": fallback,
-            "note": note, "unknown": unknown, "config_path": cfg.path,
-            "rows": [table_summary(t, builds_root=builds_root, graph_root=graph_root,
-                                   cfg=cfg, build=build) for t in tables]}
+    shown = cfg.path or "config/kc.yaml"
+    try:
+        shown = str(Path(shown).resolve().relative_to(SILO))
+    except ValueError:
+        shown = Path(shown).name
+    if scope == "all":
+        note = (f"scope: every table in build {build.version} ({len(tables)}); "
+                f"name a subset under tables: in {shown} to narrow")
+    else:
+        note = f"scope: {len(tables)} table(s) named in {shown}"
+    if unknown:
+        note += f" · {len(unknown)} named table(s) not in this build: {', '.join(unknown)}"
+    rows = [table_summary(t, builds_root=builds_root, graph_root=graph_root,
+                          cfg=cfg, build=build) for t in tables]
+    lobs = sorted({r["lob"] for r in rows if r["lob"]})
+    return {"available": True, "build_id": build.version, "scope": scope,
+            "fallback": scope == "all", "note": note, "unknown": unknown,
+            "config_path": cfg.path, "lobs": lobs,
+            "totals": {"tables": len(rows),
+                       "facts": sum(r["facts"] for r in rows),
+                       "copy": sum(r["copy"] for r in rows),
+                       "review": sum(r["review"] for r in rows),
+                       "never": sum(r["never"] for r in rows)},
+            "rows": rows}
 
 
 def record_push(table: str, *, sections: list[str], actor: str, note: str = "",
@@ -262,6 +317,140 @@ def record_push(table: str, *, sections: list[str], actor: str, note: str = "",
     out = bundle_dir(graph_root, cfg, table, bundle.build_id)
     save_json(out / f"push_{stamp}.json", record)
     return {"recorded": True, "record": record, "message": message}
+
+
+def _scope_tables(build: Build, cfg: KcConfig) -> list[str]:
+    configured = [t for t in cfg.tables if t in build.schema]
+    return configured if configured else sorted(build.schema)
+
+
+def glossary_across(*, builds_root: Path | None = None, graph_root: Path | None = None,
+                    config: KcConfig | None = None, use_llm: bool = False
+                    ) -> dict[str, Any]:
+    """Every glossary term across every table in scope, merged the way
+    the catalog holds them: a glossary is one per project, so a term a
+    metric family measures on three tables is one term with three
+    related entries, and a LOB category appears once. Each merged term
+    names the tables it came from and their fact ids, so the ledger
+    trail survives the merge."""
+    cfg = config or load_config()
+    builds_root = Path(builds_root or builds_root_default())
+    graph_root = Path(graph_root or graph_root_default())
+    build = Build.open(builds_root)
+    terms: dict[tuple[str, str], dict[str, Any]] = {}
+    categories: dict[tuple[str, str], dict[str, Any]] = {}
+    review: list[dict[str, Any]] = []
+    tables = _scope_tables(build, cfg)
+    for table in tables:
+        bundle = build_bundle(table, use_llm=use_llm, builds_root=builds_root,
+                              graph_root=graph_root, config=cfg)
+        sec = bundle.sections["glossary"]
+        if sec.items:
+            for c in sec.items[0].get("categories", []):
+                key = (str(c.get("name") or ""), str(c.get("parent") or ""))
+                held = categories.setdefault(key, {**{k: v for k, v in c.items()
+                                                      if k != "fact_ids"},
+                                                   "tables": [], "fact_ids": {}})
+                held["tables"].append(table)
+                held["fact_ids"][table] = c.get("fact_ids", [])
+            for t in sec.items[0].get("terms", []):
+                key = (t["category"], t["term"])
+                held = terms.get(key)
+                if held is None:
+                    held = terms[key] = {
+                        "term": t["term"], "category": t["category"],
+                        "definition": t.get("definition", ""),
+                        "definition_llm": t.get("definition_llm", ""),
+                        "status_note": t.get("status_note", ""),
+                        "status": t.get("status", ""), "witness": set(),
+                        "synonyms": [], "related_terms": [], "related_entries": [],
+                        "contacts": [], "tables": [], "fact_ids": {}}
+                held["witness"].update(w for w in str(t.get("witness", "")).split(",") if w)
+                for field_name in ("synonyms", "related_terms", "related_entries", "contacts"):
+                    for value in t.get(field_name, []):
+                        if value not in held[field_name]:
+                            held[field_name].append(value)
+                if not held["definition"] and t.get("definition"):
+                    held["definition"] = t["definition"]
+                if not held["definition_llm"] and t.get("definition_llm"):
+                    held["definition_llm"] = t["definition_llm"]
+                held["tables"].append(table)
+                held["fact_ids"][table] = t.get("fact_ids", [])
+        for item in sec.review:
+            review.append({**item, "table": table})
+    merged_terms = sorted(({**t, "witness": ",".join(sorted(t["witness"]))}
+                           for t in terms.values()),
+                          key=lambda t: (t["category"], t["term"]))
+    merged_categories = sorted(categories.values(),
+                               key=lambda c: (c.get("parent") or "", c.get("name") or ""))
+    by_category: dict[str, int] = defaultdict(int)
+    for t in merged_terms:
+        by_category[t["category"]] += 1
+    return {"available": True, "build_id": build.version, "tables": tables,
+            "categories": merged_categories, "terms": merged_terms,
+            "by_category": dict(sorted(by_category.items())),
+            "review": review, "glossary_path": cfg.glossary_path()}
+
+
+def glossary_export(fmt: str, *, builds_root: Path | None = None,
+                    graph_root: Path | None = None, config: KcConfig | None = None
+                    ) -> tuple[bytes, str, str]:
+    """The merged glossary as an import file: ``jsonl`` (glossary
+    entries), ``links`` (entry links), ``sheet`` (the sheet columns)."""
+    from sahs.kc.export import (entry_link_lines, glossary_lines,
+                                glossary_sheet_lines)
+    cfg = config or load_config()
+    merged = glossary_across(builds_root=builds_root, graph_root=graph_root, config=cfg)
+    meta = {"build": merged["build_id"], "tables": len(merged["tables"]),
+            "scope": "merged glossary across every table in scope"}
+    if fmt == "jsonl":
+        return (glossary_lines(merged["categories"], merged["terms"], cfg, meta)
+                .encode("utf-8"), "application/x-ndjson", "glossary_all.jsonl")
+    if fmt == "links":
+        related = [{"term": t["term"], "target": e}
+                   for t in merged["terms"] for e in t.get("related_entries", [])]
+        return (entry_link_lines(related, merged["terms"], cfg, meta).encode("utf-8"),
+                "application/x-ndjson", "entry_links_all.jsonl")
+    if fmt == "sheet":
+        return (glossary_sheet_lines(merged["terms"]).encode("utf-8"), "text/csv",
+                "glossary_all.csv")
+    raise ValueError(f"unknown glossary export {fmt!r}: jsonl, links, sheet")
+
+
+def export_all(*, builds_root: Path | None = None, graph_root: Path | None = None,
+               config: KcConfig | None = None, use_llm: bool = False,
+               log: Callable[[str], None] | None = None) -> tuple[bytes, str, str]:
+    """One zip for every table in scope: a folder per table with the
+    same members as the single-table zip, plus the merged glossary,
+    its entry links and sheet at the root, and a manifest."""
+    from sahs.kc.export import zip_members
+    cfg = config or load_config()
+    builds_root = Path(builds_root or builds_root_default())
+    graph_root = Path(graph_root or graph_root_default())
+    log = log or (lambda _m: None)
+    build = Build.open(builds_root)
+    tables = _scope_tables(build, cfg)
+    buffer = io.BytesIO()
+    manifest: dict[str, Any] = {"build_id": build.version, "tables": {},
+                                "generated_at": _dt.datetime.now(
+                                    _dt.timezone.utc).isoformat(timespec="seconds")}
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for table in tables:
+            bundle = build_bundle(table, use_llm=use_llm, builds_root=builds_root,
+                                  graph_root=graph_root, config=cfg)
+            for path, text in zip_members(bundle, cfg).items():
+                zf.writestr(path, text)
+            manifest["tables"][table] = {"facts": len(bundle.facts),
+                                         "counts": bundle.counts, "digest": bundle.digest}
+            log(f"  {table}: {len(bundle.facts)} facts")
+        for fmt, name in (("jsonl", "glossary_all.jsonl"),
+                          ("links", "entry_links_all.jsonl"),
+                          ("sheet", "glossary_all.csv")):
+            data, _media, _n = glossary_export(fmt, builds_root=builds_root,
+                                               graph_root=graph_root, config=cfg)
+            zf.writestr(name, data.decode("utf-8"))
+        zf.writestr("manifest.json", json.dumps(manifest, indent=1, sort_keys=True))
+    return buffer.getvalue(), "application/zip", f"kc_all_{build.version}.zip"
 
 
 def coverage_payload(*, builds_root: Path | None = None,
