@@ -661,6 +661,67 @@ def test_coverage_stub_rows():
     assert text.count("_r(") == 3
 
 
+# ── 26 · the indexed fold answers exactly what a scan would ───────
+def test_fold_indexes_match_a_full_scan(compiled):
+    from sahs.kc.fold import fold
+    view = fold(compiled["graph"])
+    active = [(k, q) for k, q in view.edges.items() if q.prov.status == "active"]
+    seen_pairs = {(s, r) for (s, r, _o, _w), _q in active}
+    for s, r in list(seen_pairs)[:200]:
+        brute = [q for (ss, rr, _o, _w), q in active if ss == s and rr == r]
+        assert view.out(s, r) == brute, (s, r)
+    seen_obj = {(o, r) for (_s, r, o, _w), _q in active}
+    for o, r in list(seen_obj)[:200]:
+        brute = [q for (_s, rr, oo, _w), q in active if oo == o and rr == r]
+        assert view.into(o, r) == brute, (o, r)
+    assert sum(len(v) for v in view.by_kind.values()) == len(view.nodes)
+    assert view.out("table:nope.nope", "has_column") == []
+    # the same object comes back while the graph is unchanged
+    assert fold(compiled["graph"]) is view
+
+
+# ── 27 · the coverage payload and the build are read once per state ──
+def test_coverage_payload_and_build_cached(compiled, monkeypatch):
+    import sahs.kc.bundle as kc_bundle
+    from sahs.graph import quads as quads_mod
+    from sahs.kc import fold as fold_mod
+    kc_bundle._COVERAGE.clear()
+    first = coverage_payload(builds_root=compiled["builds"], graph_root=compiled["graph"])
+    assert first["counts"]["rows"] == len(coverage.ROWS) and "walk_ms" in first["timings"]
+
+    def boom(*_a, **_k):
+        raise AssertionError("the store was re-read")
+    monkeypatch.setattr(quads_mod.GraphDir, "iter_nodes", boom)
+    monkeypatch.setattr(quads_mod.GraphDir, "iter_edges", boom)
+    second = coverage_payload(builds_root=compiled["builds"], graph_root=compiled["graph"])
+    assert second is first
+    opened = {"n": 0}
+    real_open = Build.open
+
+    def counting(path):
+        opened["n"] += 1
+        return real_open(path)
+    monkeypatch.setattr(fold_mod.Build, "open", staticmethod(counting))
+    fold_mod._BUILDS.clear()
+    a = fold_mod.open_build(compiled["builds"])
+    b = fold_mod.open_build(compiled["builds"])
+    assert a is b and opened["n"] == 1
+
+
+# ── 28 · a bundle says where its time went; the picker is light ───
+def test_timings_and_light_table_names(compiled, cfg):
+    from sahs.kc.bundle import table_names
+    bundle = build_bundle(TABLE, use_llm=False, builds_root=compiled["builds"],
+                          graph_root=compiled["graph"], config=cfg)
+    assert {"open_build_ms", "assemble_ms", "render_ms", "total_ms"} <= set(bundle.timings)
+    assert "timings" in bundle.to_dict()
+    names = table_names(builds_root=compiled["builds"], graph_root=compiled["graph"], config=cfg)
+    assert names["light"] and [r["physical"] for r in names["rows"]] == sorted(compiled["build"].schema)
+    assert set(names["rows"][0]) == {"physical", "lob"}
+    listing = list_tables(builds_root=compiled["builds"], graph_root=compiled["graph"], config=cfg)
+    assert "total_ms" in listing["timings"] and "summaries_cached" in listing["timings"]
+
+
 # ── 20 · schema touches ──────────────────────────────────────────
 def test_kc_witness_and_relation_registered():
     from sahs.graph.quads import RANKING_WITNESSES, RELATIONS, SOURCE_WITNESS, WITNESSES

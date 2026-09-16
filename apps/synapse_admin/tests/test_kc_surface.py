@@ -94,6 +94,17 @@ def test_tables_coverage_and_bundle(client):
     assert missing == {"available": True, "found": False, "table": "zz.nope"}
 
 
+def test_light_tables_and_timings(client):
+    light = client.get("/api/kc/tables?light=1").json()
+    assert light["available"] and light["light"]
+    assert set(light["rows"][0]) == {"physical", "lob"}
+    full = client.get("/api/kc/tables").json()
+    assert [r["physical"] for r in light["rows"]] == [r["physical"] for r in full["rows"]]
+    assert "total_ms" in full["timings"]
+    bundle = client.get(f"/api/kc/bundle/{TABLE}").json()
+    assert "assemble_ms" in bundle["timings"]
+
+
 def test_glossary_across_and_export_all(client):
     merged = client.get("/api/kc/glossary").json()
     assert merged["available"] and merged["terms"] and merged["categories"]

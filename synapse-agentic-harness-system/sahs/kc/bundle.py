@@ -24,14 +24,17 @@ from typing import Any, Callable
 
 from sahs.ask.events import EventBus
 from sahs.kc import coverage
+import time
+
 from sahs.kc.assemble import FactSet, _graph_stamp, assemble
 from sahs.kc.config import KcConfig, load_config
+from sahs.kc.fold import open_build
 from sahs.kc.render import (Section, aspect_type_templates, aspects_payload,
                             guide, ledger, render_sections, suggestions)
 from sahs.kc.write import (KC_EVENTS, Writer, bundle_dir, cache_path,
                            default_client, gate_path, load_json, run_gate,
                            save_json)
-from sahs.tools.api import Build
+from sahs.tools.api import Build  # noqa: F401 (type only)
 
 SILO = Path(__file__).resolve().parents[2]
 
@@ -62,6 +65,7 @@ class Bundle:
     llm: dict[str, Any]
     gate: dict[str, Any]
     push_records: list[dict[str, Any]] = field(default_factory=list)
+    timings: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -119,8 +123,11 @@ def build_bundle(table: str, *, use_llm: bool = True, regenerate: bool = False,
     builds_root = Path(builds_root or builds_root_default())
     graph_root = Path(graph_root or graph_root_default())
     log = log or (lambda _m: None)
-    build = Build.open(builds_root)
+    t0 = time.perf_counter()
+    build = open_build(builds_root)
+    t_build = time.perf_counter()
     fs = assemble(build, graph_root, table)
+    t_assemble = time.perf_counter()
     out_dir = bundle_dir(graph_root, cfg, table, build.version)
     cached = load_json(cache_path(graph_root, cfg, table, build.version))
     if cached and cached.get("facts_digest") != fs.digest():
@@ -163,8 +170,14 @@ def build_bundle(table: str, *, use_llm: bool = True, regenerate: bool = False,
     tier = gate.get("tier", "not run")
     llm_for_render = llm_record if (llm_record and tier != "halt") else None
     records = push_records(graph_root, cfg, table)
+    t_render0 = time.perf_counter()
     sections = render_sections(fs, cfg, llm_for_render, gate_tier=tier,
                                push_records=records)
+    t_end = time.perf_counter()
+    ms = lambda a, c: round((c - a) * 1000, 1)     # noqa: E731
+    timings = {"open_build_ms": ms(t0, t_build), "assemble_ms": ms(t_build, t_assemble),
+               "render_ms": ms(t_render0, t_end), "total_ms": ms(t0, t_end),
+               "model_ms": ms(t_assemble, t_render0) if fresh else 0.0}
     return Bundle(
         table=table, build_id=build.version, graph_run=fs.graph_run,
         prompt_version=cfg.prompt_version, digest=fs.digest(),
@@ -172,7 +185,7 @@ def build_bundle(table: str, *, use_llm: bool = True, regenerate: bool = False,
         sections=sections, ledger=ledger(fs), aspects=aspects_payload(fs, cfg),
         aspect_types=aspect_type_templates(cfg), suggestions=suggestions(fs),
         guide=guide(cfg), llm=_llm_status(cfg, use_llm, cached, fresh, reason),
-        gate=gate, push_records=records)
+        gate=gate, push_records=records, timings=timings)
 
 
 # the assemble-derived part of a list row, per (graph state, build,
@@ -232,7 +245,7 @@ def table_summary(table: str, *, builds_root: Path, graph_root: Path,
                   cfg: KcConfig, build: Build | None = None) -> dict[str, Any]:
     """The list row: coverage numbers, section readiness, gate tier,
     cache state, last push."""
-    build = build or Build.open(builds_root)
+    build = build or open_build(builds_root)
     summary = dict(_assembled_summary(table, graph_root=graph_root, cfg=cfg,
                                       build=build))
     cached = load_json(cache_path(graph_root, cfg, table, build.version))
@@ -246,12 +259,31 @@ def table_summary(table: str, *, builds_root: Path, graph_root: Path,
     return summary
 
 
+def table_names(*, builds_root: Path | None = None, graph_root: Path | None = None,
+                config: KcConfig | None = None) -> dict[str, Any]:
+    """The picker's list: names and LOBs only, no assembly."""
+    cfg = config or load_config()
+    builds_root = Path(builds_root or builds_root_default())
+    build = open_build(builds_root)
+    tables = _scope_tables(build, cfg)
+    lob_of: dict[str, str] = {}
+    for row in build.lob:
+        for t in row.get("tables") or []:
+            lob_of.setdefault(t, str(row.get("code") or row.get("lob") or ""))
+    return {"available": True, "build_id": build.version, "light": True,
+            "rows": [{"physical": t, "lob": lob_of.get(t, "")} for t in tables]}
+
+
 def list_tables(*, builds_root: Path | None = None, graph_root: Path | None = None,
                 config: KcConfig | None = None) -> dict[str, Any]:
+    t0 = time.perf_counter()
     cfg = config or load_config()
     builds_root = Path(builds_root or builds_root_default())
     graph_root = Path(graph_root or graph_root_default())
-    build = Build.open(builds_root)
+    build = open_build(builds_root)
+    key = _summary_key(graph_root, build, cfg)
+    warm = key in _SUMMARIES and all(
+        t in _SUMMARIES[key] for t in _scope_tables(build, cfg))
     configured = [t for t in cfg.tables if t in build.schema]
     unknown = [t for t in cfg.tables if t not in build.schema]
     # scope: every table in the build unless the config names a subset;
@@ -276,6 +308,8 @@ def list_tables(*, builds_root: Path | None = None, graph_root: Path | None = No
     return {"available": True, "build_id": build.version, "scope": scope,
             "fallback": scope == "all", "note": note, "unknown": unknown,
             "config_path": cfg.path, "lobs": lobs,
+            "timings": {"total_ms": round((time.perf_counter() - t0) * 1000, 1),
+                        "summaries_cached": warm},
             "totals": {"tables": len(rows),
                        "facts": sum(r["facts"] for r in rows),
                        "copy": sum(r["copy"] for r in rows),
@@ -336,7 +370,7 @@ def glossary_across(*, builds_root: Path | None = None, graph_root: Path | None 
     cfg = config or load_config()
     builds_root = Path(builds_root or builds_root_default())
     graph_root = Path(graph_root or graph_root_default())
-    build = Build.open(builds_root)
+    build = open_build(builds_root)
     terms: dict[tuple[str, str], dict[str, Any]] = {}
     categories: dict[tuple[str, str], dict[str, Any]] = {}
     review: list[dict[str, Any]] = []
@@ -428,7 +462,7 @@ def export_all(*, builds_root: Path | None = None, graph_root: Path | None = Non
     builds_root = Path(builds_root or builds_root_default())
     graph_root = Path(graph_root or graph_root_default())
     log = log or (lambda _m: None)
-    build = Build.open(builds_root)
+    build = open_build(builds_root)
     tables = _scope_tables(build, cfg)
     buffer = io.BytesIO()
     manifest: dict[str, Any] = {"build_id": build.version, "tables": {},
@@ -453,11 +487,25 @@ def export_all(*, builds_root: Path | None = None, graph_root: Path | None = Non
     return buffer.getvalue(), "application/zip", f"kc_all_{build.version}.zip"
 
 
+_COVERAGE: dict[tuple, dict[str, Any]] = {}
+
+
 def coverage_payload(*, builds_root: Path | None = None,
                      graph_root: Path | None = None) -> dict[str, Any]:
+    """The coverage report and dictionary, computed once per graph
+    state and build: the walk reads every node and edge, and the list
+    page asks for it on every visit."""
     builds_root = Path(builds_root or builds_root_default())
     graph_root = Path(graph_root or graph_root_default())
-    build = Build.open(builds_root)
-    report = coverage.coverage_report(graph_root, build.root)
-    return {"available": True, "build_id": build.version, **report,
-            "dictionary": coverage.dictionary(report)}
+    build = open_build(builds_root)
+    key = (str(graph_root), _graph_stamp(graph_root), build.version)
+    held = _COVERAGE.get(key)
+    if held is None:
+        t0 = time.perf_counter()
+        report = coverage.coverage_report(graph_root, build.root)
+        held = {"available": True, "build_id": build.version, **report,
+                "dictionary": coverage.dictionary(report),
+                "timings": {"walk_ms": round((time.perf_counter() - t0) * 1000, 1)}}
+        _COVERAGE.clear()
+        _COVERAGE[key] = held
+    return held

@@ -148,7 +148,8 @@ export async function renderKc(outlet) {
         <span class="muted">· order: ${ENTRY_SECTIONS.map((k) => SECTION_TITLE[k]).join(" · ")}</span></div>
     </div>
     <div class="legend"><span class="muted">build ${esc(tables.build_id)} · copy = may be entered as is ·
-      review = a human decides first · never = stays in the graph</span></div>`;
+      review = a human decides first · never = stays in the graph${tables.timings
+        ? ` · listed in ${tables.timings.total_ms} ms${tables.timings.summaries_cached ? " (summaries cached)" : " (first assembly of this build)"}` : ""}</span></div>`;
   outlet.querySelector("#kc-q").addEventListener("input", draw);
   body.querySelector("#kc-sort").addEventListener("change", (e) => { sort = e.target.value; draw(); });
   body.querySelector("#kc-lobs")?.addEventListener("click", (e) => {
@@ -300,7 +301,7 @@ export async function renderKcTable(outlet, physical) {
       <button class="btn" id="kc-regen" title="re-run the model sections only">regenerate</button>
     </div>
     <div id="kc-page">${loading()}</div>`;
-  const [bundle, tables] = await Promise.all([api.kcBundle(physical), api.kcTables()]);
+  const [bundle, tables] = await Promise.all([api.kcBundle(physical), api.kcTableNames()]);
   const page = outlet.querySelector("#kc-page");
   if (!page) return;
 
@@ -682,7 +683,8 @@ function bundleHtml(state, physical) {
       ${ledgerHtml(state)}
       ${order.map((k) => sectionCard(state, k)).join("")}
       ${suggestionsHtml(state)}
-      <div class="legend"><span class="muted">every line carries [witness · status] and its fact ids; nothing here is written from outside the graph</span><span class="spacer"></span><span id="kc-fb"></span></div>
+      <div class="legend"><span class="muted">every line carries [witness · status] and its fact ids; nothing here is written from outside the graph${state.timings
+        ? ` · assembled in ${state.timings.assemble_ms} ms, rendered in ${state.timings.render_ms} ms` : ""}</span><span class="spacer"></span><span id="kc-fb"></span></div>
     </div>
     ${railHtml(state, physical)}
   </div>`;

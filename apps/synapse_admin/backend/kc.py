@@ -74,12 +74,17 @@ class WitnessImport(BaseModel):
 
 
 @router.get("/tables")
-def tables() -> dict:
+def tables(light: int = 0) -> dict:
+    """The tables in scope. ``light=1`` answers names and LOBs only
+    (the picker on a table page), without assembling anything."""
     reason = _no_build()
     if reason:
         return _unavailable(reason)
     kc, cfg = _kc()
     try:
+        if light:
+            return kc.table_names(builds_root=_builds_root(), graph_root=_graph_root(),
+                                  config=cfg)
         return kc.list_tables(builds_root=_builds_root(), graph_root=_graph_root(),
                               config=cfg)
     except Exception as exc:
@@ -159,10 +164,10 @@ def bundle(table: str, llm: int = 1) -> dict:
 
 def _cached(table: str) -> bool:
     kc, cfg = _kc()
+    from sahs.kc.fold import open_build
     from sahs.kc.write import cache_path, load_json
-    from sahs.tools.api import Build
     try:
-        build = Build.open(_builds_root())
+        build = open_build(_builds_root())
     except FileNotFoundError:
         return False
     return load_json(cache_path(_graph_root(), cfg, table, build.version)) is not None
@@ -291,9 +296,9 @@ def witness_import(req: WitnessImport) -> dict:
         return _unavailable(reason)
     _silo_import()
     import datetime as _dt
+    from sahs.kc.fold import open_build
     from sahs.kc.witness import import_kc_export
-    from sahs.tools.api import Build
-    build = Build.open(_builds_root())
+    build = open_build(_builds_root())
     run_id = f"kc_import_{_dt.datetime.now(_dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     payload = req.payload if isinstance(req.payload, dict) else {"items": req.payload}
     report = import_kc_export(_graph_root(), req.kind, payload, run_id=run_id,
