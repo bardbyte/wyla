@@ -577,6 +577,38 @@ def missing_rows(graph_root: Path, build_root: Path) -> list[str]:
                   if row_for(i) is None)
 
 
+def stub_rows(missing: list[str]) -> str:
+    """Ready-to-edit ``_r(...)`` lines for unrowed items: the item and
+    the extractor family are filled from the item's own family; the
+    catalog target, representation, status rule and disclosure are
+    left for the person to decide, because that decision is the whole
+    point of the row."""
+    family = {"node:table": "identity", "node:col": "columns",
+              "node:metric": "metrics", "node:mgroup": "metrics",
+              "node:concept": "concepts", "node:pred": "concepts",
+              "node:term": "terms", "node:acr": "terms", "node:domain": "domains",
+              "node:owner": "stewardship", "node:lob": "stewardship",
+              "node:mdom": "stewardship", "node:doc": "queries",
+              "node:review": "status", "node:tmpl": "usage",
+              "edge:joins_via": "joins", "edge:co_queried_with": "joins",
+              "edge:fk_references": "keys", "edge:mapped_term": "terms",
+              "edge:alias_of": "terms", "edge:has_policy": "sensitivity",
+              "index:metrics": "metrics", "index:bindings": "concepts",
+              "index:joins": "joins", "index:columns": "columns",
+              "report:census": "status", "report:tickets": "status"}
+    lines = []
+    for item in missing:
+        head = ".".join(item.split(".")[:1])
+        guess = family.get(head, "")
+        if item.startswith("report:") or item.startswith("prov:"):
+            lines.append(f'    _r("{item}", "none", EXCLUDED, NA, "", "", '
+                         '"<why this item has no catalog home>"),')
+        else:
+            lines.append(f'    _r("{item}", "<KC construct.field>", ASPECT, ANY, '
+                         f'"<what the copied text discloses>", "{guess}"),')
+    return "\n".join(lines)
+
+
 def item_counts(graph_root: Path) -> dict[str, int]:
     """How many records each node kind / relation holds: the weights
     behind the coverage percentages."""

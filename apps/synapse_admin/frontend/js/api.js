@@ -148,4 +148,8 @@ export const api = {
     `/api/kc/bundle/${encodeURIComponent(table)}/stream?regenerate=${regenerate}`,
   kcPush: (table, body) =>
     post(`/api/kc/push-record/${encodeURIComponent(table)}`, body),
+  // the glossary is one per catalog project: every table's terms, merged
+  kcGlossary: () => get("/api/kc/glossary"),
+  kcGlossaryExportUrl: (format) => `/api/kc/glossary/export?format=${format}`,
+  kcExportAllUrl: () => "/api/kc/export-all",
 };

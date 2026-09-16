@@ -28,7 +28,7 @@ kc:
   project: ""            # the project that holds the entries and the glossary
   location: "us"
   glossary: ""           # id or full projects/…/glossaries/… path
-  tables: []             # the catalog-enabled tables, dataset.table; empty = every table, and the picker says so
+  tables: []             # scope: empty = every table in the build (the default mode); a list narrows it
   aspect_types: {…}      # ids the catalog knows the custom aspect types by
   push_record_dir: "runs/kc"
   llm: true
@@ -54,14 +54,39 @@ glossary naming convention, whether custom aspect types are allowed
 org-wide, the import bucket, and whether Gemini data insights are on
 (so the read-back can compare its descriptions with ours).
 
+## Scope: every table, or a named subset
+
+The tab covers every table in the promoted build by default. `#/kc`
+lists them all with a filter, a LOB filter, a sort, and one readiness
+dot per section (green: ready to copy; amber: ready, some items wait
+for review; dashed: nothing on record, hover for the reason), so you
+see what a table yields before opening it. Summaries are cached per
+build, so a 46-table list loads in milliseconds after the first time.
+Name tables under `tables:` in `config/kc.yaml` only to narrow the
+scope; the page then says which mode it is in.
+
+Two things span tables and live on their own pages:
+
+- `#/kc/glossary`: every term across every table, merged the way the
+  catalog holds a glossary (one per project). A metric a family
+  measures on three tables is one term with three related entries; a
+  LOB category appears once. Exports there are the ones an import job
+  takes: `glossary_all.jsonl`, `entry_links_all.jsonl`, `glossary_all.csv`.
+- "export everything (zip)" on `#/kc` (or `pipeline.py kc --table all
+  --out runs/kc --plain`): one folder per table with the same members as
+  the single-table zip, plus the merged glossary files and a manifest.
+
 ## Once
 
 1. Compile and promote a build; run `python scripts/pipeline.py kc-coverage --out runs/kc_cov --plain`.
    The gate must be green: every node kind, prop, relation, edge prop,
    index field, card section and report field in the current graph has a
-   row. A red gate names the unrowed items; add rows in
-   `sahs/kc/coverage.py` (a row may be `excluded` with a reason).
-2. Fill `config/kc.yaml`: project, location, glossary, the 15 tables.
+   row. A red gate names the unrowed items and prints a ready-to-edit
+   `_r(...)` stub for each; fill the `<placeholders>` in
+   `sahs/kc/coverage.py` (a row may be `EXCLUDED` with a reason) and
+   re-run until green.
+2. Fill `config/kc.yaml`: project, location, glossary; leave `tables`
+   empty for every table, or name a subset.
 3. In the catalog: create the glossary and its category tree (LOB →
    domain → concept family; the bundle's Glossary card lists the
    categories it needs), then create the custom aspect types from the
@@ -80,11 +105,18 @@ org-wide, the import bucket, and whether Gemini data insights are on
    sections only.
 2. Read the translation ledger: which Meridian objects became which
    catalog constructs, how many were translated, how many wait for a
-   human and why.
+   human and why. A construct jumps to the card it lands in; a row
+   expands to the facts behind it. The sticky section nav under the
+   header does the same for every card.
 3. Read "Needs review" first. Decide: hold, or approve (approving files
    a review item through the clerk and moves the item to a copy block on
    the next load).
-4. Enter each card into the catalog following the right rail:
+4. Enter each card into the catalog following the right rail. Every
+   card has "copy section" for the whole block and a copy button per
+   item in the shape the console takes it: one column's description,
+   one term's definition or name, one query's SQL, one contact, one DQ
+   rule, one aspect's JSON. "Copy every copy-ready section" at the top
+   gives the whole bundle as one document. Then:
    description via the JSON export (`entry_patch.json`, an
    `entries.patch` body: descriptions are API-only); overview, glossary
    terms, related entries, aspects, queries (source User) and contacts

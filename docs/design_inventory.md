@@ -163,3 +163,12 @@ sahs.tools.api.Build.
   `[witness · status]` and its id; nothing renders a number without its fact.
 - Tokens untouched; tier colors reused as-is (green copy-ready, amber review, crimson
   halt/conflict only, dashed unknown); reduced-motion parity for the live dot.
+- Follow-up (scope = every table): **readiness dots** on the list (one per entry section:
+  green ready, amber ready-with-review, dashed empty; hover names the reason), list filter +
+  LOB pills + sort, "export everything (zip)"; **section nav** (sticky, in-page scroll since the
+  router owns the hash, count per card), **per-item copy** (`.kc-mini`, one column's
+  description, one term, one query's SQL, one contact, one rule, one aspect's JSON) beside the
+  whole-section copy, "copy every copy-ready section", ledger constructs jump to their card;
+  `#/kc/glossary` merges every table's terms as the catalog holds a glossary (one per
+  project) with the import-file exports. Structured cards render as `.kc-ledger` tables with
+  the one-block text under a details fold.
