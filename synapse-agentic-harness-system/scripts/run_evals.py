@@ -48,6 +48,12 @@ def main(argv: list[str] | None = None) -> int:
                              "excluded from the floor by default)")
     parser.add_argument("--plain", action="store_true")
     parser.add_argument("--json", action="store_true", dest="json_out")
+    parser.add_argument("--langfuse", action="store_true",
+                        help="mirror this run as a Langfuse dataset run "
+                             "(needs SAHS_LANGFUSE=1 and the SDK keys)")
+    parser.add_argument("--run-name", default="",
+                        help="the Langfuse run name; default names the "
+                             "SUT, tasks version, canon version and time")
     args = parser.parse_args(argv)
 
     tasks = []
@@ -93,6 +99,27 @@ def main(argv: list[str] | None = None) -> int:
         print("no tasks answerable by this sut", file=sys.stderr)
         return EXIT_VALIDATION_ERROR
 
+    recorder = None
+    langfuse = None
+    if args.langfuse:
+        from sahs.observe.experiments import experiment_recorder
+        from sahs.observe.setup import langfuse_client
+        langfuse = langfuse_client()
+        if not langfuse.auth_check():
+            print("langfuse: auth_check failed — check LANGFUSE_PUBLIC_KEY, "
+                  "LANGFUSE_SECRET_KEY and LANGFUSE_BASE_URL in the silo "
+                  ".env (python scripts/langfuse_sync.py check)",
+                  file=sys.stderr)
+            return EXIT_VALIDATION_ERROR
+        recorder = experiment_recorder(
+            langfuse, [Path(p) for p in args.tasks], sut=args.sut,
+            canon_version=CANON_VERSION, run_name=args.run_name,
+            extra={"script_version": SCRIPT_VERSION,
+                   "samples": args.samples,
+                   "deterministic": not args.stochastic})
+        sut = recorder.sut(sut)
+        print(f"langfuse run: {recorder.run_name}", file=sys.stderr)
+
     out = Path(args.out) if args.out else None
     run_id = (_dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
               + "_" + uuid.uuid4().hex[:8])
@@ -102,13 +129,27 @@ def main(argv: list[str] | None = None) -> int:
         plain=args.plain)
     console.phase("evaluate", total=len(tasks))
 
+    def on_trial(t):
+        if t.verdict == "pass":
+            console.item_ok()
+        else:
+            console.item_quarantined(t.verdict, t.reason)
+        if recorder is not None:
+            recorder.on_trial(t)
+
     report = run_suite(
         tasks, sut,
         n=args.samples, deterministic=not args.stochastic,
         triage_path=(out / "triage" / "ambiguous.jsonl") if out else None,
-        on_trial=lambda t: (console.item_ok() if t.verdict == "pass"
-                            else console.item_quarantined(t.verdict,
-                                                          t.reason)))
+        on_trial=on_trial)
+    if recorder is not None:
+        if recorder.missing:
+            print(f"langfuse: {len(recorder.missing)} task ids not in "
+                  f"the pushed datasets: {recorder.missing[:5]}",
+                  file=sys.stderr)
+        langfuse.flush()
+        print(f"langfuse: {recorder.recorded} trials recorded on run "
+              f"{recorder.run_name}", file=sys.stderr)
     report["excluded_out_of_coverage"] = excluded
     report["excluded_kind_not_answerable"] = excluded_kind
     print(format_report(report), file=sys.stderr)

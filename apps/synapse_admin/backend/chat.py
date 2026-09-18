@@ -79,6 +79,11 @@ def _chat():
         # approved knowledge files land where the shelf reads staged
         # ones; resolved at publish time, so the .env decides
         _RUNTIME.knowledge_dir = lambda: _sources_dir() / "artifacts"
+        # the Langfuse mirror of every turn's record: attached only
+        # when SAHS_LANGFUSE=1 (sahs.observe); off is the default
+        from sahs.observe import langfuse_observer
+        _RUNTIME.observer = langfuse_observer(
+            user_id=_RUNTIME.user_name, model_of=_RUNTIME.label_for)
     return _RUNTIME, sse_frame
 
 

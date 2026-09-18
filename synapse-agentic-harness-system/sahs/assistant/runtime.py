@@ -92,6 +92,9 @@ class AssistantRuntime:
             except (TypeError, ValueError):
                 self._factory_hears_plane = False
         self._runtimes: dict[str, _SessionRuntime] = {}
+        # an observer of every session's event record (sahs.observe):
+        # attached to each bus as it is created, absent by default
+        self.observer: Callable[[dict[str, Any]], None] | None = None
         self._lock = threading.Lock()
         self._build: Build | None = None
         self._build_stamp: float = -1.0
@@ -299,6 +302,8 @@ class AssistantRuntime:
             rt = self._runtimes.get(session_id)
             if rt is None:
                 rt = _SessionRuntime(session_id, self.events_dir)
+                if self.observer is not None:
+                    rt.bus.sinks.append(self.observer)
                 self._runtimes[session_id] = rt
             return rt
 
