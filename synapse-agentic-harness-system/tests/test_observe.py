@@ -366,7 +366,8 @@ def test_experiment_recorder_scores_every_trial_on_its_item():
     tasks = read_tasks(path)
     client = _FakeClient()
     recorder = experiment_recorder(client, [path], sut="oracle",
-                                   canon_version="c1", run_name="run-1")
+                                   canon_version="c1", run_name="run-1",
+                                   queue=False)
     assert set(client.datasets) == {"wyla-curated"}
     assert len(client.items["wyla-curated"]) == len(tasks)
 
@@ -395,3 +396,279 @@ def test_recorder_keeps_the_suts_declared_kinds():
     sut.answerable_kinds = ("resolve_bind",)
     wrapped = ExperimentRecorder(_FakeClient(), [], run_name="r").sut(sut)
     assert wrapped.answerable_kinds == ("resolve_bind",)
+
+
+# ── prompt versions as labels ────────────────────────────────
+class _FakePrompts:
+    """The prompts API: get raises until create registers."""
+
+    def __init__(self, store):
+        self.store = store
+
+    def get(self, name, *, label=None, **_kw):
+        for row in self.store.get(name, []):
+            if label in row["labels"]:
+                return row["obj"]
+        raise LookupError(f"no prompt {name} @ {label}")
+
+
+class _PromptObj:
+    def __init__(self, name, prompt, version, labels):
+        self.name, self.prompt, self.version, self.labels = \
+            name, prompt, version, labels
+
+
+class _PromptClient:
+    def __init__(self):
+        self.store = {}
+
+        class _Api:
+            prompts = _FakePrompts(self.store)
+        self.api = _Api()
+
+    def create_prompt(self, *, name, prompt, labels, **_kw):
+        version = len(self.store.get(name, [])) + 1
+        obj = _PromptObj(name, prompt, version, list(labels))
+        # a label moves to the newest version, as Langfuse does
+        for row in self.store.get(name, []):
+            row["labels"] = [l for l in row["labels"] if l not in labels]
+        self.store.setdefault(name, []).append(
+            {"labels": list(labels), "obj": obj})
+        return obj
+
+    def flush(self):
+        pass
+
+
+def test_prompt_templates_carry_the_static_prose_and_variables():
+    from sahs.assistant.loop import ASSISTANT_VERSION, IDENTITY
+    from sahs.loop.prompt import PROMPT_VERSION
+    from sahs.observe.prompts import (assistant_template, label_for,
+                                      loop_template, registry)
+    text = assistant_template()
+    assert IDENTITY.strip() in text
+    assert "{{graph}}" in text and "{{session}}" in text
+    assert "{{digest}}" in loop_template()
+    names = {(r["name"], r["version"]) for r in registry()}
+    assert ("wyla-assistant-system", ASSISTANT_VERSION) in names
+    assert ("wyla-loop-system", PROMPT_VERSION) in names
+    assert label_for("assistant/3") == "assistant-3"
+
+
+def test_register_prompts_is_idempotent_and_flags_drift(tmp_path,
+                                                        monkeypatch):
+    from sahs.observe import prompts as P
+    client = _PromptClient()
+    out = tmp_path / "langfuse" / "prompts.json"
+    first = P.register_prompts(client, out, root=None)
+    assert all(r["created"] for r in first)
+    assert not any(r["drift"] for r in first)
+    links = P.load_links(out)
+    assert links["wyla-assistant-system"] == {first[0]["version"]: 1}
+
+    second = P.register_prompts(client, out, root=None)
+    assert not any(r["created"] for r in second)      # same text: no-op
+
+    # the text moved but the version string did not: a new Langfuse
+    # version under the same label, and the drift is reported
+    monkeypatch.setattr(P, "assistant_template", lambda: "changed words")
+    third = P.register_prompts(client, out, root=None)
+    row = next(r for r in third if r["name"] == "wyla-assistant-system")
+    assert row["created"] and row["drift"]
+    assert P.load_links(out)["wyla-assistant-system"][row["version"]] == 2
+    # the reader follows the file as it changes
+    link = P.PromptLinks(out)
+    assert link(row["version"]) == ("wyla-assistant-system", 2)
+    assert link("never-registered") is None
+
+
+def test_generations_carry_the_registered_prompt_link(tmp_path):
+    rec = Recorder()
+    tracer = TurnTracer(rec, prompt_of=lambda v: ("wyla-assistant-system", 7)
+                        if v == "assistant/3" else None)
+    bus = EventBus("s1", None, events=ASSISTANT_EVENTS)
+    bus.sinks.append(tracer)
+    _emit_turn(bus)
+    assert [g["prompt"] for g in rec.of("generation_open")] == \
+        [("wyla-assistant-system", 7)] * 2
+
+
+def test_langfuse_emitter_links_the_generation_to_the_prompt(sdk_client):
+    from sahs.observe.langfuse_emitter import LangfuseEmitter
+    client, exporter, _posted = sdk_client
+    tracer = TurnTracer(LangfuseEmitter(client),
+                        prompt_of=lambda v: ("wyla-assistant-system", 7))
+    bus = EventBus("s1", None, events=ASSISTANT_EVENTS)
+    bus.sinks.append(tracer)
+    _emit_turn(bus)
+    tracer.flush()
+    gen = {s.name: s for s in exporter.get_finished_spans()}["model call 1"]
+    assert gen.attributes["langfuse.observation.prompt.name"] == \
+        "wyla-assistant-system"
+    assert gen.attributes["langfuse.observation.prompt.version"] == 7
+
+
+# ── the annotation queue round trip ──────────────────────────
+class _Page:
+    def __init__(self, data, pages=1):
+        self.data = data
+
+        class _Meta:
+            total_pages = pages
+        self.meta = _Meta()
+
+
+class _Obj:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+class _QueueClient(_FakeClient):
+    def __init__(self):
+        super().__init__()
+        outer = self
+        self.queues, self.configs, self.items_queued = [], [], []
+        self.scores, self.traces = [], {}
+
+        class _Queues:
+            @staticmethod
+            def list_queues(page=1, limit=100):
+                return _Page(list(outer.queues))
+
+            @staticmethod
+            def create_queue(*, name, score_config_ids, description=""):
+                q = _Obj(id=f"q{len(outer.queues) + 1}", name=name,
+                         score_config_ids=score_config_ids)
+                outer.queues.append(q)
+                return q
+
+            @staticmethod
+            def create_queue_item(queue_id, *, object_id, object_type):
+                if (queue_id, object_id) in outer.items_queued:
+                    raise ValueError("already queued")
+                outer.items_queued.append((queue_id, object_id))
+
+        class _Configs:
+            @staticmethod
+            def get(page=1, limit=100):
+                return _Page(list(outer.configs))
+
+            @staticmethod
+            def create(*, name, data_type, categories, description=""):
+                c = _Obj(id=f"c{len(outer.configs) + 1}", name=name,
+                         is_archived=False)
+                outer.configs.append(c)
+                return c
+
+        class _Scores:
+            @staticmethod
+            def get_many(*, name, page=1, limit=100):
+                return _Page([s for s in outer.scores if s.name == name])
+
+        class _Trace:
+            @staticmethod
+            def get(trace_id):
+                return outer.traces[trace_id]
+
+        self.api.annotation_queues = _Queues()
+        self.api.score_configs = _Configs()
+        self.api.scores = _Scores()
+        self.api.trace = _Trace()
+
+
+def test_ambiguous_trials_land_on_the_queue_and_resolutions_write_back(
+        tmp_path):
+    from sahs.canon.canonical import c
+    from sahs.evals.grading import SutAnswer, TrialResult
+    from sahs.evals.harness import run_suite
+    from sahs.evals.schema import (Task, TaskGold, TaskGrading,
+                                   TaskProvenance, read_tasks, write_tasks)
+    from sahs.evals.substrate import DryRunOutcome, StaticSubstrate
+    from sahs.evals.suts import oracle
+    from sahs.observe.annotations import (QUEUE_NAME, SCORE_NAME,
+                                          pull_resolutions)
+    from sahs.observe.experiments import experiment_recorder
+
+    # the seeded semantic twin from the P1 suite: same shape, different
+    # fingerprint — AMBIGUOUS until a person says accept or fail
+    gold_sql = ("SELECT part_dt, COUNT(1) AS n FROM wwcas_authorization "
+                "WHERE approval_cd = 'D' GROUP BY part_dt")
+    twin_sql = ("SELECT part_dt, COUNT(approval_cd) AS n "
+                "FROM wwcas_authorization WHERE approval_cd = 'D' "
+                "GROUP BY part_dt")
+    schema = [{"name": "part_dt", "type": "DATE"},
+              {"name": "n", "type": "INT64"}]
+    twin_task = Task(
+        id="nl2sql_twin", kind="nl2sql", prompt="declines per day",
+        gold=TaskGold(sql=gold_sql, canonical_fp=c(gold_sql).fp_expr),
+        grading=TaskGrading(graders=["parse", "canon_ast", "dry_run"],
+                            accepted_fps=[c(gold_sql).fp_expr],
+                            result_schema={"fields": schema},
+                            dry_run="required"),
+        provenance=TaskProvenance(source="test"))
+    path = tmp_path / "curated" / "curated.jsonl"
+    write_tasks(read_tasks(TASKS / "curated" / "curated.jsonl")
+                + [twin_task], path)
+    before = path.read_text(encoding="utf-8").splitlines()
+    tasks = read_tasks(path)
+    substrate = StaticSubstrate({
+        c(twin_sql).fp_expr: DryRunOutcome(valid=True,
+                                           result_schema=schema)})
+
+    def twin(task):
+        if task.id == twin_task.id:
+            return SutAnswer(kind="sql", sql=twin_sql)
+        return oracle(task)
+
+    client = _QueueClient()
+    recorder = experiment_recorder(client, [path], sut="twin",
+                                   canon_version="c1", run_name="run-q")
+    assert [q.name for q in client.queues] == [QUEUE_NAME]
+    assert [c_.name for c_ in client.configs] == [SCORE_NAME]
+    report = run_suite(tasks, recorder.sut(twin), substrate=substrate,
+                       on_trial=recorder.on_trial)
+    assert report["overall"]["ambiguous_rate"] > 0
+    assert recorder.queued == [twin_task.id] and not recorder.queue_errors
+    (queue_id, trace_id), = client.items_queued
+    # a second run re-queues the same trace: reported, never fatal
+    recorder.on_trial(TrialResult(twin_task.id, "nl2sql", "ambiguous",
+                                  "again", answer_fp=c(twin_sql).fp_expr))
+    assert recorder.queue_errors and "already queued" in \
+        recorder.queue_errors[0]
+
+    # the trace the recorder wrote, as the API returns it, and the
+    # steward's resolution scored on it
+    span = next(sp for sp in client.spans if sp.trace_id == trace_id)
+    assert span.kw["metadata"]["answer_fp"] == c(twin_sql).fp_expr
+    client.traces[trace_id] = _Obj(metadata=None, observations=[
+        _Obj(name="eval.trial", metadata=span.kw["metadata"])])
+    client.scores.append(_Obj(id="sc1", name=SCORE_NAME, trace_id=trace_id,
+                              string_value="accept", value=1, comment=""))
+    result = pull_resolutions(client, [path])
+    assert result["accepted"] == [twin_task.id]
+    assert result["files_written"] == [str(path)]
+    reread = {t.id: t for t in read_tasks(path)}
+    assert c(twin_sql).fp_expr in reread[twin_task.id].grading.accepted_fps
+    # the rewrite is surgical: exactly one line differs
+    after = path.read_text(encoding="utf-8").splitlines()
+    assert len(before) == len(after)
+    assert sum(1 for a, b in zip(before, after) if a != b) == 1
+    # pulling again is a no-op, and the suite now passes the twin
+    again = pull_resolutions(client, [path])
+    assert again["already_accepted"] == [twin_task.id]
+    assert not again["files_written"]
+    rerun = run_suite(read_tasks(path), twin, substrate=substrate)
+    assert rerun["overall"]["ambiguous_rate"] == 0.0
+    assert rerun["overall"]["pass@1"] == 1.0
+
+
+def test_pull_reports_what_it_cannot_match():
+    from sahs.observe.annotations import SCORE_NAME, pull_resolutions
+    client = _QueueClient()
+    client.scores.append(_Obj(id="sc9", name=SCORE_NAME, trace_id="t9",
+                              string_value="accept", value=1, comment=""))
+    client.traces["t9"] = _Obj(metadata={"task_id": "not_a_task"},
+                               observations=[])
+    result = pull_resolutions(client, [TASKS / "curated" / "curated.jsonl"])
+    assert result["unmatched"][0]["task_id"] == "not_a_task"
+    assert not result["files_written"]

@@ -9,6 +9,7 @@ from __future__ import annotations
 import atexit
 import os
 import sys
+from pathlib import Path
 from typing import Any, Callable
 
 from .tracer import TurnTracer
@@ -40,9 +41,14 @@ def langfuse_client() -> Any:
 
 def langfuse_observer(*, user_id: str = "",
                       model_of: Callable[[str], str] | None = None,
+                      prompt_links: Path | None = None,
                       env: Any = None) -> TurnTracer | None:
     if not enabled(env):
         return None
+    prompt_of = None
+    if prompt_links is not None:
+        from .prompts import PromptLinks
+        prompt_of = PromptLinks(prompt_links)
     try:
         from .langfuse_emitter import LangfuseEmitter
         emitter = LangfuseEmitter(langfuse_client())
@@ -50,6 +56,7 @@ def langfuse_observer(*, user_id: str = "",
         print(f"langfuse: observer not attached: {e}", file=sys.stderr)
         return None
     tracer = TurnTracer(emitter, user_id=user_id, model_of=model_of,
+                        prompt_of=prompt_of,
                         full_results=full_results(env),
                         environment=str((os.environ if env is None
                                          else env).get(

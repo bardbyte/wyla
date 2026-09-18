@@ -12,6 +12,14 @@ live traces (docs/runbooks/langfuse.md).
         translator the live turn uses, so the trace is the same trace
         [--full-results] keeps tool results on the spans (real rows)
         [--user <name>] the user the traces are filed under
+    python scripts/langfuse_sync.py prompts
+        registers each system prompt's template under its version
+        string as a label, and writes <graph>/langfuse/prompts.json —
+        the file the tracer reads to link generations to the prompt
+    python scripts/langfuse_sync.py pull-annotations [--tasks <jsonl> ...]
+        reads the stewards' accept / fail resolutions off the
+        annotation queue and writes accepted fingerprints into the
+        task files (default: tests/tasks/curated). Then commit.
 
 Needs SAHS_LANGFUSE=1 and the SDK keys in the silo .env.
 """
@@ -85,6 +93,44 @@ def cmd_backfill(args: argparse.Namespace) -> int:
     return 0
 
 
+def _graph_root() -> Path:
+    import os
+    return Path(os.environ.get("MERIDIAN_GRAPH_DIR", SILO / "graph"))
+
+
+def cmd_prompts(args: argparse.Namespace) -> int:
+    from sahs.observe.prompts import links_path, register_prompts
+    client = _client()
+    if client is None:
+        return 2
+    out = Path(args.out) if args.out else links_path(_graph_root())
+    rows = register_prompts(client, out, root=SILO)
+    client.flush()
+    for row in rows:
+        state = ("created" if row["created"] else "already registered")
+        if row["drift"]:
+            state += " — TEXT CHANGED under the same version string: bump it"
+        print(f"{row['name']:24} {row['version']:14} → v{row['langfuse_version']}"
+              f"  {state}")
+    print(f"links: {out}")
+    return 1 if any(r["drift"] for r in rows) else 0
+
+
+def cmd_pull(args: argparse.Namespace) -> int:
+    import json
+    from sahs.observe.annotations import pull_resolutions
+    client = _client()
+    if client is None:
+        return 2
+    paths = ([Path(p) for p in args.tasks] if args.tasks
+             else sorted((TASKS_ROOT / "curated").glob("*.jsonl")))
+    report = pull_resolutions(client, paths)
+    print(json.dumps(report, indent=1))
+    if report["files_written"]:
+        print("→ review the diff and commit: the suite learns through git")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv(SILO / ".env")
     parser = argparse.ArgumentParser(prog="langfuse_sync.py")
@@ -98,6 +144,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--full-results", action="store_true")
     p.add_argument("--user", default="")
     p.set_defaults(fn=cmd_backfill)
+    p = sub.add_parser("prompts")
+    p.add_argument("--out", default="")
+    p.set_defaults(fn=cmd_prompts)
+    p = sub.add_parser("pull-annotations")
+    p.add_argument("--tasks", action="append", default=[])
+    p.set_defaults(fn=cmd_pull)
     args = parser.parse_args(argv)
     return args.fn(args)
 

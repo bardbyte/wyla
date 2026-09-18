@@ -79,16 +79,58 @@ look. If either is off, the sync is broken, not the model. The grader
 never moved: it is `sahs/evals/grading.py`, and Langfuse displays what
 it decided.
 
+## Step four: prompt versions as labels
+
+```
+python scripts/langfuse_sync.py prompts
+```
+
+Registers the template of each system prompt (the assistant's and the
+navigation loop's: static prose verbatim, the dynamic sections as
+`{{variables}}`) under its version string as a label, plus a `git-<sha>`
+label, and writes `<graph>/langfuse/prompts.json`. The tracer reads
+that file and links every generation to the registered prompt, so the
+dashboard slices cost and outcomes by prompt version.
+
+The prompt is never fetched at runtime. It is assembled from code, byte
+identical per build, with a pinned routing key. Re-running the command
+is a no-op while the text matches. If the words changed but the version
+string did not, the command registers the new text, moves the label,
+prints **TEXT CHANGED**, and exits non-zero: bump the version, that is
+the rule the trajectory ritual already states.
+
+## Step five: the annotation queue round trip
+
+An ambiguous verdict (fingerprint mismatch, result shape match) is
+neither a pass nor a fail until a person says so. With `--langfuse`,
+every ambiguous trial's trace goes on the `wyla-ambiguous` annotation
+queue, which the run creates on first use with one categorical score
+config, `resolution`: accept or fail.
+
+A steward works the queue in the Langfuse UI and scores each trace.
+Then:
+
+```
+python scripts/langfuse_sync.py pull-annotations
+git diff tests/tasks/curated/curated.jsonl
+git commit -m "evals: accept <n> triaged fingerprints"
+```
+
+Every accept adds the answer's fingerprint to that task's
+`grading.accepted_fps`, rewriting only the lines that changed. Fails
+and anything that could not be matched to a task are reported, never
+applied. The suite learns through git: nothing in Langfuse is read at
+grading time, and an ambiguous item never moves the floor on its own.
+
 ## What is deliberately not here
 
-- **No prompt fetching at runtime.** The system prompt is assembled
-  from code, byte identical per build, with a pinned routing key.
-  Prompt versions are metadata on the trace, not state in Langfuse.
+- **No prompt fetching at runtime.** See step four: labels on the
+  trace, code as the source of truth.
 - **No LLM judge on SQL.** Fingerprint equality, arity, dry run and
   schema decide. A judge belongs only where fingerprints cannot reach.
-- **No writes back.** Annotation-queue resolutions land in the task
-  files through git, when that step is built, never through the API
-  into a running system.
+- **No automatic write-back.** Resolutions land in the task files
+  through a command a person runs and a diff a person commits, never
+  through the API into a running system.
 
 ## Shutdown
 

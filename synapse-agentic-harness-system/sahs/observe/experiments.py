@@ -20,6 +20,8 @@ from typing import Any, Callable, Iterable
 from sahs.evals.grading import SutAnswer, TrialResult
 from sahs.evals.schema import Task
 
+from .annotations import enqueue_trace, ensure_queue
+from .langfuse_emitter import set_trace_attributes
 from .tracer import trace_id_for
 
 DATASET_PREFIX = "wyla"
@@ -105,14 +107,19 @@ class ExperimentRecorder:
 
     def __init__(self, client: Any, items: Iterable[Any], *,
                  run_name: str,
-                 metadata: dict[str, Any] | None = None) -> None:
+                 metadata: dict[str, Any] | None = None,
+                 queue_id: str = "") -> None:
         self.client = client
         self.items = {item.id: item for item in items}
         self.run_name = run_name
         self.metadata = dict(metadata or {})
+        # the annotation queue AMBIGUOUS trials go to ('' = none)
+        self.queue_id = queue_id
         self.answers: dict[str, SutAnswer] = {}
         self.missing: list[str] = []
         self.recorded = 0
+        self.queued: list[str] = []
+        self.queue_errors: list[str] = []
 
     def sut(self, inner: Callable[[Task], SutAnswer]
             ) -> Callable[[Task], SutAnswer]:
@@ -141,6 +148,10 @@ class ExperimentRecorder:
                       "answer_fp": trial.answer_fp,
                       "warnings": trial.warnings,
                       "run_name": self.run_name})
+        set_trace_attributes(
+            root, name="eval.trial", tags=["eval", f"verdict:{trial.verdict}"],
+            metadata={"task_id": trial.task_id, "answer_fp": trial.answer_fp,
+                      "run_name": self.run_name, "verdict": trial.verdict})
         self.client.api.dataset_run_items.create(
             run_name=self.run_name, dataset_item_id=item.id,
             metadata=self.metadata, trace_id=root.trace_id,
@@ -153,15 +164,23 @@ class ExperimentRecorder:
         root.update(level="DEFAULT" if trial.verdict == "pass"
                     else "WARNING").end()
         self.recorded += 1
+        if trial.verdict == "ambiguous" and self.queue_id:
+            problem = enqueue_trace(self.client, self.queue_id, root.trace_id)
+            if problem:
+                self.queue_errors.append(f"{trial.task_id}: {problem}")
+            else:
+                self.queued.append(trial.task_id)
 
 
 def experiment_recorder(client: Any, paths: Iterable[Path], *,
                         sut: str, canon_version: str,
                         run_name: str = "",
-                        extra: dict[str, Any] | None = None
-                        ) -> ExperimentRecorder:
+                        extra: dict[str, Any] | None = None,
+                        queue: bool = True) -> ExperimentRecorder:
     """Push the task files (idempotent), gather their items, and hand
-    back a recorder named by the run's coordinates."""
+    back a recorder named by the run's coordinates. With ``queue``,
+    ambiguous trials land on the annotation queue (created if
+    missing)."""
     paths = [Path(p) for p in paths]
     push_datasets(client, paths)
     items: list[Any] = []
@@ -172,7 +191,8 @@ def experiment_recorder(client: Any, paths: Iterable[Path], *,
                 "canon_version": canon_version,
                 "tasks": [p.name for p in paths], **(extra or {})}
     return ExperimentRecorder(client, items, run_name=name,
-                              metadata=metadata)
+                              metadata=metadata,
+                              queue_id=ensure_queue(client) if queue else "")
 
 
 __all__ = ["ExperimentRecorder", "dataset_name", "experiment_recorder",

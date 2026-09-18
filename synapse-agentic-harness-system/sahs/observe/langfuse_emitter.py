@@ -20,6 +20,31 @@ _SESSION = "session.id"
 _USER = "user.id"
 _TAGS = "langfuse.trace.tags"
 _TRACE_NAME = "langfuse.trace.name"
+_TRACE_META = "langfuse.trace.metadata"
+_PROMPT_NAME = "langfuse.observation.prompt.name"
+_PROMPT_VERSION = "langfuse.observation.prompt.version"
+
+
+def set_trace_attributes(root: Any, *, name: str = "", session_id: str = "",
+                         user_id: str = "", tags: list[str] | None = None,
+                         metadata: dict[str, Any] | None = None) -> None:
+    """Trace-level fields on a root observation, the way the SDK's
+    own propagate_attributes() writes them. Metadata values become
+    strings: that is what the trace-level keys accept."""
+    otel = getattr(root, "_otel_span", None)
+    if otel is None or not otel.is_recording():
+        return
+    if name:
+        otel.set_attribute(_TRACE_NAME, name)
+    if session_id:
+        otel.set_attribute(_SESSION, session_id)
+    if user_id:
+        otel.set_attribute(_USER, user_id)
+    if tags:
+        otel.set_attribute(_TAGS, list(tags))
+    for key, value in (metadata or {}).items():
+        if value is not None:
+            otel.set_attribute(f"{_TRACE_META}.{key}", str(value))
 
 
 class LangfuseEmitter:
@@ -37,26 +62,26 @@ class LangfuseEmitter:
         root = self.client.start_observation(
             name=name, as_type="span", input=input, metadata=metadata,
             trace_context={"trace_id": trace_id})
-        otel = getattr(root, "_otel_span", None)
-        if otel is not None and otel.is_recording():
-            otel.set_attribute(_TRACE_NAME, name)
-            if session_id:
-                otel.set_attribute(_SESSION, session_id)
-            if user_id:
-                otel.set_attribute(_USER, user_id)
-            if tags:
-                otel.set_attribute(_TAGS, list(tags))
+        set_trace_attributes(root, name=name, session_id=session_id,
+                             user_id=user_id, tags=tags)
         self._roots[trace_id] = root
 
     def generation_open(self, trace_id: str, key: str, *, name: str,
-                        model: str, input: Any,
-                        metadata: dict[str, Any]) -> None:
+                        model: str, input: Any, metadata: dict[str, Any],
+                        prompt: tuple[str, int] | None = None) -> None:
         root = self._roots.get(trace_id)
         if root is None:
             return
-        self._children[(trace_id, key)] = root.start_observation(
+        gen = root.start_observation(
             name=name, as_type="generation", model=model or None,
             input=input, metadata=metadata)
+        otel = getattr(gen, "_otel_span", None)
+        if prompt and otel is not None and otel.is_recording():
+            # the registered prompt this generation ran under
+            # (sahs.observe.prompts): name + Langfuse's numeric version
+            otel.set_attribute(_PROMPT_NAME, prompt[0])
+            otel.set_attribute(_PROMPT_VERSION, int(prompt[1]))
+        self._children[(trace_id, key)] = gen
 
     def generation_close(self, trace_id: str, key: str, *, output: Any,
                          usage: dict[str, int] | None,
@@ -111,4 +136,4 @@ class LangfuseEmitter:
         self.client.flush()
 
 
-__all__ = ["LangfuseEmitter"]
+__all__ = ["LangfuseEmitter", "set_trace_attributes"]

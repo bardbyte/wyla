@@ -32,8 +32,8 @@ class Emitter(Protocol):
                    tags: list[str]) -> None: ...
 
     def generation_open(self, trace_id: str, key: str, *, name: str,
-                        model: str, input: Any,
-                        metadata: dict[str, Any]) -> None: ...
+                        model: str, input: Any, metadata: dict[str, Any],
+                        prompt: tuple[str, int] | None) -> None: ...
 
     def generation_close(self, trace_id: str, key: str, *, output: Any,
                          usage: dict[str, int] | None,
@@ -121,6 +121,7 @@ class _Turn:
     trace_id: str
     session_id: str
     model: str
+    prompt: tuple[str, int] | None = None
     system: str = ""
     gen_key: str = ""
     gen_text: list[str] = field(default_factory=list)
@@ -133,11 +134,16 @@ class _Turn:
 class TurnTracer:
     def __init__(self, emitter: Emitter, *, user_id: str = "",
                  model_of: Callable[[str], str] | None = None,
+                 prompt_of: Callable[[str], tuple[str, int] | None] | None
+                 = None,
                  full_results: bool = False,
                  environment: str = "") -> None:
         self.emitter = emitter
         self.user_id = user_id
         self.model_of = model_of
+        # version string → (registered prompt name, Langfuse version):
+        # the link a generation carries; None when unregistered
+        self.prompt_of = prompt_of
         self.full_results = full_results
         self.environment = environment
         self._turns: dict[str, _Turn] = {}
@@ -179,6 +185,11 @@ class TurnTracer:
                 model = plane
         turn = _Turn(key=key, trace_id=trace_id_for(session_id, turn_id),
                      session_id=session_id, model=model)
+        if self.prompt_of is not None:
+            try:
+                turn.prompt = self.prompt_of(str(record.get("version") or ""))
+            except Exception:                 # noqa: BLE001
+                turn.prompt = None
         self._turns[key] = turn
         metadata = {k: v for k, v in record.items()
                     if k not in _ENVELOPE and k != "text"}
@@ -210,7 +221,8 @@ class TurnTracer:
             payload["system"] = _clip(turn.system, 12000)
         self.emitter.generation_open(
             turn.trace_id, turn.gen_key, name=f"model call {n}",
-            model=turn.model, input=payload, metadata={"n": n})
+            model=turn.model, input=payload, metadata={"n": n},
+            prompt=turn.prompt)
 
     def _on_thinking(self, turn: _Turn, record: dict[str, Any]) -> None:
         turn.gen_thought.append(str(record.get("delta") or ""))

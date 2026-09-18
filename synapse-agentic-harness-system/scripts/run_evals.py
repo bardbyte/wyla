@@ -149,7 +149,10 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
         langfuse.flush()
         print(f"langfuse: {recorder.recorded} trials recorded on run "
-              f"{recorder.run_name}", file=sys.stderr)
+              f"{recorder.run_name}; {len(recorder.queued)} ambiguous "
+              "queued for annotation", file=sys.stderr)
+        for problem in recorder.queue_errors[:5]:
+            print(f"langfuse: queue: {problem}", file=sys.stderr)
     report["excluded_out_of_coverage"] = excluded
     report["excluded_kind_not_answerable"] = excluded_kind
     print(format_report(report), file=sys.stderr)
