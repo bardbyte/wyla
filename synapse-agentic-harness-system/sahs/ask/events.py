@@ -20,7 +20,7 @@ import datetime as _dt
 import json
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 SCHEMA = "meridian.event/1"
 
@@ -81,6 +81,12 @@ class EventBus:
         self._events: list[dict[str, Any]] = []
         self._seq = 0
         self._closed_turns: set[str] = set()
+        # observers of the record (the Langfuse tracer rides here): each
+        # sees every record after it is on the bus and on disk. A sink
+        # that raises is counted, never propagated — an observer cannot
+        # break a turn.
+        self.sinks: list[Callable[[dict[str, Any]], None]] = []
+        self.sink_errors = 0
         if path is not None:
             path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -107,6 +113,11 @@ class EventBus:
             # the record on disk: append-only, one JSON object per line
             with self.path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        for sink in self.sinks:
+            try:
+                sink(record)
+            except Exception:                    # noqa: BLE001
+                self.sink_errors += 1
         return record
 
     def since(self, seq: int) -> list[dict[str, Any]]:
