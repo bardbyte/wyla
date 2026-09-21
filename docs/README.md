@@ -6,6 +6,7 @@ specs, eval baselines).
 
 | what | where | for |
 |---|---|---|
+| **The sheet** | [`architecture/`](architecture/README.md) | the whole system on one page: sources → graph → build → the two turn engines → both surfaces, with every gate drawn. Send this to someone with ten minutes. |
 | **The wiki** | [`wiki/`](wiki/README.md) | 14 pages, one per subsystem, with source citations and diagrams. Start at the index. |
 | **The paper** | [`paper/compiling-a-semantic-layer.md`](paper/compiling-a-semantic-layer.md) | How the graph is built, why each mechanism is the way it is, what the numbers are, and what is still a bet. |
 | **The deck** | [`presentation/synapse-system-overview.html`](presentation/synapse-system-overview.html) | 31 slides: graph → harness → generative UI → capabilities and proof. Open it in a browser; `←` `→` to move, `O` for the overview. |
@@ -13,7 +14,8 @@ specs, eval baselines).
 
 ## Reading order
 
-New to the repo: the root [`README.md`](../README.md), then
+New to the repo: the root [`README.md`](../README.md), then the
+[end-to-end sheet](architecture/README.md), then
 [wiki page 1](wiki/01-overview.md) and [page 2](wiki/02-architecture.md).
 
 Here to change the graph or the compiler: the paper first, then wiki pages
