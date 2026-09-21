@@ -89,6 +89,9 @@ graph TB
 left to right; the only human write path into truth is the governance
 clerk ([Page 11](11-governance-enrichment.md)).
 
+The drawn version of the same claim, with the gates and the two turn
+engines on it, is the [end-to-end sheet](../architecture/README.md).
+
 ---
 
 ## Page index
@@ -153,6 +156,7 @@ Each one has already changed a decision in this tree.
 
 ## Companion documents
 
+- [`docs/architecture/`](../architecture/README.md) — the end-to-end sheet: the whole system on one page.
 - [`docs/paper/compiling-a-semantic-layer.md`](../paper/compiling-a-semantic-layer.md) — the paper on graph construction.
 - [`docs/presentation/synapse-system-overview.html`](../presentation/synapse-system-overview.html) — the deck.
 - `synapse-agentic-harness-system/docs/runbooks/` — the operational procedures.

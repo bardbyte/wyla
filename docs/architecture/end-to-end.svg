@@ -1,0 +1,418 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 2020" width="1600" height="2020" role="img" aria-label="wyla end to end: source exports pass an identity gate into nine loaders, become an append-only provenance graph, are compiled by a pure function into an immutable build, which two turn engines read through one reader, streaming a single event log to two web surfaces; the clerk and a blind-graded enricher are the only write paths back into truth.">
+  <title>wyla — the whole system, end to end</title>
+  <style>
+    .dg{
+      --dg-paper:#f5f4f0; --dg-box:#ffffff; --dg-band:#ebe9e3; --dg-line:#b7bac0;
+      --dg-ink:#15181e; --dg-ink2:#565c66;
+      --dg-flow:#14706a; --dg-flowbg:#e8f2f1;
+      --dg-gate:#9d6317; --dg-gatebg:#f8f0e3;
+      --dg-gov:#55458a; --dg-govbg:#eeebf5;
+      --dg-stop:#a1332b;
+    }
+    @media (prefers-color-scheme: dark){
+      .dg{
+        --dg-paper:#12151a; --dg-box:#1b2027; --dg-band:#232932; --dg-line:#3c434d;
+        --dg-ink:#e8e7e4; --dg-ink2:#9ba2ac;
+        --dg-flow:#4fb8ae; --dg-flowbg:#16292a;
+        --dg-gate:#d69d4e; --dg-gatebg:#2a2318;
+        --dg-gov:#9e8cd6; --dg-govbg:#201c2e;
+        --dg-stop:#e0837a;
+      }
+    }
+  </style>
+  <g class="dg" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+    <defs>
+      <marker id="ah-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="var(--dg-flow, #14706a)"/>
+      </marker>
+      <marker id="ah-gov" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="var(--dg-gov, #55458a)"/>
+      </marker>
+      <marker id="ah-stop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" fill="var(--dg-stop, #a1332b)"/>
+      </marker>
+    </defs>
+
+    <rect x="0" y="0" width="1600" height="2020" fill="var(--dg-paper, #f5f4f0)"/>
+
+    <!-- ============ title ============ -->
+    <text x="36" y="48" font-size="25" font-weight="700" fill="var(--dg-ink, #15181e)">wyla — the whole system, end to end</text>
+    <text x="36" y="74" font-size="13.5" fill="var(--dg-ink2, #565c66)">Source exports become a provenance-typed graph, the graph compiles to an immutable build, two turn engines read that build and only that build, and one event log feeds both surfaces.</text>
+
+    <!-- ============ L0 sources ============ -->
+    <text x="236" y="104" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">L0 · SOURCE EXPORTS — READ-ONLY, NEVER WRITTEN</text>
+
+    <g fill="var(--dg-box, #ffffff)" stroke="var(--dg-line, #b7bac0)" stroke-width="1.2">
+      <rect x="236" y="110" width="244" height="112" rx="6"/>
+      <rect x="494" y="110" width="244" height="112" rx="6"/>
+      <rect x="752" y="110" width="244" height="112" rx="6"/>
+      <rect x="1010" y="110" width="244" height="112" rx="6"/>
+    </g>
+    <g font-size="14" font-weight="650" fill="var(--dg-ink, #15181e)">
+      <text x="250" y="136">Warehouse archive</text>
+      <text x="508" y="136">Metadata service</text>
+      <text x="766" y="136">Query history</text>
+      <text x="1024" y="136">Semantic sources</text>
+    </g>
+    <g font-size="11.5" fill="var(--dg-ink2, #565c66)">
+      <text x="250" y="158">46 tables × 00–17 artifacts</text>
+      <text x="250" y="174">columns · types · partitions</text>
+      <text x="250" y="190">column profiles · value domains</text>
+      <text x="250" y="206">table metrics · row-access policies</text>
+
+      <text x="508" y="158">one response set per table</text>
+      <text x="508" y="174">ownership · pipeline · lifecycle</text>
+      <text x="508" y="190">lineage up · attribute lineage</text>
+      <text x="508" y="206">PII flags</text>
+
+      <text x="766" y="158">30 days of warehouse jobs</text>
+      <text x="766" y="174">true recency, not a claimed one</text>
+      <text x="766" y="190">measured joins_via</text>
+      <text x="766" y="206">per-table cost priors · rhythm</text>
+
+      <text x="1024" y="158">certified KPIs · pending specs</text>
+      <text x="1024" y="174">glossary · acronyms by BU+region</text>
+      <text x="1024" y="190">10 skill packs · playbooks</text>
+      <text x="1024" y="206">158 gold SQL pairs · studio exports</text>
+    </g>
+
+    <line x1="745" y1="222" x2="745" y2="238" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+
+    <!-- ============ gate 1: identity ============ -->
+    <rect x="236" y="244" width="1018" height="40" rx="4" fill="var(--dg-gatebg, #f8f0e3)" stroke="var(--dg-gate, #9d6317)" stroke-width="1.2"/>
+    <text x="252" y="269" font-size="11.5" fill="var(--dg-ink2, #565c66)"><tspan font-size="10.5" font-weight="700" letter-spacing="0.7" fill="var(--dg-gate, #9d6317)">IDENTITY GATE</tspan>  ·  the crosswalk: 46 human-signed rows. An archive record whose table will not resolve stops the run; a semantic one is skipped with a count.</text>
+
+    <line x1="745" y1="284" x2="745" y2="302" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+
+    <!-- ============ L1 loaders ============ -->
+    <rect x="236" y="306" width="1018" height="112" rx="6" fill="var(--dg-box, #ffffff)" stroke="var(--dg-line, #b7bac0)" stroke-width="1.2"/>
+    <text x="250" y="326" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">L1 · LOADERS + CANONICALIZATION</text>
+    <text x="250" y="350" font-size="15" font-weight="650" fill="var(--dg-ink, #15181e)">9 loaders — one module per export <tspan font-style="italic">shape</tspan>, not per source <tspan font-style="italic">meaning</tspan></text>
+    <g font-size="11.5" fill="var(--dg-ink2, #565c66)">
+      <text x="250" y="372">Each emits typed records and nothing else — no arbitration, no policy. Arbitration happens once, later, in the reconciler.</text>
+      <text x="250" y="390">c(sql) pins the SQL dialect in the fingerprint · evidence_ref points at the exact file and row · SQL that will not canonicalize is quarantined by category, never fatally</text>
+      <text x="250" y="408">A utilization ledger accounts for every input file as consumed, deferred(reason), or inventoried — the honest &#8220;we hold this and do nothing with it yet.&#8221;</text>
+    </g>
+
+    <line x1="745" y1="418" x2="745" y2="438" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+
+    <!-- ============ L2 the graph ============ -->
+    <rect x="236" y="442" width="1018" height="152" rx="6" fill="var(--dg-box, #ffffff)" stroke="var(--dg-line, #b7bac0)" stroke-width="1.2"/>
+    <text x="250" y="462" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">L2 · THE TRUTH GRAPH — APPEND-ONLY</text>
+    <text x="250" y="486" font-size="15" font-weight="650" fill="var(--dg-ink, #15181e)" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">nodes/*.jsonl · edges/*.jsonl · runs/&lt;run&gt;/manifest.json</text>
+
+    <g fill="var(--dg-band, #ebe9e3)" stroke="var(--dg-line, #b7bac0)" stroke-width="1">
+      <rect x="250" y="498" width="486" height="60" rx="4"/>
+      <rect x="750" y="498" width="490" height="60" rx="4"/>
+    </g>
+    <g font-size="11.5" fill="var(--dg-ink2, #565c66)">
+      <text x="264" y="518">20 node kinds · 26 registered relations</text>
+      <text x="264" y="534">16 witness families — only 13 of them may vote</text>
+      <text x="264" y="550">7 governance states, every transition lattice-checked</text>
+
+      <text x="764" y="518"><tspan font-weight="650" fill="var(--dg-ink, #15181e)">prov on every single statement:</tspan></text>
+      <text x="764" y="534">source · run · evidence_ref · status · support · actor · witness</text>
+      <text x="764" y="550">so the bottom of every provenance chain is a file and a row</text>
+    </g>
+    <text x="250" y="578" font-size="11.5" fill="var(--dg-ink2, #565c66)">The graph is compiled, never edited. Where witnesses agree they fold; where they disagree both readings are kept side by side, and the census counts how contested each meaning is.</text>
+
+    <line x1="745" y1="594" x2="745" y2="612" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+
+    <!-- ============ gate 2: validator ============ -->
+    <rect x="236" y="618" width="1018" height="40" rx="4" fill="var(--dg-gatebg, #f8f0e3)" stroke="var(--dg-gate, #9d6317)" stroke-width="1.2"/>
+    <text x="252" y="643" font-size="11.5" fill="var(--dg-ink2, #565c66)"><tspan font-size="10.5" font-weight="700" letter-spacing="0.7" fill="var(--dg-gate, #9d6317)">GRAPH VALIDATOR</tspan>  ·  14 pinned checks — grammar, endpoints, relations, duplicates, witnesses, and a certified metric with a home. Any error and nothing compiles.</text>
+
+    <line x1="745" y1="658" x2="745" y2="678" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+
+    <!-- ============ L3 the build ============ -->
+    <rect x="236" y="682" width="1018" height="166" rx="6" fill="var(--dg-box, #ffffff)" stroke="var(--dg-line, #b7bac0)" stroke-width="1.2"/>
+    <text x="250" y="702" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">L3 · THE BUILD — IMMUTABLE ONCE WRITTEN</text>
+    <text x="250" y="726" font-size="15" font-weight="650" fill="var(--dg-ink, #15181e)">compile_build() — a pure function: same graph in, byte-identical build out</text>
+    <text x="250" y="746" font-size="11.5" fill="var(--dg-flow, #14706a)" font-weight="600">fold → reconcile (D1–D5) → acl → index rows → cards → census → manifest → diff against the previous build</text>
+
+    <g fill="var(--dg-band, #ebe9e3)" stroke="var(--dg-line, #b7bac0)" stroke-width="1">
+      <rect x="250" y="758" width="486" height="56" rx="4"/>
+      <rect x="750" y="758" width="490" height="56" rx="4"/>
+    </g>
+    <g font-size="11.5" fill="var(--dg-ink2, #565c66)">
+      <text x="264" y="778"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="650" fill="var(--dg-ink, #15181e)">cards/</tspan>  tables · metrics · concepts</text>
+      <text x="264" y="796">≤2K tokens of markdown each — the agent's entire world</text>
+      <text x="764" y="778"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-weight="650" fill="var(--dg-ink, #15181e)">indexes/</tspan>  joins · lob · domains · value_meanings · cost_priors</text>
+      <text x="764" y="796">sources · graph_map  +  census · acl · schema · columns · manifest</text>
+    </g>
+    <text x="250" y="834" font-size="11.5" fill="var(--dg-ink2, #565c66)">The build id <tspan font-style="italic">is</tspan> the graph hash — b_&lt;hash12&gt;. No wall clock anywhere inside a build artifact, so a diff in the build is a diff in the data.</text>
+
+    <line x1="745" y1="848" x2="745" y2="866" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+
+    <!-- ============ gate 3: compile gates + promotion ============ -->
+    <rect x="236" y="872" width="1018" height="40" rx="4" fill="var(--dg-gatebg, #f8f0e3)" stroke="var(--dg-gate, #9d6317)" stroke-width="1.2"/>
+    <text x="252" y="897" font-size="11.5" fill="var(--dg-ink2, #565c66)"><tspan font-size="10.5" font-weight="700" letter-spacing="0.7" fill="var(--dg-gate, #9d6317)">COMPILE GATES</tspan>  ·  table reconciliation · card existence · certified-has-home. All pass ⇒ one atomic CURRENT cutover. Otherwise the promoted build does not move.</text>
+
+    <!-- ============ the membrane: one way in, no way back ============ -->
+    <line x1="420" y1="916" x2="420" y2="984" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+    <text x="406" y="940" font-size="11.5" font-weight="650" text-anchor="end" fill="var(--dg-flow, #14706a)">Build.open() resolves through</text>
+    <text x="406" y="956" font-size="11.5" text-anchor="end" fill="var(--dg-ink2, #565c66)">builds/CURRENT — one way in</text>
+
+    <line x1="1000" y1="984" x2="1000" y2="916" stroke="var(--dg-stop, #a1332b)" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ah-stop)"/>
+    <g stroke="var(--dg-stop, #a1332b)" stroke-width="2.4">
+      <line x1="992" y1="942" x2="1008" y2="958"/>
+      <line x1="1008" y1="942" x2="992" y2="958"/>
+    </g>
+    <text x="1016" y="940" font-size="11.5" font-weight="650" fill="var(--dg-stop, #a1332b)">nothing below writes to the graph —</text>
+    <text x="1016" y="956" font-size="11.5" fill="var(--dg-ink2, #565c66)">the kit has no writer (clerk_only: absent)</text>
+
+    <!-- ============ L4 serving ============ -->
+    <rect x="236" y="990" width="1018" height="120" rx="6" fill="var(--dg-box, #ffffff)" stroke="var(--dg-line, #b7bac0)" stroke-width="1.2"/>
+    <text x="250" y="1010" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">L4 · SERVING — READS THE BUILD AND ONLY THE BUILD</text>
+    <g fill="var(--dg-band, #ebe9e3)" stroke="var(--dg-line, #b7bac0)" stroke-width="1">
+      <rect x="250" y="1020" width="238" height="76" rx="4"/>
+      <rect x="500" y="1020" width="238" height="76" rx="4"/>
+      <rect x="750" y="1020" width="238" height="76" rx="4"/>
+      <rect x="1000" y="1020" width="238" height="76" rx="4"/>
+    </g>
+    <g font-size="13" font-weight="650" fill="var(--dg-ink, #15181e)">
+      <text x="264" y="1041">Build.open()</text>
+      <text x="514" y="1041">8 serving tools</text>
+      <text x="764" y="1041">MCP shim</text>
+      <text x="1014" y="1041">SYNAPSE.md digest</text>
+    </g>
+    <g font-size="11" fill="var(--dg-ink2, #565c66)">
+      <text x="264" y="1060">one reader implementation —</text>
+      <text x="264" y="1075">the web apps import it from</text>
+      <text x="264" y="1090">the silo, never re-parse it</text>
+
+      <text x="514" y="1060">+ the resolver, SQL</text>
+      <text x="514" y="1075">validation, the sandbox, a</text>
+      <text x="514" y="1090">warehouse-error classifier</text>
+
+      <text x="764" y="1060">the same plain functions</text>
+      <text x="764" y="1075">behind one envelope, with a</text>
+      <text x="764" y="1090">short TTL cache</text>
+
+      <text x="1014" y="1060">the model's briefing —</text>
+      <text x="1014" y="1075">generated from the indexes</text>
+      <text x="1014" y="1090">and nothing else</text>
+    </g>
+
+    <!-- fork into the two turn engines -->
+    <line x1="745" y1="1110" x2="745" y2="1126" stroke="var(--dg-flow, #14706a)" stroke-width="1.8"/>
+    <line x1="486" y1="1126" x2="1004" y2="1126" stroke="var(--dg-flow, #14706a)" stroke-width="1.8"/>
+    <line x1="486" y1="1126" x2="486" y2="1148" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+    <line x1="1004" y1="1126" x2="1004" y2="1148" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+
+    <!-- ============ the two turn engines ============ -->
+    <rect x="236" y="1152" width="500" height="296" rx="6" fill="var(--dg-box, #ffffff)" stroke="var(--dg-line, #b7bac0)" stroke-width="1.2"/>
+    <rect x="754" y="1152" width="500" height="296" rx="6" fill="var(--dg-box, #ffffff)" stroke="var(--dg-line, #b7bac0)" stroke-width="1.2"/>
+
+    <text x="250" y="1172" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">TURN ENGINE A — THE HARNESS DRIVES</text>
+    <text x="250" y="1198" font-size="17" font-weight="700" fill="var(--dg-ink, #15181e)">Ask lane</text>
+    <g font-size="11.5" fill="var(--dg-ink2, #565c66)">
+      <text x="250" y="1222" fill="var(--dg-flow, #14706a)" font-weight="600">classify → apply → delta-resolve → contract</text>
+      <text x="250" y="1239" fill="var(--dg-flow, #14706a)" font-weight="600">→ preview → generate → verify → render</text>
+      <text x="250" y="1264">The versioned plan is the state — not the conversation. A grain is</text>
+      <text x="250" y="1281">required, so nothing renders without saying what one row means.</text>
+      <text x="250" y="1298">An edit moves exactly one slot, computed in code, so &#8220;same for</text>
+      <text x="250" y="1315">Canada&#8221; re-resolves that slot and nothing else.</text>
+      <text x="250" y="1340">One ranked blocker ends the turn with a single question whose</text>
+      <text x="250" y="1357">options each carry their evidence. Below-margin is a success</text>
+      <text x="250" y="1374">state: the resolver never argmaxes.</text>
+      <text x="250" y="1399"><tspan font-weight="650" fill="var(--dg-ink, #15181e)">out: a2ui.answer/1 — or RenderRefused.</tspan></text>
+      <text x="250" y="1416">Zero model calls on the fast path; at most two — a generator, and</text>
+      <text x="250" y="1433">a verifier that never sees the generator's reasoning.</text>
+    </g>
+
+    <text x="768" y="1172" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">TURN ENGINE B — THE MODEL DRIVES</text>
+    <text x="768" y="1198" font-size="17" font-weight="700" fill="var(--dg-ink, #15181e)">Assistant lane</text>
+    <g font-size="11.5" fill="var(--dg-ink2, #565c66)">
+      <text x="768" y="1222">One interaction per turn, native tool calls, results handed back whole.</text>
+      <text x="768" y="1247"><tspan font-weight="650" fill="var(--dg-ink, #15181e)">12 tools + suggest_next</tspan> — search · read · sample_values · run_sql ·</text>
+      <text x="768" y="1264">propose_sql · python · check · artifact · ask · load_skill · remember · note</text>
+      <text x="768" y="1289"><tspan font-weight="650" fill="var(--dg-gate, #9d6317)">hooks</tspan> — artifact_schema, sql_gates (pre) · literal_check,</text>
+      <text x="768" y="1306">rows_to_workspace, warehouse_errors (post) · clerk_only (absent)</text>
+      <text x="768" y="1331"><tspan font-weight="650" fill="var(--dg-ink, #15181e)">checks it runs on itself</tspan> — part_whole · crosscheck · coverage · fanout ·</text>
+      <text x="768" y="1348">reconcile · answer. A passing fact is what lets a composed number</text>
+      <text x="768" y="1365">shed its EXPLORATORY watermark; the validator refuses any artifact</text>
+      <text x="768" y="1382">whose numbers carry no disclosure.</text>
+      <text x="768" y="1399">budgets: 40 model calls · 600s wall clock · 20K chars per result · 30</text>
+      <text x="768" y="1416">messages replayed. A breach ends the turn in plain language.</text>
+    </g>
+    <rect x="768" y="1426" width="472" height="0.9" fill="var(--dg-line, #b7bac0)"/>
+
+    <!-- execution gate, inside the harness -->
+    <rect x="754" y="1462" width="500" height="40" rx="4" fill="var(--dg-gatebg, #f8f0e3)" stroke="var(--dg-gate, #9d6317)" stroke-width="1.2"/>
+    <text x="768" y="1480" font-size="10.5" font-weight="700" letter-spacing="0.7" fill="var(--dg-gate, #9d6317)">EXECUTION GATE · pre-hook on every run_sql</text>
+    <text x="768" y="1495" font-size="11" fill="var(--dg-ink2, #565c66)">cost estimate · scan ceiling · row cap · the build's ACL · dry run first</text>
+
+    <line x1="1004" y1="1448" x2="1004" y2="1458" stroke="var(--dg-gate, #9d6317)" stroke-width="1.5" marker-end="url(#ah-flow)"/>
+
+    <!-- ============ external planes ============ -->
+    <text x="1294" y="1130" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">EXTERNAL PLANES — CONFIGURED OR</text>
+    <text x="1294" y="1144" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">NOT, REPORTED AS BOOLEANS</text>
+
+    <rect x="1294" y="1152" width="268" height="178" rx="6" fill="var(--dg-flowbg, #e8f2f1)" stroke="var(--dg-flow, #14706a)" stroke-width="1.2"/>
+    <text x="1308" y="1176" font-size="14" font-weight="650" fill="var(--dg-ink, #15181e)">Model plane</text>
+    <g font-size="11" fill="var(--dg-ink2, #565c66)">
+      <text x="1308" y="1196">streamGenerateContent over urllib</text>
+      <text x="1308" y="1211">and a service-account token — no</text>
+      <text x="1308" y="1226">SDK, client-managed history.</text>
+      <text x="1308" y="1248">Native function calls; thought</text>
+      <text x="1308" y="1263">signatures echoed back opaquely.</text>
+      <text x="1308" y="1285">Both lanes ride it. A gateway plane</text>
+      <text x="1308" y="1300">behind a short-lived bearer token is</text>
+      <text x="1308" y="1315">validated, not yet the default.</text>
+    </g>
+
+    <rect x="1294" y="1344" width="268" height="136" rx="6" fill="var(--dg-flowbg, #e8f2f1)" stroke="var(--dg-flow, #14706a)" stroke-width="1.2"/>
+    <text x="1308" y="1368" font-size="14" font-weight="650" fill="var(--dg-ink, #15181e)">Warehouse plane</text>
+    <g font-size="11" fill="var(--dg-ink2, #565c66)">
+      <text x="1308" y="1388">BigQuery. Every query is dry-run</text>
+      <text x="1308" y="1403">and priced first.</text>
+      <text x="1308" y="1425">Live execution only where it is</text>
+      <text x="1308" y="1440">explicitly allowed, under a scan</text>
+      <text x="1308" y="1455">ceiling and a row cap, and only</text>
+      <text x="1308" y="1470">against tables the ACL carries.</text>
+    </g>
+
+    <line x1="1254" y1="1230" x2="1290" y2="1230" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+    <line x1="1254" y1="1482" x2="1290" y2="1482" stroke="var(--dg-gate, #9d6317)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+
+    <!-- ============ the event stream ============ -->
+    <line x1="486" y1="1448" x2="486" y2="1470" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+
+    <rect x="236" y="1516" width="1018" height="92" rx="6" fill="var(--dg-box, #ffffff)" stroke="var(--dg-line, #b7bac0)" stroke-width="1.2"/>
+    <text x="250" y="1536" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">THE EVENT STREAM — THE ONLY UI TRUTH</text>
+    <text x="250" y="1558" font-size="15" font-weight="650" fill="var(--dg-ink, #15181e)">meridian.event/1 — one append-only log per turn, read by sequence number</text>
+    <text x="250" y="1578" font-size="11.5" fill="var(--dg-ink2, #565c66)">The turn runs in a worker thread and the log is polled rather than called back — thread-safe by construction, and it loses nothing on reconnect.</text>
+    <text x="250" y="1595" font-size="11.5" fill="var(--dg-ink2, #565c66)">The events file <tspan font-style="italic">is</tspan> the record: a browser coming back mid-turn replays it whole. A turn belongs to the server, not the tab.</text>
+
+    <line x1="737" y1="1608" x2="737" y2="1630" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+    <line x1="1085" y1="1608" x2="1085" y2="1630" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+    <text x="745" y="1624" font-size="10" fill="var(--dg-flow, #14706a)" font-weight="600">SSE</text>
+    <text x="1093" y="1624" font-size="10" fill="var(--dg-flow, #14706a)" font-weight="600">SSE</text>
+    <line x1="1254" y1="1554" x2="1290" y2="1554" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+
+    <rect x="1294" y="1508" width="268" height="122" rx="6" fill="var(--dg-flowbg, #e8f2f1)" stroke="var(--dg-flow, #14706a)" stroke-width="1.2"/>
+    <text x="1308" y="1532" font-size="14" font-weight="650" fill="var(--dg-ink, #15181e)">Session store</text>
+    <g font-size="11" fill="var(--dg-ink2, #565c66)">
+      <text x="1308" y="1552">SQLite on the laptop, Spanner in</text>
+      <text x="1308" y="1567">the deployment — the same shape.</text>
+      <text x="1308" y="1589">Chats, messages, files, artifact</text>
+      <text x="1308" y="1604">versions, plan versions, turn</text>
+      <text x="1308" y="1619">events, memory, saved skills.</text>
+    </g>
+
+    <!-- ============ surfaces ============ -->
+    <text x="236" y="1624" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">ONE FASTAPI PROCESS · NO BUNDLER · PLAIN ES MODULES</text>
+
+    <rect x="236" y="1634" width="322" height="188" rx="6" fill="var(--dg-box, #ffffff)" stroke="var(--dg-line, #b7bac0)" stroke-width="1.2"/>
+    <rect x="572" y="1634" width="330" height="188" rx="6" fill="var(--dg-box, #ffffff)" stroke="var(--dg-line, #b7bac0)" stroke-width="1.2"/>
+    <rect x="916" y="1634" width="338" height="188" rx="6" fill="var(--dg-box, #ffffff)" stroke="var(--dg-line, #b7bac0)" stroke-width="1.2"/>
+
+    <text x="250" y="1654" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">READ PLANE</text>
+    <text x="250" y="1678" font-size="15" font-weight="650" fill="var(--dg-ink, #15181e)" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">/api/meridian/*</text>
+    <g font-size="11" fill="var(--dg-ink2, #565c66)">
+      <text x="250" y="1700">Read-only projections of the</text>
+      <text x="250" y="1715">promoted build, through the same</text>
+      <text x="250" y="1730">Build reader — never re-parsed here.</text>
+      <text x="250" y="1752">No build? HTTP 200 with</text>
+      <text x="250" y="1767">{available:false, reason}, and the UI</text>
+      <text x="250" y="1782">renders a designed empty state.</text>
+      <text x="250" y="1804" font-weight="650" fill="var(--dg-ink, #15181e)">Nothing is ever mocked.</text>
+    </g>
+
+    <text x="586" y="1654" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">SURFACE 1 · FOR THE PEOPLE WHO STEWARD</text>
+    <text x="586" y="1678" font-size="15" font-weight="650" fill="var(--dg-ink, #15181e)">Synapse by Lumi<tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="var(--dg-ink2, #565c66)">   /</tspan></text>
+    <g font-size="11" fill="var(--dg-ink2, #565c66)">
+      <text x="586" y="1700">home · semantics explorer · metric and</text>
+      <text x="586" y="1715">table profiles · the cosmos: the graph as</text>
+      <text x="586" y="1730">a 3-D sky, positions baked at compile so</text>
+      <text x="586" y="1745">a diff in the sky is a diff in the data</text>
+      <text x="586" y="1767">artifacts and skills · operate: per-turn</text>
+      <text x="586" y="1782">instrumentation and transcripts</text>
+      <text x="586" y="1804">Deep links work — a metric profile is a URL.</text>
+    </g>
+
+    <text x="930" y="1654" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-ink2, #565c66)">SURFACE 2 · FOR THE PEOPLE WHO ASK</text>
+    <text x="930" y="1678" font-size="15" font-weight="650" fill="var(--dg-ink, #15181e)">Synapse<tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="var(--dg-ink2, #565c66)">   /synapse/</tspan></text>
+    <g font-size="11" fill="var(--dg-ink2, #565c66)">
+      <text x="930" y="1700">the chat first, the library under it · tables</text>
+      <text x="930" y="1715">are data products · artifacts publish inside</text>
+      <text x="930" y="1730">the conversation, versioned, never</text>
+      <text x="930" y="1745">overwritten</text>
+      <text x="930" y="1767">a proposal arrives as a card: Run query ·</text>
+      <text x="930" y="1782">Run + build a dashboard · Edit SQL</text>
+      <text x="930" y="1804">a deck carries the disclosure in the notes.</text>
+    </g>
+
+    <!-- ============ people ============ -->
+    <line x1="737" y1="1822" x2="737" y2="1844" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)" marker-start="url(#ah-flow)"/>
+    <line x1="1085" y1="1822" x2="1085" y2="1844" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)" marker-start="url(#ah-flow)"/>
+
+    <rect x="572" y="1848" width="330" height="76" rx="6" fill="var(--dg-band, #ebe9e3)" stroke="var(--dg-line, #b7bac0)" stroke-width="1.2"/>
+    <rect x="916" y="1848" width="338" height="76" rx="6" fill="var(--dg-band, #ebe9e3)" stroke="var(--dg-line, #b7bac0)" stroke-width="1.2"/>
+    <text x="586" y="1872" font-size="14" font-weight="650" fill="var(--dg-ink, #15181e)">Steward</text>
+    <text x="586" y="1892" font-size="11" fill="var(--dg-ink2, #565c66)">browses the semantics, reads the transcripts,</text>
+    <text x="586" y="1908" font-size="11" fill="var(--dg-ink2, #565c66)">leaves feedback, signs a status change</text>
+    <text x="930" y="1872" font-size="14" font-weight="650" fill="var(--dg-ink, #15181e)">Analyst</text>
+    <text x="930" y="1892" font-size="11" fill="var(--dg-ink2, #565c66)">asks in their own words, taps Run on a</text>
+    <text x="930" y="1908" font-size="11" fill="var(--dg-ink2, #565c66)">proposal, keeps the artifacts, exports the deck</text>
+
+    <!-- ============ the write-back lane ============ -->
+    <text x="36" y="462" font-size="10" font-weight="600" letter-spacing="0.9" fill="var(--dg-gov, #55458a)">HOW TRUTH CHANGES</text>
+
+    <rect x="36" y="474" width="160" height="122" rx="6" fill="var(--dg-govbg, #eeebf5)" stroke="var(--dg-gov, #55458a)" stroke-width="1.2"/>
+    <text x="50" y="498" font-size="13.5" font-weight="650" fill="var(--dg-ink, #15181e)">The clerk</text>
+    <g font-size="10.5" fill="var(--dg-ink2, #565c66)">
+      <text x="50" y="518">graph/clerk.py — the</text>
+      <text x="50" y="533">only write into truth.</text>
+      <text x="50" y="548">It demands a named</text>
+      <text x="50" y="563">human actor and refuses</text>
+      <text x="50" y="578">an illegal transition</text>
+      <text x="50" y="593">before it writes.</text>
+    </g>
+    <line x1="196" y1="535" x2="232" y2="535" stroke="var(--dg-gov, #55458a)" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ah-gov)"/>
+
+    <rect x="36" y="682" width="160" height="156" rx="6" fill="var(--dg-govbg, #eeebf5)" stroke="var(--dg-gov, #55458a)" stroke-width="1.2"/>
+    <text x="50" y="706" font-size="13.5" font-weight="650" fill="var(--dg-ink, #15181e)">Enrichment</text>
+    <g font-size="10.5" fill="var(--dg-ink2, #565c66)">
+      <text x="50" y="726">model-written descriptions</text>
+      <text x="50" y="741">behind a blind grader:</text>
+      <text x="50" y="756">strip the names off the</text>
+      <text x="50" y="771">certified metrics and make</text>
+      <text x="50" y="786">the model recover them.</text>
+      <text x="50" y="801">Under 60% and the run</text>
+      <text x="50" y="816">halts, writing nothing.</text>
+    </g>
+    <path d="M196 760 H216 V560 H232" fill="none" stroke="var(--dg-gov, #55458a)" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ah-gov)"/>
+
+    <rect x="36" y="1634" width="160" height="124" rx="6" fill="var(--dg-govbg, #eeebf5)" stroke="var(--dg-gov, #55458a)" stroke-width="1.2"/>
+    <text x="50" y="1658" font-size="13.5" font-weight="650" fill="var(--dg-ink, #15181e)">Feedback</text>
+    <g font-size="10.5" fill="var(--dg-ink2, #565c66)">
+      <text x="50" y="1678">the only write on the read</text>
+      <text x="50" y="1693">plane: append-only JSONL</text>
+      <text x="50" y="1708">beside the graph, in the</text>
+      <text x="50" y="1723">same run tree — adjacent</text>
+      <text x="50" y="1738">to a quad, never one. A</text>
+      <text x="50" y="1753">steward acts on it.</text>
+    </g>
+    <line x1="232" y1="1706" x2="200" y2="1706" stroke="var(--dg-gov, #55458a)" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ah-gov)"/>
+
+    <!-- ============ legend ============ -->
+    <line x1="236" y1="1962" x2="1254" y2="1962" stroke="var(--dg-line, #b7bac0)" stroke-width="1"/>
+    <g font-size="11" fill="var(--dg-ink2, #565c66)">
+      <line x1="236" y1="1982" x2="262" y2="1982" stroke="var(--dg-flow, #14706a)" stroke-width="1.8" marker-end="url(#ah-flow)"/>
+      <text x="270" y="1986">compiled flow, one way</text>
+
+      <line x1="430" y1="1982" x2="456" y2="1982" stroke="var(--dg-gov, #55458a)" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ah-gov)"/>
+      <text x="464" y="1986">a write back into truth, always witnessed</text>
+
+      <rect x="740" y="1975" width="26" height="14" rx="3" fill="var(--dg-gatebg, #f8f0e3)" stroke="var(--dg-gate, #9d6317)" stroke-width="1.2"/>
+      <text x="774" y="1986">a gate: it stops the run</text>
+
+      <line x1="950" y1="1982" x2="976" y2="1982" stroke="var(--dg-stop, #a1332b)" stroke-width="1.8" stroke-dasharray="5 4"/>
+      <line x1="957" y1="1975" x2="969" y2="1989" stroke="var(--dg-stop, #a1332b)" stroke-width="2.2"/>
+      <line x1="969" y1="1975" x2="957" y2="1989" stroke="var(--dg-stop, #a1332b)" stroke-width="2.2"/>
+      <text x="984" y="1986">a path that deliberately does not exist</text>
+    </g>
+  </g>
+</svg>
