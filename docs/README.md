@@ -10,6 +10,8 @@ specs, eval baselines).
 | **The wiki** | [`wiki/`](wiki/README.md) | 14 pages, one per subsystem, with source citations and diagrams. Start at the index. |
 | **The paper** | [`paper/compiling-a-semantic-layer.md`](paper/compiling-a-semantic-layer.md) | How the graph is built, why each mechanism is the way it is, what the numbers are, and what is still a bet. |
 | **The deck** | [`presentation/synapse-system-overview.html`](presentation/synapse-system-overview.html) | 31 slides: graph → harness → generative UI → capabilities and proof. Open it in a browser; `←` `→` to move, `O` for the overview. |
+| **The story deck** | [`presentation/radix-graph-end-to-end.pptx`](presentation/radix-graph-end-to-end.pptx) | 11 slides for a room: one question with three right answers, why the usual fix decays, the turn, then the architecture at three depths. [Source and how to rebuild it.](presentation/radix-graph-deck/README.md) |
+| **The mark** | [`brand/radix-graph/`](brand/radix-graph/README.md) | the Radix Graph logo — SVG masters and PNGs, with the geometry it was built from |
 | Design sweep | [`design_inventory.md`](design_inventory.md) | the sweep of the design files |
 
 ## Reading order
