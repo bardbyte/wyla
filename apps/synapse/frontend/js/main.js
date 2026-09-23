@@ -1,8 +1,10 @@
-/** Synapse Semantic Intelligence: the chat first, the library under
- * it. A hash router over the left sidebar, a theme toggle.
+/** Synapse by Lumi: the chat first, the library under it. A hash
+ * router over the left sidebar, a theme toggle.
  * Routes: #/chat #/chat/<session> #/search #/products
  *         #/product/<physical> #/metrics #/metric/<id> #/skills #/memory
- *         (#/knowledge and #/artifacts are Skills' old names and still answer)
+ *         (#/knowledge and #/artifacts are Skills' old names and still answer;
+ *         the library routes answer by URL only — their Explore shelf is
+ *         off this surface for now and lives on in the admin console)
  * Deep links work: a metric profile is a URL you can send someone. */
 
 import { renderChat } from "./pages/chat.js";
@@ -93,7 +95,7 @@ async function brandLogo() {
   }
   const img = new Image();
   img.className = "brand-logo";
-  img.alt = "Synapse Semantic Intelligence";
+  img.alt = "Synapse by Lumi";
   img.onerror = () => console.warn(
     "SYNAPSE_LOGO: the browser could not decode the image the server "
     + "sent; open /api/synapse/brand for what the file's bytes are");
@@ -101,7 +103,7 @@ async function brandLogo() {
     const link = document.createElement("a");
     link.className = "brand-link";
     link.href = "#/chat";
-    link.title = "Synapse Semantic Intelligence";
+    link.title = "Synapse by Lumi";
     link.appendChild(img);
     brand.replaceChildren(link);
     brand.classList.add("has-logo");

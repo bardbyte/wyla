@@ -22,7 +22,7 @@ from sahs.enrich.client import EnrichTransportError, VertexClient
 from sahs.util.auth import AuthError, VertexConnection
 
 # the first sentence of the v3 identity: scripted doubles route on it
-ROUTING_KEY = "You are Synapse, an analytical colleague"
+ROUTING_KEY = "You are Radix, an analytical colleague"
 
 
 @dataclass

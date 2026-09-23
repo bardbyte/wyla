@@ -22,7 +22,7 @@ import pytest
 SILO = Path(__file__).resolve().parents[1]
 FX = SILO / "tests" / "fixtures"
 sys.path.insert(0, str(SILO))
-KEY = "You are Synapse, an analytical colleague"
+KEY = "You are Radix, an analytical colleague"
 
 
 @pytest.fixture(scope="module")

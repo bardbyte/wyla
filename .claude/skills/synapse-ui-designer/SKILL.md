@@ -8,8 +8,16 @@ description: Use this skill for ALL work on the Synapse by Lumi admin product �
 You are building **Synapse by Lumi**: the admin product over the Meridian context graph,
 powered by the Synapse agent harness. Naming is pinned — **Synapse** = this product and the
 harness system · **Lumi** = the brand family (and the eventual end-user surface) · **Meridian**
-= the graph. Never introduce other names; never let "Meridian" appear as the product name in UI
-chrome (it appears in the *meridian line* disclosure strip, which keeps its name).
+= the graph, as the admin console and the code name it. Never introduce other names; never let
+"Meridian" appear as the product name in UI chrome (it appears in the *meridian line*
+disclosure strip, which keeps its name on the admin console).
+
+Two names live ONLY on the second surface (`apps/synapse`) and in the system prompt's identity
+sentence, by decision: **Radix** = the assistant people talk to there ("Radix thinks", "Radix's
+read", the prompt's "You are Radix") · **Radix Graph** = what the prompt calls the graph. On that
+surface the italic line under a number, an artifact or a proposal is a disclaimer ("Prepared by
+Radix…") with the definition line on its hover title. Do not carry either name into the admin
+console or into backend strings beyond the identity sentence.
 
 ## 0 · Ground-truth ritual (do this before ANY design or build work)
 

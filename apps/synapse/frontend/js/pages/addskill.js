@@ -1,5 +1,5 @@
 /** Add a skill: one pop-up, three ways in — bring a file, write one
- * from the house template, or Draft with Synapse from your material —
+ * from the house template, or Draft with Radix from your material —
  * and one door out: every way ends as a submission to your manager
  * (the PRD's single-level approval). The person gives the name, a
  * description and the intended purpose; the system records the
@@ -71,7 +71,7 @@ export function openAddSkill(tab = "upload", onSubmitted = null, approver = null
       <div class="modal-tabs" role="tablist">
         <button role="tab" data-tab="upload">Bring a file</button>
         <button role="tab" data-tab="write">Write a skill</button>
-        <button role="tab" data-tab="draft">Draft with Synapse</button>
+        <button role="tab" data-tab="draft">Draft with Radix</button>
       </div>
       <div class="modal-body">
         <section data-pane="upload">
@@ -120,7 +120,7 @@ export function openAddSkill(tab = "upload", onSubmitted = null, approver = null
         <section data-pane="draft" hidden>
           <ol class="as-steps">
             <li data-step="1" class="on"><b>Material</b> what you know, in your words</li>
-            <li data-step="2"><b>Draft</b> Synapse rewrites it as a pack</li>
+            <li data-step="2"><b>Draft</b> Radix rewrites it as a pack</li>
             <li data-step="3"><b>Read, edit, submit</b> to ${esc(to)} for approval</li>
           </ol>
           <div data-draft="1">
@@ -136,11 +136,11 @@ export function openAddSkill(tab = "upload", onSubmitted = null, approver = null
                 accept=".md,.txt,.csv,.tsv,.json,.yaml,.yml,.sql,.xml,.html,.py,.xlsx,.docx,.pptx" />
               <span class="muted" id="as-material-note"></span>
               <span class="spacer"></span>
-              <button class="btn primary" id="as-draft-go" disabled>Draft with Synapse</button>
+              <button class="btn primary" id="as-draft-go" disabled>Draft with Radix</button>
             </div>
           </div>
           <div data-draft="2" hidden>
-            <p class="muted as-wait"><span class="think-orb">✳</span> Synapse is rewriting your material in the house format…</p>
+            <p class="muted as-wait"><span class="think-orb">✳</span> Radix is rewriting your material in the house format…</p>
           </div>
           <div data-draft="3" hidden>
             <ul class="as-notes muted" id="as-notes"></ul>
@@ -273,7 +273,7 @@ export function openAddSkill(tab = "upload", onSubmitted = null, approver = null
     if (got.available) setTimeout(() => submitted({ ...got.submission, resubmitted: got.resubmitted }), 400);
   });
 
-  // ── Draft with Synapse ──
+  // ── Draft with Radix ──
   const step = (n) => {
     for (const li of root.querySelectorAll(".as-steps li")) {
       li.classList.toggle("on", Number(li.dataset.step) === n);
@@ -317,7 +317,7 @@ export function openAddSkill(tab = "upload", onSubmitted = null, approver = null
       .catch((err) => ({ available: false, reason: String(err) }));
     if (!got.available) {
       step(1);
-      $("as-draft-error").textContent = `no draft: ${got.reason || "Synapse did not answer"}. Write it yourself on the Write tab, or try again.`;
+      $("as-draft-error").textContent = `no draft: ${got.reason || "Radix did not answer"}. Write it yourself on the Write tab, or try again.`;
       return;
     }
     const d = got.draft;

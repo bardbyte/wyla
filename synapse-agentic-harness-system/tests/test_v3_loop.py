@@ -23,7 +23,7 @@ import pytest
 SILO = Path(__file__).resolve().parents[1]
 FX = SILO / "tests" / "fixtures"
 sys.path.insert(0, str(SILO))
-KEY = "You are Synapse, an analytical colleague"
+KEY = "You are Radix, an analytical colleague"
 
 
 @pytest.fixture(scope="module")
@@ -217,6 +217,8 @@ def test_the_prompt_is_sections_not_protocol(compiled):
     build, _ = compiled
     system = system_prompt(build, skill_index=all_skills(None))
     assert system.startswith("<identity>\n" + KEY)
+    # the graph goes by its enterprise name; the code name stays in code
+    assert "Radix Graph" in system and "Meridian" not in system
     for tag in ("<chain>", "<mode>", "<graph>", "<skills>", "<memory>"):
         assert tag in system, tag
     # the autonomy slider is a section: chat hands over, autopilot runs

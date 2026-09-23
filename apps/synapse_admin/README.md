@@ -82,7 +82,7 @@ runner); this app is the product and its copy of the read plane
 python -m pytest apps/synapse_admin/tests/ -q
 ```
 
-## Synapse Semantic Intelligence: the second surface
+## Synapse by Lumi, the second surface (apps/synapse)
 
 The same server also serves a second frontend at
 `http://localhost:8400/synapse/` from `apps/synapse/frontend`: a copy

@@ -18,10 +18,10 @@ export async function renderMemory(outlet) {
         <button class="btn" id="mem-preview" aria-pressed="false">preview</button>
         <button class="btn primary" id="mem-save" disabled>Save</button>
       </div>
-      <p class="muted shelf-intro">What Synapse has recorded so far, as
+      <p class="muted shelf-intro">What Radix has recorded so far, as
         <code>memory.md</code>. Edit the lines and save: a line you add is
         remembered, a line you remove is retired, and the next chat reads
-        it. Synapse adds a line itself when you settle a preference in
+        it. Radix adds a line itself when you settle a preference in
         chat, and says so inline with an undo.</p>
       <textarea class="input memory-editor" id="mem-text" spellcheck="false"></textarea>
       <div class="md memory-rendered" id="mem-rendered" hidden></div>

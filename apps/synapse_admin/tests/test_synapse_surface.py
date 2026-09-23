@@ -1,4 +1,4 @@
-"""Synapse Semantic Intelligence (apps/synapse): the second surface,
+"""Synapse by Lumi (apps/synapse): the second surface,
 served beside the admin console by the same server. The shell is
 stripped and renamed, the chats have a search page of their own,
 artifacts publish inside the chat, and the library pages are cards
@@ -59,34 +59,37 @@ def client(compiled) -> TestClient:
 
 
 def test_shell_is_stripped_and_renamed():
-    """The left header says Synapse Semantic Intelligence; Home, Cosmos
-    and Operate are gone; New chat and Search chats sit at the top, the
-    chats under them, Data Products and Semantics Explorer under Explore,
-    and Skills under Customize, at the bottom above the account (the
-    knowledge files live on the Skills page, the way a settings page
-    lists them)."""
-    assert "<title>Synapse Semantic Intelligence</title>" in INDEX
-    assert ">Synapse</a>" in INDEX and "Semantic Intelligence" in INDEX
+    """The left header says Synapse, by Lumi; Home, Cosmos and Operate
+    are gone; New chat and Search chats sit at the top, the chats under
+    them, and Skills and Memory under Customize, at the bottom above the
+    account (the knowledge files live on the Skills page, the way a
+    settings page lists them). The Explore shelf — Data Products and
+    Semantics Explorer — is off this surface for now: the pages still
+    answer by URL, and the admin console keeps its own entries."""
+    assert "<title>Synapse by Lumi</title>" in INDEX
+    assert ">Synapse</a>" in INDEX and ">by Lumi<" in INDEX
     for gone in ("#/home", "#/cosmos", "#/operate", "#/ask", "#/artifacts",
-                 "powered by Lumi", "Metrics Explorer", ">Tables<",
-                 ">Home<", ">Artifacts<", "chats-search"):
+                 "powered by Lumi", "Semantic Intelligence", "Metrics Explorer",
+                 ">Tables<", ">Home<", ">Artifacts<", "chats-search",
+                 'aria-label="Explore"', "Data Products", "Semantics Explorer",
+                 'data-tab="products"', 'data-tab="metrics"'):
         assert gone not in INDEX, gone
-    explore = INDEX.split('aria-label="Explore"')[1].split("</nav>")[0]
-    for kept in ("Data Products", "Semantics Explorer"):
-        assert kept in explore, kept
-    assert "Skills" not in explore and "Knowledge" not in INDEX.split(
-        'aria-label="Explore"')[1].split('aria-label="Customize"')[0]
     customize = INDEX.split('aria-label="Customize"')[1].split("</nav>")[0]
     assert ">Customize<" in customize and 'href="#/skills"' in customize
     assert 'href="#/memory"' in customize
     assert customize.index("#/skills") < customize.index("#/memory")
     assert "#/knowledge" not in INDEX
-    # Customize sits above Explore: the things a person shapes first
+    # Customize sits at the bottom of the nav, above the account
     order = [INDEX.index('href="#/chat/new"'), INDEX.index('href="#/search"'),
              INDEX.index('class="chats"'), INDEX.index('aria-label="Customize"'),
-             INDEX.index('aria-label="Explore"'),
              INDEX.index('class="account"')]
     assert order == sorted(order)
+    # the library routes are still wired: a bookmarked profile opens
+    for route in ("products: () => renderProducts(outlet)",
+                  "product: () => renderTable(outlet, arg)",
+                  "metrics: () => renderMetrics(outlet)",
+                  "metric: () => renderMetric(outlet, arg)"):
+        assert route in MAIN, route
     assert 'id="nav-skills-badge"' in customize
     assert "Search chats" in INDEX
     # served under /synapse/: relative asset paths, no vendored three.js
@@ -149,7 +152,7 @@ def test_library_pages_are_cards():
 def test_second_surface_is_served_beside_the_first(client):
     page = client.get("/synapse/")
     assert page.status_code == 200
-    assert "Synapse Semantic Intelligence" in page.text
+    assert "Synapse by Lumi" in page.text
     assert client.get("/synapse/js/main.js").status_code == 200
     assert client.get("/synapse/styles/synapse.css").status_code == 200
     home = client.get("/")
@@ -275,7 +278,7 @@ def test_logo_from_the_env_replaces_the_words(client, tmp_path, monkeypatch):
     assert served.headers["content-type"].startswith("image/svg+xml")
     assert b"ACME" in served.content
     # the page: the words are the fallback, the swap waits for the load
-    assert 'id="brand"' in INDEX and "Semantic Intelligence" in INDEX
+    assert 'id="brand"' in INDEX and ">by Lumi<" in INDEX
     assert "brandLogo" in MAIN and "/api/synapse/brand" in MAIN
     assert "img.onload" in MAIN and "replaceChildren" in MAIN
     assert "img.onerror" in MAIN and "console.warn(`SYNAPSE_LOGO" in MAIN
@@ -533,12 +536,12 @@ def test_own_skills_and_the_creators(client):
         "name": "memo.pdf", "data_b64": base64.b64encode(b"%PDF-1.4").decode()}
         ).json()
     assert pdf["available"] is False and "attach it in a chat" in pdf["reason"]
-    # one pop-up, three ways in; Draft with Synapse is a guided flow;
+    # one pop-up, three ways in; Draft with Radix is a guided flow;
     # the knowledge creator is gone from the page
     popup = (FRONT / "js" / "pages" / "addskill.js").read_text(encoding="utf-8")
     for piece in ("export function openAddSkill", 'data-tab="upload"',
                   'data-tab="write"', 'data-tab="draft"', "Bring a file",
-                  "Write a skill", "Draft with Synapse", "SKILL_TEMPLATE",
+                  "Write a skill", "Draft with Radix", "SKILL_TEMPLATE",
                   "api.chatDraft(", "api.chatFileText(", "api.chatSubmitReview(",
                   'data-step="1"', 'data-step="2"', 'data-step="3"',
                   "Submit for approval", 'role="dialog"',
@@ -569,9 +572,9 @@ def test_the_shelf_and_the_help_read_plainly():
     assert "(row.messages ?? 1) > 0" in chats
     assert 'find((r) => r.messages === 0)' in CHAT
     assert "Mode <span>" not in CHAT and "on Vertex" not in CHAT
-    assert "Depth <span>how much Synapse thinks before each step" in CHAT
+    assert "Depth <span>how much Radix thinks before each step" in CHAT
     assert 'if (d) o.title = d.means;' in CHAT
-    assert "Semantics Explorer" in INDEX and "Metrics Explorer" not in INDEX
+    assert "Metrics Explorer" not in INDEX
 
 
 def test_memory_is_a_document_the_person_edits(client):
@@ -606,3 +609,39 @@ def test_memory_is_a_document_the_person_edits(client):
         assert piece in page, piece
     assert "memory: () => renderMemory(outlet)" in MAIN
     assert ".memory-editor" in CSS
+
+
+def test_the_thread_follows_only_while_you_read_at_the_bottom():
+    """Scrolling up to reread unsticks the thread: a thinking delta, an
+    answer token or the heartbeat never drags the view back down; the
+    "Latest" pill offers the way back, and sending re-sticks it. A step
+    that failed reads as a snag with a plain reason and, once the model
+    takes another step, "trying another way" — never a raw error. The
+    italic line under a number is Radix's disclaimer, with the graph's
+    definition line one hover away. The two behavior fixes ride both chat
+    pages; the Radix names and the disclaimer stay on this surface — the
+    admin console keeps its own copy."""
+    admin = (REPO_ROOT / "apps" / "synapse_admin" / "frontend" / "js"
+             / "pages" / "chat.js").read_text(encoding="utf-8")
+    for src in (CHAT, admin):
+        for piece in ('id="chat-jump"', "let stuck = true", "stuck = atBottom()",
+                      "scroll(true)", "snagRow(", "snagReason(",
+                      "movedOn(turn, true)", "movedOn(turn, false)",
+                      "trying another way", "hit a snag"):
+            assert piece in src, piece
+        assert '"did not work: "' not in src
+    for piece in ("disclaimer(prov)", "disclaimer(proposal)", "Prepared by Radix",
+                  'title="${esc(prov.meridian_line || "")}"', "Radix is AI"):
+        assert piece in CHAT, piece
+    assert "prose(prov.meridian_line)" not in CHAT
+    assert "Synapse is AI" not in CHAT and "Synapse thinks" not in CHAT
+    # the admin console is out of the rename's scope
+    assert "Radix" not in admin and "Synapse is AI" in admin
+    assert "prose(prov.meridian_line)" in admin
+    admin_css = (REPO_ROOT / "apps" / "synapse_admin" / "frontend" / "styles"
+                 / "app.css").read_text(encoding="utf-8")
+    app_css = (FRONT / "styles" / "app.css").read_text(encoding="utf-8")
+    for css in (app_css, admin_css):
+        for cls in (".chat-jump", ".theater-step.failed .mark",
+                    ".theater-step .snag"):
+            assert cls in css, cls
