@@ -22,10 +22,13 @@ model reads from it; nothing else in the code names a model.
 
 The two skill budgets are the subject of [Skill retrieval](skill-retrieval.md):
 a skill under the whole-load budget (and under `SAHS_MAX_SKILL_CHARS`,
-the global ceiling on top) loads whole; over it, a skill whose
-frontmatter allows it loads as a searchable library under the library
-budget, folded by depth; one that requires the whole file is refused
-by name.
+the global ceiling on top) loads whole; over it, a skill loads as a
+searchable library under the library budget, folded by depth — whole
+when it fits, a library when it does not, never a refusal. A
+frontmatter that asks for the whole file is a preference: honoured
+when the pack fits, disclosed as `preferred: whole` with the sizes
+when it does not. The v1 navigator holds the same block as static
+retrieval (no lookup tools) on the `VERTEX_MODEL` engine's budget.
 
 The level lists come from Google's model pages (September 2026) and
 the laptop's `gateway_check.py --all-models` run. The `--levels` probe
@@ -86,7 +89,7 @@ the deployment's word.
 | `VERTEX_THINKING_LEVELS` | the same, for the Vertex model | `max:high` |
 | `GATEWAY_JSON_MODEL` | route the one-shot JSON calls to a lighter engine of the plane | `gemini-3.1-flash-lite` |
 | `SAHS_TEMPERATURE_POLICY` | `default` leaves Gemini 3's temperature alone; `explicit` sends the caller's | `default` |
-| `SAHS_MAX_SKILL_CHARS` | the longest skill that loads whole; over it a pack loads as a searchable library under the engine's `skill_budget` ([skill retrieval](skill-retrieval.md)) | `4000` |
+| `SAHS_MAX_SKILL_CHARS` | the longest skill that loads whole; over it every pack loads as a searchable library under the engine's `skill_budget`, never refused ([skill retrieval](skill-retrieval.md)) | `4000` |
 
 ## What Gemini 3 asked for, and where the harness answers
 

@@ -112,10 +112,13 @@ _DIGEST_CACHE: dict[str, str] = {}
 
 
 def system_prompt(build: Build, skills: list[Skill] | None = None,
-                  tool_block: str = "") -> str:
+                  tool_block: str = "", skill_library: str = "") -> str:
     """The assembled prompt. Byte-identical for the same build +
     skills + tools, so the whole thing is prompt-cacheable across a
-    session's turns (§1's latency pin)."""
+    session's turns (§1's latency pin). ``skill_library`` is the
+    static-retrieval block for skills over the whole-load limit
+    (``render_searchable_skills(tools=False)``), rendered after the
+    whole ones; empty, it adds nothing."""
     digest = _DIGEST_CACHE.get(build.version)
     if digest is None:
         digest = synapse_digest(build)
@@ -124,5 +127,7 @@ def system_prompt(build: Build, skills: list[Skill] | None = None,
     loaded = render_skills(skills or [])
     if loaded:
         parts += ["", loaded]
+    if skill_library:
+        parts += ["", skill_library.rstrip()]
     parts += ["", STOP_CONDITIONS, "", TRACES, "", TONE, "", PROTOCOL]
     return "\n".join(parts) + tool_block

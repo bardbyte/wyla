@@ -245,6 +245,8 @@ def run_turn(*, build: Build, store: SessionStore, bus: EventBus,
                 abort=abort, model=model, session=session,
                 turn_id=turn_id, plan=prior, finish=finish,
                 skills=session.get("_skills_loaded"),
+                skill_library=session.get("_skill_library") or "",
+                skills_library=session.get("_skills_library") or [],
                 snapshot_runner=snapshot_runner,
                 resume=_resume_context(store, session_id, choice))
             return
@@ -339,6 +341,8 @@ def run_turn(*, build: Build, store: SessionStore, bus: EventBus,
                 abort=abort, model=model, session=session,
                 turn_id=turn_id, plan=plan, finish=finish,
                 skills=session.get("_skills_loaded"),
+                skill_library=session.get("_skill_library") or "",
+                skills_library=session.get("_skills_library") or [],
                 snapshot_runner=snapshot_runner,
                 resolver=outcome.result, clarify=outcome.clarify)
             return

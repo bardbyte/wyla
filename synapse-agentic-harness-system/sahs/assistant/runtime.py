@@ -685,7 +685,7 @@ class AssistantRuntime:
                 "min_band": MIN_BAND, "me": self.user_name, **board}
 
     def set_skills(self, session_id: str, names: list[str]) -> dict:
-        from sahs.loop.skills import LOADED_VAR, SkillTooLarge, max_loaded
+        from sahs.loop.skills import LOADED_VAR, SkillUnreadable, max_loaded
 
         from .skills_loader import load_packs
         session = self.store.get_session(session_id)
@@ -699,8 +699,10 @@ class AssistantRuntime:
         try:
             loaded, missing = load_packs(self.graph_root, list(names),
                                          owner=self.owner)
-        except SkillTooLarge as e:
-            # over the size ceiling: refused by name, never cut
+        except SkillUnreadable as e:
+            # broken input (a file that cannot be read): refused by
+            # name with the reason. Size never refuses — a pack over
+            # the ceiling pins and loads as a library.
             return {"ok": False, "reason": str(e)}
         if missing:
             return {"ok": False,

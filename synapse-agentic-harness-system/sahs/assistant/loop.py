@@ -31,7 +31,7 @@ from sahs.ask.budget import Aborted
 from sahs.ask.model import ModelUnavailable
 from sahs.loop.digest import synapse_digest
 from sahs.loop.loop import _short, compact_result
-from sahs.loop.skills import Skill, SkillRefused, render_skills
+from sahs.loop.skills import Skill, render_skills
 from sahs.tools.api import Build
 from sahs.util.profiles import prompt_style
 
@@ -625,30 +625,12 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
     # the skills, split at this engine's whole-load limit: whole ones
     # paste verbatim; a pack over it is a library — its contents and
     # the passages that match this ask, under the engine's budget at
-    # this depth — unless its frontmatter demands the whole file, which
-    # refuses the turn by name (fail closed, never a partial load)
+    # this depth — never a refusal, never a partial load; a pack whose
+    # frontmatter asked for the whole file is disclosed as preferring
+    # it (the block and the loader record both say so)
     shelf = all_skills(graph_root, owner)
-    try:
-        library = skill_context(graph_root, list(skills or []), text,
-                                model_name, thinking_level, shelf=shelf)
-    except SkillRefused as refused:
-        partial = getattr(refused, "context", None)
-        if partial is not None:
-            bus.emit("skills_loaded", turn_id=turn_id, **partial.event())
-        bus.emit("error", turn_id=turn_id, code="skill_refused",
-                 message="I could not load a skill this chat pins: "
-                         + str(refused),
-                 retryable=False,
-                 next_actions=["switch to a model with a larger window",
-                               "or mark the skill sectioned "
-                               "(runtime_loading: sectioned) in its "
-                               "frontmatter",
-                               "or unpin it for this chat"])
-        # a task's sub-turn leaves the closing to its foreman
-        if sub is None or sub.finish:
-            _finish(bus, budget, turn_id, "error", started, model_calls=0,
-                    steps=0, thinking_level=thinking_level, skills_loaded=[])
-        return "error"
+    library = skill_context(graph_root, list(skills or []), text,
+                            model_name, thinking_level, shelf=shelf)
     bus.emit("skills_loaded", turn_id=turn_id, **library.event())
     kit = build_kit(build, state, store=store, session_id=session_id,
                     turn_id=turn_id, workspace=workspace, model=model,

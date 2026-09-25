@@ -128,23 +128,25 @@ def test_shelves_merge_and_builtin_wins(tmp_path):
     assert missing == ["ghost"]
 
 
-def test_skill_size_is_a_ceiling_from_the_env_never_a_silent_cut(
+def test_skill_size_is_a_ceiling_from_the_env_never_a_silent_cut_or_a_refusal(
         tmp_path, monkeypatch):
-    """DECISION: a skill loads whole or not at all. The size and count
-    ceilings come from the env; the defaults keep a skill a briefing.
+    """DECISION: a skill loads whole when it fits, as a library when
+    it does not — never a refusal. The size and count ceilings come
+    from the env; the defaults keep a whole-loaded skill a briefing.
     Over the ceiling a skill is still LISTED (the shelf hides nothing)
-    but REFUSES to load, naming itself, its size and the variable —
-    a cut briefing reads as a different briefing, and nobody would
+    and still LOADS, whole in the list the loader returns; the prompt
+    builder splits it to the library side at the ceiling, never a cut
+    — a cut briefing reads as a different briefing, and nobody would
     know. Unreadable or non-positive values fall back to the default,
     never to "no ceiling"."""
     from sahs.loop.skills import (
         CHARS_VAR,
         LOADED_VAR,
-        SkillTooLarge,
         list_skills,
         load_skills,
         max_loaded,
         max_skill_chars,
+        split_by_ceiling,
     )
     graph_root = _user_shelf(tmp_path)
     big = "# Bundle\n\nThe whole doctrine, unabridged.\n" + "x" * 6000
@@ -158,17 +160,23 @@ def test_skill_size_is_a_ceiling_from_the_env_never_a_silent_cut(
     assert listed["bundle"].text == big and listed["bundle"].chars == len(big)
     assert "truncated" not in listed["bundle"].text
 
-    # under the default ceiling it refuses, and says exactly why
-    with pytest.raises(SkillTooLarge) as err:
-        load_skills(graph_root, ["bundle"])
-    said = str(err.value)
-    assert "'bundle'" in said and "4,000" in said and CHARS_VAR in said
+    # under the default ceiling it still loads — whole in the list —
+    # and the ceiling puts it on the library side, verbatim, no cut
+    loaded, missing = load_skills(graph_root, ["bundle"])
+    assert [s.name for s in loaded] == ["bundle"] and not missing
+    assert loaded[0].text == big
+    whole, searchable = split_by_ceiling(loaded)
+    assert not whole and [s.name for s in searchable] == ["bundle"]
+    assert searchable[0].text == big
 
-    # the env raises the ceiling: the skill reaches the session whole
+    # the env raises the ceiling: the same skill is whole again
     monkeypatch.setenv(CHARS_VAR, "128_000")
     loaded, missing = load_skills(graph_root, ["bundle", "fiscal-notes"])
     assert [s.name for s in loaded] == ["bundle", "fiscal-notes"]
     assert loaded[0].text == big and not missing
+    whole, searchable = split_by_ceiling(loaded)
+    assert [s.name for s in whole] == ["bundle", "fiscal-notes"]
+    assert not searchable
 
     # the count is a ceiling from the env too
     monkeypatch.setenv(LOADED_VAR, "1")
@@ -179,6 +187,70 @@ def test_skill_size_is_a_ceiling_from_the_env_never_a_silent_cut(
     monkeypatch.setenv(LOADED_VAR, "lots")
     monkeypatch.setenv(CHARS_VAR, "0")
     assert (max_skill_chars(), max_loaded()) == (4000, 4)
+
+
+def test_the_only_refusal_is_a_file_that_cannot_be_read(tmp_path,
+                                                        monkeypatch):
+    """Broken input, never size: a skill file that is not UTF-8 is
+    still listed (with the reason as its description) and refuses to
+    load by name in the v1 loader, the assistant's resolver and both
+    pickers; a huge but valid pack beside it loads."""
+    from sahs.assistant.skills_loader import all_skills, load_packs
+    from sahs.loop.skills import (CHARS_VAR, SkillUnreadable, list_skills,
+                                  load_skills)
+    graph_root = _user_shelf(tmp_path)
+    (graph_root / "skills" / "broken.md").write_bytes(
+        b"# Broken\n\n\xff\xfe not utf-8 \x80\n")
+    (graph_root / "skills" / "bundle.md").write_text(
+        "# Bundle\n\n" + "y" * 9000, encoding="utf-8")
+    monkeypatch.delenv(CHARS_VAR, raising=False)
+    listed = {s.name: s for s in list_skills(graph_root)}
+    assert listed["broken"].error.startswith("not UTF-8")
+    assert listed["broken"].description.startswith("unreadable: not UTF-8")
+    assert listed["broken"].text == ""           # never decoded with guesses
+    assert not listed["bundle"].error
+    with pytest.raises(SkillUnreadable) as err:
+        load_skills(graph_root, ["bundle", "broken"])
+    assert "'broken' cannot be loaded: not UTF-8" in str(err.value)
+    assert "UTF-8 markdown" in str(err.value)
+    # the big pack alone loads whole in the list (the ceiling splits
+    # it to the library later, never a refusal)
+    loaded, _ = load_skills(graph_root, ["bundle"])
+    assert [s.name for s in loaded] == ["bundle"]
+    shelf = {p.name: p for p in all_skills(graph_root)}
+    assert shelf["broken"].error and shelf["broken"].origin == "unreviewed"
+    with pytest.raises(SkillUnreadable):
+        load_packs(graph_root, ["broken"])
+    assert [p.name for p in load_packs(graph_root, ["bundle"])[0]] == ["bundle"]
+
+
+def test_the_pickers_refuse_only_a_broken_file(compiled, tmp_path,
+                                               monkeypatch):
+    from sahs.ask import AskRuntime
+    from sahs.assistant.agent import ScriptedAgent
+    from sahs.loop.skills import CHARS_VAR
+    graph_root = _user_shelf(tmp_path)
+    (graph_root / "skills" / "broken.md").write_bytes(b"# B\n\n\xff\xfe\n")
+    (graph_root / "skills" / "bundle.md").write_text(
+        "# Bundle\n\n" + "y" * 9000, encoding="utf-8")
+    monkeypatch.delenv(CHARS_VAR, raising=False)
+    build, _ = compiled
+    assistant = _runtime(compiled, ScriptedAgent([[{"text": "ok"}]]), tmp_path)
+    session = assistant.create_session()
+    refused = assistant.set_skills(session["id"], ["bundle", "broken"])
+    assert not refused["ok"] and "'broken' cannot be loaded" in refused["reason"]
+    assert assistant.set_skills(session["id"], ["bundle"])["ok"]
+    navigator = AskRuntime(builds_root=build.root.parent, graph_root=graph_root,
+                           store_path=tmp_path / "ask.sqlite3",
+                           model_factory=lambda budget: None)
+    session = navigator.create_session("analyst")
+    refused = navigator.set_skills(session["id"], ["broken"])
+    assert not refused["ok"] and "'broken' cannot be loaded" in refused["reason"]
+    assert navigator.set_skills(session["id"], ["bundle"])["ok"]
+    # the tool refuses it the same way, and records nothing
+    tools, state = _kit(compiled, tmp_path, graph_root=graph_root)
+    got = tools["load_skill"].fn("broken")
+    assert "cannot be read" in got["error"] and state.skills_loaded == []
 
 
 # ─── the tool: load whole, teach on a miss, record ───────────
@@ -308,6 +380,8 @@ def test_runtime_pins_an_oversized_pack_as_a_library(compiled, tmp_path,
     system = model.calls[0]["system"]
     assert "## Skills loaded as a library (searchable)" in system
     assert "### Bundle (`bundle`, 5,0" in system and CHARS_VAR in system
+    assert "mode: library · preferred: sectioned — 5,0" in system
+    assert "over the whole-load ceiling (SAHS_MAX_SKILL_CHARS) of 4,000" in system
     assert "s2 · Bundle > Quorvex" in system
     assert "[c2] Bundle > Quorvex" in system and "The quorvex rule." in system
     assert "z" * 5000 not in system                # never pasted whole
@@ -448,7 +522,10 @@ def test_a_library_pack_reaches_the_model_as_contents_and_pages(
         record = events[1]
         assert record["skills_loaded"] == ["bundle"]
         (row,) = record["skills"]
-        assert row["skill_name"] == "bundle" and row["mode"] == "sectioned"
+        assert row["skill_name"] == "bundle" and row["mode"] == "library"
+        assert row["preferred"] == "sectioned"
+        assert f"{len(text):,} characters over the whole-load ceiling " \
+               f"({CHARS_VAR}) of 4,000" in row["reason"]
         assert row["source_chars"] == len(text) and row["truncated"]
         assert 0 < row["sent_chars"] <= row["rendered_chars"]
         assert record["aggregate_skill_chars"] == row["sent_chars"]
@@ -589,16 +666,23 @@ def test_a_650k_bundle_loads_whole_on_a_big_engine_and_sectioned_on_a_small_one(
     assert big.aggregate_skill_chars == row["sent_chars"]
     small = skill_context(tmp_path, [pack], "anything", "", "medium")
     assert not small.whole and [p.name for p in small.searchable] == ["bundle"]
-    assert small.limit == 262_144 and small.records[0]["mode"] == "sectioned"
+    assert small.limit == 262_144 and small.records[0]["mode"] == "library"
     assert small.records[0]["truncated"]
+    assert small.records[0]["preferred"] == "sectioned"
 
 
-def test_a_full_file_skill_over_the_budget_fails_closed(tmp_path, monkeypatch):
-    """A skill whose frontmatter demands the whole file and does not
-    fit this model's whole-load budget is refused by name with the
-    reason — never partially loaded, never silently searched."""
+def test_a_full_file_skill_over_the_budget_loads_as_a_library_and_says_so(
+        tmp_path, monkeypatch):
+    """DECISION (replacing the refusal): a skill whose frontmatter
+    asks for the whole file loads whole whenever it fits this model's
+    whole-load budget, and as a library when it does not — the block
+    and the loader record say ``mode: library`` with ``preferred:
+    whole`` and the sizes, so nothing is hidden and nothing is cut.
+    ``truncation_allowed: false`` means what it always did in
+    practice: never a partial paste — which the library keeps, since
+    the contents are complete and every section is readable."""
     from sahs.assistant.skills_loader import Pack, skill_context
-    from sahs.loop.skills import CHARS_VAR, SkillRefused, SkillTooLarge
+    from sahs.loop.skills import CHARS_VAR
     from synthetic_skill import build_pack
     body, _ = build_pack(target_chars=300_000)
     text = ("---\nruntime_loading: full_file_required\n"
@@ -606,47 +690,62 @@ def test_a_full_file_skill_over_the_budget_fails_closed(tmp_path, monkeypatch):
     pack = Pack(name="bundle", title="Runtime knowledge bundle",
                 description="", text=text, origin="unreviewed")
     monkeypatch.setenv(CHARS_VAR, "650000")
-    # the big engine takes it whole
+    # the big engine takes it whole: the preference is honoured
     big = skill_context(tmp_path, [pack], "q", "gemini-3.7-flash")
     assert big.records[0]["mode"] == "whole"
-    # the small one refuses: the reason names the need, the budget
-    # and the two ways out; the record says refused, nothing sent
-    with pytest.raises(SkillRefused) as err:
-        skill_context(tmp_path, [pack], "q", "gemini-x-small")
-    said = str(err.value)
-    assert isinstance(err.value, SkillTooLarge)
-    assert f"'bundle' needs {len(text):,} chars whole" in said
-    assert "runtime_loading: full_file_required" in said
-    assert "this model's (gemini-x-small) whole-load budget is 262,144" in said
-    assert "switch to a model with a larger window or mark the skill " \
-           "sectioned" in said
-    ctx = err.value.context
-    assert ctx.records == [{"skill_name": "bundle", "source_chars": len(text),
-                            "rendered_chars": 0, "sent_chars": 0,
-                            "mode": "refused", "truncated": False}]
-    assert ctx.event()["skills_loaded"] == [] \
-        and ctx.event()["aggregate_skill_chars"] == 0
-    # truncation_allowed: false means the same
+    assert big.records[0]["preferred"] == "whole"
+    assert big.records[0]["reason"] == "" and big.block == ""
+    # the small one holds it as a library, and says plainly why
+    small = skill_context(tmp_path, [pack], "q", "gemini-x-small")
+    assert not small.whole and [p.name for p in small.searchable] == ["bundle"]
+    (row,) = small.records
+    assert row["mode"] == "library" and row["preferred"] == "whole"
+    assert f"{len(text):,} characters (runtime_loading: " \
+           "full_file_required) over this model's (gemini-x-small) " \
+           "whole-load limit of 262,144" in row["reason"]
+    assert "nothing cut" in row["reason"]
+    assert 0 < row["sent_chars"] <= row["rendered_chars"]
+    assert small.event()["skills_loaded"] == ["bundle"]
+    assert small.event()["aggregate_skill_chars"] == row["sent_chars"]
+    assert ("mode: library · preferred: whole — " + row["reason"]) \
+        in small.block
+    assert "Contents:" in small.block
+    assert "s2 · Runtime knowledge bundle (" in small.block   # s1: the frontmatter
+    # truncation_allowed: false means the same; an unnamed engine is
+    # named as such when its window, not the ceiling, is what bound
     strict = Pack(name="strict", title="Strict", description="",
                   text="---\ntruncation_allowed: false\n---\n" + body,
                   origin="unreviewed")
-    with pytest.raises(SkillRefused) as err:
-        skill_context(tmp_path, [strict], "q", "")
-    assert "truncation_allowed: false" in str(err.value)
-    # a sectioned pack of the same size loads as a library instead
+    ctx = skill_context(tmp_path, [strict], "q", "")
+    assert ctx.records[0]["mode"] == "library"
+    assert ctx.records[0]["preferred"] == "whole"
+    assert "(truncation_allowed: false) over this model's (unnamed " \
+           "engine) whole-load limit of 262,144" in ctx.records[0]["reason"]
+    # when the ceiling is what bound, the ceiling is named
+    monkeypatch.setenv(CHARS_VAR, "100000")
+    ctx = skill_context(tmp_path, [strict], "q", "gemini-3.7-flash")
+    assert f"over the whole-load ceiling ({CHARS_VAR}) of 100,000" \
+        in ctx.records[0]["reason"]
+    monkeypatch.setenv(CHARS_VAR, "650000")
+    assert "mode: library · preferred: whole — " in ctx.block
+    # a sectioned pack of the same size loads as a library the same
+    # way, its preference recorded as sectioned
     loose = Pack(name="loose", title="Loose", description="", text=body,
                  origin="unreviewed")
-    assert skill_context(tmp_path, [loose], "q", "").records[0]["mode"] \
-        == "sectioned"
+    ctx = skill_context(tmp_path, [loose], "q", "")
+    assert ctx.records[0]["mode"] == "library"
+    assert ctx.records[0]["preferred"] == "sectioned"
+    assert "mode: library · preferred: sectioned — " in ctx.block
 
 
-def test_the_pickers_and_the_tool_refuse_a_full_file_skill_over_the_ceiling(
+def test_the_pickers_and_the_tool_load_a_full_file_skill_over_the_ceiling_as_a_library(
         compiled, tmp_path, monkeypatch):
-    """At pin time the global ceiling decides (no engine can exceed
-    it): set_skills and a slash turn refuse by name. At turn time the
-    engine's budget decides: the turn ends on the refusal, the loader
-    record says so, and the model is never called. load_skill on such
-    a pack refuses too."""
+    """No refusal anywhere: a full-file pack over the global ceiling
+    pins; load_skill on it returns the contents with ``preferred:
+    whole`` and the reason; a turn whose pinned pack is over the
+    engine's budget runs to completion with the library block in the
+    prompt, the three tools declared, the loader record saying
+    ``mode: library`` / ``preferred: whole``, and the model called."""
     from sahs.assistant.agent import ScriptedAgent
     from sahs.loop.skills import CHARS_VAR, LOADED_VAR
     from synthetic_skill import build_pack
@@ -657,21 +756,26 @@ def test_the_pickers_and_the_tool_refuse_a_full_file_skill_over_the_ceiling(
         encoding="utf-8")
     monkeypatch.delenv(CHARS_VAR, raising=False)
     monkeypatch.delenv(LOADED_VAR, raising=False)
-    model = ScriptedAgent([[{"text": "never"}]])
+    model = ScriptedAgent([[{"text": "The bundle says so."}]])
     runtime = _runtime(compiled, model, tmp_path)
     session = runtime.create_session()
-    refused = runtime.set_skills(session["id"], ["whole-only"])
-    assert not refused["ok"]
-    assert "'whole-only' needs" in refused["reason"]
-    assert f"the whole-load ceiling ({CHARS_VAR}) is 4,000" in refused["reason"]
-    assert "mark the skill sectioned" in refused["reason"]
-    # the tool refuses the same way, nothing recorded as loaded
+    pinned = runtime.set_skills(session["id"], ["whole-only"])
+    assert pinned["ok"] and pinned["skills"] == ["whole-only"]
+    # the tool loads it as a library and discloses the preference
     tools, state = _kit(compiled, tmp_path, graph_root=graph_root)
+    assert {"skill_toc", "skill_search", "skill_read"} <= set(tools)
     got = tools["load_skill"].fn("whole-only")
-    assert "needs" in got["error"] and "whole-load budget" in got["error"]
-    assert state.skills_loaded == [] and "skill_search" not in tools
-    # raise the global ceiling: the pack pins, but the scripted engine
-    # (an unknown model: a 262,144-character budget) cannot take it
+    assert got["ok"] and got["searchable"] and "text" not in got
+    assert got["mode"] == "library" and got["preferred"] == "whole"
+    assert "(runtime_loading: full_file_required) over the whole-load " \
+           f"ceiling ({CHARS_VAR}) of 4,000" in got["reason"]
+    assert "its frontmatter preferred the whole file" in got["note"]
+    assert state.skills_loaded == ["whole-only"]
+    page = tools["skill_read"].fn("whole-only", "s1", 500)
+    assert page["ok"] and page["text"]                # every section readable
+    # raise the global ceiling: the pack still pins; the scripted
+    # engine (an unknown model: a 262,144-character budget) holds it
+    # as a library and the turn runs to completion
     monkeypatch.setenv(CHARS_VAR, "650000")
     assert runtime.set_skills(session["id"], ["whole-only"])["ok"]
     runtime.start_turn(session["id"], "what is in the bundle?")
@@ -679,16 +783,24 @@ def test_the_pickers_and_the_tool_refuse_a_full_file_skill_over_the_ceiling(
     events = runtime.runtime(session["id"]).bus.since(0)
     kinds = [e["ev"] for e in events]
     assert kinds[:2] == ["turn_started", "skills_loaded"]
-    assert "model_prompt" not in kinds and model.calls == []
+    assert "model_prompt" in kinds and len(model.calls) == 1
+    assert "error" not in kinds
     (row,) = events[1]["skills"]
-    assert row["mode"] == "refused" and row["sent_chars"] == 0
-    assert events[1]["skills_loaded"] == []
-    error = next(e for e in events if e["ev"] == "error")
-    assert error["code"] == "skill_refused"
-    assert "whole-load budget is 262,144" in error["message"]
-    assert any("larger window" in a for a in error["next_actions"])
+    assert row["mode"] == "library" and row["preferred"] == "whole"
+    assert "this model's (unnamed engine) whole-load limit of 262,144" \
+        in row["reason"]
+    assert 0 < row["sent_chars"] and events[1]["whole_load_limit"] == 262_144
+    assert events[1]["skills_loaded"] == ["whole-only"]
+    system = model.calls[0]["system"]
+    assert "## Skills loaded as a library (searchable)" in system
+    assert "mode: library · preferred: whole — " in system
+    assert "(runtime_loading: full_file_required)" in system
+    assert "whole-load limit of 262,144" in system
+    assert body[-2000:] not in system                 # never pasted whole
+    assert {"skill_toc", "skill_search", "skill_read"} \
+        <= set(model.calls[0]["tools"])
     assert [e for e in events if e["ev"] == "turn_done"][-1]["status"] \
-        == "error"
+        == "answered"
 
 
 def test_the_shelf_lists_the_likely_pack_first(compiled, tmp_path):

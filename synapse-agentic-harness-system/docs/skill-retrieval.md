@@ -42,19 +42,34 @@ rendering to a golden string). What "fits" means is now per model:
   4,000 characters, the briefing size). The turn's limit is the
   smaller of the two (`skills_loader.whole_load_limit`). To let the
   big engines take a bundle whole, set `SAHS_MAX_SKILL_CHARS=650000`;
-  the small engines still fall to the library or refuse, below.
+  the small engines still hold it as a library, below.
 - `SAHS_MAX_LOADED_SKILLS` still caps how many packs one chat loads at
   once, whole or library.
 
-The v1 navigator (`sahs.ask`), which has no lookup tools, keeps the
-old refusal (`SkillTooLarge`).
+The v1 navigator (`sahs.ask`) has no lookup tools, so its library is
+**static retrieval**: at turn start the runtime builds the same block
+(`skill_context(..., tools=False)`) — the table of contents plus the
+top passages for this ask under the engine's library budget at
+`medium` — and the navigator's prompt carries it after the skills
+pasted whole, with a line saying this lane has no lookup tool. Its
+engine is the `.env`'s `VERTEX_MODEL` (the unknown-engine row under a
+scripted model). `loop_started` lists the library packs in `skills`
+and again in `skills_library`.
 
-## The skill's own word: frontmatter policy
+## The policy: whole when it fits, a library when it does not, never a refusal
 
-Over the whole-load limit, the library path is allowed only when the
-skill's frontmatter permits it. Two keys, read from the leading
-`---` block (stdlib parse, no YAML dependency; the block stays part of
-the text that loads):
+There is no refusal anywhere in skill loading. Every verbatim of
+every skill is always usable: a pack under this turn's whole-load
+limit is pasted whole; a pack over it is loaded as a library — the
+complete table of contents, the matched passages, and every section
+readable through `skill_read` (or, in the navigator, named by its
+breadcrumb). "Never silently truncate" still holds; the answer to "it
+does not fit whole" is "load it as a library and say so", never "end
+the turn".
+
+The skill's frontmatter states a **preference**, not a gate. Two
+keys, read from the leading `---` block (stdlib parse, no YAML
+dependency; the block stays part of the text that loads):
 
 ```markdown
 ---
@@ -65,24 +80,33 @@ truncation_allowed: true          # or false
 ---
 ```
 
-- `runtime_loading: sectioned` (the default when absent) allows the
-  library path.
+- `runtime_loading: sectioned` (the default when absent): a library
+  is fine. Recorded as `preferred: sectioned`.
 - `runtime_loading: full_file_required`, or `truncation_allowed:
-  false`, means the skill must load whole or not at all. Over the
-  turn's whole-load limit it **fails closed**: refused by name with
-  the reason — `skill 'x' needs N chars whole (runtime_loading:
-  full_file_required), this model's (gemini-…) whole-load budget is M;
-  switch to a model with a larger window or mark the skill
-  sectioned` — never partially loaded, never silently sent to search.
+  false`: the skill prefers the whole file. It loads whole whenever it
+  fits the engine's whole-load budget and the global ceiling. When it
+  does not fit, it loads as a library exactly like a sectioned pack,
+  and the prompt block and the `skills_loaded` record say so plainly:
+  `mode: library · preferred: whole — N characters
+  (runtime_loading: full_file_required) over this model's (gemini-…)
+  whole-load limit of M: loaded as a library, the whole text reachable
+  by section, nothing cut` (the ceiling is named instead of the model
+  when `SAHS_MAX_SKILL_CHARS` is what bound). `truncation_allowed:
+  false` means what it always did in practice — never a partial
+  paste — and the library keeps that: the contents are complete and
+  every section is readable.
 
-Where the refusal lands: at pin time (the session picker, a slash
-command, a project's pinned packs) the global ceiling decides, since
-no engine can exceed it (`load_packs` raises `SkillRefused`, a
-`SkillTooLarge`, and the pickers show the reason). At turn time the
-engine's budget decides: the turn ends before any model call with an
-`error` event (`code: skill_refused`, the reason, the ways out) and a
-`turn_done` of status `error`. `load_skill` on such a pack refuses the
-same way; the library tools never serve a page of it.
+Where the sizes land: at pin time (the session picker, a slash
+command, a project's pinned packs) `load_packs` returns every pack
+whole, so a pack over the ceiling pins; at turn time
+`split_by_policy` puts each pack on the whole or the library side at
+the engine's limit; `load_skill` on an oversized pack returns the
+contents with `mode`, `preferred` and `reason`. The only load that
+refuses is a file that cannot be read or is not UTF-8
+(`SkillUnreadable`, raised by the loaders, caught by the pickers and
+the chat route): the shelf still lists it with the reason as its
+description, and nothing of it is decoded with substitutions. A
+large-but-valid pack can never raise it.
 
 ## The loader record
 
@@ -91,14 +115,14 @@ Every turn emits one `skills_loaded` event right after
 
 | field | meaning |
 |---|---|
-| `skills[]` | one row per pinned or slash-loaded skill: `skill_name`, `source_chars` (the file), `rendered_chars` (what the renderer made of it: the whole text, or the contents plus every passage the search found), `sent_chars` (what reached the prompt after the budget), `mode` (`whole` / `sectioned` / `refused`), `truncated` (always false for whole and refused) |
-| `skills_loaded` | the names that loaded (whole or sectioned) |
+| `skills[]` | one row per pinned or slash-loaded skill: `skill_name`, `source_chars` (the file), `rendered_chars` (what the renderer made of it: the whole text, or the contents plus every passage the search found), `sent_chars` (what reached the prompt after the budget), `mode` (`whole` / `library`), `preferred` (`whole` / `sectioned`, the frontmatter's word), `reason` (for a library: the sizes and the limit that bound; '' for whole), `truncated` (the prompt holds less than the file: always false for whole; true for a library, whose whole text stays reachable by section) |
+| `skills_loaded` | every name in `skills[]` — nothing is ever refused |
 | `aggregate_skill_chars` | the sum of `sent_chars` this turn |
 | `whole_load_limit` | this turn's whole-load limit in characters |
 | `retrieval_budget`, `retrieval_chunks` | the library fold at this depth |
 
 The chat page subscribes to it (the record lives in the transcript for
-Operate); a refusal also shows as the error card that follows.
+Operate).
 
 ## The routing hint: which skill, before any load
 
@@ -158,6 +182,18 @@ and nothing more; a changed pack re-indexes on its next load, and
 only itself. The index takes any object with `name`, `title` and
 `text` (a file-backed pack, or a store-backed row: an `updated`,
 `version` or `mtime` is recorded, but the content hash decides).
+
+The index never fails a turn. When the file cannot be opened or
+written (a corrupt file, a path that cannot be created, a read-only
+or full disk) the index falls back to one in-memory index for the
+process, shared by every later open of that path, and logs once per
+path (`sahs.loop.skill_index`, WARNING); the file is left alone as
+derived data to delete. When chunking a pack throws, the pack is
+indexed as a single chunk — the whole text as one section, offsets
+exact — so it is still searchable and readable; the fault is logged
+once per pack, the row carries chunker version 0, and the next load
+re-tries the chunker. `SkillIndex.fallback` and `.single_chunk` say
+which happened.
 
 Queries are lexical and deterministic. The ask's words, minus a small
 stopword list, each expanded to the term plus a few folded inflections
@@ -224,10 +260,30 @@ section.
   contents or a `c<N>` from a search. Longer sections come back in
   pages with the next offset named.
 
-`load_skill(name)` on an oversized pack no longer refuses: it returns
-the catalogue and says the pack is loaded as a library.
+`load_skill(name)` on an oversized pack never refuses: it returns the
+catalogue with `mode: library`, `preferred` and `reason`, and a note
+that says when the frontmatter preferred the whole file.
 
 ## Checking retrieval on your own packs
+
+**How to verify on the real packs.** Point the check script at the
+skills tree the `.env` names (`MERIDIAN_SKILLS_DIR`, or
+`<sources>/skills` when unset) with a question a pack should answer:
+
+```bash
+source .env   # or export MERIDIAN_SKILLS_DIR=/path/to/skills
+python scripts/skill_index_check.py "$MERIDIAN_SKILLS_DIR" "how is spend reconciled"
+python scripts/skill_index_check.py "$MERIDIAN_SKILLS_DIR" "settlement window" --memory --k 5
+```
+
+Read three things in the output: every pack lists with its characters,
+sections and chunks (a pack over `SAHS_MAX_SKILL_CHARS` is the one the
+chat holds as a library; a single-section pack with one chunk is one
+the chunker gave up on, see the log); `Likely skills` names the pack
+the shelf would mark; and the top hit's breadcrumb is the section you
+would cite. Exit 1 means no passage matched — try the pack's own
+words before concluding the pack is silent. `--memory` writes nothing
+next to the packs.
 
 ```bash
 python scripts/skill_index_check.py graph/skills "how is spend reconciled"
@@ -259,8 +315,20 @@ before the skills section is unchanged, `skill_search` then
 record carries the row. The same file proves the frontmatter parse
 and its defaults; the whole-load budget per engine (a 620,000-character
 bundle loads whole on 3.7 Flash with `SAHS_MAX_SKILL_CHARS=650000` and
-sectioned on the unknown engine); a `full_file_required` pack over
-the budget refused with the exact reason, at pin time by the global
-ceiling and at turn time by the engine's budget with no model call;
-and the shelf listing the likely pack first. The routing hint ranks
-the right pack first for ten questions in `tests/test_skill_index.py`.
+as a library on the unknown engine); a `full_file_required` pack over
+the budget loading as a library with `preferred: whole` and the sizes
+in the block and the record — through `skill_context`, `set_skills`
+(it pins), `load_skill`, and a real turn that runs to completion with
+the block and the three tools; the only refusal being a file that is
+not UTF-8, in both pickers and the tool; and the shelf listing the
+likely pack first. `tests/test_loop_prompt.py` drives the v1
+navigator with a pinned 150,000-character pack: the prompt carries
+the contents and the right passage first within the medium budget,
+names no lookup tool, still pastes the small skill whole, and the
+turn completes. `tests/test_skill_index.py` proves the two fallbacks:
+a corrupt file, an uncreatable path and a file that stops taking
+writes each fall back to the process's in-memory index (logged once
+per path, the pack still found), and a pack the chunker cannot read
+is indexed as one exact chunk and re-chunked on the next load. The
+routing hint ranks the right pack first for ten questions in the same
+file.

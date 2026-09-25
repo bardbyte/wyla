@@ -10,6 +10,7 @@ events file carries exactly what the model saw.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -221,6 +222,82 @@ class Navigator:
     def stream(self, prompt, *, system="", temperature=0.3,
                max_tokens=1500):
         yield "the governed answer."
+
+
+def test_the_navigator_holds_an_oversized_skill_as_static_retrieval(
+        compiled, tmp_path, monkeypatch):
+    """The v1 navigator has no lookup tools, so a skill over the
+    whole-load limit is not refused and not pasted: the turn renders
+    the table of contents plus the top passages for the ask under the
+    engine's library budget, the block says so (mode: library, no
+    tool named), the small skill beside it is still pasted whole, and
+    the turn runs to completion."""
+    sys.path.insert(0, str(SILO / "tests"))
+    from sahs.ask import AskRuntime
+    from sahs.loop.skills import CHARS_VAR, LOADED_VAR
+    from sahs.util.profiles import skill_retrieval_for
+    from synthetic_skill import build_pack
+    monkeypatch.setenv("SYNAPSE_NAVIGATE", "1")
+    monkeypatch.delenv(CHARS_VAR, raising=False)
+    monkeypatch.delenv(LOADED_VAR, raising=False)
+    build, _ = compiled
+    spend = next(m for m in build.metrics
+                 if m["label"] == "Acquirer Net Spend"
+                 and m["status"] == "certified")
+    text, truths = build_pack(target_chars=150_000)
+    _write_skill(tmp_path / "graph", "fiscal", "Fiscal calendar",
+                 "Quarters are fiscal, ending March.")
+    (tmp_path / "graph" / "skills" / "bundle.md").write_text(
+        text, encoding="utf-8")
+    t = next(t for t in truths if not t.twin_of and t.path.count(" > ") == 2)
+    ask = f"why is the {t.b} pass waiting on {t.a} backlog?"
+    model = Navigator(steps=[
+        {"tool": "plan_set", "args": {"patch": {"metric": spend["id"],
+                                                "grain": "transaction"}}},
+        {"final": True},
+    ])
+    runtime = AskRuntime(builds_root=build.root.parent,
+                         graph_root=tmp_path / "graph",
+                         store_path=tmp_path / "s.sqlite3",
+                         model_factory=lambda budget: model)
+    session = runtime.create_session("analyst")
+    pinned = runtime.set_skills(session["id"], ["fiscal", "bundle"])
+    assert pinned["ok"] and pinned["skills"] == ["fiscal", "bundle"]
+    runtime.start_turn(session["id"], ask)
+    assert runtime.wait(session["id"], 60)
+    events = runtime.runtime(session["id"]).bus.since(0)
+    system = model.systems[0]
+    # the small one whole, the big one as a library, both disclosed
+    assert "Quarters are fiscal, ending March." in system
+    started = next(e for e in events if e["ev"] == "loop_started")
+    assert started["skills"] == ["fiscal", "bundle"]
+    assert started["skills_library"] == ["bundle"]
+    block = system.split("## Skills loaded as a library", 1)[1]
+    block = "## Skills loaded as a library" + block.split("## When to stop", 1)[0]
+    k, budget = skill_retrieval_for("", "medium")
+    assert len(block) <= budget, (len(block), budget)
+    assert "### Runtime knowledge bundle (`bundle`," in block
+    assert "mode: library · preferred: sectioned — " in block
+    assert f"{len(text):,} characters over the whole-load ceiling " \
+           f"({CHARS_VAR}) of 4,000" in block
+    assert "Contents:" in block and "s1 · Runtime knowledge bundle" in block
+    passages = re.findall(r"^\[c\d+\] (.+?) \(chars [\d,]+–[\d,]+\)$",
+                          block, re.M)
+    assert 1 <= len(passages) <= k and passages[0] == t.path
+    assert f"When {t.a}s pile up, the {t.b} pass waits" in block
+    # static: no lookup tool is named, and the pack is never pasted whole
+    assert "skill_search" not in system and "skill_read" not in system
+    assert "skill_toc" not in system
+    assert "this lane has no lookup tool" in block
+    assert text[-3000:] not in system
+    # the order: whole skills, then the library, then the stop rules
+    assert system.index("Fiscal calendar") < system.index(
+        "## Skills loaded as a library") < system.index("## When to stop")
+    assert [e for e in events if e["ev"] == "turn_done"][-1]["status"] \
+        in ("answered", "partial", "clarify")
+    assert not [e for e in events if e["ev"] == "error"]
+    # the index is where the design says
+    assert (tmp_path / "graph" / "runs" / "skill_index.sqlite3").exists()
 
 
 def test_loop_runs_under_prompt_v1_with_skills_and_emits_the_trail(

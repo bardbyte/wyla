@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sahs.loop.skills import CHARS_VAR, SkillRefused, policy_of
+from sahs.loop.skills import CHARS_VAR, library_reason
 from sahs.loop.tools import ROW_CAP, ToolSpec, toolkit as v1_toolkit
 from sahs.tools.api import Build
 from sahs.tools.sandbox import (DEFAULT_MAX_BYTES, execute_sandboxed,
@@ -28,7 +28,8 @@ from . import checks as _checks
 from .artifacts import TYPES, validate_artifact
 from .hooks import literal_warnings
 from .sandbox import run_python, save_rows
-from .skills_loader import (TOC_TOOL_CAP, all_skills, get_skill, toc_lines,
+from .skills_loader import (TOC_TOOL_CAP, all_skills, get_skill,
+                            preference_of, toc_lines,
                             whole_load_limit)
 from .state import AssistantState
 from .store import AssistantStore
@@ -76,7 +77,8 @@ def build_kit(build: Build, state: AssistantState, *,
     ``skill_limit`` this turn's whole-load limit (default: the
     engine's, ``whole_load_limit(model_name)``); the three skill_*
     tools are declared when any pack the turn can reach is over the
-    limit and its frontmatter allows sectioned loading."""
+    limit — every such pack is a library, whatever its frontmatter
+    preferred."""
     v1 = v1_toolkit(build, state, substrate=substrate,
                     snapshot_runner=snapshot_runner)
     base = {name: v1[name].fn for name in (
@@ -389,9 +391,10 @@ def build_kit(build: Build, state: AssistantState, *,
         else whole_load_limit(model_name)
 
     def _library_pack(pack: Any) -> bool:
-        """Over this turn's whole-load limit, and its frontmatter
-        allows sectioned loading."""
-        return pack.chars > shelf_limit and not policy_of(pack.text).requires_whole
+        """Over this turn's whole-load limit: a library, whatever its
+        frontmatter preferred (the preference is disclosed, never a
+        gate)."""
+        return pack.chars > shelf_limit
 
     oversized = {p.name for p in all_skills(graph_root, owner)
                  if _library_pack(p)}
@@ -418,19 +421,15 @@ def build_kit(build: Build, state: AssistantState, *,
                               f"{p.name} ({p.origin})"
                               for p in all_skills(graph_root, owner))
                               or "none")}
+        if pack.error:
+            return None, {"error": f"{name!r} cannot be read: {pack.error}",
+                          "hint": "the file must be UTF-8 markdown; "
+                                  "nothing of it loaded"}
         if pack.chars <= shelf_limit:
             return None, {"error": f"{name!r} is not a library pack: it "
                                    f"is {pack.chars:,} characters, under "
                                    f"the {shelf_limit:,} whole-load limit",
                           "hint": "load_skill(name) hands it over whole"}
-        policy = policy_of(pack.text)
-        if policy.requires_whole:
-            # fail closed: never a page of a pack that demands the file
-            return None, {"error": str(SkillRefused(
-                pack, shelf_limit, model=model_name or "this model",
-                why=policy.why)),
-                "hint": "nothing was loaded; the person can switch "
-                        "model or mark the skill sectioned"}
         _index().ensure([pack])
         if name not in library:
             library.append(name)
@@ -448,28 +447,41 @@ def build_kit(build: Build, state: AssistantState, *,
                 or "none"
             return {"error": f"no skill named {name!r}",
                     "hint": f"available: {names}"}
+        if pack.error:
+            # broken input, the one refusal: by name, with the reason
+            return {"error": f"{name!r} cannot be read: {pack.error}",
+                    "hint": "the file must be UTF-8 markdown; nothing "
+                            "of it loaded"}
         if pack.chars > shelf_limit:
             # on the shelf, over the limit: it loads as a library —
             # the contents now, the pages by skill_search / skill_read
-            # — never as a cut of itself; a pack that demands the whole
-            # file is refused with the reason (fail closed)
+            # — never as a cut of itself and never a refusal; a pack
+            # whose frontmatter asked for the whole file says so here
             _pack, problem = _in_library(name)
             if problem:
                 return problem
             state.skills_loaded.append(name)
             got = skill_toc(name)
+            preferred, why = preference_of(pack)
             return {"ok": True, "name": pack.name, "title": pack.title,
                     "origin": pack.origin, "searchable": True,
+                    "mode": "library", "preferred": preferred,
+                    "reason": library_reason(pack, shelf_limit,
+                                             model_name, why),
                     "chars": pack.chars, "sections": got.get("sections"),
                     "chunks": got.get("chunks"), "toc": got.get("toc"),
                     "toc_omitted": got.get("omitted", 0),
                     "note": f"{pack.chars:,} characters, over the "
                             f"{shelf_limit:,} whole-load ceiling "
-                            f"({CHARS_VAR}): loaded as a library. This "
-                            "is the table of contents; skill_search("
-                            f"query, \"{pack.name}\") ranks the passages "
-                            f"and skill_read(\"{pack.name}\", section) "
-                            "reads one — cite the breadcrumb"}
+                            f"({CHARS_VAR}): loaded as a library"
+                            + (f" (its frontmatter preferred the whole "
+                               f"file: {why}; it does not fit this "
+                               "turn, so the library holds it whole by "
+                               "section)" if preferred == "whole" else "")
+                            + ". This is the table of contents; "
+                            f"skill_search(query, \"{pack.name}\") ranks "
+                            f"the passages and skill_read(\"{pack.name}\", "
+                            "section) reads one — cite the breadcrumb"}
         state.skills_loaded.append(name)
         return {"ok": True, "name": pack.name, "title": pack.title,
                 "origin": pack.origin, "text": pack.text}
