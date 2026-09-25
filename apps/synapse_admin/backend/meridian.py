@@ -45,7 +45,9 @@ def _silo_import():
 
 
 def _builds_root() -> Path:
-    return Path(os.environ.get("MERIDIAN_BUILDS_DIR", _SILO / "builds"))
+    _silo_import()
+    from sahs.builds.resolve import builds_root
+    return builds_root()
 
 
 def _graph_root() -> Path:
@@ -108,17 +110,18 @@ class MeridianData:
     # ── loading ──────────────────────────────────────────────
 
     def _load(self):
-        current = _builds_root() / "CURRENT"
-        if not current.exists():
-            return None, (f"no compiled build: {current} missing; "
-                          "run `pipeline.py compile` on this machine")
-        stamp = (current.stat().st_mtime_ns,
-                 current.read_text(encoding="utf-8").strip())
-        if self._build is not None and stamp == self._stamp:
-            return self._build, ""
         try:
+            root = _builds_root()
+            current = root / "CURRENT"
+            if not current.exists():
+                return None, (f"no compiled build: {current} missing; "
+                              "run `pipeline.py compile` on this machine")
+            stamp = (current.stat().st_mtime_ns,
+                     current.read_text(encoding="utf-8").strip())
+            if self._build is not None and stamp == self._stamp:
+                return self._build, ""
             Build, tier_of_metric, tier_of_join = _silo_import()
-            self._build = Build.open(_builds_root())
+            self._build = Build.open(root)
             self._bridge = (tier_of_metric, tier_of_join)
             self._stamp = stamp
             return self._build, ""

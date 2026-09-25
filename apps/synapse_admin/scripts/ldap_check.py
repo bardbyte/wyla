@@ -21,6 +21,18 @@ Per environment the script does:
                 the bind user's short name) by sAMAccountName / UPN / uid / cn,
                 proving that searches work and showing the DN that came back.
 
+--inventory answers "what do we actually get from the directory" for that
+person: every attribute on the entry (the identity ones with their values,
+the rest by name), the account flags (userAccountControl decoded), the
+direct groups from memberOf and the full nested set through Active
+Directory's LDAP_MATCHING_RULE_IN_CHAIN, the manager's entry (name and
+e-mail: the approval flow's approver), a scan for a band or level attribute
+(title, extensionAttribute1..15), and a verdict on each thing the app could
+use: an e-mail (mail vs userPrincipalName, and whether they agree), a stable
+key (employeeID, objectGUID), a manager, groups. LDAP_GROUPS_PREFIX lists the
+groups whose name starts so (for the role map). --redact masks personal
+values; --out writes the JSON for identity_map.py.
+
 Configuration comes from environment variables; NAME_<ENV> wins over NAME, so
 a file with the plain deployment names (LDAP_SERVER, LDAP_BASE_DN, ...) works
 for a single environment as well:
@@ -32,6 +44,7 @@ for a single environment as well:
   LDAP_PASSWORD_<ENV>     without it the script stops after the TLS check
   LDAP_BIND_DN_<ENV>      optional: an exact bind identity to use instead
   LDAP_LOOKUP_<ENV>       optional: an account name to search for under the base DN
+  LDAP_GROUPS_PREFIX      --inventory: list the groups named like this prefix, e.g. Sem-
   LDAP_CA_CERT            PEM bundle with the corporate root (LDAPS certificates
                           are usually signed by an internal CA)
   LDAP_TLS_INSECURE=1     skip certificate verification, loudly
@@ -41,6 +54,7 @@ Requires the `ldap3` package:  pip install ldap3
 Usage:
   python ldap_check.py --env-file .env.authcheck.local
   python ldap_check.py --envs E3 --json
+  python ldap_check.py --env-file .env.authcheck.local --envs E1 --inventory --redact --out ldap.json
 
 Exit code: 0 everything passed, 1 something FAILED, 2 configuration problem.
 """
@@ -60,7 +74,7 @@ from dataclasses import asdict, dataclass
 
 try:
     import ldap3
-    from ldap3 import ALL, BASE, SIMPLE, SUBTREE, Connection, Server, Tls
+    from ldap3 import ALL, ALL_ATTRIBUTES, BASE, SIMPLE, SUBTREE, Connection, Server, Tls
     from ldap3.core.exceptions import LDAPException
     from ldap3.utils.conv import escape_filter_chars
 except ImportError:  # reported in main(), so --help still works
@@ -185,6 +199,210 @@ def bind_candidates(user: str, bind_dn: str | None, base_dn: str) -> list[str]:
             cands.append(f"{user}@{domain}")
             cands.append(f"{domain.split('.')[0]}\\{user}")
     return cands
+
+
+# ------------------------------------------------------------ inventory --
+REDACT = False
+INVENTORY = False
+# under --redact these stay readable: they name things, not people
+KEEP_UNDER_REDACT = {"objectclass", "memberof", "groups", "groups_nested", "useraccountcontrol",
+                     "flags", "c", "co", "attributes_present", "dn_ou"}
+# the identity attributes the app could read, in the order they are shown
+IDENTITY_ATTRIBUTES = ("sAMAccountName", "userPrincipalName", "mail", "proxyAddresses",
+                       "displayName", "givenName", "sn", "cn", "employeeID", "employeeNumber",
+                       "employeeType", "objectGUID", "objectSid", "title", "department",
+                       "division", "company", "manager", "physicalDeliveryOfficeName", "l", "st",
+                       "c", "co", "telephoneNumber", "mobile", "description", "whenCreated",
+                       "whenChanged", "lastLogonTimestamp", "pwdLastSet", "accountExpires",
+                       "userAccountControl", "memberOf")
+UAC_FLAGS = {0x2: "ACCOUNTDISABLE", 0x10: "LOCKOUT", 0x20: "PASSWD_NOTREQD",
+             0x40: "PASSWD_CANT_CHANGE", 0x200: "NORMAL_ACCOUNT", 0x10000: "DONT_EXPIRE_PASSWORD",
+             0x40000: "SMARTCARD_REQUIRED", 0x400000: "DONT_REQ_PREAUTH",
+             0x800000: "PASSWORD_EXPIRED", 0x1000000: "TRUSTED_TO_AUTH_FOR_DELEGATION"}
+IN_CHAIN = "1.2.840.113556.1.4.1941"
+
+
+def uac_flags(value) -> list[str]:
+    try:
+        bits = int(str(value))
+    except (TypeError, ValueError):
+        return []
+    return [name for bit, name in sorted(UAC_FLAGS.items()) if bits & bit]
+
+
+def rdn(dn: str) -> str:
+    """'CN=Sem-Stewards,OU=Groups,DC=corp,...' -> 'Sem-Stewards'."""
+    first = str(dn).split(",", 1)[0]
+    return first.split("=", 1)[1] if "=" in first else first
+
+
+def mask(value, key: str = ""):
+    """Personal values under --redact: an e-mail keeps its domain, a string its
+    shape and length, a list its length; names of things stay."""
+    if not REDACT or value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, list):
+        return [mask(v, key) for v in value]
+    if isinstance(value, dict):
+        return {k: mask(v, k) for k, v in value.items()}
+    if key.lower() in KEEP_UNDER_REDACT:
+        return value
+    text = str(value)
+    if "@" in text and " " not in text:
+        local, _, domain = text.partition("@")
+        return f"{local[:1]}***@{domain}"
+    if text.upper().startswith("CN="):
+        return "CN=***," + text.split(",", 1)[1] if "," in text else "CN=***"
+    if len(text) <= 3:
+        return "***"
+    return f"{text[:2]}...{text[-1]}({len(text)})"
+
+
+def show(value) -> str:
+    if isinstance(value, list):
+        inner = ", ".join(str(v) for v in value[:8]) + (", ..." if len(value) > 8 else "")
+        return f"list[{len(value)}]: {inner}"
+    return f"{type(value).__name__}: {value}"
+
+
+def attribute_values(entry, name: str):
+    """The attribute's values as plain Python, or None when absent."""
+    if name not in entry:
+        return None
+    values = entry[name].values
+    if not values:
+        return None
+    out = [v.isoformat() if hasattr(v, "isoformat") else (v.decode("utf-8", "replace")
+           if isinstance(v, bytes) else v) for v in values]
+    return out[0] if len(out) == 1 else out
+
+
+def inventory(env: str, rep: Report, conn, server, base_dn: str, entry_dn: str) -> None:
+    """Everything the directory holds on this person, and the verdicts."""
+    ok = conn.search(entry_dn, "(objectClass=*)", search_scope=BASE, attributes=[ALL_ATTRIBUTES])
+    if not ok or not conn.entries:
+        rep.add(env, "inventory", "FAIL", f"cannot read {entry_dn}: {conn.result.get('description')}")
+        return
+    entry = conn.entries[0]
+    present = sorted(entry.entry_attributes, key=str.lower)
+    rep.add(env, "inventory", "PASS", f"{len(present)} attributes on {mask(entry_dn, 'dn')}")
+    person: dict = {"provider": "ldap", "dn": entry_dn,
+                    "dn_ou": ",".join(entry_dn.split(",")[1:]), "attributes_present": present}
+    shown = set()
+    for name in IDENTITY_ATTRIBUTES:
+        value = attribute_values(entry, name)
+        if value is None:
+            continue
+        shown.add(name.lower())
+        person[name] = value
+        if name == "userAccountControl":
+            flags = uac_flags(value)
+            person["flags"] = flags
+            rep.add(env, f"attr.{name}", "INFO", f"{value}: {', '.join(flags)}")
+        elif name == "memberOf":
+            groups = [rdn(g) for g in (value if isinstance(value, list) else [value])]
+            person["groups"] = groups
+            rep.add(env, "attr.memberOf", "INFO",
+                    f"{len(groups)} direct group(s): {', '.join(groups[:15])}{', ...' if len(groups) > 15 else ''}")
+        else:
+            rep.add(env, f"attr.{name}", "INFO", show(mask(value, name)))
+    others = [a for a in present if a.lower() not in shown]
+    if others:
+        rep.add(env, "attr.others", "INFO", f"{len(others)} more: {', '.join(others)}")
+
+    # nested groups: Active Directory's matching rule walks the chain server-side
+    nested: list[str] = []
+    try:
+        root = ((getattr(server.info, "other", {}) or {}).get("defaultNamingContext") or [base_dn])[0]
+        flt = f"(&(objectClass=group)(member:{IN_CHAIN}:={escape_filter_chars(entry_dn)}))"
+        for page in conn.extend.standard.paged_search(root, flt, search_scope=SUBTREE,
+                                                      attributes=["cn"], paged_size=500,
+                                                      generator=True):
+            if page.get("type") == "searchResEntry":
+                nested.append(str(page["attributes"].get("cn") or rdn(page["dn"])))
+    except LDAPException as exc:
+        rep.add(env, "groups (nested)", "WARN", f"the in-chain rule failed: {type(exc).__name__}: {exc}")
+    if nested:
+        direct = set(person.get("groups") or [])
+        extra = sorted(set(nested) - direct)
+        person["groups_nested"] = sorted(set(nested))
+        rep.add(env, "groups (nested)", "INFO",
+                f"{len(set(nested))} in total through nesting; {len(extra)} beyond memberOf"
+                + (f": {', '.join(extra[:10])}{', ...' if len(extra) > 10 else ''}" if extra else ""))
+
+    # the manager: the approval flow's approver
+    manager_dn = person.get("manager")
+    if manager_dn:
+        ok = conn.search(str(manager_dn), "(objectClass=*)", search_scope=BASE,
+                         attributes=["displayName", "mail", "sAMAccountName", "title", "userPrincipalName"])
+        if ok and conn.entries:
+            m = conn.entries[0]
+            manager = {k: attribute_values(m, k) for k in ("displayName", "mail", "sAMAccountName",
+                                                          "title", "userPrincipalName")}
+            person["manager_entry"] = manager
+            rep.add(env, "manager", "PASS",
+                    f"{mask(manager.get('displayName'), 'displayName')} <{mask(manager.get('mail'), 'mail')}>"
+                    f" ({mask(manager.get('title'), 'title')})")
+        else:
+            rep.add(env, "manager", "WARN", f"manager DN set but unreadable: {conn.result.get('description')}")
+    else:
+        rep.add(env, "manager", "WARN", "no manager attribute: the approval flow needs another source for the approver")
+
+    # a band or level: title, or one of the extension attributes
+    band_hits = []
+    for name in present:
+        low = name.lower()
+        if low.startswith("extensionattribute") or low in ("title", "employeetype", "description", "info"):
+            value = attribute_values(entry, name)
+            if value is not None and re.search(r"\b(band|level|grade|B\d{2}|L\d{1,2}|\d{2})\b",
+                                               str(value), re.IGNORECASE):
+                band_hits.append(f"{name}={mask(value, name)}")
+    ext = [a for a in present if a.lower().startswith("extensionattribute")]
+    person["extension_attributes"] = {a: mask(attribute_values(entry, a), a) for a in ext}
+    rep.add(env, "band / level", "INFO",
+            ("candidates: " + "; ".join(band_hits[:6])) if band_hits else
+            (f"nothing that reads as a band; extension attributes present: {', '.join(ext)}" if ext
+             else "nothing that reads as a band, and no extension attributes"))
+
+    # the join keys
+    mail = str(person.get("mail") or "").lower()
+    upn = str(person.get("userPrincipalName") or "").lower()
+    sam = str(person.get("sAMAccountName") or "")
+    if mail and upn:
+        rep.add(env, "need: email", "PASS" if mail == upn else "WARN",
+                f"mail and userPrincipalName {'agree' if mail == upn else 'DIFFER'}: "
+                f"{mask(mail, 'mail')} | {mask(upn, 'upn')}"
+                + ("" if mail == upn else " (the Okta e-mail claim will match one of them; check which)"))
+    elif mail or upn:
+        rep.add(env, "need: email", "WARN", f"only {'mail' if mail else 'userPrincipalName'} is set")
+    else:
+        rep.add(env, "need: email", "FAIL", "neither mail nor userPrincipalName is set")
+    keys = [k for k in ("employeeID", "employeeNumber", "objectGUID") if person.get(k)]
+    rep.add(env, "need: stable key", "PASS" if keys else "WARN",
+            f"{', '.join(keys)} present (objectGUID never changes; employeeID follows HR)" if keys
+            else "no employeeID, employeeNumber or objectGUID readable")
+    rep.add(env, "need: username", "PASS" if sam else "WARN",
+            f"sAMAccountName {mask(sam, 'sam')}" if sam else "no sAMAccountName")
+    flags = person.get("flags") or []
+    rep.add(env, "need: account active", "FAIL" if "ACCOUNTDISABLE" in flags else "PASS",
+            "disabled in the directory" if "ACCOUNTDISABLE" in flags else "enabled"
+            + (", locked out" if "LOCKOUT" in flags else ""))
+
+    # groups by prefix, for the role map
+    prefix = cfg("LDAP_GROUPS_PREFIX", env)
+    if prefix:
+        flt = f"(&(objectClass=group)(cn={escape_filter_chars(prefix)}*))"
+        ok = conn.search(base_dn, flt, search_scope=SUBTREE, attributes=["cn", "description", "member"],
+                         size_limit=200)
+        names = []
+        for g in conn.entries if ok else []:
+            members = len(g.member.values) if "member" in g else 0
+            names.append(f"{g.cn.value} ({members} members)")
+        person["groups_by_prefix"] = names
+        rep.add(env, f"groups {prefix}*", "INFO" if names else "WARN",
+                f"{len(names)}: {'; '.join(names[:20])}" if names else f"no group named {prefix}* under {base_dn}")
+
+    rep.facts.setdefault("inventory", {})[env] = mask(person)
 
 
 def ad_reason(result: dict) -> str:
@@ -339,7 +557,9 @@ def run_env(env: str, rep: Report) -> None:
         entry = conn.entries[0]
         dn = entry.entry_dn
         groups = len(entry.memberOf.values) if "memberOf" in entry else 0
-        rep.add(env, "lookup", "PASS", f"{lookup} -> {dn} ({groups} group memberships)")
+        rep.add(env, "lookup", "PASS", f"{lookup} -> {mask(dn, 'dn')} ({groups} group memberships)")
+        if INVENTORY:
+            inventory(env, rep, conn, server, base_dn, dn)
     else:
         rep.add(env, "lookup", "WARN",
                 f"{lookup} not found under {base_dn} ({conn.result.get('description')}); "
@@ -356,8 +576,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--envs", help="comma list, default $AUTHCHECK_ENVS or E1,E2,E3")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--timeout", type=int, default=_TIMEOUT, help="seconds per operation")
+    ap.add_argument("--inventory", action="store_true",
+                    help="list everything the directory holds on the looked-up person: attributes, "
+                         "flags, direct and nested groups, the manager, a band candidate")
+    ap.add_argument("--redact", action="store_true",
+                    help="mask personal values in the inventory (e-mails keep their domain)")
+    ap.add_argument("--out", metavar="FILE", help="write the JSON report here as well")
     args = ap.parse_args(argv)
     _TIMEOUT = args.timeout
+    global REDACT, INVENTORY
+    REDACT, INVENTORY = args.redact, args.inventory
     if ldap3 is None:
         print("the ldap3 package is required:  pip install ldap3", file=sys.stderr)
         return 2
@@ -375,6 +603,9 @@ def main(argv: list[str] | None = None) -> int:
         except LDAPException as e:  # anything ldap3 raises that we did not expect
             rep.add(env, "ldap", "FAIL", f"{type(e).__name__}: {e}")
 
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            json.dump(rep.dump(), fh, indent=2, default=str)
     if args.json:
         print(json.dumps(rep.dump(), indent=2, default=str))
     else:

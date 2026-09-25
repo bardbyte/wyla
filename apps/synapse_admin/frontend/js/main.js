@@ -3,7 +3,10 @@
  * Routes: #/ask #/ask/<session> #/home #/semantics #/tables #/cosmos
  *         #/artifacts #/operate #/metric/<id> #/table/<physical>
  *         #/kc #/kc/dictionary #/kc/glossary #/kc/<physical>
- * Deep links work: a metric profile is a URL you can send someone. */
+ *         #/signin?next= #/account #/users
+ * Deep links work: a metric profile is a URL you can send someone.
+ * The shell boots as the signed-in person (js/session.js): with an
+ * identity store and nobody signed in, every route is the sign-in page. */
 
 import { renderHome } from "./pages/home.js";
 import { renderSemantics } from "./pages/semantics.js";
@@ -20,20 +23,30 @@ import { renderSkills } from "./pages/skills.js";
 import {
   renderKc, renderKcDictionary, renderKcGlossary, renderKcTable,
 } from "./pages/kc.js";
+import { renderSignin } from "./pages/signin.js";
+import { renderAccount } from "./pages/account.js";
+import { renderUsers } from "./pages/users.js";
+import { drawAccount, gateNav, whoami, HOME, SIGNIN } from "./session.js";
 
 const outlet = document.getElementById("outlet");
 let teardown = null;
 
 function parseRoute() {
-  const hash = location.hash.replace(/^#\/?/, "") || "home";
+  const raw = location.hash.replace(/^#\/?/, "");
+  const [path, query = ""] = raw.split("?");
+  const hash = path || "home";
   const [page, ...rest] = hash.split("/");
-  return { page, arg: decodeURIComponent(rest.join("/")) };
+  return { page, arg: decodeURIComponent(rest.join("/")), query };
 }
 
 async function route() {
   if (teardown) { try { teardown(); } catch { /* page gone */ } }
   teardown = null;
-  const { page, arg } = parseRoute();
+  const { page, arg, query } = parseRoute();
+  if (page !== "signin" && signedOut) {         // nobody here: the door first
+    location.hash = `${SIGNIN}?${new URLSearchParams({ next: location.hash || HOME })}`;
+    return;
+  }
   const tab = page === "metric" ? "semantics"
     : page === "table" ? "tables" : page;
   document.querySelectorAll(".navlist a[data-tab]").forEach((a) =>
@@ -58,12 +71,33 @@ async function route() {
       : arg === "dictionary" ? renderKcDictionary(outlet)
       : arg === "glossary" ? renderKcGlossary(outlet)
       : renderKcTable(outlet, arg)),
+    signin: () => renderSignin(outlet, query),
+    account: () => renderAccount(outlet),
+    users: () => renderUsers(outlet),
   };
   const render = pages[page] ?? renderHome;
   teardown = await (page === "metric" || page === "table" || page === "ask"
-    || page === "kc"
+    || page === "kc" || page === "signin" || page === "account" || page === "users"
     ? render()
     : render(outlet)) ?? null;
+}
+
+/* who is here: the account row, the gated nav entries, and whether the
+ * shell may show anything but the sign-in page */
+let signedOut = false;
+async function boot() {
+  const who = await whoami();
+  signedOut = !who.user && who.status === 401;
+  document.body.classList.toggle("signed-out", signedOut);
+  drawAccount(who.user);
+  gateNav(who.user);
+  if (who.user && !(who.user.surfaces || []).includes("admin")) {
+    // this console is the admins'; everyone else has Synapse
+    location.replace("/synapse/");
+    return;
+  }
+  await route();
+  if (!signedOut) refreshChats();
 }
 
 window.addEventListener("hashchange", route);
@@ -89,5 +123,4 @@ toggle.addEventListener("click", () => {
 });
 applyThemeGlyph();
 
-route();
-refreshChats();
+boot();

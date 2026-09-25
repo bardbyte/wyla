@@ -2,9 +2,13 @@
  * carries `available`; false means no compiled build: pages render
  * their designed empty state with the server's own reason. */
 
+// every call goes through the session: the CSRF header on anything that
+// changes state, the sign-in page on a 401
+import { apiFetch } from "./session.js";
+
 async function get(url) {
   try {
-    const r = await fetch(url);
+    const r = await apiFetch(url);
     if (!r.ok) return { available: false, reason: `${url} → ${r.status}` };
     return await r.json();
   } catch {
@@ -17,7 +21,7 @@ async function get(url) {
 // page can render, never an exception it has to guess at.
 async function post(url, body) {
   try {
-    const r = await fetch(url, {
+    const r = await apiFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body ?? {}),
@@ -55,13 +59,13 @@ export const api = {
   enrichRuns: () => get("/api/meridian/enrich_runs"),
   artifacts: () => get("/api/meridian/artifacts"),
   stageArtifact: (payload) =>
-    fetch("/api/meridian/artifacts", {
+    apiFetch("/api/meridian/artifacts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }).then(async (r) => ({ ok: r.ok, ...(await r.json()) })),
   feedback: (payload) =>
-    fetch("/api/meridian/feedback", {
+    apiFetch("/api/meridian/feedback", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

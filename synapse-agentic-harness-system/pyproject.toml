@@ -26,6 +26,10 @@ enrich = ["google-auth", "truststore"]
 # Synapse v2 assistant: the PPTX deck export (§13.5) and the numpy the
 # python sandbox advertises as importable
 assistant = ["python-pptx>=0.6.23", "numpy>=1.26"]
+# the identity service: people, sessions and the audit on Spanner (or
+# the sqlite stand-in), Argon2id passwords, Fernet-protected Google
+# refresh tokens for user-delegated BigQuery
+identity = ["google-cloud-spanner>=3.40", "argon2-cffi>=23", "cryptography>=42"]
 dev = ["pytest>=8"]
 
 [tool.pytest.ini_options]

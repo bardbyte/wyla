@@ -34,6 +34,8 @@ from sahs.tools.api import Build
 from sahs.tools.qualify import qualify_tables
 from sahs.tools.warehouse_errors import teach_warehouse_error
 from sahs.tools.validate_sql import _DML_DDL, _QUERY_KINDS
+from sahs.util.bigquery_errors import (bigquery_http_error_message,
+                                       is_bigquery_auth_error)
 
 DEFAULT_MAX_BYTES = 1_000_000_000
 LIVE_SWITCH = "SAHS_ALLOW_LIVE"
@@ -110,8 +112,13 @@ class BQJobRunner:
 
     def __init__(self, connection=None, token_provider=None) -> None:
         from sahs.util.auth import BQConnection
-        self.connection = connection or BQConnection.from_env()
         self._token_provider = token_provider
+        self.connection = connection or BQConnection.from_env(
+            require_key=token_provider is None)
+
+    @property
+    def token_provider(self):
+        return self._token_provider
 
     def _token(self) -> str:
         if self._token_provider is not None:
@@ -121,6 +128,7 @@ class BQJobRunner:
         return self.connection.token()
 
     def run(self, sql: str, limit: int) -> dict[str, Any]:
+        import urllib.error
         import urllib.request
         url = (f"{self.connection.endpoint}/bigquery/v2/projects/"
                f"{self.connection.project}/queries")
@@ -128,14 +136,17 @@ class BQJobRunner:
                 "maxResults": limit, "timeoutMs": 60000}
         if getattr(self.connection, "location", ""):
             body["location"] = self.connection.location
-        request = urllib.request.Request(
-            url, data=json.dumps(body).encode("utf-8"),
-            headers={"Authorization": f"Bearer {self._token()}",
-                     "Content-Type": "application/json"},
-            method="POST")
-        with self.connection.opener().open(
-                request, timeout=90) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        try:
+            request = urllib.request.Request(
+                url, data=json.dumps(body).encode("utf-8"),
+                headers={"Authorization": f"Bearer {self._token()}",
+                         "Content-Type": "application/json"},
+                method="POST")
+            with self.connection.opener().open(
+                    request, timeout=90) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(bigquery_http_error_message(e)) from e
         fields = (payload.get("schema") or {}).get("fields") or []
         names = [f.get("name", "") for f in fields]
         rows = [[cell.get("v") for cell in row.get("f", [])]
@@ -264,10 +275,15 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
                                 "machine: not your SQL; dry_run and "
                                 "snapshot still work", "source": "gate"})
 
-    # 4. only now may an execution object exist
+    # 4. only now may an execution object exist. When the live runner is
+    # user-scoped, the required dry run uses the same user token too;
+    # the evals inject their own substrate class, so the keyword rides
+    # only when there is a token to ride
     if substrate is None:
         from sahs.evals.substrate import BQDryRun
-        substrate = BQDryRun()
+        token_provider = getattr(runner, "token_provider", None)
+        substrate = (BQDryRun(token_provider=token_provider)
+                     if token_provider is not None else BQDryRun())
 
     # the project that HOSTS the tables may not be the one that runs
     # the query: qualify every table the build knows before the trip
@@ -293,7 +309,9 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
 
     outcome = substrate.dry_run(sent)
     if not outcome.valid:
-        return _finish("error", error=f"invalid_sql: {outcome.error}",
+        prefix = "bigquery_authorization" if is_bigquery_auth_error(
+            outcome.error or "") else "invalid_sql"
+        return _finish("error", error=f"{prefix}: {outcome.error}",
                        taught=_taught(outcome.error or ""))
     meta["bytes_scanned"] = outcome.bytes_processed
 
@@ -343,6 +361,24 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
                       "bounds normal queries; narrow the scan or "
                       "justify the outlier to a steward.")
     if runner is None:
+        # BigQuery as the person (SAHS_BQ_AUTH_MODE=user): live needs the
+        # person's connected Google account, and the gates above have
+        # already had their say; as the service account, the default runner
+        from sahs.util.auth import AuthError, resolve_bq_auth_mode
+        try:
+            user_scoped = resolve_bq_auth_mode() == "user"
+        except AuthError:
+            user_scoped = False
+        if user_scoped:
+            return _finish(
+                "denied",
+                error="google_oauth_required: live BigQuery execution requires "
+                      "a stored Google OAuth connection",
+                taught={
+                    "kind": "access", "yours_to_fix": False,
+                    "hint": "this workspace requires a connected Google account "
+                            "for live BigQuery. Open Account, connect Google "
+                            "BigQuery, and retry.", "source": "oauth"})
         runner = BQJobRunner()
     capped = _cap_limit(sent, limit)
     try:

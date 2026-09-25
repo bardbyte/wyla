@@ -21,6 +21,10 @@ Contract (the silo .env):
 ``inspect()`` is what ``scripts/spanner_check.py`` prints: the
 database's state, its tables with columns and indexes, optional row
 counts, and the diff against the designed DDL under ``db/spanner``.
+
+This module became the package's ``__init__`` when the enterprise
+branch's ``sahs/util/spanner/settings.py`` arrived: the same names,
+importable as before; the settings live in the submodule.
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from .auth import (AuthError, _first_env, describe_route, env_proxies,
+from sahs.util.auth import (AuthError, _first_env, describe_route, env_proxies,
                    load_dotenv, plane_opener, resolve_ssl)
 
 DEFAULT_ENDPOINT = "https://spanner.googleapis.com"

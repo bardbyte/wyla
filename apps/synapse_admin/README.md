@@ -48,6 +48,41 @@ reports the BQ (PSC) and Vertex (proxy) planes as booleans —
 configured or not, never values. The app itself calls neither;
 enrichment and dry-runs stay with `pipeline.py`.
 
+## Sign-in
+
+Three modes, picked by `SAHS_STORE` in the silo `.env`:
+
+| `SAHS_STORE` | who you are | when |
+|---|---|---|
+| `local` (default) | the local developer, admin, no cookie | a laptop working on the graph |
+| `sqlite` | the people in one local file, real sessions and roles | trying the sign-in, the account and People pages, tests |
+| `spanner` | the people in Cloud Spanner | the deployment |
+
+With a store, the shell boots as the signed-in person (`js/session.js`):
+nobody signed in means every route is the sign-in page, every API call
+carries the CSRF header on anything that changes state, and a 401 goes
+back to the door. Roles decide the surfaces: admins open this console,
+everyone else is sent to `/synapse/`.
+
+The front door is Okta (`OKTA_*` in `.env.example`). To try the whole
+hop on a laptop, use the non-production Okta client and add
+`http://localhost:8400/callback` to its Login redirect URIs; never the
+production client. The email-and-password form is off unless a
+deployment opens it:
+
+```sh
+# a laptop without Okta: the form, the first account is the admin
+SAHS_STORE=sqlite AUTH_LOCAL_LOGIN=1 AUTH_PEPPER=anything \
+AUTH_BOOTSTRAP_ADMIN_EMAIL=you@example.com AUTH_COOKIE_SECURE=auto \
+uvicorn apps.synapse_admin.backend.app:app --port 8400
+```
+
+`AUTH_COOKIE_SECURE=auto` follows the request: plain over `http://localhost`,
+`Secure` behind TLS. Pages: `#/signin?next=`, `#/account` (roles, the
+Google connection when BigQuery is delegated to people, sign out),
+`#/users` (admins: roles granted or taken back, accounts disabled or
+restored, the access contexts behind each person's sign-ins).
+
 ## Surfaces
 
 | route | screen |

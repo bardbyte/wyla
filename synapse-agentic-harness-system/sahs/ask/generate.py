@@ -72,16 +72,16 @@ class Generation:
 
 
 def _execute_mode() -> str:
-    """Live only when BOTH the sandbox is unlocked and Ask is asked to
-    use it; otherwise the dry run, which returns zero rows by design."""
+    """Live when the sandbox is unlocked unless Ask is explicitly
+    pinned back to snapshot; snapshot returns zero rows by design."""
     from sahs.tools.sandbox import live_enabled
     if (live_enabled()
-            and os.environ.get("ASK_EXECUTE", "").lower() == "live"):
+            and os.environ.get("ASK_EXECUTE", "live").lower() == "live"):
         return "live"
     return "snapshot"
 
 
-def run_query(build: Build, sql: str) -> dict[str, Any]:
+def run_query(build: Build, sql: str, *, runner: Any = None) -> dict[str, Any]:
     """Execute through the sandbox: ACL, then cost gates, then run.
 
     A denial is a result, not an exception — and neither is an
@@ -90,16 +90,19 @@ def run_query(build: Build, sql: str) -> dict[str, Any]:
     of the turn dying. A machine with no BigQuery still gets a
     composed, validated, honestly-unverified answer."""
     try:
-        envelope = execute_sandboxed(build, sql, mode=_execute_mode())
+        envelope = execute_sandboxed(build, sql, mode=_execute_mode(), runner=runner)
     except Exception as e:                       # transport, creds, ACL
         return {"status": "error", "data": {},
                 "error": f"{type(e).__name__}: {e}", "meta": {}}
     if (envelope.get("status") == "denied"
             and _execute_mode() == "live"):
+        taught = (envelope.get("meta") or {}).get("taught") or {}
+        if taught.get("kind") == "access":
+            return envelope
         # the gates said no: fall back to the dry run and keep the
         # refusal, so the answer can say why there is no number
         try:
-            fallback = execute_sandboxed(build, sql, mode="snapshot")
+            fallback = execute_sandboxed(build, sql, mode="snapshot", runner=runner)
         except Exception as e:
             return {"status": "error", "data": {},
                     "error": f"{type(e).__name__}: {e}", "meta": {}}
@@ -145,7 +148,8 @@ def _sql_prompt(plan: Plan, retrieval: dict[str, Any],
 
 def generate(model: Any, build: Build, plan: Plan, *,
              on_token: Callable[[str], None] | None = None,
-             abort_check: Callable[[], None] | None = None) -> Generation:
+             abort_check: Callable[[], None] | None = None,
+             runner: Any = None) -> Generation:
     """Compose, validate (one repair attempt), execute, then stream the
     prose through ``on_token``."""
     retrieval = _retrieve(build, plan)
@@ -181,7 +185,7 @@ def generate(model: Any, build: Build, plan: Plan, *,
     # ── execute (dry run by default: zero rows, real gates) ──
     if abort_check:
         abort_check()
-    envelope = run_query(build, gen.sql)
+    envelope = run_query(build, gen.sql, runner=runner)
     gen.execution = {"status": envelope.get("status"),
                      "error": envelope.get("error"),
                      "meta": envelope.get("meta", {})}

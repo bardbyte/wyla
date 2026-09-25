@@ -25,6 +25,18 @@ Then, unless --no-matrix, every distinct client is probed against the OTHER
 environments' callbacks, so you can see whether e.g. the prod client also
 accepts the dev callback (it should not).
 
+--inventory <ENV> goes one step further and answers "what do we actually
+get from Okta": it signs YOU in once, through a browser, on that
+environment's client, with a local callback (OKTA_LOCAL_REDIRECT_URI,
+default http://localhost:8400/callback, which must be added to the client's
+Login redirect URIs; use the non-production client). It then prints every
+claim of the ID token, of the access token when it is a JWT, and of the
+/userinfo answer, verifies the ID token's signature against the JWKS, and
+gives a verdict on each thing the app needs: an email claim, a name, the
+group claim, a stable subject, the token lifetimes. --redact masks the
+personal values (an email keeps its domain, a name its shape) so the output
+can be pasted anywhere; --out writes the JSON for identity_map.py.
+
 Configuration comes from environment variables; NAME_<ENV> wins over NAME:
 
   AUTHCHECK_ENVS             comma list of environments, default E1,E2,E3
@@ -34,6 +46,8 @@ Configuration comes from environment variables; NAME_<ENV> wins over NAME:
   OKTA_CLIENT_SECRET_<ENV>   optional; enables check 5
   OKTA_SCOPES                space or comma list, default "openid profile"
   OKTA_GROUP_CLAIM           optional, e.g. groups
+  OKTA_LOCAL_REDIRECT_URI    --inventory: the local callback, default http://localhost:8400/callback
+  OKTA_INVENTORY_SCOPES      --inventory: scopes to request, default OKTA_SCOPES + email groups
   GOOGLE_REDIRECT_URI_<ENV>  optional; reported as parity with the Okta callback
 
 TLS: `truststore` (the OS keychain, where corporate roots live) when it is
@@ -44,6 +58,7 @@ HTTPS_PROXY is honoured.
 Usage:
   python okta_check.py --env-file .env.authcheck.local
   python okta_check.py --envs E1,E3 --json
+  python okta_check.py --env-file .env.authcheck.local --inventory E1 --redact --out okta.json
 
 Exit code: 0 everything passed, 1 something FAILED, 2 configuration problem.
 """
@@ -266,6 +281,322 @@ def pkce() -> dict:
             "code_challenge_method": "S256"}
 
 
+# ------------------------------------------------------------ inventory --
+REDACT = False
+# under --redact these stay readable: they name things, not people
+KEEP_UNDER_REDACT = {"iss", "aud", "azp", "alg", "kid", "typ", "scp", "scope", "amr", "idp",
+                     "cid", "ver", "groups", "hd", "token_type", "email_verified", "acr"}
+
+
+def b64url_decode(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def decode_jwt(token: str) -> tuple[dict, dict] | None:
+    """(header, claims) of a JWT, unverified; None when the string is not one."""
+    parts = (token or "").split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        header = json.loads(b64url_decode(parts[0]))
+        claims = json.loads(b64url_decode(parts[1]))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(header, dict) or not isinstance(claims, dict):
+        return None
+    return header, claims
+
+
+def verify_rs256(token: str, jwks: dict) -> str:
+    """'verified', 'failed: ...' or 'unverified: ...' (no cryptography package,
+    or an algorithm this check does not cover)."""
+    decoded = decode_jwt(token)
+    if not decoded:
+        return "unverified: not a JWT"
+    header, _ = decoded
+    if header.get("alg") != "RS256":
+        return f"unverified: alg {header.get('alg')} is not RS256"
+    key = next((k for k in (jwks or {}).get("keys", []) if k.get("kid") == header.get("kid")), None)
+    if key is None:
+        return f"failed: no key {header.get('kid')!r} in the JWKS"
+    try:
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+    except ImportError:
+        return "unverified: pip install cryptography to verify the signature here"
+    head, body, sig = token.split(".")
+    try:
+        public = rsa.RSAPublicNumbers(int.from_bytes(b64url_decode(key["e"]), "big"),
+                                      int.from_bytes(b64url_decode(key["n"]), "big")).public_key()
+        public.verify(b64url_decode(sig), f"{head}.{body}".encode(), padding.PKCS1v15(),
+                      hashes.SHA256())
+    except Exception as exc:  # noqa: BLE001 - any failure is the same answer
+        return f"failed: {type(exc).__name__}"
+    return "verified"
+
+
+def mask(value, key: str = ""):
+    """Personal values under --redact: an e-mail keeps its domain, a string its
+    shape and length, a list its length; names of things stay (KEEP_UNDER_REDACT)."""
+    if not REDACT or value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, list):
+        return [mask(v, key) for v in value]
+    if isinstance(value, dict):
+        return {k: mask(v, k) for k, v in value.items()}
+    if key.lower() in KEEP_UNDER_REDACT:
+        return value
+    text = str(value)
+    if "@" in text and " " not in text:
+        local, _, domain = text.partition("@")
+        return f"{local[:1]}***@{domain}"
+    if len(text) <= 3:
+        return "***"
+    return f"{text[:2]}...{text[-1]}({len(text)})"
+
+
+def show(value) -> str:
+    """One line for a claim value in the table."""
+    if isinstance(value, list):
+        inner = ", ".join(str(v) for v in value[:12]) + (", ..." if len(value) > 12 else "")
+        return f"list[{len(value)}]: {inner}"
+    if isinstance(value, dict):
+        return "object: " + ", ".join(sorted(value)[:12])
+    return f"{type(value).__name__}: {value}"
+
+
+def receive_code(redirect_uri: str, state: str, timeout: int, open_browser: bool,
+                 url: str) -> dict:
+    """Serve the local callback once and return its query as a dict, or
+    {"error": ...}. The browser is opened on the authorize URL; the URL is
+    printed too, for a machine without one."""
+    import http.server
+
+    parts = urllib.parse.urlsplit(redirect_uri)
+    host, port, path = parts.hostname or "127.0.0.1", parts.port or 80, parts.path or "/"
+    got: dict = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - the stdlib's name
+            u = urllib.parse.urlsplit(self.path)
+            if u.path.rstrip("/") != path.rstrip("/"):
+                self.send_response(404)
+                self.end_headers()
+                return
+            got.update({k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()})
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"<!doctype html><title>Synapse preflight</title>"
+                             b"<p>Received. Close this tab and return to the terminal.</p>")
+
+        def log_message(self, *args):  # quiet
+            pass
+
+    try:
+        server = http.server.HTTPServer((host, port), Handler)
+    except OSError as exc:
+        return {"error": f"cannot listen on {host}:{port} for the callback: {exc}"}
+    server.timeout = 1
+    print(f"\nSign in here (the browser should open by itself):\n  {url}\n", file=sys.stderr)
+    if open_browser:
+        import webbrowser
+        webbrowser.open(url)
+    deadline = time.time() + timeout
+    try:
+        while not got and time.time() < deadline:
+            server.handle_request()
+    finally:
+        server.server_close()
+    if not got:
+        return {"error": f"no callback arrived within {timeout}s"}
+    if got.get("state") != state:
+        return {"error": "the callback carried another state; start again"}
+    return got
+
+
+def exchange_code(token_ep: str, client_id: str, secret: str | None, code: str,
+                  redirect_uri: str, verifier: str) -> tuple[dict, str]:
+    """(token response, how the client authenticated) or ({}, error)."""
+    form = {"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri,
+            "code_verifier": verifier}
+    hdrs = {"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}
+    attempts = []
+    if secret:
+        basic = base64.b64encode(f"{client_id}:{secret}".encode()).decode()
+        attempts.append(("client_secret_basic", {**hdrs, "Authorization": f"Basic {basic}"}, form))
+        attempts.append(("client_secret_post", hdrs,
+                         {**form, "client_id": client_id, "client_secret": secret}))
+    else:
+        attempts.append(("none (public client, PKCE only)", hdrs, {**form, "client_id": client_id}))
+    last = ""
+    for how, headers, body in attempts:
+        r = http(token_ep, "POST", urllib.parse.urlencode(body).encode(), headers)
+        doc = r.json() or {}
+        if r.status == 200 and doc.get("id_token"):
+            return doc, how
+        last = f"{how}: {doc.get('error', '')} {doc.get('error_description', '')}".strip() \
+            if doc else f"{how}: {r.error or f'HTTP {r.status}'}"
+        if doc.get("error") != "invalid_client":
+            break
+    return {}, last
+
+
+CLAIM_ORDER = ("sub", "email", "email_verified", "preferred_username", "login", "name",
+               "given_name", "family_name", "groups", "amr", "idp", "auth_time", "iss", "aud",
+               "iat", "exp", "nonce", "at_hash", "jti", "ver")
+
+
+def ordered(claims: dict) -> list[str]:
+    return [c for c in CLAIM_ORDER if c in claims] + sorted(c for c in claims if c not in CLAIM_ORDER)
+
+
+def inventory(env: str, rep: Report, *, timeout: int, open_browser: bool) -> None:
+    """Sign in once on this environment's client and report every claim that
+    comes back, then the verdict on each thing the app needs."""
+    facts = rep.facts.get(env) or {}
+    if not facts.get("authorization_endpoint"):
+        rep.add(env, "inventory", "FAIL", "discovery did not answer above; nothing to sign in to")
+        return
+    client_id = cfg("OKTA_CLIENT_ID", env)
+    secret = cfg("OKTA_CLIENT_SECRET", env)
+    redirect_local = norm_redirect(cfg("OKTA_LOCAL_REDIRECT_URI", env,
+                                       "http://localhost:8400/callback"))
+    if redirect_local.startswith("https://localhost"):
+        redirect_local = "http://" + redirect_local[len("https://"):]
+    base_scopes = split_list(cfg("OKTA_SCOPES", env, "openid profile"))
+    scopes = split_list(cfg("OKTA_INVENTORY_SCOPES", env, "")) or sorted(
+        set(base_scopes) | {"openid", "email", "groups"}, key=lambda x: (x != "openid", x))
+    claim_name = cfg("OKTA_GROUP_CLAIM", env) or "groups"
+
+    state, nonce = secrets.token_urlsafe(16), secrets.token_urlsafe(16)
+    verifier = secrets.token_urlsafe(48)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    url = facts["authorization_endpoint"] + "?" + urllib.parse.urlencode({
+        "client_id": client_id, "redirect_uri": redirect_local, "response_type": "code",
+        "scope": " ".join(scopes), "state": state, "nonce": nonce,
+        "code_challenge": challenge, "code_challenge_method": "S256"})
+    got = receive_code(redirect_local, state, timeout, open_browser, url)
+    if got.get("error"):
+        why = got["error"]
+        if got.get("error_description"):
+            why = f"Okta refused: {why}: {got['error_description']}"
+        if "redirect_uri" in why or why == "invalid_request":
+            why += f" (add {redirect_local} to the client's Login redirect URIs)"
+        if "invalid_scope" in why:
+            why += " (a requested scope is not on this authorization server; set OKTA_INVENTORY_SCOPES)"
+        rep.add(env, "sign-in", "FAIL", why)
+        return
+    tokens, how = exchange_code(facts["token_endpoint"], client_id, secret, got.get("code", ""),
+                                redirect_local, verifier)
+    if not tokens:
+        rep.add(env, "sign-in", "FAIL", f"the code exchange failed: {how}")
+        return
+    at_kind = "JWT" if decode_jwt(tokens.get("access_token", "")) else "opaque"
+    rep.add(env, "sign-in", "PASS",
+            f"signed in with scopes '{' '.join(scopes)}' (client auth: {how}); tokens: id_token, "
+            f"access_token ({at_kind}, {tokens.get('expires_in', '?')}s)"
+            + (", refresh_token" if tokens.get("refresh_token") else ", no refresh_token")
+            + f"; granted scope: {tokens.get('scope', '?')}")
+
+    # the ID token
+    decoded = decode_jwt(tokens["id_token"])
+    if not decoded:
+        rep.add(env, "id_token", "FAIL", "not a JWT")
+        return
+    header, claims = decoded
+    jr = http(facts.get("jwks_uri") or "")
+    jwks = jr.json() if jr.status == 200 else {}
+    verdict = verify_rs256(tokens["id_token"], jwks or {})
+    problems = []
+    if claims.get("iss") != facts.get("issuer"):
+        problems.append(f"iss {claims.get('iss')} != discovery issuer {facts.get('issuer')}")
+    aud = claims.get("aud")
+    if client_id not in (aud if isinstance(aud, list) else [aud]):
+        problems.append("aud does not name our client")
+    if claims.get("nonce") != nonce:
+        problems.append("nonce mismatch")
+    status = "PASS" if verdict == "verified" and not problems else ("WARN" if verdict.startswith("unverified") and not problems else "FAIL")
+    rep.add(env, "id_token.verify", status,
+            f"alg {header.get('alg')} kid {header.get('kid')}: signature {verdict}"
+            + ("; " + "; ".join(problems) if problems else "; iss, aud and nonce match"))
+    life = (claims.get("exp") or 0) - (claims.get("iat") or 0)
+    rep.add(env, "id_token.lifetime", "INFO", f"{life}s ({life // 60} min)")
+    for name in ordered(claims):
+        rep.add(env, f"id_token.{name}", "INFO", show(mask(claims[name], name)))
+
+    # the access token, when it is a JWT (custom authorization servers)
+    at = decode_jwt(tokens.get("access_token", ""))
+    at_claims = at[1] if at else {}
+    if at_claims:
+        for name in ordered(at_claims):
+            if name in ("iss", "aud", "iat", "exp", "jti", "ver", "auth_time", "nonce"):
+                continue
+            rep.add(env, f"access_token.{name}", "INFO", show(mask(at_claims[name], name)))
+
+    # userinfo
+    ui_claims: dict = {}
+    if facts.get("userinfo_endpoint"):
+        ur = http(facts["userinfo_endpoint"], headers={
+            "Authorization": f"Bearer {tokens.get('access_token', '')}", "Accept": "application/json"})
+        ui_claims = ur.json() if ur.status == 200 and isinstance(ur.json(), dict) else {}
+        if ui_claims:
+            extra = [c for c in ordered(ui_claims) if c not in claims]
+            rep.add(env, "userinfo", "PASS",
+                    f"{len(ui_claims)} claims; beyond the id_token: {', '.join(extra) or 'none'}")
+            for name in extra:
+                rep.add(env, f"userinfo.{name}", "INFO", show(mask(ui_claims[name], name)))
+        else:
+            rep.add(env, "userinfo", "WARN", f"HTTP {ur.status} {ur.error or text_of(ur)[:120]}")
+
+    # the verdicts the app needs
+    everything = {**ui_claims, **at_claims, **claims}
+    email = next((c for c in ("email", "preferred_username", "login") if everything.get(c)
+                  and "@" in str(everything.get(c))), None)
+    where = "id_token" if email in claims else ("userinfo" if email in ui_claims else "access_token")
+    rep.add(env, "need: email", "PASS" if email else "FAIL",
+            f"{email} in the {where} (set AUTH_EMAIL_CLAIMS={email})" if email
+            else "no claim carries an e-mail: grant the email scope, or add an email claim on the server")
+    name_ok = everything.get("name") or (everything.get("given_name") and everything.get("family_name"))
+    rep.add(env, "need: name", "PASS" if name_ok else "WARN",
+            "name" + (" and given_name/family_name" if everything.get("given_name") else "") + " present"
+            if name_ok else "no name claims (profile scope missing, or not mapped); the app falls back to the e-mail")
+    groups = everything.get(claim_name)
+    if isinstance(groups, list):
+        where = "id_token" if claim_name in claims else ("access_token" if claim_name in at_claims else "userinfo")
+        rep.add(env, "need: groups", "PASS",
+                f"{claim_name} in the {where}: {len(groups)} group(s); AUTH_GROUP_ROLE_MAP maps these names to roles")
+    else:
+        rep.add(env, "need: groups", "WARN",
+                f"no '{claim_name}' claim anywhere: on the authorization server add a Claims rule "
+                f"'{claim_name}' (Groups, filter) for the ID token, or set OKTA_GROUP_CLAIM to the claim it uses")
+    rep.add(env, "need: subject", "PASS" if claims.get("sub") else "FAIL",
+            "sub present: the stable key the store links the person on" if claims.get("sub") else "no sub")
+    amr = everything.get("amr")
+    rep.add(env, "need: mfa", "INFO",
+            f"amr {amr}: {'a second factor was used' if isinstance(amr, list) and any(a in ('mfa', 'otp', 'sms', 'hwk', 'swk', 'pop') for a in amr) else 'no second factor visible'}"
+            if amr else "no amr claim (Okta shows the factors only when the server maps them)")
+    rep.add(env, "need: refresh", "INFO",
+            "refresh_token present (offline_access granted)" if tokens.get("refresh_token")
+            else "no refresh_token: fine for a browser sign-in (the app keeps its own session)")
+
+    rep.facts.setdefault("inventory", {})[env] = mask({
+        "provider": "okta", "issuer": facts.get("issuer"), "client_id": client_id,
+        "scopes_requested": scopes, "scopes_granted": split_list(str(tokens.get("scope", ""))),
+        "client_auth": how, "id_token_lifetime_s": life,
+        "access_token_kind": at_kind, "access_token_expires_in": tokens.get("expires_in"),
+        "refresh_token": bool(tokens.get("refresh_token")),
+        "sub": claims.get("sub"), "email": everything.get(email) if email else None,
+        "email_claim": email, "preferred_username": everything.get("preferred_username"),
+        "name": everything.get("name"), "given_name": everything.get("given_name"),
+        "family_name": everything.get("family_name"),
+        "groups": groups if isinstance(groups, list) else None, "groups_claim": claim_name,
+        "amr": amr, "idp": everything.get("idp"),
+        "id_token_claims": ordered(claims), "access_token_claims": ordered(at_claims),
+        "userinfo_claims": ordered(ui_claims), "signature": verdict,
+    })
+
+
 def probe_authorize(authz: str, client_id: str, redirect_uri: str,
                     scopes: list[str]) -> tuple[str, str]:
     """Ask /authorize with prompt=none and read Okta's verdict on the
@@ -369,9 +700,20 @@ def run_env(env: str, rep: Report, clients: dict, redirects: dict) -> None:
     authz = doc["authorization_endpoint"]
     rep.facts[env] = {k: doc.get(k) for k in (
         "issuer", "authorization_endpoint", "token_endpoint", "introspection_endpoint",
-        "userinfo_endpoint", "jwks_uri", "end_session_endpoint", "scopes_supported",
-        "claims_supported", "grant_types_supported", "code_challenge_methods_supported")}
+        "userinfo_endpoint", "jwks_uri", "end_session_endpoint", "revocation_endpoint",
+        "scopes_supported", "claims_supported", "grant_types_supported",
+        "code_challenge_methods_supported", "token_endpoint_auth_methods_supported",
+        "id_token_signing_alg_values_supported", "response_types_supported")}
     rep.add(env, "discovery", "PASS", f"issuer {issuer} ({ms} ms)")
+    rep.add(env, "capabilities", "INFO",
+            f"grants {','.join(doc.get('grant_types_supported') or ['?'])}; client auth "
+            f"{','.join(doc.get('token_endpoint_auth_methods_supported') or ['?'])}; PKCE "
+            f"{','.join(doc.get('code_challenge_methods_supported') or ['none'])}; id_token algs "
+            f"{','.join(doc.get('id_token_signing_alg_values_supported') or ['?'])}; logout endpoint "
+            f"{'yes' if doc.get('end_session_endpoint') else 'no'}; userinfo "
+            f"{'yes' if doc.get('userinfo_endpoint') else 'no'}")
+    if doc.get("claims_supported"):
+        rep.add(env, "claims published", "INFO", ", ".join(doc["claims_supported"]))
     disc_host = urllib.parse.urlsplit(url).netloc.lower()
     if urllib.parse.urlsplit(issuer).netloc.lower() != disc_host:
         rep.add(env, "issuer host", "WARN", f"issuer {issuer} is not on {disc_host}")
@@ -466,8 +808,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-matrix", action="store_true",
                     help="skip probing each client against the other environments' callbacks")
     ap.add_argument("--timeout", type=int, default=_TIMEOUT, help="seconds per request")
+    ap.add_argument("--inventory", metavar="ENV",
+                    help="sign in once on this environment's client through the browser and list "
+                         "every claim Okta returns (needs OKTA_LOCAL_REDIRECT_URI on the client)")
+    ap.add_argument("--redact", action="store_true",
+                    help="mask personal values in the inventory (e-mails keep their domain)")
+    ap.add_argument("--no-browser", action="store_true",
+                    help="print the sign-in URL instead of opening a browser")
+    ap.add_argument("--wait", type=int, default=180, help="seconds to wait for the sign-in")
+    ap.add_argument("--out", metavar="FILE", help="write the JSON report here as well")
     args = ap.parse_args(argv)
     _TIMEOUT = args.timeout
+    global REDACT
+    REDACT = args.redact
     if args.env_file:
         if not os.path.exists(args.env_file):
             print(f"env file not found: {args.env_file}", file=sys.stderr)
@@ -482,7 +835,15 @@ def main(argv: list[str] | None = None) -> int:
         run_env(env, rep, clients, redirects)
     if not args.no_matrix and clients and len(redirects) > 1:
         run_matrix(rep, clients, redirects)
+    if args.inventory:
+        env = args.inventory.strip()
+        if env not in envs:
+            run_env(env, rep, clients, redirects)
+        inventory(env, rep, timeout=args.wait, open_browser=not args.no_browser)
 
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            json.dump(rep.dump(), fh, indent=2)
     if args.json:
         print(json.dumps(rep.dump(), indent=2))
     else:

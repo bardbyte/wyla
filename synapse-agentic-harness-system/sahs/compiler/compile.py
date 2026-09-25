@@ -622,7 +622,10 @@ def compile_build(graph_root: Path, builds_root: Path
                 "disambiguation":
                     record.props.get("disambiguation_enriched", "")}
     for label, rows in sorted(bindings_by_label.items()):
-        slug = label.replace(" ", "_").replace("/", "_")[:60]
+        slug = "".join(
+            character if character.isalnum() or character in "._-" else "_"
+            for character in label
+        )[:60]
         (build_dir / "cards" / "concepts" / f"{slug}.md").write_text(
             concept_card(label, rows,
                          enriched=concept_notes.get(label)) + "\n",

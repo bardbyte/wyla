@@ -58,7 +58,10 @@ def test_shell_and_planes(client):
     page = client.get("/")
     assert page.status_code == 200
     assert "SYNAPSE" in page.text and "powered by Lumi" in page.text
-    assert "Saheb Singh" in page.text  # logged-in identity, no build chip
+    # the account row is drawn from /api/auth/me by js/session.js: the
+    # shell ships no name of its own, and no build chip
+    assert 'id="account-name"' in page.text and 'href="#/account"' in page.text
+    assert "Saheb Singh" not in page.text
     assert client.get("/health").json()["app"] == "synapse-by-lumi"
     planes = client.get("/api/synapse/planes").json()
     # three planes as booleans, and which model plane the chat rides

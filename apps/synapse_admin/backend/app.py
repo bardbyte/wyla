@@ -5,7 +5,7 @@ under ``/api/meridian/*`` and the hand-authored frontend (ES modules,
 no bundler, three.js vendored locally) from ``frontend/``. Run it
 from the repo root:
 
-    uvicorn apps.synapse_admin.backend.app:app --port 8400
+    uvicorn apps.synapse_admin.backend.app:app --port 8080
 
 Environment: the same ``.env`` contract as the pipeline. The app
 itself only READS the compiled build (``MERIDIAN_SILO_DIR`` /
@@ -19,14 +19,20 @@ deployment.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from apps.synapse_admin.backend.auth import callback_router, router as auth_router
+from apps.synapse_admin.backend.admin import router as admin_router
+from apps.synapse_admin.backend.access import router as access_router
+from apps.synapse_admin.backend.okta import (callback_router as okta_callback_router,
+                                             router as okta_router)
 from apps.synapse_admin.backend.ask import router as ask_router
 from apps.synapse_admin.backend.chat import router as chat_router
 from apps.synapse_admin.backend.kc import router as kc_router
@@ -44,6 +50,7 @@ _LOGO_TYPES = {".png": "image/png", ".jpg": "image/jpeg",
                ".jpeg": "image/jpeg", ".svg": "image/svg+xml",
                ".webp": "image/webp", ".gif": "image/gif"}
 LOGO_VAR = "SYNAPSE_LOGO"
+logger = logging.getLogger(__name__)
 
 
 # what the first bytes of an image say it is: a .png that is really a
@@ -127,9 +134,9 @@ def _logo_path() -> Path | None:
 
 
 def _load_env_file() -> None:
-    """Pick up the silo's ``.env`` (the pipeline's own loader: first
-    file found among $SAHS_ENV_FILE → <silo>/.env → ./.env; NEVER
-    overrides variables already exported in the shell). So pasting
+    """Pick up the workspace's ``.env`` (the pipeline's own loader:
+    $SAHS_ENV_FILE → ./.env; it NEVER overrides variables already
+    exported in the shell). So pasting
     ``MERIDIAN_SOURCES_DIR=/path/to/data/sources`` into the .env is
     enough for the Knowledge Files shelf to find its files."""
     import sys
@@ -148,14 +155,75 @@ def _load_env_file() -> None:
 
 def create_app() -> FastAPI:
     _load_env_file()
+    from apps.synapse_admin.backend.security import (
+        CSRF_COOKIE, allowed_origins, csrf_is_required, csrf_is_valid,
+        set_csrf_cookie)
     app = FastAPI(title="Synapse by Lumi", version="0.1.0")
     app.add_middleware(
-        CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
-        allow_headers=["*"])
+        CORSMiddleware,
+        allow_origins=allowed_origins(),
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
+    )
+
+    @app.middleware("http")
+    async def bind_request_user(request: Request, call_next):
+        """Make the cookie user available to owner-scoped route handlers."""
+        from apps.synapse_admin.backend.auth import (COOKIE, _cached_session_user,
+                                                     _google_api_error,
+                                                     request_user)
+        if csrf_is_required(request) and not csrf_is_valid(request):
+            return JSONResponse(status_code=403, content={"detail": "CSRF validation failed"})
+        from apps.synapse_admin.backend.meridian import _silo_import
+        _silo_import()
+        from sahs.spanner import SpannerConfigurationError, spanner_is_enabled
+        user = None
+        session = request.cookies.get(COOKIE, "")
+        try:
+            if (spanner_is_enabled() and session
+                    and not request.url.path.startswith("/api/auth/")):
+                user = _cached_session_user(session)
+        except SpannerConfigurationError as exc:
+            return JSONResponse(
+                {"detail": f"identity service is unavailable: {exc}"},
+                status_code=503)
+        except _google_api_error() as exc:
+            return JSONResponse(
+                {"detail": "identity service is unavailable; verify Cloud "
+                           "Spanner API access and try again"},
+                status_code=503)
+        except OSError as exc:
+            return JSONResponse(
+                {"detail": f"identity service is unavailable: {exc}"},
+                status_code=503)
+        token = request_user.set(user)
+        try:
+            try:
+                response = await call_next(request)
+            except _google_api_error() as exc:
+                logger.error("Google Cloud backend request failed: %s",
+                             exc, exc_info=exc)
+                return JSONResponse(
+                    {"detail": "storage service is unavailable; verify "
+                               "the deployed Spanner schema and access"},
+                    status_code=503)
+            if session and not request.cookies.get(CSRF_COOKIE):
+                set_csrf_cookie(response, secure=request.url.scheme == "https")
+            return response
+        finally:
+            request_user.reset(token)
 
     @app.get("/health")
     def health() -> dict:
         return {"ok": True, "app": "synapse-by-lumi"}
+
+    # the deployment's platform probes a second health path whose name is
+    # the deployment's own, so it comes from the environment
+    # (SYNAPSE_HEALTH_ALIAS=/some/path); unset means /health alone
+    alias = (os.environ.get("SYNAPSE_HEALTH_ALIAS") or "").strip()
+    if alias.startswith("/") and alias != "/health":
+        app.add_api_route(alias, health, methods=["GET"])
 
     @app.get("/api/synapse/planes")
     def planes() -> dict:
@@ -163,10 +231,15 @@ def create_app() -> FastAPI:
         never values. BQ rides the PSC/NO_PROXY contract; Vertex
         rides the proven proxy contract. The app itself calls
         neither; enrichment and dry-runs stay with pipeline.py."""
-        env = os.environ.get
+        try:
+            from config.settings import Settings
+            configured = Settings.load()
+        except ImportError:
+            configured = None
 
         def _set(*names: str) -> bool:
-            return any(bool(env(n)) for n in names)
+            return any(bool(configured.get(name) if configured is not None
+                            else os.environ.get(name)) for name in names)
 
         def _plane() -> str:
             try:
@@ -188,9 +261,13 @@ def create_app() -> FastAPI:
                             "GOOGLE_APPLICATION_CREDENTIALS"),
                 "project": _set("VERTEX_PROJECT_ID",
                                 "GOOGLE_CLOUD_PROJECT"),
-                "model": env("VERTEX_MODEL",
-                             env("GEMINI_MODEL",
-                                 "gemini-3.1-pro-preview")),
+                "model": (configured.get("VERTEX_MODEL")
+                          if configured is not None else
+                          os.environ.get("VERTEX_MODEL")) or
+                         (configured.get("GEMINI_MODEL")
+                          if configured is not None else
+                          os.environ.get("GEMINI_MODEL")) or
+                         "gemini-3.1-pro-preview",
             },
             # the second model plane: Gemini through the gateway behind a
             # the identity service token, and which plane the chat rides
@@ -198,7 +275,10 @@ def create_app() -> FastAPI:
                 "app_id": _set("APP_ID"),
                 "secret": _set("APP_SECRET"),
                 "bearer": _set("GEMINI_BEARER_TOKEN"),
-                "model": env("GATEWAY_MODEL", "gemini-2.5-pro"),
+                "model": (configured.get("GATEWAY_MODEL")
+                          if configured is not None else
+                          os.environ.get("GATEWAY_MODEL")) or
+                         "gemini-2.5-pro",
             },
             "plane": _plane(),
         }
@@ -237,6 +317,12 @@ def create_app() -> FastAPI:
         return FileResponse(str(path),
                             media_type=_LOGO_TYPES[path.suffix.lower()])
 
+    app.include_router(auth_router)
+    app.include_router(callback_router)
+    app.include_router(okta_router)             # Okta sign-in, and the shared /callback
+    app.include_router(okta_callback_router)
+    app.include_router(admin_router)
+    app.include_router(access_router)
     app.include_router(meridian_router)
     app.include_router(ask_router)      # Ask (E18), in-process
     app.include_router(chat_router)     # Synapse v2 chat, in-process
@@ -247,6 +333,9 @@ def create_app() -> FastAPI:
         app.mount("/synapse", StaticFiles(directory=str(_SYNAPSE),
                                           html=True), name="synapse")
     if _FRONTEND.exists():
+        app.mount("/synapse-admin", StaticFiles(directory=str(_FRONTEND),
+                                                html=True),
+                  name="synapse-admin")
         app.mount("/", StaticFiles(directory=str(_FRONTEND),
                                    html=True), name="app")
     return app

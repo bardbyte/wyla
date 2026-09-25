@@ -1,4 +1,4 @@
--- ============================================================
+-- ===========================================================================
 -- Synapse on Spanner · 001 · identity, credentials, roles, sessions
 -- GoogleSQL dialect. Apply in order: 001, 002, 003.
 --
@@ -16,7 +16,7 @@
 --     role may open is a column, so admin→the admin console, analyst→Synapse
 --     and the steward's set change without a deploy;
 --   * audit is append-only, on its own change stream.
--- ============================================================
+-- ===========================================================================
 
 CREATE TABLE Users (
   UserId              STRING(36)  NOT NULL DEFAULT (GENERATE_UUID()),
@@ -25,6 +25,8 @@ CREATE TABLE Users (
   EmailNormalized     STRING(320) NOT NULL AS (LOWER(TRIM(Email))) STORED,
   Username            STRING(64)  NOT NULL,
   UsernameNormalized  STRING(64)  NOT NULL AS (LOWER(TRIM(Username))) STORED,
+  FirstName           STRING(100),
+  LastName            STRING(100),
   DisplayName         STRING(200) NOT NULL,
   -- pending_verification | active | locked | disabled | deleted
   Status              STRING(24)  NOT NULL DEFAULT ('pending_verification'),
@@ -41,7 +43,8 @@ CREATE TABLE Users (
   CreatedAt           TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true),
   UpdatedAt           TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true),
   -- soft delete: the row stays for audit joins, the person is
-  -- anonymized by the deletion job (email/username replaced)
+    -- retained for schema compatibility; account deletion removes the row
+    -- and keeps audit rows independent through nullable user IDs
   DeletedAt           TIMESTAMP,
   CONSTRAINT ck_users_status CHECK (Status IN (
     'pending_verification', 'active', 'locked', 'disabled', 'deleted')),
@@ -128,19 +131,19 @@ CREATE INDEX UserRolesByRole ON UserRoles (RoleId, UserId);
 -- absolute one (AbsoluteExpiresAt, never pushed). Rows die a week after
 -- the absolute expiry — long enough for an investigation to see them.
 CREATE TABLE AuthSessions (
-  SessionId         STRING(36)  NOT NULL DEFAULT (GENERATE_UUID()),
-  UserId            STRING(36)  NOT NULL,
-  TokenHash         BYTES(32)   NOT NULL,
-  CreatedAt         TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true),
-  LastSeenAt        TIMESTAMP   NOT NULL,
-  ExpiresAt         TIMESTAMP   NOT NULL,
-  AbsoluteExpiresAt TIMESTAMP   NOT NULL,
-  Ip                STRING(45),
-  UserAgent         STRING(512),
-  DeviceLabel       STRING(120),
-  MfaPassedAt       TIMESTAMP,
-  RevokedAt         TIMESTAMP,
-  RevokedReason     STRING(64),
+  SessionId          STRING(36)  NOT NULL DEFAULT (GENERATE_UUID()),
+  UserId             STRING(36)  NOT NULL,
+  TokenHash          BYTES(32)   NOT NULL,
+  CreatedAt          TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true),
+  LastSeenAt         TIMESTAMP   NOT NULL,
+  ExpiresAt          TIMESTAMP   NOT NULL,
+  AbsoluteExpiresAt  TIMESTAMP   NOT NULL,
+  Ip                 STRING(45),
+  UserAgent          STRING(512),
+  DeviceLabel        STRING(120),
+  MfaPassedAt        TIMESTAMP,
+  RevokedAt          TIMESTAMP,
+  RevokedReason      STRING(64),
   CONSTRAINT fk_authsessions_user FOREIGN KEY (UserId) REFERENCES Users (UserId),
 ) PRIMARY KEY (SessionId),
   ROW DELETION POLICY (OLDER_THAN(AbsoluteExpiresAt, INTERVAL 7 DAY));
@@ -153,17 +156,17 @@ CREATE INDEX AuthSessionsByUser ON AuthSessions (UserId, RevokedAt, ExpiresAt);
 -- marks the parent used; a used token presented again is reuse, and
 -- the whole family is revoked (ReuseDetectedAt).
 CREATE TABLE RefreshTokens (
-  FamilyId        STRING(36)  NOT NULL,
-  TokenId         STRING(36)  NOT NULL DEFAULT (GENERATE_UUID()),
-  UserId          STRING(36)  NOT NULL,
-  SessionId       STRING(36)  NOT NULL,
-  TokenHash       BYTES(32)   NOT NULL,
-  ParentTokenId   STRING(36),
-  IssuedAt        TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true),
-  ExpiresAt       TIMESTAMP   NOT NULL,
-  UsedAt          TIMESTAMP,
-  RevokedAt       TIMESTAMP,
-  ReuseDetectedAt TIMESTAMP,
+  FamilyId         STRING(36)  NOT NULL,
+  TokenId          STRING(36)  NOT NULL DEFAULT (GENERATE_UUID()),
+  UserId           STRING(36)  NOT NULL,
+  SessionId        STRING(36)  NOT NULL,
+  TokenHash        BYTES(32)   NOT NULL,
+  ParentTokenId    STRING(36),
+  IssuedAt         TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true),
+  ExpiresAt        TIMESTAMP   NOT NULL,
+  UsedAt           TIMESTAMP,
+  RevokedAt        TIMESTAMP,
+  ReuseDetectedAt  TIMESTAMP,
   CONSTRAINT fk_refresh_user FOREIGN KEY (UserId) REFERENCES Users (UserId),
 ) PRIMARY KEY (FamilyId, TokenId),
   ROW DELETION POLICY (OLDER_THAN(ExpiresAt, INTERVAL 30 DAY));
@@ -173,15 +176,15 @@ CREATE UNIQUE INDEX RefreshTokensByHash ON RefreshTokens (TokenHash);
 -- Every login attempt, success or not, for rate limiting by account
 -- and by address and for the audit; a month is enough.
 CREATE TABLE LoginAttempts (
-  AttemptId       STRING(36)  NOT NULL DEFAULT (GENERATE_UUID()),
-  EmailNormalized STRING(320) NOT NULL,
-  UserId          STRING(36),
-  Ip              STRING(45)  NOT NULL,
-  UserAgent       STRING(512),
-  Succeeded       BOOL        NOT NULL,
+  AttemptId        STRING(36)  NOT NULL DEFAULT (GENERATE_UUID()),
+  EmailNormalized  STRING(320) NOT NULL,
+  UserId           STRING(36),
+  Ip               STRING(45)  NOT NULL,
+  UserAgent        STRING(512),
+  Succeeded        BOOL        NOT NULL,
   -- bad_password | unknown_user | locked | mfa_failed | disabled | ok
-  Reason          STRING(32)  NOT NULL,
-  OccurredAt      TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true),
+  Reason           STRING(32)  NOT NULL,
+  OccurredAt       TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true),
 ) PRIMARY KEY (AttemptId),
   ROW DELETION POLICY (OLDER_THAN(OccurredAt, INTERVAL 30 DAY));
 
@@ -243,16 +246,16 @@ CREATE UNIQUE INDEX ActionTokensByHash ON ActionTokens (TokenHash);
 -- An invitation names the address and the role it will hold; the
 -- token that redeems it lives in ActionTokens (Purpose = 'invite').
 CREATE TABLE Invitations (
-  InviteId        STRING(36)  NOT NULL DEFAULT (GENERATE_UUID()),
-  EmailNormalized STRING(320) NOT NULL,
-  RoleId          STRING(36)  NOT NULL,
-  InvitedBy       STRING(36)  NOT NULL,
-  Message         STRING(1000),
-  CreatedAt       TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true),
-  ExpiresAt       TIMESTAMP   NOT NULL,
-  AcceptedAt      TIMESTAMP,
-  AcceptedUserId  STRING(36),
-  RevokedAt       TIMESTAMP,
+  InviteId         STRING(36)  NOT NULL DEFAULT (GENERATE_UUID()),
+  EmailNormalized  STRING(320) NOT NULL,
+  RoleId           STRING(36)  NOT NULL,
+  InvitedBy        STRING(36)  NOT NULL,
+  Message          STRING(1000),
+  CreatedAt        TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true),
+  ExpiresAt        TIMESTAMP   NOT NULL,
+  AcceptedAt       TIMESTAMP,
+  AcceptedUserId   STRING(36),
+  RevokedAt        TIMESTAMP,
   CONSTRAINT fk_invitations_role FOREIGN KEY (RoleId) REFERENCES Roles (RoleId),
 ) PRIMARY KEY (InviteId);
 
@@ -317,8 +320,13 @@ CREATE CHANGE STREAM AuditStream FOR AuditEvents
 --   ('audit.read', 'Read the audit');
 -- INSERT INTO RolePermissions (RoleId, PermissionId)
 --   SELECT r.RoleId, p.PermissionId FROM Roles r CROSS JOIN Permissions p
---   WHERE r.Name = 'admin';                       -- admin holds every permission
+--   WHERE r.Name = 'admin';                                  -- admin holds every permission
 -- INSERT INTO RolePermissions (RoleId, PermissionId)
 --   SELECT r.RoleId, p.PermissionId FROM Roles r CROSS JOIN Permissions p
---   WHERE r.Name IN ('analyst', 'steward')        -- the steward's own set: to be decided
+--   WHERE r.Name = 'analyst'
 --     AND p.Name IN ('chat.use', 'chat.autopilot', 'skills.own', 'knowledge.stage');
+-- INSERT INTO RolePermissions (RoleId, PermissionId)
+--   SELECT r.RoleId, p.PermissionId FROM Roles r CROSS JOIN Permissions p
+--   WHERE r.Name = 'steward'
+--     AND p.Name IN ('chat.use', 'chat.autopilot', 'skills.own',
+--                    'knowledge.stage', 'metrics.certify', 'skills.share');

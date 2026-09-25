@@ -52,12 +52,15 @@
         <!-- the Explore shelf (the library pages) is off this surface
              for now: its routes still answer by URL, and the admin
              console keeps its own entries -->
+        <!-- the signed-in person, drawn by js/session.js from /api/auth/me -->
         <div class="account">
-          <span class="avatar" aria-hidden="true">SS</span>
-          <span class="who">
-            <b>Saheb Singh</b>
-            <span class="role">Steward</span>
-          </span>
+          <a class="who-link" href="#/account" title="Your account">
+            <span class="avatar" id="account-avatar" aria-hidden="true">…</span>
+            <span class="who">
+              <b id="account-name">Signing in…</b>
+              <span class="role" id="account-role"></span>
+            </span>
+          </a>
           <button id="theme-toggle" class="icon-btn" type="button"
                   aria-label="Switch theme">☾</button>
         </div>

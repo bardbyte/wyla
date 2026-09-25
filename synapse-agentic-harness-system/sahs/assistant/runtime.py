@@ -22,6 +22,7 @@ from sahs.ask.budget import Abort, Budget
 from sahs.ask.model import ModelUnavailable
 from sahs.ask.runtime import BuildUnavailable, LazyModel, TurnBusy
 from sahs.tools.api import Build
+from sahs.util.paths import owner_paths
 
 from .events import ASSISTANT_EVENTS, EventBus
 from .loop import (DEFAULT_MODE, DEFAULT_THINKING, DEPTHS, MAX_CALLS,
@@ -65,8 +66,12 @@ class AssistantRuntime:
                  model_factory: Callable[[Budget], Any] | None = None,
                  snapshot_runner: Any = None, runner: Any = None,
                  user_name: str | None = None,
-                 substrate: Any = None) -> None:
+                 substrate: Any = None, owner_user_id: str = "") -> None:
         self.builds_root = Path(builds_root)
+        # a signed-in person's runtime keeps its own store and event log
+        # under runs/chat/users/<id>/; "" is the single-developer mode
+        self.owner_user_id = (owner_user_id or "").strip()
+        store_path, events_dir = owner_paths(self.owner_user_id, store_path, events_dir)
         # the dry-run substrate: None = the laptop's BigQuery; the evals
         # inject a static or fault-injecting one
         self.substrate = substrate

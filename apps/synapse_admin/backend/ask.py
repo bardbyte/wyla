@@ -21,37 +21,49 @@ Paths follow the E18 contract:
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from apps.synapse_admin.backend.meridian import _builds_root, _graph_root, _silo_import
+from apps.synapse_admin.backend.auth import (current_user, _google_runner,
+                                             require_permission)
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api",
+                   dependencies=[Depends(require_permission("chat.use"))])
 
 POLL_SECONDS = 0.05          # 50ms: invisible to a reader, trivial to serve
 HEARTBEAT_SECONDS = 15.0
 
 
-def _ask():
-    """Import the harness from the silo (same path contract as the
-    read plane) and hold one runtime for the process."""
+def _ask(user: dict | None = None):
+    """Return the current user's isolated Ask runtime."""
     _silo_import()                       # puts the silo on sys.path
     from sahs.ask import AskRuntime      # noqa: WPS433 (late by design)
     from sahs.ask.events import sse_frame
     global _RUNTIME
-    if _RUNTIME is None:
+    if _RUNTIME is not None:
+        return _RUNTIME, sse_frame
+    owner = user["user_id"] if user else "local"
+    if owner not in _RUNTIMES:
         ask_dir = _graph_root() / "runs" / "ask"
-        _RUNTIME = AskRuntime(
+        options = dict(
             builds_root=_builds_root(), graph_root=_graph_root(),
             store_path=ask_dir / "sessions.sqlite3",
-            events_dir=ask_dir / "events")
-    return _RUNTIME, sse_frame
+            events_dir=ask_dir / "events", owner_user_id=owner if user else "")
+        if user:
+            runner = _google_runner(owner)
+            if runner is not None:
+                options["runner"] = runner
+        _RUNTIMES[owner] = AskRuntime(**options)
+    return _RUNTIMES[owner], sse_frame
 
 
 _RUNTIME: Any = None
+_RUNTIMES: dict[str, Any] = {}
 
 
 class NewSession(BaseModel):
@@ -80,21 +92,26 @@ def _unavailable(reason: str) -> dict:
 
 
 @router.post("/sessions", status_code=201)
-def create_session(req: NewSession) -> dict:
-    runtime, _ = _ask()
+def create_session(req: NewSession, user: dict = Depends(current_user)) -> dict:
+    if req.kind == "steward" and "metrics.certify" not in user.get(
+            "permissions", []):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403,
+                            detail="metrics.certify required")
+    runtime, _ = _ask(user)
     session = runtime.create_session(req.kind, actor=req.actor)
     return {"available": True, "session": session}
 
 
 @router.get("/sessions")
-def list_sessions(limit: int = 50) -> dict:
-    runtime, _ = _ask()
+def list_sessions(limit: int = 50, user: dict = Depends(current_user)) -> dict:
+    runtime, _ = _ask(user)
     return {"available": True, "sessions": runtime.sessions(limit)}
 
 
 @router.get("/sessions/{session_id}")
-def get_session(session_id: str) -> dict:
-    runtime, _ = _ask()
+def get_session(session_id: str, user: dict = Depends(current_user)) -> dict:
+    runtime, _ = _ask(user)
     session = runtime.store.get_session(session_id)
     if session is None:
         return _unavailable(f"no session {session_id}")
@@ -107,14 +124,22 @@ def get_session(session_id: str) -> dict:
 
 
 @router.post("/sessions/{session_id}/messages", status_code=202)
-def post_message(session_id: str, req: NewMessage) -> dict:
-    runtime, _ = _ask()
+def post_message(session_id: str, req: NewMessage,
+                 user: dict = Depends(current_user)) -> dict:
+    runtime, _ = _ask(user)
     from sahs.ask.model import ModelUnavailable
     from sahs.ask.runtime import BuildUnavailable, TurnBusy
     try:
+        from sahs.tools.sandbox import live_enabled
+        request_runner = (_google_runner(user["user_id"])
+                          if live_enabled()
+                          and os.environ.get("ASK_EXECUTE", "live").lower() == "live"
+                          else None)
+        options = {"choice": req.choice}
+        if request_runner is not None:
+            options["runner"] = request_runner
         return {"available": True,
-                **runtime.start_turn(session_id, req.text,
-                                     choice=req.choice)}
+                **runtime.start_turn(session_id, req.text, **options)}
     except KeyError:
         return _unavailable(f"no session {session_id}")
     except TurnBusy as e:
@@ -124,8 +149,8 @@ def post_message(session_id: str, req: NewMessage) -> dict:
 
 
 @router.post("/sessions/{session_id}/stop")
-def stop_turn(session_id: str) -> dict:
-    runtime, _ = _ask()
+def stop_turn(session_id: str, user: dict = Depends(current_user)) -> dict:
+    runtime, _ = _ask(user)
     return {"available": True, **runtime.stop(session_id)}
 
 
@@ -134,10 +159,11 @@ class RestorePlan(BaseModel):
 
 
 @router.post("/sessions/{session_id}/plan/restore")
-def restore_plan(session_id: str, req: RestorePlan) -> dict:
+def restore_plan(session_id: str, req: RestorePlan,
+                 user: dict = Depends(current_user)) -> dict:
     """Undo as scrubbing, not archaeology. The restored plan is
     appended as the newest version, so the chain never loses a step."""
-    runtime, _ = _ask()
+    runtime, _ = _ask(user)
     from sahs.ask.runtime import TurnBusy
     if runtime.store.get_session(session_id) is None:
         return _unavailable(f"no session {session_id}")
@@ -151,17 +177,18 @@ def restore_plan(session_id: str, req: RestorePlan) -> dict:
 
 
 @router.get("/skills")
-def list_skills() -> dict:
+def list_skills(user: dict = Depends(current_user)) -> dict:
     """The skills an analyst can load — markdown files they put in
     <graph>/skills. Names and descriptions only; the text enters a
     session's context when loaded, never before."""
-    runtime, _ = _ask()
+    runtime, _ = _ask(user)
     return {"available": True, "skills": runtime.skills()}
 
 
 @router.post("/sessions/{session_id}/skills")
-def set_session_skills(session_id: str, req: SetSkills) -> dict:
-    runtime, _ = _ask()
+def set_session_skills(session_id: str, req: SetSkills,
+                       user: dict = Depends(current_user)) -> dict:
+    runtime, _ = _ask(user)
     try:
         result = runtime.set_skills(session_id, req.names)
     except KeyError:
@@ -170,8 +197,9 @@ def set_session_skills(session_id: str, req: SetSkills) -> dict:
 
 
 @router.post("/sessions/{session_id}/feedback", status_code=201)
-def session_feedback(session_id: str, req: NewFeedback) -> dict:
-    runtime, _ = _ask()
+def session_feedback(session_id: str, req: NewFeedback,
+                     user: dict = Depends(current_user)) -> dict:
+    runtime, _ = _ask(user)
     row = runtime.store.add_feedback(session_id, req.subject, req.vote,
                                      turn_id=req.turn_id, note=req.note)
     return {"available": True, "recorded": row["id"]}
@@ -180,11 +208,12 @@ def session_feedback(session_id: str, req: NewFeedback) -> dict:
 @router.get("/sessions/{session_id}/stream")
 async def stream(session_id: str, request: Request, after: int = 0,
                  once: bool = False,
-                 last_event_id: str | None = Header(default=None)) -> Any:
+                 last_event_id: str | None = Header(default=None),
+                 user: dict = Depends(current_user)) -> Any:
     """One stream per session: every turn flows through it. Resume is
     ``Last-Event-ID`` (or ?after=), and because the bus keeps the log,
     a reconnect replays exactly what was missed."""
-    runtime, sse_frame = _ask()
+    runtime, sse_frame = _ask(user)
     if runtime.store.get_session(session_id) is None:
         return StreamingResponse(
             iter([f"event: error\ndata: "
