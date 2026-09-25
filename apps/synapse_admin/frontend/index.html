@@ -41,6 +41,7 @@
           <a href="#/cosmos" data-tab="cosmos"><span class="glyph">✦</span>Cosmos</a>
           <a href="#/operate" data-tab="operate"><span class="glyph">⚙</span>Operate</a>
           <a href="#/kc" data-tab="kc"><span class="glyph">⇪</span>KC Enrichment</a>
+          <a href="#/users" data-tab="users" data-needs="users.manage" hidden><span class="glyph">☺</span>People</a>
         </nav>
         <div class="chats" aria-label="Chats">
           <div class="chats-head">Chats</div>
@@ -49,12 +50,15 @@
             <p class="chats-note">loading…</p>
           </div>
         </div>
+        <!-- the signed-in person, drawn by js/session.js from /api/auth/me -->
         <div class="account">
-          <span class="avatar" aria-hidden="true">SS</span>
-          <span class="who">
-            <b>Saheb Singh</b>
-            <span class="role">Steward</span>
-          </span>
+          <a class="who-link" href="#/account" title="Your account">
+            <span class="avatar" id="account-avatar" aria-hidden="true">…</span>
+            <span class="who">
+              <b id="account-name">Signing in…</b>
+              <span class="role" id="account-role"></span>
+            </span>
+          </a>
           <button id="theme-toggle" class="icon-btn" type="button"
                   aria-label="Switch theme">☾</button>
         </div>

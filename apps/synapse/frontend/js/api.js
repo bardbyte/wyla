@@ -2,9 +2,13 @@
  * carries `available`; false means no compiled build: pages render
  * their designed empty state with the server's own reason. */
 
+// every call goes through the session: the CSRF header on anything that
+// changes state, the sign-in page on a 401
+import { apiFetch } from "./session.js";
+
 async function get(url) {
   try {
-    const r = await fetch(url);
+    const r = await apiFetch(url);
     if (!r.ok) return { available: false, reason: `${url} → ${r.status}` };
     return await r.json();
   } catch {
@@ -17,7 +21,7 @@ async function get(url) {
 // page can render, never an exception it has to guess at.
 async function post(url, body) {
   try {
-    const r = await fetch(url, {
+    const r = await apiFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body ?? {}),
@@ -56,13 +60,13 @@ export const api = {
   enrichRuns: () => get("/api/meridian/enrich_runs"),
   artifacts: () => get("/api/meridian/artifacts"),
   stageArtifact: (payload) =>
-    fetch("/api/meridian/artifacts", {
+    apiFetch("/api/meridian/artifacts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }).then(async (r) => ({ ok: r.ok, ...(await r.json()) })),
   feedback: (payload) =>
-    fetch("/api/meridian/feedback", {
+    apiFetch("/api/meridian/feedback", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -94,7 +98,7 @@ export const api = {
     post(`/api/chat/sessions/${encodeURIComponent(id)}/files`,
          { name, data_b64 }),
   chatRemoveFile: async (id, fileId) => {
-    const r = await fetch(`/api/chat/sessions/${encodeURIComponent(id)
+    const r = await apiFetch(`/api/chat/sessions/${encodeURIComponent(id)
       }/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
     return r.json();
   },
@@ -115,7 +119,7 @@ export const api = {
   chatDraft: (body) => post("/api/chat/skills/draft", body),
   chatSaveSkill: (name, text) => post("/api/chat/skills/mine", { name, text }),
   chatDeleteSkill: async (name) => {
-    const r = await fetch(`/api/chat/skills/mine/${encodeURIComponent(name)}`,
+    const r = await apiFetch(`/api/chat/skills/mine/${encodeURIComponent(name)}`,
                           { method: "DELETE" });
     return r.json();
   },
@@ -149,7 +153,7 @@ export const api = {
   // memory.md: the document, and the document back
   chatMemoryDoc: () => get("/api/chat/memory.md"),
   chatSaveMemoryDoc: async (text) => {
-    const r = await fetch("/api/chat/memory.md", { method: "PUT",
+    const r = await apiFetch("/api/chat/memory.md", { method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }) });
     return r.json();

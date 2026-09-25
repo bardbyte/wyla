@@ -12,7 +12,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote_plus, urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
@@ -37,6 +37,7 @@ class SigningOkta(FakeOkta):
         self.nonce = ""
         self.groups: list[str] = ["Sem-Stewards"]
         self.email: str | None = "ana@example.com"
+        self.subject = "00u1"
 
     def http(self, url, data, headers):
         if url == ISSUER + "/v1/token":
@@ -44,9 +45,11 @@ class SigningOkta(FakeOkta):
             self.calls.append((url, headers, form))
             if form.get("code") != "good-code":
                 return 400, json.dumps({"error": "invalid_grant"}).encode()
-            over = {"groups": self.groups}
+            over = {"groups": self.groups, "sub": self.subject}
             if self.email is None:
                 over["_drop_email"] = True
+            else:
+                over["email"] = self.email
             token = self.id_token(nonce=self.nonce, **over)
             return 200, json.dumps({"id_token": token, "access_token": "at",
                                     "token_type": "Bearer"}).encode()
@@ -174,33 +177,56 @@ def test_state_changing_calls_need_the_csrf_header_and_sign_out_clears_it(client
     assert client.get("/api/auth/me").status_code == 401
 
 
+def _refused(response, *words):
+    """A refusal on the callback is a browser on a URL, so it lands on the
+    sign-in page with its reason in the hash, never a JSON error page."""
+    assert response.status_code == 303, response.text
+    location = unquote_plus(response.headers["location"])
+    assert "#/signin?error=" in location, location
+    for word in words:
+        assert word in location, location
+    return location
+
+
 def test_a_state_is_good_once_and_a_bad_token_or_refusal_is_reported(client, fake):
     state = _start(client, fake)
     first = client.get("/callback", params={"code": "good-code", "state": state}, follow_redirects=False)
-    assert first.status_code == 303
+    assert first.status_code == 303 and "signin" not in first.headers["location"]
     replay = client.get("/callback", params={"code": "good-code", "state": state}, follow_redirects=False)
-    assert replay.status_code == 400 and "expired or was already used" in replay.text
+    _refused(replay, "expired or was already used")
 
     state = _start(client, fake)
     fake.nonce = "not-the-one-we-sent"
     wrong = client.get("/callback", params={"code": "good-code", "state": state}, follow_redirects=False)
-    assert wrong.status_code == 401 and "Okta sign-in failed" in wrong.text
+    _refused(wrong, "Okta sign-in failed")
 
     state = _start(client, fake)
     denied = client.get("/callback", params={"state": state, "error": "access_denied",
                                              "error_description": "User denied"},
                         follow_redirects=False)
-    assert denied.status_code == 400 and "access_denied" in denied.text
+    _refused(denied, "access_denied")
 
     state = _start(client, fake)
     fake.email = None
     nameless = client.get("/callback", params={"code": "good-code", "state": state}, follow_redirects=False)
-    assert nameless.status_code == 401 and "no email" in nameless.text
+    _refused(nameless, "no email")
+    fake.email = "ana@example.com"
 
     unknown = client.get("/callback", params={"code": "x", "state": "okta.never-issued"}, follow_redirects=False)
-    assert unknown.status_code == 400
+    assert _refused(unknown, "expired").startswith("/#/signin")
     audit = auth._identity()._query("SELECT Action, Outcome FROM AuditEvents WHERE Action = 'login.failed'")
     assert len(audit) >= 2
+
+
+def test_a_refusal_lands_on_the_surface_the_person_was_heading_for(client, fake):
+    state = _start(client, fake, "/synapse/#/chat")
+    fake.nonce = "wrong"
+    refused = client.get("/callback", params={"code": "good-code", "state": state}, follow_redirects=False)
+    assert _refused(refused).startswith("/synapse/#/signin?error=")
+    state = _start(client, fake, "/#/home")
+    fake.nonce = "wrong"
+    refused = client.get("/callback", params={"code": "good-code", "state": state}, follow_redirects=False)
+    assert _refused(refused).startswith("/#/signin?error=")
 
 
 def test_next_is_only_ever_a_path_on_this_site(client, fake):
@@ -255,4 +281,4 @@ def test_signin_states_expire(client, fake, monkeypatch):
     real = store_module.utcnow
     monkeypatch.setattr(store_module, "utcnow", lambda: real() + timedelta(seconds=okta.STATE_TTL_SECONDS + 5))
     stale = client.get("/callback", params={"code": "good-code", "state": state}, follow_redirects=False)
-    assert stale.status_code == 400 and "expired" in stale.text
+    _refused(stale, "expired")

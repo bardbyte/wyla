@@ -37,6 +37,7 @@ the schema file `db/spanner/004_google_oauth.sql`; and their changes to
 | `backend/auth.py` `google_callback` | owned `GET /callback` | no route of its own; `backend/okta.py` serves `/callback` and hands any state that is not an Okta sign-in to `google_callback` unchanged | one registered callback URL for both providers |
 | `backend/auth.py` session cookie | `AUTH_COOKIE_SECURE=auto` always set `Secure` | `auto` follows the request: `Secure` over https or behind `x-forwarded-proto: https`, plain over http | a browser drops a `Secure` cookie set over `http://localhost`, so nobody could sign in on a laptop |
 | `backend/admin.py` `users()` | a hand-written SQL join that did not parse | `store.list_users(limit)` | the query had a syntax error; the store already knows how to list people |
+| `backend/okta.py` `/callback` | (new) | a refusal (expired state, bad token, no email, Okta's own error) redirects to the sign-in page of the surface the person was heading for, with the reason in the hash; the audit keeps the status | a browser is on that URL, not a script; a JSON error page is a dead end |
 
 ## Written here to their interfaces
 
@@ -55,6 +56,7 @@ either implementation can replace the other file for file:
 | `sahs/identity/oidc.py` | new here, not theirs: `OidcSettings.from_env()` (the `OKTA_*` variables), `OidcClient` (discovery, JWKS, PKCE authorize URL, code exchange, RS256 ID-token verification), `roles_for_groups` |
 | `backend/okta.py` | new here, not theirs: `GET /api/auth/okta` (status for the sign-in page), `GET /api/auth/okta/start?next=`, `GET /callback` for both providers; state, nonce and PKCE verifier live in the store's `AuthStates` table so any pod may take the callback |
 | `sahs/identity/store.py` additions | `find_or_create_external_user`, `set_roles`, `list_users`, `put_state`, `pop_state`; `db/spanner/006_external_identities.sql` adds `ExternalIdentities` and `AuthStates` |
+| both frontends: `js/session.js`, `pages/signin.js`, `pages/account.js`; admin `pages/users.js` | new here, not theirs: every `api.js` call goes through `apiFetch` (the `X-CSRF-Token` header from the `synapse_csrf` cookie on state-changing calls, the sign-in page on a 401); the shell boots from `/api/auth/me` and draws the account row from it; Okta first on the sign-in page, the email-and-password form only under `AUTH_LOCAL_LOGIN=1`; the account page holds their Google connect popup (`google-connected` message) and disconnect; People uses their `/api/admin/users` and `/api/admin/access` routes |
 
 Additions with no counterpart on their side, all ours: `sahs/identity/database.py`
 (one interface, Spanner and a sqlite stand-in selected by `SAHS_STORE=sqlite`),

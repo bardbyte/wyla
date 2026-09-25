@@ -2,10 +2,13 @@
  * router over the left sidebar, a theme toggle.
  * Routes: #/chat #/chat/<session> #/search #/products
  *         #/product/<physical> #/metrics #/metric/<id> #/skills #/memory
+ *         #/signin?next= #/account
  *         (#/knowledge and #/artifacts are Skills' old names and still answer;
  *         the library routes answer by URL only — their Explore shelf is
  *         off this surface for now and lives on in the admin console)
- * Deep links work: a metric profile is a URL you can send someone. */
+ * Deep links work: a metric profile is a URL you can send someone.
+ * The shell boots as the signed-in person (js/session.js): with an
+ * identity store and nobody signed in, every route is the sign-in page. */
 
 import { renderChat } from "./pages/chat.js";
 import { renderSearch } from "./pages/search.js";
@@ -15,22 +18,31 @@ import { renderMetrics } from "./pages/semantics.js";
 import { renderMetric } from "./pages/metric.js";
 import { renderSkills } from "./pages/skills.js";
 import { renderMemory } from "./pages/memory.js";
+import { renderSignin } from "./pages/signin.js";
+import { renderAccount } from "./pages/account.js";
 import { refreshChats } from "./chats.js";
 import { api } from "./api.js";
+import { drawAccount, gateNav, whoami, HOME, SIGNIN } from "./session.js";
 
 const outlet = document.getElementById("outlet");
 let teardown = null;
 
 function parseRoute() {
-  const hash = location.hash.replace(/^#\/?/, "") || "chat";
+  const raw = location.hash.replace(/^#\/?/, "");
+  const [path, query = ""] = raw.split("?");
+  const hash = path || "chat";
   const [page, ...rest] = hash.split("/");
-  return { page, arg: decodeURIComponent(rest.join("/")) };
+  return { page, arg: decodeURIComponent(rest.join("/")), query };
 }
 
 async function route() {
   if (teardown) { try { teardown(); } catch { /* page gone */ } }
   teardown = null;
-  const { page, arg } = parseRoute();
+  const { page, arg, query } = parseRoute();
+  if (page !== "signin" && signedOut) {         // nobody here: the door first
+    location.hash = `${SIGNIN}?${new URLSearchParams({ next: location.hash || HOME })}`;
+    return;
+  }
   const tab = page === "metric" ? "metrics"
     : page === "product" ? "products"
     : (page === "artifacts" || page === "knowledge") ? "skills" : page;
@@ -49,6 +61,8 @@ async function route() {
     memory: () => renderMemory(outlet),
     knowledge: () => renderSkills(outlet),         // the old names
     artifacts: () => renderSkills(outlet),
+    signin: () => renderSignin(outlet, query),
+    account: () => renderAccount(outlet),
   };
   const render = pages[page] ?? pages.chat;
   teardown = await render() ?? null;
@@ -128,7 +142,18 @@ async function refreshReviewsBadge() {
 }
 window.addEventListener("synapse:reviews", refreshReviewsBadge);
 
-route();
-refreshChats();
-brandLogo();
-refreshReviewsBadge();
+/* who is here: the account row, the gated nav entries, and whether the
+ * shell may show anything but the sign-in page */
+let signedOut = false;
+async function boot() {
+  const who = await whoami();
+  signedOut = !who.user && who.status === 401;
+  document.body.classList.toggle("signed-out", signedOut);
+  drawAccount(who.user);
+  gateNav(who.user);
+  await route();
+  brandLogo();
+  if (!signedOut) { refreshChats(); refreshReviewsBadge(); }
+}
+
+boot();

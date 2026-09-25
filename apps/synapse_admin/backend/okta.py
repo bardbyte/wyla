@@ -9,7 +9,8 @@
                                    ID token verified, the person found or
                                    created, their roles set from their groups,
                                    a session cookie issued, then a redirect to
-                                   where they were going
+                                   where they were going; a refusal goes to
+                                   the sign-in page with its reason
     GET /api/auth/okta/callback    the same handler under the API prefix
 
 The registered callback (``OKTA_REDIRECT_URI``) is the root ``/callback``,
@@ -27,7 +28,7 @@ from __future__ import annotations
 import logging
 import secrets
 from functools import lru_cache
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Cookie, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -136,6 +137,9 @@ def okta_callback(request: Request, code: str | None, state: str | None,
     if pending is None:
         raise HTTPException(status_code=400,
                             detail="this sign-in has expired or was already used; start again")
+    # the surface the person was heading for, so a refusal below lands on
+    # its sign-in page rather than the console's
+    request.state.signin_home = _surface_home(str(pending.get("next") or ""))
     if error:
         store.record_audit("login.failed", "denied",
                            details={"via": "okta", "error": error,
@@ -208,9 +212,24 @@ def callback(request: Request, code: str | None = None, state: str | None = None
     """The one registered callback: an Okta sign-in when the state says so,
     otherwise the Google connect flow, unchanged."""
     if state and state.startswith(STATE_PREFIX):
-        return okta_callback(request, code, state, error, error_description)
+        try:
+            return okta_callback(request, code, state, error, error_description)
+        except HTTPException as exc:
+            # a browser is on this URL, not a script: the sign-in page says
+            # what happened in words; the audit keeps the reason
+            return _back_to_signin(request, exc.detail)
     return google_callback(code=code, state=state, error=error,
                            synapse_session=synapse_session)
+
+
+def _surface_home(next_path: str) -> str:
+    return "/synapse/" if next_path.startswith("/synapse") else "/"
+
+
+def _back_to_signin(request: Request, detail: object) -> RedirectResponse:
+    home = getattr(request.state, "signin_home", "/")
+    query = urlencode({"error": str(detail)})
+    return RedirectResponse(f"{home}#/signin?{query}", status_code=303)
 
 
 __all__ = ["callback_router", "okta_callback", "reset_client", "router"]
