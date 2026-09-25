@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_signin_flow import _sign_in, client, fake  # noqa: E402,F401
 
 REPO = Path(__file__).resolve().parents[3]
+# the example SYNAPSE_USER_NAME from .env.example: the shell must not ship it
+EXAMPLE_NAME = "John Doe"
 ADMIN = REPO / "apps" / "synapse_admin" / "frontend"
 SYNAPSE = REPO / "apps" / "synapse" / "frontend"
 
@@ -28,7 +30,7 @@ def test_both_shells_draw_the_account_row_and_gate_the_nav():
         index = read(root, "index.html")
         assert 'id="account-name"' in index and 'id="account-role"' in index
         assert 'id="account-avatar"' in index and 'href="#/account"' in index
-        assert "Saheb Singh" not in index                      # no shipped identity
+        assert EXAMPLE_NAME not in index                        # no shipped identity
         assert index.index('class="account"') > index.index('class="navlist"')
     admin = read(ADMIN, "index.html")
     assert 'href="#/users" data-tab="users" data-needs="users.manage" hidden' in admin

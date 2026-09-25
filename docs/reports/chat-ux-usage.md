@@ -1,7 +1,6 @@
 # Chat UX and usage: the pane scrolls, the thinking folds, what a turn cost is stored and shown, Systematic Intelligence on the second surface
 
-Branch `worktree-agent-a6ceaae395e3002cd` (branched from `claude/production-ready` at
-`e3524b6`), worktree `/home/user/wyla/.claude/worktrees/agent-a6ceaae395e3002cd`.
+Branched from the integration branch at `e3524b6`.
 Work commit `f8710b8`; this report is the commit after it. Nothing pushed, no PR opened.
 
 ## What the owner reported, and what changed

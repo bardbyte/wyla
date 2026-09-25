@@ -1,8 +1,6 @@
 # Report: skill retrieval (workstream "skill retrieval")
 
-Branch: `worktree-agent-a088816e83c8240ea`
-Worktree: `/home/user/wyla/.claude/worktrees/agent-a088816e83c8240ea`
-Commits on the branch (nothing pushed, no PR):
+Commits:
 
 - `231218a` — Skill retrieval: a pack over the ceiling loads as a
   searchable library, not a refusal (the original brief).
@@ -259,11 +257,8 @@ All paths relative to `synapse-agentic-harness-system/` unless noted.
 
 ## No refusals
 
-Branch: `worktree-agent-a67c6daaf6a665657`
-Worktree: `/home/user/wyla/.claude/worktrees/agent-a67c6daaf6a665657`
-(branched from `claude/production-ready` at `44a268e`; nothing pushed,
-no PR). Commits: `e500e74` — the change; this section as a second
-commit.
+Based on the integration branch at `44a268e`. Commits: `e500e74` — the
+change; this section as a second commit.
 
 The repo owner's decision: there is no refusal anywhere in skill
 loading. Every verbatim of every skill is always usable by the

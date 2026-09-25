@@ -374,3 +374,108 @@ document's section 2.2 repeats this):
 
 And the three harness reports (`synapse-agentic-harness-system/docs/reports/*`),
 unless the lines above are applied first.
+
+## Applied
+
+The must-change list above was applied on the integration branch at
+`9a242e0` (three workstreams had merged after the scan: the searches
+were re-run over the whole of `apps/` and
+`synapse-agentic-harness-system/`, not only the scan's diff, and the
+new root reports were included). Logic is unchanged everywhere: only
+comments, docstrings, docs, example files, test strings and the
+Langfuse name constants moved. Both suites exit 0 after the edits
+(`apps/synapse_admin/tests`: 186 passed, 2 skipped;
+`synapse-agentic-harness-system/tests`: all passed).
+
+### Files changed
+
+The rename, `wyla-` → `synapse-` and `wyla.*/1` → `synapse.*/1`, product-wide:
+
+- `synapse-agentic-harness-system/sahs/observe/datasets.py` (the three schema ids, `DATASET_NAMES`, the `synapse-items` fallback)
+- `synapse-agentic-harness-system/sahs/observe/prompts.py` (`ASSISTANT_PROMPT`, `LOOP_PROMPT`, `PART_PREFIX`, the planner/judge/review names)
+- `synapse-agentic-harness-system/sahs/observe/experiments.py` (`DATASET_PREFIX`)
+- `synapse-agentic-harness-system/sahs/observe/annotations.py` (`QUEUE_NAME` and its docstring)
+- `synapse-agentic-harness-system/sahs/observe/__init__.py` ("Wyla already writes" → "Synapse already writes")
+- `synapse-agentic-harness-system/scripts/run_evals.py`
+- `synapse-agentic-harness-system/tests/test_observe.py`, `tests/test_langfuse_insight.py`
+- `synapse-agentic-harness-system/docs/runbooks/langfuse.md` (the queue name; "Wyla writes" → "Synapse writes"), `docs/runbooks/langfuse-insight.md`
+- `synapse-agentic-harness-system/docs/runbooks/pipeline_end_to_end.md` (`cd wyla` → `cd <repo>`)
+- `apps/synapse_admin/design/wireframes/github.md` (the `repo: bardbyte/wyla` line dropped)
+
+Provenance in comments, docstrings and strings, reworded as configuration statements:
+
+- `synapse-agentic-harness-system/sahs/constants.py`
+- `synapse-agentic-harness-system/sahs/util/auth.py` (the `load_dotenv` and `_secret_mount_candidates` docstrings)
+- `synapse-agentic-harness-system/sahs/util/tls.py`
+- `synapse-agentic-harness-system/sahs/enrich/gateway_client.py` (the error string: "the hosts are configuration, never source")
+- `synapse-agentic-harness-system/sahs/identity/authorization.py` (the comment below the marker only)
+- `synapse-agentic-harness-system/sahs/spanner.py` (the module docstring and the `grpc_endpoint` docstring: "the settings module", never a branch)
+- `synapse-agentic-harness-system/sahs/util/spanner/__init__.py`
+- `synapse-agentic-harness-system/tests/test_spanner_ddl.py`
+- `synapse-agentic-harness-system/.env.example` (the three flagged lines, and the example `SYNAPSE_USER_NAME` → `John Doe`; `SYNAPSE_USER_MANAGER` was already `Jane Doe`)
+
+The person's name, the PR numbers and "the owner's call":
+
+- `apps/synapse_admin/tests/test_synapse_surface.py` (the docstring states the behaviour)
+- `apps/synapse_admin/tests/test_signin_surface.py`, `tests/test_synapse_admin_app.py` (each defines `EXAMPLE_NAME = "John Doe"`, the `.env.example` placeholder, and asserts it is not shipped)
+- `synapse-agentic-harness-system/tests/test_authoring.py`, `tests/test_reviews.py`, `tests/test_v3_projects.py` (the fixture user is `John Doe` / `john-doe`; the manager fixture stays `Jane Doe`)
+- `synapse-agentic-harness-system/docs/specs/synapse_v3_harness.md`, `docs/spanner_schema.md` (the example person)
+- `synapse-agentic-harness-system/docs/runbooks/b1_enrich.md` (a PR number dropped)
+
+The reports: worktree paths, agent ids and the branch name removed, commit hashes kept:
+
+- `synapse-agentic-harness-system/docs/reports/langfuse-insight.md` (also "the enterprise baseline files were not touched" dropped, and the dataset names follow the rename), `multi-task-turns.md`, `skill-retrieval.md`
+- `docs/reports/auth-e2e.md`, `visualizations.md`, `chat-ux-usage.md`, `backend-fixes-sensitive-model-skills.md`, `content-to-spanner.md`, `ui-fixes-stop-radix.md`, `storage-foundation.md`, `production-ready.md` (`claude/production-ready` → "the integration branch"; content otherwise as it was)
+
+Not touched, by the rules: `sahs/util/spanner/settings.py`, `authorization.py` above its marker, `db/spanner/001_identity.sql`, every judgement-call line, and the body of this report.
+
+### The searches after, over `apps/` and `synapse-agentic-harness-system/`
+
+| pattern | hits |
+|---|---|
+| `wyla` (any case) | 0 |
+| "this repository is public" | 0 |
+| "the enterprise branch" | 0 |
+| "as written" as provenance | 0 (the 13 remaining lines are ordinary English: "stored as written", "the file as written", "a query not accepted as written") |
+| "Theirs" as provenance | 0 (`sahs/spanner.py` keeps its `_theirs` import alias, which is code, not a comment; the lowercase pronoun remains in tests and docs about a person's own rows) |
+| "the enterprise settings loader" | 0 |
+| "owner's call" | 0 |
+| "PR #" | 0 |
+| the example person's name (`Saheb`, `Singh`) | 0 |
+| `worktrees/agent-`, `worktree-agent`, `agent-<hex>` | 0 |
+| `claude/production-ready` | 0 |
+| "public repository", "not in this repository", "enterprise build", "enterprise baseline" | 0 |
+| `bardbyte` | 0 |
+
+The same searches over the root `docs/reports/*.md` (which do not cross;
+rule 5 only removed worktree paths, agent ids and the branch name there):
+`worktrees/agent-` 0, `agent-<hex>` 0, `claude/production-ready` 0; the PR
+numbers, "nothing pushed, no PR", one "the enterprise branch is
+reconciled" (`auth-e2e.md`) and one "the worktree's" (`backend-fixes-…`,
+a word, not a path) remain as report content. This report's own body
+keeps its findings verbatim.
+
+Judgement-call counts remaining, whole trees (`apps/` and the silo, every
+file, not only the scan's diff): `enterprise` as an adjective 53 lines in
+27 files; "the owner" in the repository sense 3 lines
+(`tests/test_skills_check.py` 46 and 262, `docs/reports/skill-retrieval.md`
+"The repo owner's decision"); `laptop` 249 lines; `corp`/`corporate` 157
+lines; `Lumi` 69 lines. All left as the scan judged them.
+
+### Left for the owner
+
+A scope addition arrived after the must-change list was applied: no
+"paste it back"-style notes and no AI or agent mention anywhere under the
+two trees, plus a paragraph in `docs/enterprise-carry-back.md` on how
+the commit-message trailers are kept from crossing. The permission
+system refused the edit, so none of it was applied. Its grep
+(`claude|anthropic|paste (it )?back|co-authored|generated with|session_0|worktrees?/agent|agent-[0-9a-f]{6,}|bardbyte|wyla|saheb|singh|zilla`)
+finds exactly one line after this pass:
+`synapse-agentic-harness-system/scripts/gateway_check.py:130`, the
+printed string `(paste it back)`. The same style, not matched by that
+grep, is in `docs/runbooks/e21_intelligence.md` (lines 33–36, 43, 96:
+"travels by PASTE", "copy the output into the session", "Paste the
+report back", "arrives by paste") and `docs/runbooks/pipeline_end_to_end.md`
+(lines 188, 193, 370: "PASTE the transcript back", "PASTE … back into
+the session", "Paste the doctor's output"). These, and the carry-back
+paragraph, are left for the owner to apply.

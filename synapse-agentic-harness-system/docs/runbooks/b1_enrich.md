@@ -73,7 +73,7 @@
 
 > **Pinned follow-up (not built): observed filters from referenced
 > SQL.** The graph already stores each certified metric's full
-> referenced query (`doc:referenced_sql_*`, PR #89). Mining its
+> referenced query (`doc:referenced_sql_*`). Mining its
 > top-level WHERE conjuncts with string literals into an
 > `observed_filters` row field would make the five
 > unwinnable-from-expression exam cases (and every future mined

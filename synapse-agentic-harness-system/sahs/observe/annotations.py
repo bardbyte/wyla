@@ -2,7 +2,7 @@
 
 An ambiguous trial (fingerprint mismatch, schema match) is neither a
 pass nor a fail until a person says so. The eval run puts its trace
-on the ``wyla-ambiguous`` queue; a steward scores it ``resolution`` =
+on the ``synapse-ambiguous`` queue; a steward scores it ``resolution`` =
 accept or fail in the Langfuse UI; ``pull_resolutions`` reads those
 scores back and writes accepted fingerprints into the task file's
 ``grading.accepted_fps`` — which the user then commits. The suite
@@ -16,7 +16,7 @@ from typing import Any, Iterable, Iterator
 
 from sahs.evals.schema import Task, read_tasks, write_tasks
 
-QUEUE_NAME = "wyla-ambiguous"
+QUEUE_NAME = "synapse-ambiguous"
 SCORE_NAME = "resolution"
 CATEGORIES = ({"value": 1, "label": "accept"}, {"value": 0, "label": "fail"})
 

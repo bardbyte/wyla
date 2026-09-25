@@ -1,10 +1,8 @@
 # Report: multi-task turns (workstream "multi-task turns")
 
-Branch: `worktree-agent-a866e6dd37820f3a4`
-Worktree: `/home/user/wyla/.claude/worktrees/agent-a866e6dd37820f3a4`
 Feature commit: `d256f1f` ("Multi-task turns: a compound ask becomes
 tasks that run side by side and in order, with a "What was done"
-report"). Not pushed; no PR.
+report").
 
 ## What changed, file by file
 

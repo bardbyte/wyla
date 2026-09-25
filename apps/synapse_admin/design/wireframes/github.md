@@ -1,4 +1,3 @@
-repo: bardbyte/wyla
 branch: main
 
 ## Last sync

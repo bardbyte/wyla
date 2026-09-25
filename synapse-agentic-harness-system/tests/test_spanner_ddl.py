@@ -30,7 +30,7 @@ def test_identity_holds_nothing_recoverable_and_roles_are_rows():
     assert "CREATE UNIQUE INDEX UsersByEmail ON Users (EmailNormalized)" in ddl
     assert "AS (LOWER(TRIM(Email))) STORED" in ddl
     # the column's type and nullability, not its alignment: the file is
-    # the enterprise branch's, whose editor pads columns differently
+    # hand-aligned, and a second copy may pad columns differently
     assert re.search(r"PasswordHash\s+STRING\(512\)\s+NOT NULL", ddl)
     assert "PepperVersion" in ddl and "argon2id" in ddl
     assert re.search(r"TokenHash\s+BYTES\(32\)\s+NOT NULL", ddl)

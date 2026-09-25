@@ -29,16 +29,16 @@ def test_own_packs_load_for_their_owner_alone(tmp_path):
     (graph / "skills").mkdir(parents=True)
     (graph / "skills" / "team-notes.md").write_text(
         "# Team notes\n\nShared words.\n", encoding="utf-8")
-    assert owner_slug("Saheb Singh") == "saheb-singh"
-    assert user_root(graph, "Saheb Singh") == graph / "skills" / "users" \
-        / "saheb-singh"
-    got = authoring.save_skill(graph, "Saheb Singh", "Churn Triage", PACK)
+    assert owner_slug("John Doe") == "john-doe"
+    assert user_root(graph, "John Doe") == graph / "skills" / "users" \
+        / "john-doe"
+    got = authoring.save_skill(graph, "John Doe", "Churn Triage", PACK)
     assert got["ok"] and got["name"] == "churn-triage"
-    assert got["owner"] == "saheb-singh" and got["origin"] == "unreviewed"
+    assert got["owner"] == "john-doe" and got["origin"] == "unreviewed"
     assert got["title"] == "Churn triage"
     assert got["description"].startswith("The moves for a churn question")
-    mine = {p.name: p for p in all_skills(graph, "Saheb Singh")}
-    assert mine["churn-triage"].owner == "saheb-singh"
+    mine = {p.name: p for p in all_skills(graph, "John Doe")}
+    assert mine["churn-triage"].owner == "john-doe"
     assert mine["team-notes"].owner == "" and mine["team-notes"].origin \
         == "unreviewed"
     assert mine["analysis-playbooks"].origin == "built-in"
@@ -46,31 +46,31 @@ def test_own_packs_load_for_their_owner_alone(tmp_path):
     other = {p.name for p in all_skills(graph, "Alice")}
     assert "team-notes" in other and "churn-triage" not in other
     assert get_skill(graph, "churn-triage", "Alice") is None
-    assert get_skill(graph, "churn-triage", "Saheb Singh").text == PACK
+    assert get_skill(graph, "churn-triage", "John Doe").text == PACK
     loaded, missing = load_packs(graph, ["churn-triage", "team-notes"],
-                                 owner="Saheb Singh")
+                                 owner="John Doe")
     assert [p.name for p in loaded] == ["churn-triage", "team-notes"]
     assert not missing
     # an own pack shadows a shared one of the same name, for its owner
-    authoring.save_skill(graph, "Saheb Singh", "team-notes",
+    authoring.save_skill(graph, "John Doe", "team-notes",
                          "# Team notes, mine\n\nMy words.\n")
-    assert get_skill(graph, "team-notes", "Saheb Singh").owner == "saheb-singh"
+    assert get_skill(graph, "team-notes", "John Doe").owner == "john-doe"
     assert get_skill(graph, "team-notes", "Alice").owner == ""
     # never a built-in
-    refused = authoring.save_skill(graph, "Saheb Singh",
+    refused = authoring.save_skill(graph, "John Doe",
                                    "analysis-playbooks", PACK)
     assert not refused["ok"] and "built-in" in refused["reason"]
     for name, text, why in (("x", "", "empty"),
                             ("y", "# T\n\n" + "w" * 13_000, "over 12,000"),
                             ("", PACK, "needs a name")):
-        got = authoring.save_skill(graph, "Saheb Singh", name, text)
+        got = authoring.save_skill(graph, "John Doe", name, text)
         assert not got["ok"] and why in got["reason"], (name, got)
     assert not authoring.save_skill(graph, "", "z", PACK)["ok"]
-    again = authoring.save_skill(graph, "Saheb Singh", "churn-triage", PACK)
+    again = authoring.save_skill(graph, "John Doe", "churn-triage", PACK)
     assert again["ok"] and again["replaced"]
-    assert authoring.delete_skill(graph, "Saheb Singh", "churn-triage")
-    assert not authoring.delete_skill(graph, "Saheb Singh", "churn-triage")
-    assert get_skill(graph, "churn-triage", "Saheb Singh") is None
+    assert authoring.delete_skill(graph, "John Doe", "churn-triage")
+    assert not authoring.delete_skill(graph, "John Doe", "churn-triage")
+    assert get_skill(graph, "churn-triage", "John Doe") is None
 
 
 def test_the_draft_is_the_models_rewrite_in_the_house_format():
@@ -118,27 +118,27 @@ def test_the_agent_consumes_an_own_pack_at_runtime_for_that_person(
                            "description": "The moves.", "text": PACK,
                            "notes": []}])
 
-    saheb = AssistantRuntime(
+    john = AssistantRuntime(
         builds_root=build.root.parent, graph_root=graph,
-        store_path=tmp_path / "saheb.sqlite3", model_factory=factory,
-        user_name="Saheb Singh")
-    assert saheb.owner == "saheb-singh"
-    drafted = saheb.draft("skill", "Churn triage", "rate vs mix first")
+        store_path=tmp_path / "john.sqlite3", model_factory=factory,
+        user_name="John Doe")
+    assert john.owner == "john-doe"
+    drafted = john.draft("skill", "Churn triage", "rate vs mix first")
     assert drafted["ok"] and drafted["text"] == PACK.strip()
-    saved = saheb.save_my_skill(drafted["name"], drafted["text"])
+    saved = john.save_my_skill(drafted["name"], drafted["text"])
     assert saved["ok"]
-    listed = {s["name"]: s for s in saheb.skills()}
+    listed = {s["name"]: s for s in john.skills()}
     assert listed["churn-triage"]["mine"] and listed["churn-triage"][
-        "owner"] == "saheb-singh"
+        "owner"] == "john-doe"
     assert not listed["analysis-playbooks"]["mine"]
-    session = saheb.create_session()
-    saheb.start_turn(session["id"], "why did churn move?")
-    assert saheb.wait(session["id"], 60)
-    events = saheb.runtime(session["id"]).bus.since(0)
+    session = john.create_session()
+    john.start_turn(session["id"], "why did churn move?")
+    assert john.wait(session["id"], 60)
+    events = john.runtime(session["id"]).bus.since(0)
     step = next(e for e in events if e["ev"] == "tool_step")
     assert step["tool"] == "load_skill" and "error" not in step.get(
         "summary", "").lower()
-    stored = saheb.store.messages(session["id"])[-1]
+    stored = john.store.messages(session["id"])[-1]
     assert "Loaded the triage moves." in stored["text"]
     # the system prompt offered the own pack by name
     prompt = next(e for e in events if e["ev"] == "model_prompt"
@@ -156,4 +156,4 @@ def test_the_agent_consumes_an_own_pack_at_runtime_for_that_person(
     events = alice.runtime(session["id"]).bus.since(0)
     result = next(e for e in events if e["ev"] == "tool_result")
     assert "no skill named 'churn-triage'" in result["content"]
-    assert saheb.delete_my_skill("churn-triage")
+    assert john.delete_my_skill("churn-triage")

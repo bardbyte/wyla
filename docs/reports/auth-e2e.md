@@ -1,6 +1,6 @@
 # The Okta-to-Google auth chain and the query as the person: what is proven, what is not
 
-Branch `worktree-agent-af33f4f57245bbf65` (from `claude/production-ready` at `e3524b6`).
+Branched from the integration branch at `e3524b6`.
 Nothing pushed, no PR opened.
 
 The owner asked: *have we tested the full Okta-to-Google auth flow, and would the
