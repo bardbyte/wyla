@@ -22,6 +22,17 @@ from sahs.util.gateway import (Config, GatewayError, TokenManager, model_plane,
 
 SILO = Path(__file__).resolve().parents[1]
 FX = SILO / "tests" / "fixtures"
+# the enterprise hosts are configuration, never source: the tests name
+# placeholders the fake gateway answers for
+TOKEN_URL = "https://identity.example/security/digital/v1/application/token"
+BASE_URL = "https://gateway.example/genai/google/v1"
+
+
+def _cfg(**kw):
+    kw.setdefault("token_url", TOKEN_URL)
+    kw.setdefault("base_url", BASE_URL)
+    return Config(**kw)
+
 SECRET = base64.b64encode(b"a-32-byte-secret-for-the-tests!!").decode()
 
 
@@ -78,14 +89,14 @@ class FakeGateway:
 
 
 def _client(fake: FakeGateway, **cfg) -> GatewayClient:
-    config = Config(app_id="app", secret=SECRET, **cfg)
+    config = _cfg(app_id="app", secret=SECRET, **cfg)
     return GatewayClient(cfg=config, http=fake.http, sleep=fake.sleep,
                      tokens=TokenManager(config, fake.http, now=fake.clock))
 
 
 def test_token_manager_mints_reuses_refreshes_and_invalidates():
     fake = FakeGateway()
-    cfg = Config(app_id="app", secret=SECRET)
+    cfg = _cfg(app_id="app", secret=SECRET)
     tokens = TokenManager(cfg, fake.http, now=fake.clock)
     assert tokens.describe().startswith("no token yet")
     first = tokens.token()
@@ -102,13 +113,13 @@ def test_token_manager_mints_reuses_refreshes_and_invalidates():
     assert tokens.remaining() == 0.0
     assert tokens.token() != second and fake.minted == 3
     # the environment's bearer is used as it is, never minted
-    env_tokens = TokenManager(Config(auth_mode="env", bearer=_jwt(
+    env_tokens = TokenManager(_cfg(auth_mode="env", bearer=_jwt(
         {"exp": int(fake.now) + 100})), fake.http, now=fake.clock)
     assert env_tokens.token().startswith("eyJ") and fake.minted == 3
     with pytest.raises(GatewayError):
-        TokenManager(Config(auth_mode="env"), fake.http).token()
+        TokenManager(_cfg(auth_mode="env"), fake.http).token()
     with pytest.raises(GatewayError):
-        TokenManager(Config(), fake.http).token()   # no credentials
+        TokenManager(_cfg(), fake.http).token()   # no credentials
 
 
 def test_converse_delivers_one_call_as_the_loops_events():
@@ -237,6 +248,8 @@ def test_the_agent_factory_picks_the_plane_and_teaches_when_unconfigured(
     assert "APP_ID and APP_SECRET" in str(err.value)
     monkeypatch.setenv("APP_ID", "app")
     monkeypatch.setenv("APP_SECRET", SECRET)
+    monkeypatch.setenv("IDP_TOKEN_URL", "https://identity.example/security/digital/v1/application/token")
+    monkeypatch.setenv("GATEWAY_BASE_URL", "https://gateway.example/genai/google/v1")
     agent = agent_from_env()
     assert isinstance(agent, GatewayAgent) and agent.client.plane == "gateway"
     assert agent.client.cfg.model == "gemini-2.5-pro"
@@ -394,6 +407,8 @@ def test_a_chat_switches_planes_from_the_composer(compiled, monkeypatch,
     build, tmp = compiled
     monkeypatch.setenv("APP_ID", "app")
     monkeypatch.setenv("APP_SECRET", SECRET)
+    monkeypatch.setenv("IDP_TOKEN_URL", "https://identity.example/security/digital/v1/application/token")
+    monkeypatch.setenv("GATEWAY_BASE_URL", "https://gateway.example/genai/google/v1")
     monkeypatch.setenv("SAHS_MODEL_PLANE", "auto")
     heard: list[str] = []
 
