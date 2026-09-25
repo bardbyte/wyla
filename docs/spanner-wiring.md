@@ -2,25 +2,32 @@
 
 `SAHS_STORE` picks the book the app writes in. `local` is one laptop, one
 developer, no accounts: everything goes to files under the silo's `graph/`.
-`spanner` is the deployment: the people, their sessions and their chats go
-to one Cloud Spanner database (`db/spanner/001_identity.sql`,
-`002_chat.sql`, `004_google_oauth.sql`, `006_external_identities.sql`).
-`sqlite` is the same tables in one local file, so a laptop can rehearse
-the deployment without a Spanner.
+`spanner` is the deployment: the people, their sessions, their chats and
+what they file beside a chat go to one Cloud Spanner database
+(`db/spanner/001_identity.sql`, `002_chat.sql`, `004_google_oauth.sql`,
+`006_external_identities.sql`, `007_content.sql`). `sqlite` is the same
+tables in one local file, so a laptop can rehearse the deployment without
+a Spanner.
 
 Think of it as a hotel: the identity tables are the front desk's register
 (who is here, which key opens what), the chat tables are each guest's
 room, and the filesystem is the shared lobby, the same for everyone. Under
-`spanner` the register and the rooms are in the database; what is listed
-below as a gap is still in the lobby.
+`spanner` the register and the rooms are in the database, and the last of
+the lobby's filing has moved: a guest's files and own skills into their
+room, the review board and the knowledge files into the front desk's
+shared register (they are shared by design). What is listed below as a
+gap is still in the lobby.
 
-Two classes carry every database write. `IdentityStore`
-(`sahs/identity/store.py`) owns the identity tables; `SpannerAssistantStore`
-(`sahs/assistant/spanner_store.py`) owns the chat tables. Both speak
-portable SQL to one `Database` object (`sahs/identity/database.py`):
+Three classes carry every database write. `IdentityStore`
+(`sahs/identity/store.py`) owns the identity tables;
+`SpannerAssistantStore` (`sahs/assistant/spanner_store.py`) owns the chat
+tables; `SpannerContentStore` (`sahs/assistant/content_store.py`) owns the
+content tables — `ChatFiles` and `ChatFileChunks`, `UserSkills`,
+`KnowledgeFiles`, and the review board's four. All three speak portable
+SQL to one `Database` object (`sahs/identity/database.py`):
 `SpannerDatabase` on the Cloud Spanner SDK, `SqliteDatabase` on the
 stand-in. The app opens that object once (`backend/auth.py`, `_identity()`)
-and hands it to both stores, so one connection serves both.
+and hands it to every store, so one connection serves them all.
 
 ## In Spanner
 
@@ -44,12 +51,32 @@ and hands it to both stores, so one connection serves both.
 | memory (the memory pass; `memory.md`) | the loop; `GET`/`PUT /api/chat/memory.md`, `/memories*` | `SpannerAssistantStore.add_memory`, `retire_memory`, `list_memories` | `ChatMemories` (retire sets `Status`, `RetiredAt`) |
 | plan versions, feedback (the assistant lane) | the loop | `SpannerAssistantStore.add_plan_version`, `add_feedback` | `ChatPlanVersions`, `ChatFeedback` |
 | compiled builds (when `MERIDIAN_BUILDS_SOURCE=spanner`) | `sahs/builds/spanner_store.py` | `SpannerBuildStore` | `Builds` (`003_graph.sql`) |
+| the files on a chat: the manifest, the converted text, the bytes | `GET`/`POST /api/chat/sessions/{id}/files`, `DELETE …/files/{file_id}`; the message that carries them (`AssistantRuntime.start_turn` → `_file_parts`, `_mark_files_sent`) | `SpannerContentStore.add_file`, `files`, `remove_file`, `file_bytes`, `file_text`, `parts_for`, `mark_sent` | `ChatFiles` (`002_chat.sql`; `ObjectPath` null), `ChatFileChunks` (`007_content.sql`: the bytes in slices of at most 8 MiB, interleaved in the file) |
+| a person's own skills | `POST`/`DELETE /api/chat/skills/mine` (`sahs/assistant/authoring.py`); the shelf, the loop's skill index and the `load_skill` tool (`sahs/assistant/skills_loader.py`, `bind_own_skills`) | `SpannerContentStore.save_skill`, `delete_skill`, `my_skills` | `UserSkills` (`002_chat.sql`) |
+| the review board (skills and knowledge files awaiting a manager) | `/api/chat/reviews*` (`AssistantRuntime.reviews` is the store when one is on) | `SpannerContentStore.submit`, `resubmit`, `start_ai`, `record_ai`, `decide`, `withdraw`, `get`, `list`, `find`, `text_of`, `notices`, `mark_seen` — the events folded by `sahs/assistant/reviews.py`'s `fold_records`, the same fold as the ledger's | `ReviewSubmissions`, `ReviewVersions`, `ReviewEvents`, `ReviewSeen` (`007_content.sql`); one board per deployment |
+| approved knowledge files | `POST /api/chat/reviews/{id}/decision` (publish: `AssistantRuntime._publish_submission`) | `SpannerContentStore.stage_knowledge` (an approved resubmission replaces its earlier version) | `KnowledgeFiles` (`002_chat.sql`) |
+| the staging door and the Knowledge Files shelf | `POST /api/meridian/artifacts`, `GET /api/meridian/artifacts`, `/artifact_file` (`backend/meridian.py`, `_content_store`) | `SpannerContentStore.stage_knowledge`, `knowledge_files` | `KnowledgeFiles`; the door needs a signed-in person (`StagedBy` is a foreign key to `Users`) |
 
 Under a store every `/api/chat/*` route needs the session cookie, and each
 signed-in person gets their own `AssistantRuntime` whose store is bound to
 their user id: every chat row carries `OwnerUserId`, every memory `UserId`,
-and a read never crosses owners. Under `local` the one shared runtime and
-the sqlite file `graph/runs/chat/sessions.sqlite3` stay as they were.
+every file's chat is checked against the owner, every own skill is keyed
+by `UserId`, and a read never crosses owners. The board and the knowledge
+files are the exceptions by design: everyone on the deployment reads the
+same submissions and the same staged files, and only the seen-mark
+(`ReviewSeen`) is the person's. Under `local` the one shared runtime, the
+sqlite file `graph/runs/chat/sessions.sqlite3`, the workspaces, the
+skills tree, the reviews ledger and `sources/artifacts/` stay as they
+were: `AssistantRuntime.content_store` is `None` and every path below the
+graph is byte-for-byte the one before.
+
+Two things the content store does not change: the built-in packs
+(`sahs/assistant/skills/*.md`) and the shared user packs
+(`<graph>/skills/*.md`) are still read from disk under every store mode —
+only the person's own packs moved — and the build-graph run still reads
+`sources/` from the filesystem, so a `KnowledgeFiles` row reaches the
+graph when the ingest step exports the active rows before it runs
+(`IngestedRun` stays null until one does; `docs/spanner_schema.md` §4.10).
 
 ## Not yet in Spanner
 
@@ -58,17 +85,22 @@ would land in, or the table it would need.
 
 | what | route or module | writes today | table it would use | why not yet |
 |---|---|---|---|---|
-| the files on a chat (bytes, manifest, converted text) | `POST /api/chat/sessions/{id}/files` (`sahs/assistant/files.py`) | `graph/runs/chat/workspaces/<session>/files/` | `ChatFiles` (`002_chat.sql`), plus an object store for the bytes (`ObjectPath`) | the table keeps the manifest and the text; the bytes need a bucket. `SAHS_FILES_DIR` is named in `.env.example` for that but nothing reads it yet |
 | the event log the page replays | `sahs/assistant/runtime.py` (`_SessionRuntime`) | `graph/runs/chat/events/<session>.jsonl` (per person under `users/<id>/` with a store) | `ChatEvents` | the SSE bus replays from memory and the JSONL; the runtime is being reworked by another change, so the sink stays a file for now |
-| the review board (skills and knowledge files awaiting a manager) | `/api/chat/reviews*` (`sahs/assistant/reviews.py`) | `graph/runs/reviews/ledger.jsonl`, `files/<id>/v<n>.md`, `seen.json` | none: a `ReviewSubmissions` / `ReviewEvents` pair | no table in the DDL yet; the board is shared across people by design (one ledger), so it needs its own tables, not the per-person chat ones |
-| a person's own skills | `POST`/`DELETE /api/chat/skills/mine` (`sahs/assistant/authoring.py`) | `graph/skills/users/<owner>/<name>.md` | `UserSkills` | the loader (`sahs/assistant/skills_loader.py`, `sahs/loop/skills.py`) reads packs off the skills tree; a Spanner read path for the loader has to come with the write |
-| approved knowledge files | `POST /api/chat/reviews/{id}/decision` (publish) | `<sources>/artifacts/` | `KnowledgeFiles` | the shelf and the build-graph run read the sources directory; same as above, the readers move with the writer |
+| the build-graph run's read of the knowledge files | `pipeline.py build-graph` (`--sources-dir`) | reads `<sources>/artifacts/` | `KnowledgeFiles` (read) | the graph build is a filesystem job in the first rollout; its ingest step is to export the active rows to `sources/artifacts/` before it runs and write `IngestedRun` after (`docs/spanner_schema.md` §4.10). Until then a staged row is on the shelf, and the app says so, never pretended into the graph |
 | Ask sessions, messages, plans, feedback (the E18 lane) | `/api/sessions*` (`backend/ask.py`, `sahs/ask/store.py`) | `graph/runs/ask/[users/<id>/]sessions.sqlite3` | `ChatSessions` (`Kind` analyst or steward), `ChatMessages`, `ChatPlanVersions`, `ChatFeedback` | the Ask runtime builds its own `SessionStore`; `SpannerAssistantStore` already covers the verbs it uses, so this is the next seam to wire |
 | Knowledge Catalog: the push record, the model cache, the gate | `POST /api/kc/push-record/{table}` (`sahs/kc/write.py`) | `graph/<push_record_dir>/…`, `llm_<version>.json` | none | a run report on the graph's filesystem, by design (`db/spanner/README.md`: the graph stays on the filesystem in the first rollout) |
 | Knowledge Catalog: the read-back import (pending quads) | `POST /api/kc/witness-import` (`sahs/kc/witness.py`) | `graph/nodes/*.jsonl`, `graph/edges/*.jsonl` | `GraphNodeAssertions`, `GraphEdgeAssertions`, `GraphRuns` (`003_graph.sql`) | the graph is the clerk's, on the filesystem, until the graph half moves (`docs/spanner_schema.md` §5) |
 | feedback on the admin surfaces | `graph/runs/feedback/*.jsonl` (`backend/meridian.py`) | JSONL | none | a laptop log, never read back by the app |
-| the staging door (Knowledge Files creator) | `POST /api/meridian/artifacts` (`backend/meridian.py`) | `<sources>/artifacts/` | `KnowledgeFiles` | same readers as the approved files above |
-| the sandbox workspace (a turn's rows, cells, snapshots) | `sahs/assistant/sandbox.py` | `graph/runs/chat/workspaces/<session>/` | none | scratch for one turn, not a record |
+| the sandbox workspace (a turn's rows, cells, snapshots) | `sahs/assistant/sandbox.py` | `graph/runs/chat/workspaces/<session>/` | none | scratch for one turn, not a record; a turn still prepares the folder under every store mode, but no file of the person's is written there (`_file_parts` reads the store) |
+
+One honest seam in the wiring above: `AssistantRuntime.owner` — the key
+the loader binds a person's store-backed shelf under, and the
+`submitter_slug` a submission carries — is still the slug of the
+person's display name, as it was on the laptop, not their user id. The
+rows themselves are keyed by `UserId`; two people with the same display
+name would share the slug for those two lookups. Moving `owner` to the
+user id under a store is a one-line change in `runtime.py` outside this
+lane's ownership.
 
 ## Process memory, by design
 
@@ -102,9 +134,12 @@ tables grow past a laptop's worth.
 `synapse-agentic-harness-system/tests/fake_spanner.py` is a stand-in for
 the SDK's `Database` object: `snapshot()` and `run_in_transaction()` over a
 sqlite file that carries the same tables. `SpannerDatabase` runs unchanged
-against it (the typed parameters, the `JsonObject` cells, the commit
-timestamps), so `tests/test_assistant_spanner_store.py` and
-`apps/synapse_admin/tests/test_local_login.py` prove the whole path from
-the route to the table. What the double does not do: enforce interleaving,
-foreign keys or `CHECK` constraints. `scripts/spanner_check.py` diffs a live
-database against the DDL for that.
+against it (the typed parameters, the `JsonObject` cells, the `BYTES`
+cells, the commit timestamps), so `tests/test_assistant_spanner_store.py`,
+`tests/test_content_store.py`, `apps/synapse_admin/tests/test_local_login.py`
+and `apps/synapse_admin/tests/test_content_store_app.py` prove the whole
+path from the route to the table — a 9 MiB upload lands as two chunks and
+comes back byte-identical, and a submission folds to the same shape from
+the rows as from the ledger. What the double does not do: enforce
+interleaving, foreign keys or `CHECK` constraints. `scripts/spanner_check.py`
+diffs a live database against the DDL for that.

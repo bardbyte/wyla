@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from sahs.assistant.content_store import CONTENT_SQLITE_SCHEMA
 from sahs.assistant.spanner_store import CHAT_SQLITE_SCHEMA
 from sahs.identity.database import COMMIT_TS, SqliteDatabase
 
@@ -41,7 +42,7 @@ _TYPED: dict[str, str] = {
         "CreatedAt", "UpdatedAt", "ExpiresAt", "AbsoluteExpiresAt", "LastSeenAt",
         "RevokedAt", "LockedUntil", "LastLoginAt", "PasswordChangedAt",
         "EmailVerifiedAt", "OccurredAt", "GrantedAt", "RetiredAt", "LinkedAt",
-        "DeletedAt", "MfaPassedAt", "StagedAt", "Ts")},
+        "DeletedAt", "MfaPassedAt", "StagedAt", "Ts", "SeenAt")},
     **{name: "bool" for name in (
         "Starred", "Archived", "Succeeded", "MustChangePassword", "MfaRequired",
         "IsSystem", "Shared")},
@@ -157,6 +158,7 @@ class FakeSpannerDatabase:
     def __init__(self, path: str | Path = ":memory:") -> None:
         self.sqlite = SqliteDatabase(path)
         self.sqlite.ensure(CHAT_SQLITE_SCHEMA)
+        self.sqlite.ensure(CONTENT_SQLITE_SCHEMA)
         self.transactions = 0
 
     def snapshot(self, **kwargs: Any) -> _Snapshot:

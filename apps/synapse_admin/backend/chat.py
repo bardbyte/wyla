@@ -5,9 +5,11 @@ key, never calls a model.
 
 With an identity store (SAHS_STORE=spanner|sqlite) every route below
 needs the session cookie and each signed-in person has their own
-runtime, its chats in the store's chat tables (docs/spanner-wiring.md);
-without one (SAHS_STORE=local) the one shared runtime and its sqlite
-file serve the local developer as before.
+runtime, its chats in the store's chat tables and its files, own
+skills, knowledge files and review board in the content tables
+(docs/spanner-wiring.md); without one (SAHS_STORE=local) the one
+shared runtime, its sqlite file and the graph's folders serve the
+local developer as before.
 
     POST /api/chat/sessions                        → session
     GET  /api/chat/sessions                        → the sidebar
@@ -97,8 +99,13 @@ def _make_runtime(owner: str, user: dict | None):
         # row carries this owner. The same database object the identity
         # store holds, so one connection serves both.
         from apps.synapse_admin.backend.auth import _identity
+        from sahs.assistant.content_store import SpannerContentStore
         from sahs.assistant.spanner_store import SpannerAssistantStore
         runtime.store = SpannerAssistantStore(_identity().db, owner)
+        # and beside it the content store: the files on a chat, the
+        # person's own skills, the knowledge files and the review
+        # board (007_content.sql) — nothing of theirs on the filesystem
+        runtime.content_store = SpannerContentStore(_identity().db, owner)
     # approved knowledge files land where the shelf reads staged
     # ones; resolved at publish time, so the .env decides
     runtime.knowledge_dir = lambda: _sources_dir() / "artifacts"

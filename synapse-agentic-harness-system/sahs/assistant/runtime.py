@@ -238,11 +238,33 @@ class AssistantRuntime:
         return {"ok": True, "plane": self.plane_of(session),
                 "choice": now, "model": self.label_for(now)}
 
+    # ── the content store (SAHS_STORE=spanner|sqlite): the files on a
+    #    chat, the person's own skills, the knowledge files and the
+    #    review board in the identity database; None keeps every one of
+    #    them on the filesystem, as under SAHS_STORE=local ───────────
+    @property
+    def content_store(self) -> Any:
+        return getattr(self, "_content_store", None)
+
+    @content_store.setter
+    def content_store(self, store: Any) -> None:
+        from .skills_loader import bind_own_skills, unbind_own_skills
+        self._content_store = store
+        # the loader reads this owner's own packs from the store's rows
+        # in every reader (the shelf, the loop's index, load_skill)
+        if store is None:
+            unbind_own_skills(self.owner)
+        else:
+            bind_own_skills(self.owner, store.my_skills)
+        self._reviews = None                 # the board follows the store
+
     # ── files on a chat (the composer's Add files) ────────────
     def files(self, session_id: str) -> list[dict[str, Any]]:
         from . import files as files_mod
         if self.store.get_session(session_id) is None:
             raise KeyError(session_id)
+        if self.content_store is not None:
+            return self.content_store.files(session_id)
         return files_mod.manifest(self.workspace(session_id))
 
     def add_file(self, session_id: str, name: str,
@@ -252,6 +274,8 @@ class AssistantRuntime:
         from . import files as files_mod
         if self.store.get_session(session_id) is None:
             raise KeyError(session_id)
+        if self.content_store is not None:
+            return self.content_store.add_file(session_id, name, data)
         return files_mod.store(self.workspace(session_id), name,
                                data).row()
 
@@ -259,7 +283,26 @@ class AssistantRuntime:
         from . import files as files_mod
         if self.store.get_session(session_id) is None:
             raise KeyError(session_id)
+        if self.content_store is not None:
+            return self.content_store.remove_file(session_id, file_id)
         return files_mod.remove(self.workspace(session_id), file_id)
+
+    def _file_parts(self, session_id: str, file_ids: list[str]
+                    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """The parts that ride a message for these files, from the
+        home the files are in (the workspace, or the store's rows)."""
+        from . import files as files_mod
+        if self.content_store is not None:
+            return self.content_store.parts_for(session_id, file_ids)
+        return files_mod.parts_for(self.workspace(session_id), file_ids)
+
+    def _mark_files_sent(self, session_id: str, file_ids: list[str],
+                         turn_id: str) -> None:
+        from . import files as files_mod
+        if self.content_store is not None:
+            self.content_store.mark_sent(session_id, file_ids, turn_id)
+            return
+        files_mod.mark_sent(self.workspace(session_id), file_ids, turn_id)
 
     @staticmethod
     def file_support() -> dict[str, Any]:
@@ -445,11 +488,13 @@ class AssistantRuntime:
 
     def save_my_skill(self, name: str, text: str) -> dict:
         from . import authoring
-        return authoring.save_skill(self.graph_root, self.owner, name, text)
+        return authoring.save_skill(self.graph_root, self.owner, name, text,
+                                    store=self.content_store)
 
     def delete_my_skill(self, name: str) -> bool:
         from . import authoring
-        gone = authoring.delete_skill(self.graph_root, self.owner, name)
+        gone = authoring.delete_skill(self.graph_root, self.owner, name,
+                                      store=self.content_store)
         # a published submission whose file is gone is withdrawn too
         sub = self.reviews.find("skill", authoring.slug(name), self.owner)
         if sub is not None and sub["status"] == "published":
@@ -460,11 +505,16 @@ class AssistantRuntime:
     #    manager, with the model's read, before the agent sees it ──
     # where approved knowledge files land: a folder, or a callable the
     # app gives so the answer follows its configuration at publish time
+    # (with a content store they land in KnowledgeFiles instead)
     knowledge_dir: Any = None
 
     @property
     def reviews(self) -> Any:
+        """The board: the ledger under runs/reviews/, or — with a
+        content store — the same verbs over the review tables."""
         from .reviews import Reviews
+        if self.content_store is not None:
+            return self.content_store
         if getattr(self, "_reviews", None) is None:
             self._reviews = Reviews(self.graph_root / "runs" / "reviews")
         return self._reviews
@@ -518,12 +568,25 @@ class AssistantRuntime:
         from . import authoring
         if sub["kind"] == "skill":
             # the owner's folder is the submitter's slug (a slug slugs
-            # to itself), so it lists for the person who filed it
+            # to itself), so it lists for the person who filed it; on
+            # the store, the submitter's UserSkills row
             got = authoring.save_skill(self.graph_root,
                                        sub.get("submitter_slug") or self.owner,
-                                       sub["name"], text)
+                                       sub["name"], text,
+                                       store=self.content_store,
+                                       user_id=str(sub.get("submitter_user_id")
+                                                   or ""))
             return {"ok": bool(got.get("ok")), "reason": got.get("reason", ""),
                     "path": got.get("path", "")}
+        if self.content_store is not None:
+            # the row carries the provenance the file's header carried:
+            # who staged it and when; an approved resubmission replaces
+            # the earlier version under the same name
+            got = self.content_store.stage_knowledge(
+                sub["business_unit"], sub["name"], sub.get("ext") or "md", text,
+                str(sub.get("submitter_user_id") or ""), replace=True)
+            return {"ok": bool(got.get("ok")), "reason": got.get("reason", ""),
+                    "path": f"KnowledgeFiles/{got['file']}" if got.get("ok") else ""}
         root = self.knowledge_dir() if callable(self.knowledge_dir) \
             else self.knowledge_dir
         root = Path(root) if root else (
@@ -718,12 +781,10 @@ class AssistantRuntime:
         # the files ride this message: their parts are built before
         # anything is stored, so an over-budget attachment is refused
         # with the reason and the chat stays as it was
-        from . import files as files_mod
         attachments: list[dict] = []
         used: list[dict] = []
         if files:
-            attachments, used = files_mod.parts_for(
-                self.workspace(session_id), list(files))
+            attachments, used = self._file_parts(session_id, list(files))
         turn_id = f"t_{uuid.uuid4().hex[:10]}"
         rt.abort = Abort()
         rt.current_turn = turn_id
@@ -735,8 +796,8 @@ class AssistantRuntime:
                                 "rides": r["rides"]} for r in used]}
             if used else None)
         if used:
-            files_mod.mark_sent(self.workspace(session_id),
-                                [r["id"] for r in used], turn_id)
+            self._mark_files_sent(session_id, [r["id"] for r in used],
+                                  turn_id)
         worker = self._model_turn(session_id, session, rt, build,
                                   turn_id, text, depth=depth, mode=mode,
                                   plane=plane, model_id=model_id,
