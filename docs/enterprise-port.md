@@ -79,16 +79,81 @@ became that package's `__init__.py`; every import of it reads as before.
 
 ## Carrying a change back
 
-In the enterprise clone, with this repository as the remote `wyla`:
+The two repositories share no history, so never merge a wyla branch into
+the enterprise repository (or the reverse): every file would conflict.
+Commits cross one at a time, and the first commit here never crosses at
+all: it is their own code coming home, plus our modules, which are
+checked out by path instead.
+
+The commits on the sign-in branch (`git log a87fd28..`), and what to do
+with each in the enterprise clone (wyla as the remote `wyla`):
+
+| commit | subject | carry it by |
+|---|---|---|
+| `8a87402` | Land the enterprise identity branch | not cherry-picked; `git checkout` of the ours-owned paths below |
+| `998aa24` | Sandbox: the live gate behind the cost gates; no crash without BigQuery | cherry-pick |
+| `561a0ef` | Okta sign-in on the identity store | cherry-pick |
+| `1857044` | Both surfaces sign in | cherry-pick |
+| `16e69af` | Their schema, settings loader and authorization module, reconciled | cherry-pick; their three files are byte-identical on both sides, so only `sahs/spanner.py`, `sahs/identity/authorization.py` and the `sahs/util/spanner.py` move can conflict |
 
 ```sh
-git checkout -b ours/<topic> origin/feature/unified-changes
-git cherry-pick <one commit from here>
+git fetch wyla
+git checkout -b feature/okta-signin origin/feature/unified-changes
+git cherry-pick 998aa24 561a0ef 1857044 16e69af
 ```
 
-Conflicts, when they come, are in the rows of the deviation table above.
-For each conflicted path take one side whole: theirs for deployment files,
-ours for the paths our commit set out to change.
+During a cherry-pick, git's `--ours` is the enterprise branch and
+`--theirs` is the wyla commit being applied. For each conflicted path take
+one side whole by the ownership table below: `git checkout --theirs -- <path>`
+for a path we own, `git checkout --ours -- <path>` for one they own, then
+`git add` and `git cherry-pick --continue`.
+
+Then the modules from the first commit that the Okta commits depend on
+(the store methods `find_or_create_external_user`, `set_roles`, `list_users`,
+`put_state`, `pop_state` exist only in ours):
+
+```sh
+git checkout wyla/main -- \
+  synapse-agentic-harness-system/sahs/identity \
+  synapse-agentic-harness-system/sahs/identity_store.py \
+  synapse-agentic-harness-system/db/spanner/006_external_identities.sql \
+  synapse-agentic-harness-system/.env.example \
+  docs/enterprise-port.md
+git commit -m "Identity store, database and states from wyla; the port doc"
+```
+
+(`wyla/main` once PR #146 has merged; the branch name before that. Merge
+that PR with a merge commit, not a squash, so the five commits keep their
+identities for the table above.) Add the `identity` dependency group
+(`google-cloud-spanner`, `argon2-cffi`, `cryptography`) to whatever pins
+their image installs; `pyproject.toml` here names it.
+
+### Before the enterprise branch is opened for review
+
+1. Both suites green in that clone: `python -m pytest apps/synapse_admin/tests -q`
+   and `python -m pytest synapse-agentic-harness-system/tests -q`.
+2. The DDL: `db/spanner/006_external_identities.sql` applied to each
+   environment's database (`ExternalIdentities`, `AuthStates`), and
+   `004_google_oauth.sql` where BigQuery runs as the person.
+   `scripts/spanner_check.py` diffs the live database against `db/spanner`.
+3. The environment (helm and config, theirs): `SAHS_STORE=spanner`,
+   `AUTH_PEPPER` (eight characters at least, a secret), `OKTA_ISSUER`,
+   `OKTA_CLIENT_ID`, `OKTA_CLIENT_SECRET` (a secret),
+   `OKTA_REDIRECT_URI=https://<host>/callback`, `AUTH_GROUP_ROLE_MAP` with
+   at least one group mapped to `admin` (without it nobody opens the
+   console), `AUTH_LOCAL_LOGIN` unset in e1, e2 and e3.
+4. The cookie: `AUTH_COOKIE_SECURE=auto` needs the ingress to send
+   `X-Forwarded-Proto: https`; when it does not, set `true`.
+5. Okta: `https://<host>/callback` registered as a Login redirect URI on
+   each environment's client, and the ID token carrying the group claim
+   (`OKTA_GROUP_CLAIM`, default `groups`) and an email claim.
+   `apps/synapse_admin/scripts/okta_check.py` verifies both without
+   signing anyone in.
+6. Routing: `/callback` must reach the app at the root; a prefix in front
+   of the app changes the redirect URI the app must be told.
+7. A laptop run first: `SAHS_STORE=sqlite` and the non-production client
+   with `http://localhost:8400/callback` added to its redirect URIs, never
+   the production client.
 
 ## Path ownership at reconciliation
 
