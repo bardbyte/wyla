@@ -23,21 +23,30 @@ Progressive disclosure is the point: the system prompt carries only
 names and one-liners (``render_skill_index``); the full text enters a
 turn only when the model calls ``load_skill`` — the tool result IS
 the injection — or when the user preloads packs via the session
-picker (``load_packs``). Either way the pins from v1 hold: skills
-steer, they never assert facts, and every load is disclosed.
+picker (``load_packs``). A pack over the whole-load ceiling
+(``SAHS_MAX_SKILL_CHARS``) loads as a LIBRARY instead: its table of
+contents and the passages matching the ask, fitted to the engine's
+budget (``skill_context``), with the kit's ``skill_toc`` /
+``skill_search`` / ``skill_read`` for the rest (docs/skill-retrieval.md).
+Either way the pins from v1 hold: skills steer, they never assert
+facts, and every load is disclosed.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from sahs.loop.skills import (
+    SearchableSkill,
     Skill,
     _parse,
-    check_size,
     max_loaded,
+    max_skill_chars,
+    render_searchable_skills,
     skills_root,
+    split_by_ceiling,
 )
 
 BUILTIN = "built-in"
@@ -133,9 +142,11 @@ def load_packs(graph_root: Path | None,
                names: list[str],
                owner: str = "") -> tuple[list[Pack], list[str]]:
     """(loaded, missing) across the shelves — the session-preload
-    resolver. Missing names are reported, never invented; a pack over
-    the size ceiling raises ``SkillTooLarge`` (see sahs.loop.skills)
-    rather than reaching the model as a cut of itself."""
+    resolver. Missing names are reported, never invented. A pack over
+    the size ceiling loads too: the turn splits the list with
+    ``split_by_ceiling`` and the oversized ones enter the prompt as a
+    searchable library (``skill_context``), never as a cut of
+    themselves."""
     available = {p.name: p for p in all_skills(graph_root, owner)}
     loaded, missing = [], []
     for name in names[:max_loaded()]:
@@ -143,8 +154,139 @@ def load_packs(graph_root: Path | None,
         if pack is None:
             missing.append(name)
         else:
-            loaded.append(check_size(pack))
+            loaded.append(pack)
     return loaded, missing
+
+
+# ─── the searchable library: catalogue + pages, under a budget ──
+
+TOC_SHARE = 0.35        # of the budget: the contents; the rest, pages
+TOC_TOOL_CAP = 15_000   # chars a skill_toc result lists before folding
+
+
+def toc_lines(toc: list[dict], budget: int,
+              max_level: int = 0) -> tuple[list[str], int]:
+    """The contents as prompt lines under ``budget`` characters,
+    folding to shallower headings when the full list does not fit,
+    then cutting with a count of what was left out. Deterministic:
+    (lines, omitted)."""
+    def _line(s: dict) -> str:
+        return (f"{s['section_id']} · {s['heading_path']} "
+                f"({s['chunks']} chunk{'s' if s['chunks'] != 1 else ''}, "
+                f"{s['chars']:,} chars)")
+    levels = sorted({int(s["level"]) for s in toc}, reverse=True)
+    deepest = levels[0] if levels else 0
+    for level in ([max_level] if max_level else [deepest, 3, 2, 1]):
+        if level > deepest:
+            continue
+        rows = [s for s in toc if int(s["level"]) <= level]
+        lines = [_line(s) for s in rows]
+        if sum(len(x) + 3 for x in lines) <= budget:
+            return lines, len(toc) - len(rows)
+    rows = [s for s in toc if int(s["level"]) <= (max_level or 1)]
+    kept: list[str] = []
+    used = 0
+    for s in rows:
+        line = _line(s)
+        if used + len(line) + 3 > budget:
+            break
+        kept.append(line)
+        used += len(line) + 3
+    return kept, len(toc) - len(kept)
+
+
+@dataclass
+class SkillContext:
+    """One turn's skills, split: the packs pasted whole, the packs
+    loaded as a library (with the rendered block for the prompt), the
+    index the tools read from, and the budget that shaped it."""
+
+    whole: list[Pack] = field(default_factory=list)
+    searchable: list[Pack] = field(default_factory=list)
+    block: str = ""
+    index: Any = None                    # sahs.loop.skill_index.SkillIndex
+    views: list[SearchableSkill] = field(default_factory=list)
+    chunks: int = 0                      # the fold: passages allowed
+    budget: int = 0                      # the fold: characters allowed
+
+    @property
+    def searchable_names(self) -> list[str]:
+        return [p.name for p in self.searchable]
+
+
+def skill_context(graph_root: Path | None, packs: list[Pack],
+                  query: str, model_name: str = "",
+                  stop: str = "medium", *,
+                  index: Any = None,
+                  limit: int | None = None) -> SkillContext:
+    """Split the loaded packs at the ceiling and, for the searchable
+    ones, build the prompt block: each pack's contents (fitted) and
+    the top passages for ``query`` at this engine's fold for ``stop``
+    (``profiles.skill_retrieval_for``). The index lives at
+    ``<graph>/runs/skill_index.sqlite3`` and is built lazily: an
+    unchanged pack costs a hash, nothing more."""
+    from sahs.util.profiles import skill_retrieval_for
+
+    from sahs.loop.skill_index import open_index
+
+    limit = max_skill_chars() if limit is None else limit
+    whole, searchable = split_by_ceiling(list(packs), limit)
+    ctx = SkillContext(whole=whole, searchable=searchable)
+    if not searchable:
+        return ctx
+    k, budget = skill_retrieval_for(model_name, stop)
+    ctx.chunks, ctx.budget = k, budget
+    ctx.index = index if index is not None else open_index(graph_root)
+    ctx.index.ensure(searchable)
+    names = [p.name for p in searchable]
+    hits = ctx.index.search(query, skills=names, k=k) if query.strip() \
+        else []
+    header = len(render_searchable_skills(
+        [SearchableSkill(p.name, p.title, p.chars, 0, 0)
+         for p in searchable], limit))
+    toc_budget = max(0, int(budget * TOC_SHARE) - header) // len(searchable)
+    views: list[SearchableSkill] = []
+    for pack in searchable:
+        info = ctx.index.overview(pack.name) or {}
+        lines, omitted = toc_lines(ctx.index.toc(pack.name), toc_budget)
+        views.append(SearchableSkill(
+            pack.name, pack.title, pack.chars,
+            int(info.get("sections") or 0), int(info.get("chunks") or 0),
+            tuple(lines), omitted, (), 0))
+    # the pages: in rank order, each whole or not at all, while the
+    # rendered block stays under the budget
+    by_name = {v.name: i for i, v in enumerate(views)}
+    passages: dict[str, list[dict]] = {v.name: [] for v in views}
+    matched: dict[str, int] = {v.name: 0 for v in views}
+    for hit in hits:
+        matched[hit.skill] = matched.get(hit.skill, 0) + 1
+    def _render() -> str:
+        return render_searchable_skills(
+            [SearchableSkill(v.name, v.title, v.chars, v.sections, v.chunks,
+                             v.toc, v.toc_omitted, tuple(passages[v.name]),
+                             matched.get(v.name, 0)) for v in views], limit)
+    block = _render()
+    for hit in hits:
+        if hit.skill not in by_name:
+            continue
+        chunk = ctx.index.chunk(hit.skill, hit.chunk_id) or {}
+        if not chunk:
+            continue
+        passages[hit.skill].append(
+            {"chunk_id": chunk["chunk_id"], "heading_path": chunk["heading_path"],
+             "start": chunk["start"], "end": chunk["end"],
+             "text": chunk["text"]})
+        candidate = _render()
+        if len(candidate) > budget:
+            passages[hit.skill].pop()
+            continue
+        block = candidate
+    ctx.views = [SearchableSkill(v.name, v.title, v.chars, v.sections,
+                                 v.chunks, v.toc, v.toc_omitted,
+                                 tuple(passages[v.name]),
+                                 matched.get(v.name, 0)) for v in views]
+    ctx.block = block
+    return ctx
 
 
 def render_skill_index(packs: list[Pack],
@@ -171,4 +313,5 @@ def render_skill_index(packs: list[Pack],
 __all__ = ["BUILTIN", "UNREVIEWED", "Pack", "builtin_root", "author_of",
            "owner_slug",
            "user_root", "builtin_skills", "all_skills", "get_skill",
-           "load_packs", "render_skill_index"]
+           "load_packs", "render_skill_index", "SkillContext",
+           "skill_context", "toc_lines", "TOC_TOOL_CAP"]

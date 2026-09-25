@@ -1,6 +1,9 @@
 """The v3 kit (Synapse v3 §2): eleven tools, sharp and non-overlapping,
 declared in the native tool protocol — plus ``suggest_next``, the way
-a model with no JSON wrapper offers follow-ups.
+a model with no JSON wrapper offers follow-ups, and, whenever a pack
+over the whole-load ceiling is in reach, the three library tools
+(``skill_toc``, ``skill_search``, ``skill_read``: the catalogue, the
+lookup, the page — sahs.loop.skill_index).
 
 Every tool is a thin door over the deterministic implementations the
 silo already has (the v1 kit, the checks, the artifact validator, the
@@ -14,7 +17,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sahs.loop.skills import SkillTooLarge, check_size
+from sahs.loop.skills import CHARS_VAR, is_searchable, max_skill_chars
 from sahs.loop.tools import ROW_CAP, ToolSpec, toolkit as v1_toolkit
 from sahs.tools.api import Build
 from sahs.tools.sandbox import (DEFAULT_MAX_BYTES, execute_sandboxed,
@@ -25,11 +28,13 @@ from . import checks as _checks
 from .artifacts import TYPES, validate_artifact
 from .hooks import literal_warnings
 from .sandbox import run_python, save_rows
-from .skills_loader import all_skills, get_skill
+from .skills_loader import TOC_TOOL_CAP, all_skills, get_skill, toc_lines
 from .state import AssistantState
 from .store import AssistantStore
 
 RESULT_CAP = 20_000        # chars of one tool result the model sees
+SKILL_READ_CHARS = 6000    # skill_read's default page
+SKILL_SEARCH_K = 8         # skill_search's default hits
 
 
 def _s(description: str, **extra: Any) -> dict[str, Any]:
@@ -60,7 +65,13 @@ def build_kit(build: Build, state: AssistantState, *,
               snapshot_runner: Any = None, runner: Any = None,
               graph_root: Path | None = None,
               project_id: str = "",
-              owner: str = "") -> dict[str, ToolSpec]:
+              owner: str = "",
+              retriever: Any = None,
+              searchable: list[str] | None = None) -> dict[str, ToolSpec]:
+    """``retriever`` is the turn's SkillIndex (sahs.loop.skill_index)
+    and ``searchable`` the packs loaded as a library this turn; the
+    three skill_* tools are declared when any pack the turn can reach
+    is over the whole-load ceiling."""
     v1 = v1_toolkit(build, state, substrate=substrate,
                     snapshot_runner=snapshot_runner)
     base = {name: v1[name].fn for name in (
@@ -367,6 +378,44 @@ def build_kit(build: Build, state: AssistantState, *,
             options: list[Any] | None = None) -> dict[str, Any]:
         return base["ask_user"](question, list(options or []))
 
+    # ── the library: packs over the ceiling, read by the page ─
+    library: list[str] = list(searchable or [])
+    shelf_limit = max_skill_chars()
+    oversized = {p.name for p in all_skills(graph_root, owner)
+                 if is_searchable(p, shelf_limit)}
+    index_box: list[Any] = [retriever]
+
+    def _index() -> Any:
+        if index_box[0] is None:
+            from sahs.loop.skill_index import open_index
+            index_box[0] = open_index(graph_root)
+        return index_box[0]
+
+    def _in_library(name: str) -> tuple[Any, dict[str, Any] | None]:
+        """The pack, indexed, or the error the model reads."""
+        name = str(name or "").strip()
+        if not name:
+            return None, {"error": "name the skill",
+                          "hint": "the searchable packs: "
+                                  + (", ".join(library) or "none loaded; "
+                                     "load_skill(name) first")}
+        pack = get_skill(graph_root, name, owner)
+        if pack is None:
+            return None, {"error": f"no skill named {name!r}",
+                          "hint": "available: " + (", ".join(
+                              f"{p.name} ({p.origin})"
+                              for p in all_skills(graph_root, owner))
+                              or "none")}
+        if not is_searchable(pack, shelf_limit):
+            return None, {"error": f"{name!r} is not a library pack: it "
+                                   f"is {pack.chars:,} characters, under "
+                                   f"the {shelf_limit:,} ceiling",
+                          "hint": "load_skill(name) hands it over whole"}
+        _index().ensure([pack])
+        if name not in library:
+            library.append(name)
+        return pack, None
+
     def load_skill(name: str) -> dict[str, Any]:
         name = str(name).strip()
         if name in state.skills_loaded:
@@ -379,17 +428,106 @@ def build_kit(build: Build, state: AssistantState, *,
                 or "none"
             return {"error": f"no skill named {name!r}",
                     "hint": f"available: {names}"}
-        try:
-            check_size(pack)
-        except SkillTooLarge as e:
-            # on the shelf, over the ceiling: nothing loads, and the
-            # model is told so rather than handed a cut of the pack
-            return {"error": str(e),
-                    "hint": "the pack exists but nothing was loaded; "
-                            "the person can raise the ceiling"}
+        if is_searchable(pack, shelf_limit):
+            # on the shelf, over the ceiling: it loads as a library —
+            # the contents now, the pages by skill_search / skill_read
+            # — never as a cut of itself
+            _pack, problem = _in_library(name)
+            if problem:
+                return problem
+            state.skills_loaded.append(name)
+            got = skill_toc(name)
+            return {"ok": True, "name": pack.name, "title": pack.title,
+                    "origin": pack.origin, "searchable": True,
+                    "chars": pack.chars, "sections": got.get("sections"),
+                    "chunks": got.get("chunks"), "toc": got.get("toc"),
+                    "toc_omitted": got.get("omitted", 0),
+                    "note": f"{pack.chars:,} characters, over the "
+                            f"{shelf_limit:,} whole-load ceiling "
+                            f"({CHARS_VAR}): loaded as a library. This "
+                            "is the table of contents; skill_search("
+                            f"query, \"{pack.name}\") ranks the passages "
+                            f"and skill_read(\"{pack.name}\", section) "
+                            "reads one — cite the breadcrumb"}
         state.skills_loaded.append(name)
         return {"ok": True, "name": pack.name, "title": pack.title,
                 "origin": pack.origin, "text": pack.text}
+
+    def skill_toc(name: str, under: str = "") -> dict[str, Any]:
+        pack, problem = _in_library(name)
+        if problem:
+            return problem
+        index = _index()
+        info = index.overview(pack.name) or {}
+        toc = index.toc(pack.name, under=under)
+        if not toc and under:
+            return {"error": f"no section of {pack.name!r} under "
+                             f"{under!r}",
+                    "hint": "skill_toc(name) alone lists the top level; "
+                            "under takes a heading or a heading path"}
+        lines, omitted = toc_lines(toc, TOC_TOOL_CAP)
+        out = {"ok": True, "name": pack.name, "title": pack.title,
+               "chars": pack.chars, "sections": info.get("sections"),
+               "chunks": info.get("chunks"), "under": under,
+               "toc": lines, "omitted": omitted}
+        if omitted:
+            out["hint"] = (f"{omitted:,} deeper sections folded: "
+                           "skill_toc(name, under=\"<heading>\") opens "
+                           "one branch; skill_search finds by words")
+        return out
+
+    def skill_search(query: str, skill: str = "",
+                     k: int = SKILL_SEARCH_K) -> dict[str, Any]:
+        query = str(query or "").strip()
+        if not query:
+            return {"error": "skill_search needs a query",
+                    "hint": "the words the passage would use"}
+        names: list[str]
+        if str(skill or "").strip():
+            _pack, problem = _in_library(str(skill))
+            if problem:
+                return problem
+            names = [str(skill).strip()]
+        else:
+            names = list(library)
+            if not names:
+                return {"error": "no library pack is loaded this turn",
+                        "hint": "name one: skill_search(query, skill), "
+                                "or load_skill(name) first; the "
+                                "library packs on the shelf: "
+                                + (", ".join(sorted(oversized)) or "none")}
+        k = max(1, min(int(k or SKILL_SEARCH_K), 20))
+        hits = [h.as_row() for h in _index().search(query, skills=names,
+                                                     k=k)]
+        out = {"ok": True, "query": query, "skills": names,
+               "count": len(hits), "hits": hits}
+        if hits:
+            out["hint"] = ("skill_read(skill, chunk_id) reads a passage "
+                           "whole; skill_read(skill, section_id) the "
+                           "section around it")
+        else:
+            out["hint"] = ("nothing matched: try the pack's own words "
+                           "(skill_toc lists its headings)")
+        return out
+
+    def skill_read(name: str, section: str,
+                   max_chars: int = SKILL_READ_CHARS,
+                   offset: int = 0) -> dict[str, Any]:
+        pack, problem = _in_library(name)
+        if problem:
+            return problem
+        max_chars = max(200, min(int(max_chars or SKILL_READ_CHARS),
+                                 RESULT_CAP - 2000))
+        got = _index().read(pack.name, str(section or ""), max_chars,
+                            int(offset or 0))
+        if "error" in got:
+            got.setdefault("hint", "a heading, a heading path, an s<N> "
+                                   "from the contents, or a c<N> from "
+                                   "skill_search")
+            return got
+        got["ok"] = True
+        got["title"] = pack.title
+        return got
 
     def remember(text: str, scope: str = "global") -> dict[str, Any]:
         text = str(text).strip()
@@ -612,6 +750,63 @@ def build_kit(build: Build, state: AssistantState, *,
                 "executive-summary; tiles → dashboard-design)."),
             fn=load_skill, schema=_obj({"name": _s("pack name")},
                                        ["name"])),
+    ]
+    if library or oversized:
+        specs += [
+            ToolSpec(
+                name="skill_toc", signature="skill_toc(name, under?)",
+                maps_to="the card catalogue",
+                description=(
+                    "The table of contents of a pack loaded as a "
+                    "library (one too large to hold whole): every "
+                    "heading path with its chunk count and size, in "
+                    "order. Read it before deciding a pack has nothing "
+                    "on the ask. under=\"<heading>\" opens one branch "
+                    "when the list folded to its top level."),
+                fn=skill_toc, schema=_obj({
+                    "name": _s("pack name"),
+                    "under": _s("a heading or heading path to list "
+                                "beneath")}, ["name"])),
+            ToolSpec(
+                name="skill_search",
+                signature="skill_search(query, skill?, k?)",
+                maps_to="the catalogue lookup",
+                description=(
+                    "Find the passages of a library pack that match "
+                    "words: ranked chunks, each with its breadcrumb "
+                    "(\"H1 > H2 > H3\"), character offsets, a score and "
+                    "a snippet. Lexical, not semantic: use the words "
+                    "the pack would use (its headings, its terms), "
+                    "and try a second phrasing before concluding it "
+                    "is silent. skill=name limits it to one pack; "
+                    "without it, every pack loaded this turn."),
+                fn=skill_search, schema=_obj({
+                    "query": _s("the words the passage would use"),
+                    "skill": _s("one pack name; default every library "
+                                "pack loaded this turn"),
+                    "k": _i("how many, default 8, at most 20")},
+                    ["query"])),
+            ToolSpec(
+                name="skill_read",
+                signature="skill_read(name, section, max_chars?, offset?)",
+                maps_to="the page",
+                description=(
+                    "Read one section or passage of a library pack, "
+                    "as written: a heading, a heading path, an s<N> "
+                    "from the contents, or a c<N> from skill_search. "
+                    "The result carries the breadcrumb and the "
+                    "character offsets — cite them. A section longer "
+                    "than max_chars (default 6000) comes back in pages: "
+                    "call again with the offset the result names."),
+                fn=skill_read, schema=_obj({
+                    "name": _s("pack name"),
+                    "section": _s("a heading, heading path, s<N> or "
+                                  "c<N>"),
+                    "max_chars": _i("characters per page, default 6000"),
+                    "offset": _i("continue a long section from here")},
+                    ["name", "section"])),
+        ]
+    specs += [
         ToolSpec(
             name="remember", signature="remember(text, scope?)",
             maps_to="user memory", writes=True,

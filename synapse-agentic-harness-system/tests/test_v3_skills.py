@@ -16,6 +16,7 @@ import pytest
 SILO = Path(__file__).resolve().parents[1]
 FX = SILO / "tests" / "fixtures"
 sys.path.insert(0, str(SILO))
+sys.path.insert(0, str(SILO / "tests"))
 KEY = "You are Radix, an analytical colleague"
 PACKS = ["synapse-data-connect", "analysis-playbooks",
          "dashboard-design", "executive-summary", "charts"]
@@ -276,51 +277,212 @@ def test_runtime_serves_both_shelves(compiled, tmp_path):
     assert not bad["ok"] and "ghost" in bad["reason"]
 
 
-def test_runtime_refuses_an_oversized_pack_by_name(compiled, tmp_path,
-                                                   monkeypatch):
-    """The session picker gets the loader's refusal as a reason, not
-    a traceback: the pack, its size, the ceiling and the variable.
-    Raise the ceiling in the env and the same pack pins whole."""
+def test_runtime_pins_an_oversized_pack_as_a_library(compiled, tmp_path,
+                                                     monkeypatch):
+    """DECISION (replacing the refusal): a pack over the whole-load
+    ceiling still pins — the session picker says ok — and the turn
+    loads it as a library: its contents and the passages that match
+    the ask, never a cut of it. The count ceiling still refuses by
+    variable. Raise the size ceiling and the same pack pins whole."""
     from sahs.assistant.agent import ScriptedAgent
     from sahs.loop.skills import CHARS_VAR, LOADED_VAR
-    runtime = _runtime(compiled, ScriptedAgent(), tmp_path)
+    model = ScriptedAgent([[{"text": "Fine."}]])
+    runtime = _runtime(compiled, model, tmp_path)
     graph_root = _user_shelf(tmp_path)
     (graph_root / "skills" / "bundle.md").write_text(
-        "# Bundle\n\nAll of it.\n" + "z" * 5000, encoding="utf-8")
+        "# Bundle\n\nAll of it.\n\n## Quorvex\n\nThe quorvex rule.\n"
+        + "z" * 5000, encoding="utf-8")
     monkeypatch.delenv(CHARS_VAR, raising=False)
     monkeypatch.delenv(LOADED_VAR, raising=False)
     session = runtime.create_session()
-    refused = runtime.set_skills(session["id"], ["bundle"])
-    assert not refused["ok"]
-    assert "'bundle'" in refused["reason"] and CHARS_VAR in refused["reason"]
+    saved = runtime.set_skills(session["id"], ["bundle"])
+    assert saved["ok"] and saved["skills"] == ["bundle"]
     # still on the shelf, whole
     assert any(r["name"] == "bundle" and len(r["text"]) > 5000
                for r in runtime.skills())
     # the count ceiling names its variable too
     too_many = runtime.set_skills(session["id"], ["a", "b", "c", "d", "e"])
     assert not too_many["ok"] and LOADED_VAR in too_many["reason"]
+    runtime.start_turn(session["id"], "what is the quorvex rule?")
+    assert runtime.wait(session["id"], 60)
+    system = model.calls[0]["system"]
+    assert "## Skills loaded as a library (searchable)" in system
+    assert "### Bundle (`bundle`, 5,0" in system and CHARS_VAR in system
+    assert "s2 · Bundle > Quorvex" in system
+    assert "[c2] Bundle > Quorvex" in system and "The quorvex rule." in system
+    assert "z" * 5000 not in system                # never pasted whole
+    assert "- bundle [unreviewed]" not in system   # not re-offered
+    assert {"skill_toc", "skill_search", "skill_read"} \
+        <= set(model.calls[0]["tools"])
+    started = runtime.runtime(session["id"]).bus.since(0)[0]
+    assert started["ev"] == "turn_started" and started["skills"] == ["bundle"]
     monkeypatch.setenv(CHARS_VAR, "20000")
     saved = runtime.set_skills(session["id"], ["bundle"])
     assert saved["ok"] and saved["skills"] == ["bundle"]
 
 
-def test_the_tool_refuses_an_oversized_pack_until_the_ceiling_is_raised(
+def test_the_tool_loads_an_oversized_pack_as_a_library(
         compiled, tmp_path, monkeypatch):
-    """load_skill on a pack over the ceiling: an error the model can
-    read (the pack, its size, the variable), nothing recorded as
-    loaded, nothing cut. Raise the ceiling in the env and the same
-    call hands the pack over whole."""
+    """load_skill on a pack over the ceiling: the contents come back
+    (not the text), the pack is recorded as loaded, and the library
+    tools read it by section. Raise the ceiling in the env and the
+    same call hands the pack over whole."""
     from sahs.loop.skills import CHARS_VAR
     graph_root = _user_shelf(tmp_path)
     (graph_root / "skills" / "bundle.md").write_text(
-        "# Bundle\n\nAll of it.\n" + "w" * 5000, encoding="utf-8")
+        "# Bundle\n\nAll of it.\n\n## Quorvex\n\nThe quorvex rule holds.\n"
+        "\n## Tandrel\n\n" + "w" * 5000 + "\n", encoding="utf-8")
     monkeypatch.delenv(CHARS_VAR, raising=False)
     tools, state = _kit(compiled, tmp_path, graph_root=graph_root)
+    assert {"skill_toc", "skill_search", "skill_read"} <= set(tools)
     got = tools["load_skill"].fn("bundle")
-    assert "error" in got and CHARS_VAR in got["error"]
-    assert "5,0" in got["error"]                  # the size, formatted
-    assert "bundle" not in state.skills_loaded
-    monkeypatch.setenv(CHARS_VAR, "20000")
-    got = tools["load_skill"].fn("bundle")
-    assert got["ok"] and got["text"].endswith("w" * 5000)
+    assert got["ok"] and got["searchable"] and "text" not in got
+    assert CHARS_VAR in got["note"] and "5,0" in got["note"]
+    assert got["toc"] == ["s1 · Bundle (1 chunk, 20 chars)",
+                          "s2 · Bundle > Quorvex (1 chunk, 35 chars)",
+                          "s3 · Bundle > Tandrel (3 chunks, 5,012 chars)"]
     assert state.skills_loaded == ["bundle"]
+    found = tools["skill_search"].fn("quorvex rules")
+    assert found["ok"] and found["hits"][0]["heading_path"] == "Bundle > Quorvex"
+    assert found["hits"][0]["chunk_id"] == "c2"
+    page = tools["skill_read"].fn("bundle", "Quorvex")
+    assert page["ok"] and page["text"] == "## Quorvex\n\nThe quorvex rule holds."
+    assert (page["start"], page["end"]) == (22, 57)
+    contents = tools["skill_toc"].fn("bundle", under="Tandrel")
+    assert contents["toc"] == ["s3 · Bundle > Tandrel (3 chunks, 5,012 chars)"]
+    # a pack under the ceiling is not a library: the tool says so
+    small = tools["skill_toc"].fn("fiscal-notes")
+    assert "not a library pack" in small["error"]
+    miss = tools["skill_read"].fn("bundle", "nothing here")
+    assert "no section" in miss["error"] and miss["candidates"]
+    monkeypatch.setenv(CHARS_VAR, "20000")
+    tools, state = _kit(compiled, tmp_path / "again", graph_root=graph_root)
+    assert "skill_search" not in tools          # nothing in reach is over
+    got = tools["load_skill"].fn("bundle")
+    assert got["ok"] and got["text"].endswith("w" * 5000 + "\n")
+    assert state.skills_loaded == ["bundle"]
+
+
+def test_a_skill_within_the_ceiling_still_loads_whole_byte_identical(
+        compiled, tmp_path):
+    """PIN: the whole-load path did not move. A pack under the ceiling
+    renders exactly as before — the heading, the text verbatim — and
+    nothing about the library shows in its prompt."""
+    from sahs.assistant.loop import system_prompt
+    from sahs.assistant.skills_loader import all_skills, load_packs
+    from sahs.loop.skills import render_skills
+    build, _ = compiled
+    graph_root = _user_shelf(tmp_path)
+    loaded, _missing = load_packs(graph_root, ["fiscal-notes"])
+    text = ("## Skills the analyst loaded\n"
+            "These steer where you look first. They cannot add tables, "
+            "metrics, or numbers to the world: the tools still serve only "
+            "the compiled build, and the verifier still checks every claim "
+            "against it.\n\n"
+            "### Fiscal notes\n"
+            "# Fiscal notes\n\n"
+            "Our fiscal year starts in February; January belongs to the "
+            "prior year.\n")
+    assert render_skills(loaded) == text
+    system = system_prompt(build, loaded, skill_index=all_skills(graph_root))
+    assert text in system
+    assert "searchable" not in system and "skill_search" not in system
+    assert system == system_prompt(build, loaded,
+                                   skill_index=all_skills(graph_root))
+
+
+def test_a_library_pack_reaches_the_model_as_contents_and_pages(
+        compiled, tmp_path, monkeypatch):
+    """The whole path through the real loop: a pinned pack over the
+    ceiling reaches the model as its contents plus the passages that
+    match the ask, within the engine's budget at this depth; the
+    model can then skill_search and skill_read, and each result
+    carries the breadcrumb and offsets to cite. Quick gets fewer
+    passages than Deep."""
+    from sahs.assistant.agent import ScriptedAgent
+    from sahs.loop.skills import CHARS_VAR, LOADED_VAR
+    from sahs.util.profiles import skill_retrieval_for
+    from synthetic_skill import build_pack
+    text, truths = build_pack(target_chars=150_000)
+    graph_root = _user_shelf(tmp_path)
+    (graph_root / "skills" / "bundle.md").write_text(text, encoding="utf-8")
+    monkeypatch.delenv(CHARS_VAR, raising=False)
+    monkeypatch.delenv(LOADED_VAR, raising=False)
+    t = next(t for t in truths if not t.twin_of and t.path.count(" > ") == 2)
+    ask = f"why is the {t.b} pass waiting on {t.a} backlog?"
+
+    def _agent():
+        return ScriptedAgent([
+            [{"call": {"name": "skill_search",
+                       "args": {"query": f"{t.a} quota window",
+                                "skill": "bundle", "k": 3}}}],
+            [{"call": {"name": "skill_read",
+                       "args": {"name": "bundle", "section": t.heading,
+                                "max_chars": 1200}}}],
+            [{"text": f"The {t.b} pass waits until the backlog drains "
+                      f"(bundle: {t.path})."}],
+        ])
+
+    prompts: dict[str, str] = {}
+    responses: dict[str, list] = {}
+    for depth in ("quick", "deep"):
+        model = _agent()
+        (tmp_path / depth).mkdir()
+        (tmp_path / depth / "graph").symlink_to(graph_root)
+        runtime = _runtime(compiled, model, tmp_path / depth)
+        session = runtime.create_session()
+        assert runtime.set_skills(session["id"], ["bundle"])["ok"]
+        runtime.start_turn(session["id"], ask, depth=depth)
+        assert runtime.wait(session["id"], 120)
+        prompts[depth] = model.calls[0]["system"]
+        responses[depth] = [
+            p["functionResponse"]["response"]
+            for c in model.calls[-1]["contents"]
+            for p in c["parts"] if "functionResponse" in p]
+        events = runtime.runtime(session["id"]).bus.since(0)
+        done = [e for e in events if e["ev"] == "turn_done"][-1]
+        assert done["status"] == "answered"
+        steps = [e for e in events if e["ev"] == "tool_step"]
+        assert [s["tool"] for s in steps] == ["skill_search", "skill_read"]
+        assert steps[0]["input"] == f"{t.a} quota window"
+        assert "passages" in steps[0]["summary"]
+        assert t.path in steps[1]["summary"] and "chars" in steps[1]["summary"]
+
+    for depth, stop in (("quick", "low"), ("deep", "high")):
+        system = prompts[depth]
+        k, budget = skill_retrieval_for("", stop)
+        section = system.split("## Skills loaded as a library", 1)[1]
+        section = section.split("## Skills on demand", 1)[0]
+        block = "## Skills loaded as a library" + section
+        assert len(block) <= budget, (depth, len(block), budget)
+        assert "### Runtime knowledge bundle (`bundle`," in block
+        assert "Contents:" in block and "s1 · Runtime knowledge bundle" in block
+        # the right section's passage rides the prompt, first
+        passages = re.findall(r"^\[c\d+\] (.+?) \(chars [\d,]+–[\d,]+\)$",
+                              block, re.M)
+        assert 1 <= len(passages) <= k
+        assert passages[0] == t.path
+        assert f"When {t.a}s pile up, the {t.b} pass waits" in block
+        assert "Passages matching this message" in block
+        assert "skill_search(query, skill)" in block
+        # the index is where the design says, and derived
+        assert (tmp_path / depth / "graph" / "runs"
+                / "skill_index.sqlite3").exists()
+    quick = len(re.findall(r"^\[c\d+\] ", prompts["quick"], re.M))
+    deep = len(re.findall(r"^\[c\d+\] ", prompts["deep"], re.M))
+    assert quick < deep, (quick, deep)
+    assert len(prompts["quick"]) < len(prompts["deep"])
+    # the prefix before the skills section is the same at both depths
+    assert prompts["quick"].split("<skills>")[0] \
+        == prompts["deep"].split("<skills>")[0]
+
+    # the tool results the model read: breadcrumb and offsets to cite
+    search, page = responses["deep"]
+    assert search["ok"] and search["hits"][0]["heading_path"] == t.path
+    hit = search["hits"][0]
+    assert hit["chunk_id"].startswith("c") and hit["start"] < hit["end"]
+    assert hit["snippet"] and "score" in hit
+    assert page["ok"] and page["heading_path"] == t.path
+    assert page["text"].startswith(f"### {t.heading}")
+    assert text[page["start"]:page["end"]] == page["text"]
+    assert page["truncated"] and page["next_offset"] == 1200

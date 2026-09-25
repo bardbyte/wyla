@@ -37,7 +37,7 @@ from .agent import ROUTING_KEY, declarations
 from .events import EventBus
 from .kit import RESULT_CAP, build_kit
 from .sandbox import prepare_workspace
-from .skills_loader import all_skills, render_skill_index
+from .skills_loader import all_skills, render_skill_index, skill_context
 from .state import AssistantState
 from .store import AssistantStore
 
@@ -274,12 +274,16 @@ def system_prompt(build: Build, skills: list[Skill] | None = None,
                   artifacts: list[dict[str, Any]] | None = None,
                   notes: list[str] | None = None,
                   user_name: str = "", mode: str = DEFAULT_MODE,
-                  today: _dt.date | None = None, style: str = "") -> str:
+                  today: _dt.date | None = None, style: str = "",
+                  retrieval: str = "",
+                  library: list[str] | None = None) -> str:
     """Identity → chain → mode → style (the model family's, when it has
-    one) → the graph digest (business map + skills (loaded whole, the
-    rest by name) → memory → this session (today's date first, then the
-    artifacts and notes). Stable parts first so the prefix caches; the
-    tools are declared to the transport, never pasted here."""
+    one) → the graph digest (business map + skills (loaded whole, then
+    the library packs' contents and matched passages (``retrieval``,
+    per turn), the rest by name) → memory → this session (today's date
+    first, then the artifacts and notes). Stable parts first so the
+    prefix caches; the tools are declared to the transport, never
+    pasted here."""
     digest = _DIGEST_CACHE.get(build.version)
     if digest is None:
         digest = synapse_digest(build,
@@ -293,10 +297,11 @@ def system_prompt(build: Build, skills: list[Skill] | None = None,
     skill_text = render_skills(skills or [])
     shelf = render_skill_index(
         skill_index or [],
-        exclude=frozenset(s.name for s in (skills or [])))
-    if skill_text or shelf:
+        exclude=frozenset(s.name for s in (skills or []))
+        | frozenset(library or []))
+    if skill_text or retrieval or shelf:
         parts.append(_section("skills", "\n\n".join(
-            p for p in (skill_text, shelf) if p)))
+            p for p in (skill_text, retrieval, shelf) if p)))
     memory = "\n\n".join(p for p in (_project_block(project),
                                      _memory_block(memories, user_name))
                          if p)
@@ -390,6 +395,8 @@ def tool_input(name: str, args: dict[str, Any]) -> str:
     keys = {"run_sql": "sql", "python": "code", "search": "query",
             "read": "id", "artifact": "title", "check": "kind",
             "sample_values": "column", "load_skill": "name",
+            "skill_toc": "name", "skill_search": "query",
+            "skill_read": "section",
             "remember": "text", "note": "text", "ask": "question",
             "propose_sql": "sql"}
     key = keys.get(name)
@@ -479,8 +486,22 @@ def summarize(tool: str, result: Any) -> str:
         return "asked: " + _short(
             (result.get("clarify") or {}).get("question", ""), 140)
     if tool == "load_skill":
+        if result.get("searchable"):
+            return (f"skill {result.get('name')} loaded as a library · "
+                    f"{result.get('sections')} sections")
         return (f"skill {result.get('name')} loaded"
                 if result.get("text") else str(result.get("note", "")))
+    if tool == "skill_toc":
+        return (f"{result.get('name')} · {result.get('sections')} sections, "
+                f"{len(result.get('toc') or [])} listed")
+    if tool == "skill_search":
+        heads = "; ".join(_short(h.get("heading_path", ""), 50)
+                          for h in (result.get("hits") or [])[:3])
+        return f"{result.get('count', 0)} passages: {heads}"
+    if tool == "skill_read":
+        return (f"{result.get('skill')} · {result.get('heading_path')} · "
+                f"chars {result.get('start')}–{result.get('end')}"
+                + (" (more)" if result.get("truncated") else ""))
     if tool == "remember":
         return "remembered"
     if tool == "note":
@@ -553,18 +574,25 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
 
     state = AssistantState()
     state.notes = list(session.get("notes") or [])
+    # the skills, split at the ceiling: whole ones paste verbatim; a
+    # pack over it is a library — its contents and the passages that
+    # match this ask, under the engine's budget at this depth
+    library = skill_context(graph_root, list(skills or []), text,
+                            model_name, thinking_level)
     kit = build_kit(build, state, store=store, session_id=session_id,
                     turn_id=turn_id, workspace=workspace, model=model,
                     substrate=substrate, snapshot_runner=snapshot_runner,
                     runner=runner, graph_root=graph_root,
                     project_id=(project or {}).get("id", ""),
-                    owner=owner)
+                    owner=owner, retriever=library.index,
+                    searchable=library.searchable_names)
     tools = declarations(kit)
     system = system_prompt(
-        build, skills, skill_index=all_skills(graph_root, owner),
+        build, library.whole, skill_index=all_skills(graph_root, owner),
         memories=memories, project=project,
         artifacts=store.list_artifacts(session_id), notes=state.notes,
-        user_name=user_name, mode=mode, style=prompt_style(model_name))
+        user_name=user_name, mode=mode, style=prompt_style(model_name),
+        retrieval=library.block, library=library.searchable_names)
     bus.emit("model_prompt", turn_id=turn_id, n=0, kind="system",
              content=system[:12000])
     contents = _history(store, session_id, turn_id)

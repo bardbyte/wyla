@@ -43,6 +43,22 @@ THINKING_NONE = "none"
 
 DEFAULT_CAP = 65536
 
+# ── the skill-retrieval budget ────────────────────────────────
+# A skill over the whole-load ceiling reaches the prompt as its table
+# of contents plus the chunks that match the ask (sahs.loop.skill_index),
+# under a per-engine budget in CHARACTERS (≈ 4 chars a token). The
+# numbers are deliberately conservative: a prompt is not a library,
+# and the model can always skill_search for more. The depth dial
+# folds onto the budget through RETRIEVAL_FOLD, keyed by the level the
+# engine actually runs at (so Quick on 3.5 Flash, which folds to
+# medium, gets medium's share — the fold is the engine's, not the
+# dial's). No env knob: the table is the place to tune an engine.
+DEFAULT_SKILL_BUDGET = 32_000          # an engine the table does not know
+# level the engine runs at → (chunks in the prompt, share of the budget)
+RETRIEVAL_FOLD: dict[str, tuple[int, float]] = {
+    "minimal": (2, 0.25), "low": (3, 0.40), "medium": (5, 0.60),
+    "high": (8, 1.00), "max": (8, 1.00)}
+
 
 @dataclass(frozen=True)
 class ModelProfile:
@@ -53,6 +69,15 @@ class ModelProfile:
     cap: int = DEFAULT_CAP
     fit: str = ""                  # where it belongs in the harness
     source: str = "family"         # docs | probe | family | env
+    skill_budget: int = DEFAULT_SKILL_BUDGET   # chars of searchable skills
+
+    def retrieval(self, stop: str) -> tuple[int, int]:
+        """(chunks, chars) of searchable-skill context for a dial
+        stop: the fold's share of this engine's budget at the level
+        the stop lands on."""
+        level = self.level_for(stop)
+        k, share = RETRIEVAL_FOLD.get(level, RETRIEVAL_FOLD["medium"])
+        return k, int(self.skill_budget * share)
 
     def level_for(self, stop: str) -> str:
         """The dial stop (or "json") as this model spells it: the
@@ -78,7 +103,8 @@ class ModelProfile:
     def as_row(self) -> dict[str, Any]:
         return {"model": self.model, "family": self.family,
                 "thinking": self.thinking, "levels": list(self.accepts),
-                "cap": self.cap, "fit": self.fit, "source": self.source}
+                "cap": self.cap, "fit": self.fit, "source": self.source,
+                "skill_budget": self.skill_budget}
 
 
 # ── the known engines ─────────────────────────────────────────
@@ -88,22 +114,23 @@ PROFILES: dict[str, ModelProfile] = {
         "gemini-3.1-pro", FAMILY_GEMINI_3, THINKING_LEVEL,
         ("low", "medium", "high"),
         fit="Deep and Extra deep; the multi-step SQL and python turns; "
-            "streams on Vertex", source="docs"),
+            "streams on Vertex", source="docs", skill_budget=120_000),
     "gemini-3.7-flash": ModelProfile(
         "gemini-3.7-flash", FAMILY_GEMINI_3, THINKING_LEVEL,
         ("low", "medium", "high"),          # minimal is refused
         fit="Everyday chat at Standard; Quick autopilot at high",
-        source="docs"),
+        source="docs", skill_budget=80_000),
     "gemini-3.5-flash": ModelProfile(
         "gemini-3.5-flash", FAMILY_GEMINI_3, THINKING_LEVEL,
         ("medium", "high"),                 # nothing shallower is listed
         fit="The alternate workhorse when 3.7 Flash is not served",
-        source="docs"),
+        source="docs", skill_budget=80_000),
     "gemini-3.1-flash-lite": ModelProfile(
         "gemini-3.1-flash-lite", FAMILY_GEMINI_3, THINKING_LEVEL,
         ("minimal", "low", "medium", "high"),
         fit="The one-shot JSON calls (classify, judge, reviews, "
-            "suggestions) and Minimal depth", source="docs"),
+            "suggestions) and Minimal depth", source="docs",
+        skill_budget=40_000),
 }
 
 # the family fallbacks, for a model the table does not name
@@ -111,11 +138,12 @@ _FAMILY_DEFAULTS: dict[str, ModelProfile] = {
     FAMILY_GEMINI_3: ModelProfile(
         "", FAMILY_GEMINI_3, THINKING_LEVEL, ("low", "medium", "high"),
         fit="A Gemini 3 model the table does not know: the common "
-            "three levels until the probe says otherwise"),
+            "three levels until the probe says otherwise",
+        skill_budget=80_000),
     FAMILY_GEMINI_25: ModelProfile(
         "", FAMILY_GEMINI_25, THINKING_BUDGET, (),
         fit="Retiring: a thinking budget under the cap; kept only for "
-            "an environment that still names it"),
+            "an environment that still names it", skill_budget=40_000),
     FAMILY_OTHER: ModelProfile(
         "", FAMILY_OTHER, THINKING_BUDGET, (),
         fit="Unknown to the table: treated as a budget model"),
@@ -178,7 +206,15 @@ def profile_for(model: str, env: dict[str, str] | None = None) -> ModelProfile:
     if raw_cap.isdigit():
         cap = int(raw_cap)
     return ModelProfile(name or base.model, base.family, thinking, accepts,
-                        cap, base.fit, source)
+                        cap, base.fit, source, base.skill_budget)
+
+
+def skill_retrieval_for(model: str, stop: str,
+                        env: dict[str, str] | None = None) -> tuple[int, int]:
+    """(chunks, chars) of searchable-skill context one turn may put
+    in the prompt on this engine at this dial stop — the profile's
+    fold (see RETRIEVAL_FOLD)."""
+    return profile_for(model, env).retrieval(stop)
 
 
 # ── the sampling policy ───────────────────────────────────────

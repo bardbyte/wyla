@@ -78,6 +78,7 @@ the deployment's word.
 | `VERTEX_THINKING_LEVELS` | the same, for the Vertex model | `max:high` |
 | `GATEWAY_JSON_MODEL` | route the one-shot JSON calls to a lighter engine of the plane | `gemini-3.1-flash-lite` |
 | `SAHS_TEMPERATURE_POLICY` | `default` leaves Gemini 3's temperature alone; `explicit` sends the caller's | `default` |
+| `SAHS_MAX_SKILL_CHARS` | the longest skill that loads whole; over it a pack loads as a searchable library under the engine's `skill_budget` ([skill retrieval](skill-retrieval.md)) | `4000` |
 
 ## What Gemini 3 asked for, and where the harness answers
 
@@ -152,6 +153,10 @@ it gets the budget dialect (`THINKING_BUDGET`, `GATEWAY_THINKING_BUDGETS`).
 - **Role routing by depth.** Escalating Deep and Extra deep to 3.1 Pro
   when a chat is on a Flash engine is a one-table change once the evals
   say the Flash engines slip there.
-- **Skills.** The packs are growing; loading sections instead of whole
-  files, with the names index doing the search, is the conversation
-  after this one.
+- **Embedding rerank for skills.** A pack over the whole-load ceiling
+  now loads as a searchable library (see [Skill retrieval](skill-retrieval.md):
+  the per-engine `skill_budget` next to the engine maps, the depth
+  fold, the three `skill_*` tools). The ranking is lexical BM25; the
+  `Embedder` seam in `sahs/loop/skill_index.py` is where an
+  embedding-based reranker plugs in once the transcripts say the
+  lexical hits miss.

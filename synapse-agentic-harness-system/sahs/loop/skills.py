@@ -17,14 +17,20 @@ Three pins:
   * **selection is explicit and visible.** Nothing loads by default;
     the session stores the chosen names; every surface that shows the
     model's context shows the loaded skills.
-  * **a skill loads whole or not at all.** The size ceiling and the
-    count ceiling come from the silo ``.env`` (``SAHS_MAX_SKILL_CHARS``,
-    ``SAHS_MAX_LOADED_SKILLS``); the defaults keep a skill a briefing
-    and a session to a few. A skill over the ceiling is still LISTED
-    — the shelf never hides it — but refuses to LOAD, by name, with
-    the number and the variable that raises it. Governed knowledge is
-    never truncated in silence: a cut briefing reads as a different
-    briefing, and nobody would know.
+  * **a skill loads whole, or as a library.** The size ceiling and
+    the count ceiling come from the silo ``.env``
+    (``SAHS_MAX_SKILL_CHARS``, ``SAHS_MAX_LOADED_SKILLS``); the
+    defaults keep a whole-loaded skill a briefing and a session to a
+    few. A skill within the ceiling enters the prompt whole, verbatim.
+    A skill over it is still LISTED — the shelf never hides it — and
+    in the assistant it loads as a SEARCHABLE pack: its table of
+    contents plus the passages that match the ask, under a per-model
+    budget, with tools to read any section (``sahs.loop.skill_index``,
+    ``render_searchable_skills``). The v1 navigator, which has no
+    such tools, still refuses by name (``SkillTooLarge``). Governed
+    knowledge is never truncated in silence: what the model holds is
+    labeled as the catalogue and the pages it asked for, never as the
+    whole book.
 """
 
 from __future__ import annotations
@@ -97,6 +103,23 @@ def check_size(skill: Skill, limit: int | None = None) -> Skill:
     return skill
 
 
+def is_searchable(skill: Skill, limit: int | None = None) -> bool:
+    """Over the whole-load ceiling: the assistant loads it as a
+    searchable pack instead of pasting it whole."""
+    limit = max_skill_chars() if limit is None else limit
+    return skill.chars > limit
+
+
+def split_by_ceiling(skills: list[Skill],
+                     limit: int | None = None
+                     ) -> tuple[list[Skill], list[Skill]]:
+    """(whole, searchable), each in the order given."""
+    limit = max_skill_chars() if limit is None else limit
+    whole = [s for s in skills if not is_searchable(s, limit)]
+    searchable = [s for s in skills if is_searchable(s, limit)]
+    return whole, searchable
+
+
 def skills_root(graph_root: Path) -> Path:
     return Path(graph_root) / "skills"
 
@@ -158,3 +181,70 @@ def render_skills(skills: list[Skill]) -> str:
         parts.append(skill.text.strip())
         parts.append("")
     return "\n".join(parts)
+
+
+# ─── searchable skills: the catalogue and the pages ──────────
+
+
+@dataclass(frozen=True)
+class SearchableSkill:
+    """What the prompt holds of a skill over the ceiling: the table
+    of contents (already fitted to the budget) and the passages that
+    matched this turn's ask. Built by ``skills_loader.skill_context``,
+    rendered by ``render_searchable_skills``."""
+
+    name: str
+    title: str
+    chars: int
+    sections: int
+    chunks: int
+    toc: tuple[str, ...] = ()           # "s3 · H1 > H2 (2 chunks, 8,120 chars)"
+    toc_omitted: int = 0                # sections the budget left out
+    passages: tuple[dict, ...] = ()     # chunk_id, heading_path, start, end, text
+    matched: int = 0                    # passages the search found in all
+
+
+def render_searchable_skills(skills: list[SearchableSkill],
+                             limit: int | None = None) -> str:
+    """The prompt section for the packs over the ceiling. Empty when
+    there are none, so the prompt of a session without one stays
+    byte-identical."""
+    if not skills:
+        return ""
+    limit = max_skill_chars() if limit is None else limit
+    parts = ["## Skills loaded as a library (searchable)",
+             f"These packs are over the whole-load ceiling ({limit:,} "
+             f"characters, {CHARS_VAR}), so you hold their table of "
+             "contents and the passages that matched this message — "
+             "not the whole text. Treat the contents as the card "
+             "catalogue: when the answer may sit in a section you do "
+             "not see, call skill_search(query, skill) and then "
+             "skill_read(skill, section), and cite the breadcrumb "
+             "(\"H1 > H2\") you read. Like every skill, they steer where "
+             "you look first; they cannot add tables, metrics, or "
+             "numbers to the world.", ""]
+    for skill in skills:
+        parts.append(f"### {skill.title} (`{skill.name}`, "
+                     f"{skill.chars:,} characters, {skill.sections:,} "
+                     f"sections, {skill.chunks:,} chunks)")
+        if skill.toc:
+            parts.append("Contents:")
+            parts += [f"- {line}" for line in skill.toc]
+        if skill.toc_omitted:
+            parts.append(f"- … {skill.toc_omitted:,} more sections: "
+                         f"skill_toc(\"{skill.name}\") lists them")
+        if skill.passages:
+            parts.append(f"Passages matching this message "
+                         f"({len(skill.passages)} of {skill.matched} "
+                         "found; skill_search for the rest):")
+            for p in skill.passages:
+                parts.append(f"[{p['chunk_id']}] {p['heading_path']} "
+                             f"(chars {p['start']:,}–{p['end']:,})")
+                parts.append(str(p["text"]).strip())
+                parts.append("")
+        else:
+            parts.append("No passage matched this message: "
+                         f"skill_search(query, \"{skill.name}\") when "
+                         "the pack may hold the answer.")
+        parts.append("")
+    return "\n".join(parts).rstrip() + "\n"

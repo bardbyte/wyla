@@ -181,7 +181,12 @@ where it is used, metric cards open in place with the definition and
 the table, and Skills (in place of Artifacts) showcases the doctrine
 packs with a Use-in-chat door. Skills also lets a person teach one:
 material in, the model's draft in the house format out, saved under
-`graph/skills/users/<owner>/` and loaded for that person alone. The
+`graph/skills/users/<owner>/` and loaded for that person alone. A pack
+within `SAHS_MAX_SKILL_CHARS` enters the chat whole; a larger one (a
+runtime knowledge bundle) loads as a searchable library — its table
+of contents plus the passages that match the ask, with `skill_search`
+and `skill_read` for the rest (see the harness's
+`docs/skill-retrieval.md`). The
 same page lists the knowledge files the graph is built from (the
 folders under the skills root, the staged drops, the reference docs)
 with their authors and last writes; Browse and Add open one pop-up
