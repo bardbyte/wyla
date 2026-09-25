@@ -13,6 +13,7 @@ a structured answer.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Any, Iterator
 
@@ -20,6 +21,7 @@ from sahs.ask.budget import Budget
 from sahs.ask.model import ModelUnavailable, VertexModel
 from sahs.enrich.client import EnrichTransportError, VertexClient
 from sahs.util.auth import AuthError, VertexConnection
+from sahs.util.profiles import profile_for, temperature_for
 
 # the first sentence of the v3 identity: scripted doubles route on it
 ROUTING_KEY = "You are Radix, an analytical colleague"
@@ -82,19 +84,49 @@ class VertexAgent:
         finally:
             self._charge(before)
 
+    @property
+    def model_name(self) -> str:
+        """The model id this agent rides (gemini-3.1-pro-preview, …):
+        the engine the prompt style and the sampling policy key on."""
+        return model_name_of(self.client)
+
+    def _json_client(self) -> Any:
+        """The client the one-shot JSON calls ride: this agent's own,
+        unless a plane routes them elsewhere (the gateway can)."""
+        return self.client
+
     def json(self, prompt: str, *, system: str = "",
              temperature: float = 0.0,
              max_tokens: int = 1024) -> dict | None:
-        return VertexModel(self.client, self.budget).json(
-            prompt, system=system, temperature=temperature,
+        client = self._json_client()
+        # Gemini 3 keeps the model's default temperature (Google's
+        # guidance: lowering it loops a thinking model); the older
+        # dialect takes the caller's number. SAHS_TEMPERATURE_POLICY
+        # =explicit sends it regardless
+        return VertexModel(client, self.budget).json(
+            prompt, system=system,
+            temperature=temperature_for(model_name_of(client), temperature),
             max_tokens=max_tokens)
+
+
+def model_name_of(client: Any) -> str:
+    """The model id a client rides: the gateway client's ``model``, the
+    Vertex client's ``connection.model``; "" for a double."""
+    name = getattr(client, "model", "")
+    if not name:
+        name = getattr(getattr(client, "connection", None), "model", "")
+    return str(name or "")
 
 
 class GatewayAgent(VertexAgent):
     """The same agent over Gemini through the gateway: the client delivers each
     call in one burst (the gateway serves no stream), the retry-once rule
     therefore always applies, and the budget is charged from the same
-    usage counters."""
+    usage counters. The one-shot JSON calls (judge, title, memory,
+    reviews) can ride a lighter model of the same plane:
+    GATEWAY_JSON_MODEL=gemini-3.1-flash-lite."""
+
+    _json_cache: Any = None
 
     @staticmethod
     def from_env(budget: Budget | None = None,
@@ -109,6 +141,25 @@ class GatewayAgent(VertexAgent):
                 "AUTH_MODE=env with GEMINI_BEARER_TOKEN) in the silo .env; "
                 "python scripts/gateway_check.py proves the path") from e
         return GatewayAgent(client, budget)
+
+    def _json_client(self) -> Any:
+        wanted = (os.environ.get("GATEWAY_JSON_MODEL") or "").strip()
+        if not wanted or wanted == model_name_of(self.client):
+            return self.client
+        cached = self._json_cache
+        if cached is not None and model_name_of(cached) == wanted:
+            return cached
+        from sahs.util.gateway import GatewayError
+        try:
+            self._json_cache = self.client.for_model(wanted)
+        except (GatewayError, AttributeError) as e:
+            # a model the plane does not serve: the JSON calls stay on
+            # this agent's model, and the log says why, once
+            note = getattr(self.client, "_note", None)
+            if callable(note):
+                note(f"GATEWAY_JSON_MODEL={wanted} not used: {e}")
+            self._json_cache = self.client
+        return self._json_cache
 
 
 # ── the planes as the composer lists them ─────────────────────
@@ -131,7 +182,7 @@ def join_choice(plane: str, model: str = "") -> str:
 
 
 def pretty_model(raw: str) -> str:
-    """gemini-2.5-pro → Gemini 2.5 Pro; gemini-3.1-pro-preview →
+    """gemini-3.7-flash → Gemini 3.7 Flash; gemini-3.1-pro-preview →
     Gemini 3.1 Pro Preview."""
     return " ".join(w.capitalize() if w.isalpha() else w
                     for w in (raw or "").replace("_", "-").split("-")
@@ -187,27 +238,33 @@ def plane_catalog() -> list[dict[str, Any]]:
 def model_catalog() -> list[dict[str, Any]]:
     """Every model the composer can pick, one row per plane × model:
     the choice id (plane, or plane:model), the plane, the model, the
-    label, availability with the reason, what choosing it means, how it
-    takes its depth (budget | level | none), and which one a new chat
-    starts on. Vertex serves its one model; the gateway serves
-    GATEWAY_MODELS, the default first."""
-    from sahs.util.gateway import gateway_models, thinking_kind
+    label, availability with the reason, what choosing it means, its
+    engine map (how it takes its depth — level | budget | none — the
+    levels it accepts, where it fits), and which one a new chat starts
+    on. Vertex serves its one model; the gateway serves GATEWAY_MODELS,
+    the default first."""
+    from sahs.util.gateway import gateway_models
     rows: list[dict[str, Any]] = []
     planes = {p["id"]: p for p in plane_catalog()}
     vertex = planes["vertex"]
+    engine = profile_for(vertex["model"])
     rows.append({"id": "vertex", "plane": "vertex", "plane_name": "Vertex",
                  "model": vertex["model"], "label": vertex["label"],
                  "available": vertex["available"], "reason": vertex["reason"],
                  "means": vertex["means"], "feel": vertex["feel"],
-                 "thinking": "budget", "default": vertex["default"]})
+                 "thinking": engine.thinking, "levels": list(engine.accepts),
+                 "family": engine.family, "fit": engine.fit,
+                 "default": vertex["default"]})
     gateway = planes["gateway"]
     for index, model in enumerate(gateway_models()):
+        engine = profile_for(model)
         rows.append({"id": "gateway" if index == 0 else join_choice("gateway", model),
                      "plane": "gateway", "plane_name": "Gateway", "model": model,
                      "label": pretty_model(model),
                      "available": gateway["available"], "reason": gateway["reason"],
                      "means": gateway["means"], "feel": gateway["feel"],
-                     "thinking": thinking_kind(model),
+                     "thinking": engine.thinking, "levels": list(engine.accepts),
+                     "family": engine.family, "fit": engine.fit,
                      "default": gateway["default"] and index == 0})
     return rows
 

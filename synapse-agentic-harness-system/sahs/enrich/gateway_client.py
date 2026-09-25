@@ -8,13 +8,18 @@ both stream forms). The loop, the hooks, the store and the page
 consume the events without knowing which plane produced them.
 
 What this plane does differently, all measured on the laptop:
-the model is addressed with a slash (``…/gemini-2.5-pro/generateContent``,
+the model is addressed with a slash (``…/gemini-3.7-flash/generateContent``,
 the gateway's path-pattern scopes); the bearer token comes from a
 TokenManager that mints on demand and refreshes before the token's
-exp; thinking is a BUDGET under a cap that leaves room for the answer
-(2.5 counts the thinking against maxOutputTokens); there is no prompt
-cache to lean on. A 401 mid-turn mints a fresh token and retries the
-same call once — safe, because nothing was streamed.
+exp; there is no prompt cache to lean on. A 401 mid-turn mints a
+fresh token and retries the same call once — safe, because nothing
+was streamed.
+
+Each model rides its own engine map (``sahs.util.profiles``): a 3.x
+model takes a ``thinkingLevel`` folded from the dial onto the levels
+it accepts; a retiring 2.5 takes a BUDGET under a cap that leaves room
+for the answer (2.5 counts the thinking against maxOutputTokens); a
+model that does not think takes nothing.
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ from sahs.util.gateway import (THINKING_BUDGETS, Config, GatewayError, Http,
                                thinking_kind, thinking_levels)
 
 CALL_TIMEOUT = 180.0        # one whole answer, thinking included
-MAX_CAP = 65536             # 2.5 Pro's output ceiling
+MAX_CAP = 65536             # the Gemini output ceiling (3.x and 2.5 Pro alike)
 
 
 @dataclass
@@ -50,10 +55,11 @@ class GatewayClient:
         "thought_tokens": 0})
     thinking_ok: bool = True
     plane: str = "gateway"
-    # how this model takes its depth (budget | level | none) and its
-    # output ceiling: by family, or as GATEWAY_MODEL_THINKING /
-    # GATEWAY_MODEL_CAPS say for the model
-    thinking: str = "budget"
+    # how this model takes its depth (level | budget | none), the dial's
+    # stops folded onto the levels it accepts, and its output ceiling:
+    # the model's profile, or as GATEWAY_MODEL_THINKING /
+    # GATEWAY_MODEL_LEVELS / GATEWAY_MODEL_CAPS say for it
+    thinking: str = "level"
     levels: dict[str, str] = field(
         default_factory=lambda: dict(DEFAULT_THINKING_LEVELS))
     cap: int = MAX_CAP
@@ -91,7 +97,8 @@ class GatewayClient:
         return cls(cfg=cfg, tokens=TokenManager(cfg, chooser.http),
                    http=chooser.http, log=log, budgets=thinking_budgets(env),
                    thinking=thinking_kind(cfg.model, env),
-                   levels=thinking_levels(env), cap=output_cap(cfg.model, env))
+                   levels=thinking_levels(env, cfg.model),
+                   cap=output_cap(cfg.model, env))
 
     def for_model(self, model: str) -> "GatewayClient":
         """The same plane, token and route on another of its models:
@@ -103,7 +110,7 @@ class GatewayClient:
                 + ", ".join(self.cfg.models))
         return replace(self, cfg=replace(self.cfg, model=model),
                        thinking=thinking_kind(model, env),
-                       levels=thinking_levels(env), cap=output_cap(model, env),
+                       levels=thinking_levels(env, model), cap=output_cap(model, env),
                        thinking_ok=True,
                        usage={"calls": 0, "prompt_tokens": 0, "output_tokens": 0,
                               "thought_tokens": 0})
@@ -184,8 +191,12 @@ class GatewayClient:
                 include_thoughts: bool = True, **extra: Any
                 ) -> dict[str, Any]:
         """The generationConfig for one call at one depth, in the
-        model's own thinking style: a budget (2.5, counted against the
-        cap, so the cap grows by it), a level (3.x), or nothing."""
+        model's own thinking style: a level (3.x: the dial's stop, or
+        "json", folded onto the levels this model accepts), a budget
+        (2.5, counted against the cap, so the cap grows by it), or
+        nothing. An ``extra`` field given as None is left out, so a
+        caller can leave the temperature at the model's default."""
+        extra = {k: v for k, v in extra.items() if v is not None}
         kind = self.thinking if self.thinking_ok else "none"
         if kind == "budget":
             budget = self.budgets.get(level, self.budgets["medium"])
@@ -200,7 +211,8 @@ class GatewayClient:
         if kind == "level":
             config["thinkingConfig"] = {
                 "includeThoughts": bool(include_thoughts),
-                "thinkingLevel": self.levels.get(level, level or "medium")}
+                "thinkingLevel": self.levels.get(
+                    level, self.levels.get("medium", level or "medium"))}
         return config
 
     @staticmethod
@@ -271,8 +283,10 @@ class GatewayClient:
 
     # ── the one-shots (judge, title, memory): JSON mode ──────
     def generate(self, prompt: str, *, system: str = "",
-                 temperature: float = 0.2,
+                 temperature: float | None = 0.2,
                  max_output_tokens: int = 1024) -> str:
+        """→ the model's JSON text at the shallowest level it accepts;
+        ``temperature=None`` leaves the model's default (Gemini 3)."""
         body: dict[str, Any] = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": self._config(
@@ -302,11 +316,11 @@ class GatewayClient:
             "raise GATEWAY_JSON_THINKING_BUDGET or max_output_tokens)")
 
     def generate_stream(self, prompt: str, *, system: str = "",
-                        temperature: float = 0.3,
+                        temperature: float | None = 0.3,
                         max_output_tokens: int = 1500,
                         json_mode: bool = False) -> Iterator[str]:
         """No stream through the gateway: the whole answer, yielded once."""
-        extra: dict[str, Any] = {"temperature": temperature}
+        extra: dict[str, Any] = {"temperature": temperature}   # None: left out
         if json_mode:
             extra["responseMimeType"] = "application/json"
         body: dict[str, Any] = {

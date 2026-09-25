@@ -76,7 +76,7 @@ class VertexModel:
 
     # ── calls ────────────────────────────────────────────────
     def json(self, prompt: str, *, system: str = "",
-             temperature: float = 0.0,
+             temperature: float | None = 0.0,
              max_tokens: int = 1024) -> dict | None:
         before = dict(self.client.usage)
         try:

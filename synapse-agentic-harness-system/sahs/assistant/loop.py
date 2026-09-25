@@ -31,6 +31,7 @@ from sahs.loop.digest import synapse_digest
 from sahs.loop.loop import _short, compact_result
 from sahs.loop.skills import Skill, render_skills
 from sahs.tools.api import Build
+from sahs.util.profiles import prompt_style
 
 from .agent import ROUTING_KEY, declarations
 from .events import EventBus
@@ -273,20 +274,22 @@ def system_prompt(build: Build, skills: list[Skill] | None = None,
                   artifacts: list[dict[str, Any]] | None = None,
                   notes: list[str] | None = None,
                   user_name: str = "", mode: str = DEFAULT_MODE,
-                  today: _dt.date | None = None) -> str:
-    """Identity → chain → mode → the graph digest (business map +
-    skills (loaded whole, the rest by name) → memory → this session
-    (today's date first, then the artifacts and notes). Stable parts
-    first so the prefix caches; the tools are declared to the
-    transport, never pasted here."""
+                  today: _dt.date | None = None, style: str = "") -> str:
+    """Identity → chain → mode → style (the model family's, when it has
+    one) → the graph digest (business map + skills (loaded whole, the
+    rest by name) → memory → this session (today's date first, then the
+    artifacts and notes). Stable parts first so the prefix caches; the
+    tools are declared to the transport, never pasted here."""
     digest = _DIGEST_CACHE.get(build.version)
     if digest is None:
         digest = synapse_digest(build,
                                 list_hint='search("GMNS", kind="list")')
         _DIGEST_CACHE[build.version] = digest
     parts = [_section("identity", IDENTITY), _section("chain", CHAIN),
-             _section("mode", MODES.get(mode, MODES[DEFAULT_MODE])),
-             _section("graph", digest)]
+             _section("mode", MODES.get(mode, MODES[DEFAULT_MODE]))]
+    if style:
+        parts.append(_section("style", style))
+    parts.append(_section("graph", digest))
     skill_text = render_skills(skills or [])
     shelf = render_skill_index(
         skill_index or [],
@@ -532,7 +535,8 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                        attachments: list[dict[str, Any]] | None = None,
                        file_names: list[str] | None = None,
                        owner: str = "",
-                       model_label: str = "") -> str:
+                       model_label: str = "",
+                       model_name: str = "") -> str:
     session_id = session["id"]
     started = time.perf_counter()
     mode = mode if mode in MODES else DEFAULT_MODE
@@ -560,7 +564,7 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
         build, skills, skill_index=all_skills(graph_root, owner),
         memories=memories, project=project,
         artifacts=store.list_artifacts(session_id), notes=state.notes,
-        user_name=user_name, mode=mode)
+        user_name=user_name, mode=mode, style=prompt_style(model_name))
     bus.emit("model_prompt", turn_id=turn_id, n=0, kind="system",
              content=system[:12000])
     contents = _history(store, session_id, turn_id)

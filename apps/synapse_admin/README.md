@@ -155,7 +155,8 @@ chat's "+" offers Add files: PDF and images ride inline, text as
 text, Office files converted here.
 
 On both surfaces the composer's model label is a select over the two
-model planes (Gemini 3.1 Pro on Vertex, Gemini 2.5 Pro through the gateway),
+model planes (Gemini 3.1 Pro on Vertex, the Gemini 3.x Flash models through
+the gateway; each model's engine map is `synapse-agentic-harness-system/docs/model-playbook.md`),
 remembered per chat (`POST /api/chat/sessions/{id}/model`), and the
 "?" beside the dials explains Chat/Autopilot, Quick/Standard/Deep and
 both models from `GET /api/chat/dials`.

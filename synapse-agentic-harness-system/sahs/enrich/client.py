@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from sahs.util.auth import VertexConnection
+from sahs.util.profiles import profile_for
 
 _RETRY_STATUSES = {429, 500, 502, 503, 504}
 _BACKOFFS = (2, 4, 8, 16)
@@ -43,9 +44,16 @@ VERTEX_THINKING_LEVELS = {"minimal": "low", "low": "low", "medium": "medium",
                           "high": "high", "max": "high"}
 
 
-def vertex_thinking_level(level: str, env: dict[str, str] | None = None) -> str:
+def vertex_thinking_level(level: str, env: dict[str, str] | None = None,
+                          model: str = "") -> str:
+    """The dial's stop as the Vertex model spells it: with the model
+    named, folded onto the levels its engine map accepts
+    (sahs.util.profiles; 3.1 Pro: low | medium | high); without one,
+    the common three. VERTEX_THINKING_LEVELS=max:high,… is the
+    deployment's last word."""
     env = dict(os.environ if env is None else env)
-    table = dict(VERTEX_THINKING_LEVELS)
+    table = (dict(profile_for(model, env).depth_levels) if model
+             else dict(VERTEX_THINKING_LEVELS))
     for item in (env.get("VERTEX_THINKING_LEVELS") or "").split(","):
         key, sep, value = item.strip().partition(":")
         if sep and key.strip() in table and value.strip():
@@ -140,21 +148,23 @@ class VertexClient:
             return json.loads(response.read().decode("utf-8"))
 
     def generate(self, prompt: str, *, system: str = "",
-                 temperature: float = 0.2,
+                 temperature: float | None = 0.2,
                  max_output_tokens: int = 1024) -> str:
         """→ the model's text. JSON-mode is requested via
         responseMimeType; parsing/validation is the caller's job (the
         loop counts invalid outputs — a bad generation is data, not a
-        crash)."""
+        crash). ``temperature=None`` leaves the model's default (the
+        Gemini 3 policy in sahs.util.profiles)."""
         body: dict[str, Any] = {
             "contents": [{"role": "user",
                           "parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": temperature,
                 "maxOutputTokens": max_output_tokens,
                 "responseMimeType": "application/json",
             },
         }
+        if temperature is not None:
+            body["generationConfig"]["temperature"] = temperature
         # GEMINI_THINKING_BUDGET (proven laptop knob): set → attach;
         # "0" disables thinking explicitly; unset → model default
         budget = (os.environ.get("GEMINI_THINKING_BUDGET") or "").strip()
@@ -259,7 +269,7 @@ class VertexClient:
     # latency, so the conversational lane rides :streamGenerateContent.
     # The batch enrichment path above is untouched.
     def generate_stream(self, prompt: str, *, system: str = "",
-                        temperature: float = 0.3,
+                        temperature: float | None = 0.3,
                         max_output_tokens: int = 1500,
                         json_mode: bool = False):
         """Yield text deltas as the model produces them.
@@ -271,10 +281,11 @@ class VertexClient:
         body: dict[str, Any] = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": temperature,
                 "maxOutputTokens": max_output_tokens,
             },
         }
+        if temperature is not None:
+            body["generationConfig"]["temperature"] = temperature
         if json_mode:
             body["generationConfig"]["responseMimeType"] = "application/json"
         if system:
@@ -365,7 +376,8 @@ class VertexClient:
             body["tools"] = [{"functionDeclarations": list(tools)}]
         if thinking_level and self.thinking_ok:
             body["generationConfig"]["thinkingConfig"] = {
-                "thinkingLevel": vertex_thinking_level(thinking_level),
+                "thinkingLevel": vertex_thinking_level(
+                    thinking_level, model=self.connection.model),
                 "includeThoughts": bool(include_thoughts)}
         self.usage["calls"] = self.usage.get("calls", 0) + 1
 

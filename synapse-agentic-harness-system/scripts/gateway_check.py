@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Gateway check — can Gemini 2.5 Pro through the gateway, behind an identity-service
-token, do what the harness asks of Vertex today? Run it on the laptop
-BEFORE any of it enters the program.
+"""Gateway check — can a Gemini model through the gateway, behind an
+identity-service token, do what the harness asks of Vertex today? Run
+it on the laptop BEFORE any of it enters the program.
 
     python scripts/gateway_check.py                  # token, generate, stream,
                                                  # tools, the thoughts flag
                                                  # both ways, system instruction
+    python scripts/gateway_check.py --all-models     # every model GATEWAY_MODELS names
+    python scripts/gateway_check.py --all-models --levels
+                                                 # …and which thinkingLevels each
+                                                 # accepts (one tiny call per level);
+                                                 # prints the GATEWAY_MODEL_LEVELS
+                                                 # line to paste when the engine
+                                                 # map in sahs.util.profiles is wrong
     python scripts/gateway_check.py --probe-ttl 7    # then watch the token die
                                                  # (up to 7 minutes)
     python scripts/gateway_check.py --only token,generate
@@ -33,9 +40,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sahs.util.auth import load_dotenv                    # noqa: E402
 from sahs.util.console import EXIT_ENV_AUTH               # noqa: E402
-from sahs.util.gateway import (Config, RouteChooser,  # noqa: E402
-                           candidate_routes, env_warnings, render_report,
-                           run_checks)
+from sahs.util.gateway import (DEFAULT_CHECKS, Config,  # noqa: E402
+                           RouteChooser, candidate_routes, env_warnings,
+                           render_report, run_checks)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,6 +58,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="check this model instead of GATEWAY_MODEL (one of GATEWAY_MODELS)")
     parser.add_argument("--all-models", action="store_true",
                         help="check every model GATEWAY_MODELS names, one report each")
+    parser.add_argument("--levels", action="store_true",
+                        help="also ask which thinkingLevels the model accepts "
+                             "(minimal, low, medium, high, max: one tiny call each)")
     parser.add_argument("--json", default="", metavar="FILE",
                         help="also write the full report (secrets redacted)")
     args = parser.parse_args(argv)
@@ -61,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
     only = {s.strip() for s in args.only.split(",") if s.strip()} or None
     if args.probe_ttl > 0 and only is not None:
         only.add("probe")
+    if args.levels:
+        only = (only if only is not None else set(DEFAULT_CHECKS)) | {"levels"}
 
     # the route is decided by the first real request (the token POST):
     # direct first, then the corporate proxy — no GET to a POST endpoint

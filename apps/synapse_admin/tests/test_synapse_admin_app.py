@@ -71,7 +71,7 @@ def test_shell_and_planes(client):
             assert isinstance(value, (bool, str))
     assert planes["plane"] in ("vertex", "gateway")
     assert planes["gateway"]["model"] == os.environ.get("GATEWAY_MODEL",
-                                                    "gemini-2.5-pro")
+                                                    "gemini-3.7-flash")
     vendor = client.get("/vendor/three.module.min.js")
     assert vendor.status_code == 200        # the sky renders offline
 

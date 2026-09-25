@@ -37,6 +37,8 @@ from apps.synapse_admin.backend.ask import router as ask_router
 from apps.synapse_admin.backend.chat import router as chat_router
 from apps.synapse_admin.backend.kc import router as kc_router
 from apps.synapse_admin.backend.meridian import router as meridian_router
+# the gateway's default engine is the harness's word, not a copy here
+from sahs.util.gateway import DEFAULT_MODEL as DEFAULT_GATEWAY_MODEL
 
 _FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 # the second surface: Synapse Semantic Intelligence — the same API and
@@ -278,7 +280,7 @@ def create_app() -> FastAPI:
                 "model": (configured.get("GATEWAY_MODEL")
                           if configured is not None else
                           os.environ.get("GATEWAY_MODEL")) or
-                         "gemini-2.5-pro",
+                         DEFAULT_GATEWAY_MODEL,
             },
             "plane": _plane(),
         }

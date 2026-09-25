@@ -206,6 +206,22 @@ class AssistantRuntime:
                 return row["label"]
         return choice or plane
 
+    def model_name_for(self, choice: str = "") -> str:
+        """The model id a choice rides (gemini-3.7-flash, …): what the
+        prompt style and the sampling policy key on; "" for a scripted
+        transport, which has no engine map."""
+        if self._model_factory is not None:
+            return ""
+        from sahs.util.gateway import model_plane
+        from .agent import split_choice
+        plane, model = split_choice(choice)
+        plane = plane or model_plane()
+        for row in self.models():
+            if row["plane"] == plane and (row["model"] == model if model
+                                          else row["id"] == plane):
+                return row["model"]
+        return model
+
     def set_session_model(self, session_id: str, choice: str) -> dict:
         """The composer's model switch: a plane, or plane:model,
         remembered on the chat, so it rides the next message and
@@ -611,6 +627,7 @@ class AssistantRuntime:
         from .agent import join_choice
         model = LazyModel(lambda: self.model_for(rt.budget, plane, model_id))
         model_label = self.label_for(join_choice(plane, model_id))
+        model_name = self.model_name_for(join_choice(plane, model_id))
         project = self.store.get_project(
             session.get("project_id") or "") \
             if session.get("project_id") else None
@@ -641,6 +658,7 @@ class AssistantRuntime:
                     substrate=self.substrate,
                     thinking_level=level, user_name=self.user_name,
                     mode=chosen, plane=plane, model_label=model_label,
+                    model_name=model_name,
                     attachments=attachments or [],
                     file_names=file_names or [],
                     owner=self.owner)

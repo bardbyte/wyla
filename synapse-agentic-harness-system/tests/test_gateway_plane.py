@@ -66,7 +66,7 @@ class FakeGateway:
             self.minted += 1
             token = _jwt({"exp": int(self.now) + 599, "n": self.minted})
             return 200, {}, json.dumps({"authorization_token": token}).encode()
-        assert "/models/gemini-2.5-pro/generateContent" in url, url
+        assert "/models/gemini-3.7-flash/generateContent" in url, url
         token = headers["Authorization"].split(" ", 1)[1]
         payload = json.loads(body)
         self.calls.append({"url": url, "token": token, "body": payload})
@@ -146,15 +146,17 @@ def test_converse_delivers_one_call_as_the_loops_events():
                              "thought_tokens": 30, "cached_tokens": 0}
     assert client.usage == {"calls": 1, "prompt_tokens": 100,
                             "output_tokens": 20, "thought_tokens": 30}
-    # the request: the guide's slash path, the bearer, a budget under
-    # a cap that leaves room, the system instruction and the tools
+    # the request: the guide's slash path, the bearer, the depth as the
+    # engine's thinkingLevel under the caller's cap (3.x: no budget to
+    # add), the system instruction and the tools; no temperature — the
+    # model's default, as Gemini 3 asks
     sent = fake.calls[0]
-    assert sent["url"].endswith("/models/gemini-2.5-pro/generateContent")
+    assert sent["url"].endswith("/models/gemini-3.7-flash/generateContent")
     assert sent["body"]["systemInstruction"] == {"parts": [{"text": "You are Synapse"}]}
     assert sent["body"]["tools"] == [{"functionDeclarations": tools}]
     assert sent["body"]["generationConfig"] == {
-        "maxOutputTokens": 16384 + 1024,
-        "thinkingConfig": {"includeThoughts": True, "thinkingBudget": 1024}}
+        "maxOutputTokens": 16384,
+        "thinkingConfig": {"includeThoughts": True, "thinkingLevel": "low"}}
 
 
 def test_a_dead_token_mid_turn_is_minted_anew_and_the_call_retried_once():
@@ -199,7 +201,9 @@ def test_transient_refusals_back_off_and_max_tokens_grows_the_cap_once():
     assert [e["kind"] for e in events] == ["text", "done"]
     caps = [c["body"]["generationConfig"]["maxOutputTokens"]
             for c in fake.calls]
-    assert caps == [8192 + 16384, 8192 + 16384, (8192 + 16384) * 2]
+    # a level engine: the caller's cap, doubled once when the budget
+    # went to thinking (a 2.5 would add its thinking budget on top)
+    assert caps == [8192, 8192, 8192 * 2]
     assert fake.now > 1_700_000_000.0                 # it slept the backoff
 
 
@@ -211,9 +215,11 @@ def test_the_one_shot_json_path_and_the_burst_stream():
     assert VertexModel(client).json('Return {"ok": true}') == {"ok": True}
     config = fake.calls[0]["body"]["generationConfig"]
     assert config["responseMimeType"] == "application/json"
+    # the one-shot rides the engine's shallowest level — never the
+    # literal "json" the budget table keys on — under the caller's cap
     assert config["thinkingConfig"] == {"includeThoughts": False,
-                                        "thinkingBudget": 512}
-    assert config["maxOutputTokens"] == 1024 + 512
+                                        "thinkingLevel": "low"}
+    assert config["maxOutputTokens"] == 1024
     assert list(client.generate_stream("tell me")) == ["A whole answer at once."]
 
 
@@ -253,7 +259,7 @@ def test_the_agent_factory_picks_the_plane_and_teaches_when_unconfigured(
     monkeypatch.setenv("GATEWAY_BASE_URL", "https://gateway.example/genai/google/v1")
     agent = agent_from_env()
     assert isinstance(agent, GatewayAgent) and agent.client.plane == "gateway"
-    assert agent.client.cfg.model == "gemini-2.5-pro"
+    assert agent.client.cfg.model == "gemini-3.7-flash"
 
 
 @pytest.fixture(scope="module")
@@ -351,7 +357,7 @@ def test_the_plane_catalog_names_both_planes_and_why_one_cannot_be_ridden(
     rows = {r["id"]: r for r in plane_catalog()}
     assert list(rows) == ["vertex", "gateway"]
     assert rows["vertex"]["label"] == "Gemini 3.1 Pro Preview"
-    assert rows["gateway"]["label"] == "Gemini 2.5 Pro"
+    assert rows["gateway"]["label"] == "Gemini 3.7 Flash"
     assert rows["vertex"]["plane_name"] == "Vertex"
     assert rows["gateway"]["plane_name"] == "Gateway"
     assert not rows["vertex"]["available"] and "SYNAPSE_VERTEX_SA_KEY" in \
@@ -467,5 +473,5 @@ def test_a_chat_switches_planes_from_the_composer(compiled, monkeypatch,
     with pytest.raises(ModelUnavailable) as err:
         runtime.set_session_model(session["id"], "vertex")
     assert "not configured on this machine" in str(err.value)
-    assert runtime.label_for("gateway") == "Gemini 2.5 Pro"
-    assert runtime.model_label == "Gemini 2.5 Pro"
+    assert runtime.label_for("gateway") == "Gemini 3.7 Flash"
+    assert runtime.model_label == "Gemini 3.7 Flash"

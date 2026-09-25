@@ -9,7 +9,7 @@ import hashlib
 import hmac
 import json
 
-from sahs.util.gateway import (Config, GatewayError, Route, RouteChooser,
+from sahs.util.gateway import (DEFAULT_MODEL, Config, GatewayError, Route, RouteChooser,
                            _error_text, classify_probe, classify_stream,
                            env_warnings, extract_token, find_expiry,
                            fingerprint, hmac_signature, jwt_claims,
@@ -99,7 +99,8 @@ class Gateway:
     after minting."""
 
     def __init__(self, unit="ms", token_field="authorization_token",
-                 path_form="slash"):
+                 path_form="slash", model=DEFAULT_MODEL):
+        self.model = model                # the engine it routes
         self.calls = []
         self.now = 1_700_000_000.0
         self.minted = None
@@ -111,7 +112,7 @@ class Gateway:
         """The gateway routes by path pattern: the wrong separator between the
         model and the method is a bare 401 before Gemini is reached."""
         sep = "/" if self.path_form == "slash" else ":"
-        return f"gemini-2.5-pro{sep}" in url
+        return f"{self.model}{sep}" in url
 
     def clock(self):
         return self.now
@@ -142,6 +143,11 @@ class Gateway:
         if not payload:
             return 400, {}, b'{"error":{"message":"contents required"}}'
         config = payload.get("generationConfig", {})
+        level = config.get("thinkingConfig", {}).get("thinkingLevel")
+        if level in ("minimal", "max"):        # the floor and ceiling of 3.x Flash
+            return 400, {}, json.dumps({"error": {"message": (
+                "Invalid value at 'generation_config.thinking_config."
+                f"thinking_level' ({level})")}}).encode()
         if "includeThoughts" in config.get("thinkingConfig", {}):
             return 400, {}, json.dumps({"error": {
                 "message": "Unknown name 'includeThoughts' in thinkingConfig"
@@ -179,7 +185,7 @@ class Gateway:
             "finishReason": "STOP"}],
             "usageMetadata": {"promptTokenCount": 12, "candidatesTokenCount": 20,
                               "thoughtsTokenCount": 30, "totalTokenCount": 62},
-            "modelVersion": "gemini-2.5-pro"}).encode()
+            "modelVersion": "gemini-3.7-flash"}).encode()
 
     def stream(self, url, headers, body, **kw):
         self.calls.append(("STREAM", url, headers, body))
@@ -210,8 +216,8 @@ def test_the_whole_check_against_a_scripted_gateway():
     # the path: the guide's slash form, taken on the first call
     assert by_name["path"]["ok"] is True and report["path"]["chosen"] == "slash"
     assert report["path"]["tried"] == []
-    assert "/models/gemini-2.5-pro/generateContent" in by_name["path"]["detail"]
-    assert all("gemini-2.5-pro:" not in c[1] for c in gw.calls
+    assert "/models/gemini-3.7-flash/generateContent" in by_name["path"]["detail"]
+    assert all("gemini-3.7-flash:" not in c[1] for c in gw.calls
                if c[0] in ("POST", "STREAM"))
     # generate: the guide's spelling of the thoughts flag, first try
     assert by_name["generate"]["ok"] is True
@@ -380,11 +386,11 @@ def test_the_route_is_decided_by_the_first_real_request():
 def test_the_model_comes_from_gateway_model_and_gemini_model_is_warned_about():
     assert Config.from_env({"GATEWAY_MODEL": "gemini-2.5-flash",
                             "GEMINI_MODEL": "x"}).model == "gemini-2.5-flash"
-    assert Config.from_env({"GEMINI_MODEL": "gemini-2.5-pro"}).model == \
-        "gemini-2.5-pro"
-    assert Config.from_env({}).model == "gemini-2.5-pro"
-    assert env_warnings({"GEMINI_MODEL": "gemini-2.5-pro"})[0].startswith(
-        "GEMINI_MODEL=gemini-2.5-pro is set and VERTEX_MODEL is not")
+    assert Config.from_env({"GEMINI_MODEL": "gemini-3.7-flash"}).model == \
+        "gemini-3.7-flash"
+    assert Config.from_env({}).model == "gemini-3.7-flash"
+    assert env_warnings({"GEMINI_MODEL": "gemini-3.7-flash"})[0].startswith(
+        "GEMINI_MODEL=gemini-3.7-flash is set and VERTEX_MODEL is not")
     assert env_warnings({"GEMINI_MODEL": "x", "VERTEX_MODEL": "y"}) == []
     assert env_warnings({"GATEWAY_MODEL": "x"}) == []
     text = render_report({"config": {}, "checks": [],
@@ -413,8 +419,8 @@ def test_a_gateway_that_wants_the_colon_form_is_found_and_the_refusal_explained(
     # every call after the first rode the pinned form
     urls = [c[1] for c in gw.calls if "generateContent" in c[1]
             or "streamGenerateContent" in c[1]]
-    assert urls[0].endswith("gemini-2.5-pro/generateContent")
-    assert all("gemini-2.5-pro:" in u for u in urls[1:])
+    assert urls[0].endswith("gemini-3.7-flash/generateContent")
+    assert all("gemini-3.7-flash:" in u for u in urls[1:])
 
 
 def test_a_pinned_path_form_is_not_second_guessed():
@@ -468,3 +474,44 @@ def test_a_jwt_with_exp_but_no_iat_gets_its_lifetime_from_the_minting():
     assert "its JWT says 900 s" in by_name["probe"]["detail"]
     assert report["probe"]["refresh_hint"].startswith("refresh at ~720 s by the JWT")
 
+
+
+def test_the_levels_probe_asks_the_gateway_which_levels_an_engine_takes():
+    """One tiny call per candidate thinkingLevel; the row says what was
+    accepted, what refused, and whether the engine map agrees — with
+    the GATEWAY_MODEL_LEVELS line to paste when it does not."""
+    gw = Gateway()                                   # 3.7 Flash: low, medium, high
+    report = run_checks(_cfg(app_id="app", secret=SECRET), gw.http, gw.stream,
+                        now=gw.clock, clock=gw.clock, sleep=gw.sleep,
+                        only={"token", "levels"})
+    by_name = {c["name"]: c for c in report["checks"]}
+    assert by_name["levels"]["ok"] is True
+    assert report["levels"]["accepted"] == ["low", "medium", "high"]
+    assert report["levels"]["refused"] == ["minimal", "max"]
+    assert report["levels"]["agree"] is True
+    assert "as the profile says (docs)" in by_name["levels"]["detail"]
+    assert "thinking_level" in report["levels"]["tried"]["minimal"]["note"]
+    assert "levels low, medium, high" in render_report(report)
+    # five calls, one per candidate, each with its level and no thoughts
+    sent = [json.loads(c[3]) for c in gw.calls
+            if c[0] == "POST" and "generateContent" in c[1]]
+    assert [b["generationConfig"]["thinkingConfig"]["thinkingLevel"] for b in sent] == [
+        "minimal", "low", "medium", "high", "max"]
+    assert all(b["generationConfig"]["maxOutputTokens"] == 64 for b in sent)
+    # an engine whose map disagrees with the gateway: the line to paste
+    gw = Gateway(model="gemini-3.5-flash")
+    cfg = _cfg(app_id="app", secret=SECRET, model="gemini-3.5-flash",
+               models=["gemini-3.5-flash"])
+    report = run_checks(cfg, gw.http, gw.stream, now=gw.clock, clock=gw.clock,
+                        sleep=gw.sleep, only={"token", "levels"})
+    by_name = {c["name"]: c for c in report["checks"]}
+    assert report["levels"]["agree"] is False
+    assert report["levels"]["expected"] == ["medium", "high"]
+    assert "paste GATEWAY_MODEL_LEVELS=gemini-3.5-flash:low|medium|high" in by_name["levels"]["detail"]
+    assert "(not what the profile says)" in render_report(report)
+    # a budget engine has no levels to probe: no row at all
+    gw = Gateway(model="gemini-2.5-pro")
+    report = run_checks(_cfg(app_id="app", secret=SECRET, model="gemini-2.5-pro"),
+                        gw.http, gw.stream, now=gw.clock, clock=gw.clock,
+                        sleep=gw.sleep, only={"token", "levels"})
+    assert "levels" not in {c["name"] for c in report["checks"]}

@@ -369,7 +369,7 @@ The client gives up on a model stream after 120 s of silence, retries
 once if nothing had arrived, and the turn then closes in plain language
 with what was already said. Paste the doctor's output with the transcript.
 
-**Gemini 2.5 Pro through the gateway (a candidate for the model plane).** The
+**Gemini through the gateway (the production model plane).** The
 guide's path is an identity-service bearer token minted from `APP_ID` and
 `APP_SECRET` (an HMAC-signed request), then Gemini's own REST protocol
 behind the enterprise gateway host (`GATEWAY_BASE_URL`). Before any of it enters the program, prove
@@ -398,9 +398,9 @@ the probe confirms it), then makes the model calls, plus a prompt-cache
 check: the same 3K-token prefix twice, reading `cachedContentTokenCount`
 on the second call, which says whether the harness's stable prefix
 still earns its cache through the gateway. Each is addressed the guide's way,
-`…/models/gemini-2.5-pro/generateContent` with a slash: the gateway's scopes
+`…/models/gemini-3.7-flash/generateContent` with a slash: the gateway's scopes
 are path patterns under the model name, and Google's own colon form
-(`gemini-2.5-pro:generateContent`) falls outside them, which the
+(`gemini-3.7-flash:generateContent`) falls outside them, which the
 gateway answers with a bare 401 before Gemini is reached. The check
 tries the slash first, falls back to the colon on a 401 or 404, and
 the `path` row says which form was taken and what the other got, the
@@ -419,10 +419,10 @@ answers 401: that is the token's real lifetime, which the client will
 have to keep itself. Secrets never print; paste the block (and the
 JSON) back.
 
-**The chat on the gateway (Gemini 2.5 Pro).** With `APP_ID` and `APP_SECRET`
+**The chat on the gateway (Gemini 3.7 Flash by default).** With `APP_ID` and `APP_SECRET`
 in the silo `.env` the chat's model calls ride the gateway (`SAHS_MODEL_PLANE`
 is `auto`; set it to `vertex` to go back, `gateway` to insist). Restart
-the app: the composer's model label reads "Gemini 2.5 Pro",
+the app: the composer's model label reads "Gemini 3.7 Flash",
 `python scripts/turn_doctor.py` prints the plane and why, and
 `python scripts/planes_check.py` proves it in one process after a dry
 run: the token minted, its remaining life, one model answer. What
@@ -430,16 +430,19 @@ changes in the chat: the gateway serves no stream, so each model call lands
 whole. The thinking block fills and the prose appears when a call
 returns; between calls the live line ticks and the tool rows appear.
 Run, the chart from saved rows and the dashboards are untouched: they
-never call the model. The depth dial maps to thinking budgets (Quick
-1024, Standard 4096, Deep 16384 tokens; `GATEWAY_THINKING_BUDGETS`
-overrides), and since 2.5 counts the thinking against the output cap
-the client raises the cap by the budget. The token lives 599 s and is
+never call the model. The depth dial's five stops map to each model's
+`thinkingLevel`, folded onto the levels that model accepts (the engine
+maps in `sahs/util/profiles.py`; the how-to is `docs/model-playbook.md`;
+`python scripts/gateway_check.py --all-models --levels` asks the gateway
+itself); a 2.5 model, retiring, still takes a budget under the cap
+(`GATEWAY_THINKING_BUDGETS` overrides). The token lives 599 s and is
 minted again at 80% of that or on the first 401, with the call
-retried once. The prompt is unchanged; where 2.5 slips is a matter
-for the evals, not for guessing.
+retried once. The prompt gains one style section for the Gemini 3
+family; where a model slips is a matter for the evals, not for
+guessing.
 
 **Switching models from the composer.** The label by the composer is
-a select: "Gemini 3.1 Pro Preview" or "Gemini 2.5 Pro" (the plane
+a select: "Gemini 3.1 Pro Preview" or "Gemini 3.7 Flash" (the plane
 each rides is the "?"'s business, not the label's), both surfaces. A
 plane the machine cannot ride is listed greyed with "not configured"
 and the reason in its tooltip; picking one that
