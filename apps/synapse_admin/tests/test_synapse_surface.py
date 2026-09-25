@@ -643,3 +643,43 @@ def test_the_thread_follows_only_while_you_read_at_the_bottom():
         for cls in (".chat-jump", ".theater-step.failed .mark",
                     ".theater-step .snag"):
             assert cls in css, cls
+
+
+def test_every_assistant_event_reaches_this_page_too():
+    """The second surface is its own file: every event the assistant
+    emits — the task events included — has an arm and a listener."""
+    import re
+    sys.path.insert(0, str(SILO))
+    from sahs.assistant.events import ASSISTANT_EVENTS
+    handled = set(re.findall(r'case "(\w+)":', CHAT))
+    missing = [e for e in ASSISTANT_EVENTS if e not in handled]
+    assert not missing, f"the page ignores {missing}"
+    subscribed = set(re.findall(r'"(\w+)"', CHAT.split(
+        "for (const name of [")[1].split("]")[0]))
+    unsubscribed = [e for e in ASSISTANT_EVENTS if e not in subscribed]
+    assert not unsubscribed, f"no SSE listener for {unsubscribed}"
+
+
+def test_a_compound_ask_draws_a_task_board_here_too():
+    """The task board on the second surface (docs/multi-task-turns.md):
+    the same rows, statuses and replay as the admin page, in this
+    page's own file and stylesheet, with its own plain copy."""
+    for piece in ('case "plan_made"', 'case "task_started"',
+                  'case "task_done"', "task-board", "task-row",
+                  "boardFor", "taskTurnFor", "taskStatus", "homeOf",
+                  "Split into", "side by side", "Sorting out the asks",
+                  "Working through", "replayTaskMessage",
+                  "payload?.task", "payload?.plan",
+                  "if (turn.task) break;", "event.planning"):
+        assert piece in CHAT, piece
+    for status in ("running", "done", "partial", "failed", "stopped"):
+        assert f".task-row.{status}" in CSS, status
+    for cls in (".task-board", ".task-board-head", ".task-status",
+                ".task-cost", ".task-body", ".task-note"):
+        assert cls in CSS, cls
+    # artifacts a task makes publish inside its row, as they do in a turn
+    assert "artifactCard(task.extras, row, false)" in CHAT
+    assert "artifactCard(turn.extras, row, false)" in CHAT
+    # the copy names nobody: the board reads the same on both surfaces
+    board = CHAT.split("const TASK_MARKS")[1].split("function handle")[0]
+    assert "Radix" not in board and "Synapse" not in board

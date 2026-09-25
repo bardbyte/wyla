@@ -197,3 +197,16 @@ remembered per chat (`POST /api/chat/sessions/{id}/model`), and the
 "?" beside the dials explains Chat/Autopilot, Quick/Standard/Deep and
 both models from `GET /api/chat/dials`.
 
+A message that reads like several jobs ("compare churn across the
+regions, then explain which definitions differ, and build a
+dashboard") becomes a task run on both surfaces: the harness splits it
+into at most six tasks, runs the independent ones side by side and the
+dependent ones after their inputs, and answers once with a "What was
+done" document beside the artifacts. The chat shows a task board under
+the message — one row per task with its status and cost, the running
+row open, the rest folded — and replays it when the chat is reopened.
+The events (`plan_made`, `task_started`, `task_done`, and a `task` field
+on every record a task's sub-turn emits) ride the same stream; there is
+no new route. The mental model, the gate, the budget split and the
+report are in `synapse-agentic-harness-system/docs/multi-task-turns.md`.
+
