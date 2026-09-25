@@ -136,19 +136,73 @@ def test_violations_tables_and_columns(build):
 
 
 def test_violations_sensitivity_and_star(build):
+    DENY = {"SAHS_SENSITIVE_COLUMNS": "deny"}
     assert "sensitive_column" in _codes(
-        validate_sql(build, f"SELECT cm13 FROM {GMS} {DATED}"))       # 7
+        validate_sql(build, f"SELECT cm13 FROM {GMS} {DATED}",
+                     env=DENY))                                       # 7
     assert "select_star_over_sensitive" in _codes(
-        validate_sql(build, f"SELECT * FROM {WWCAS} {DATED}"))        # 8
+        validate_sql(build, f"SELECT * FROM {WWCAS} {DATED}",
+                     env=DENY))                                       # 8
     twin = validate_sql(
-        build, f"SELECT approval_cd, part_dt FROM {WWCAS} {DATED}")
+        build, f"SELECT approval_cd, part_dt FROM {WWCAS} {DATED}",
+        env=DENY)
     assert twin["ok"], twin["violations"]
     # E3 surfaces here as a WARNING; the sandbox is where it denies
     assert "policy_unknown" in _warning_codes(twin)
     filt = validate_sql(
-        build, f"SELECT country_cd FROM {GMS} WHERE cm13 = 'x'")
+        build, f"SELECT country_cd FROM {GMS} WHERE cm13 = 'x'",
+        env=DENY)
     assert filt["ok"]
     assert "sensitive_column_in_filter" in _warning_codes(filt)
+
+
+def test_sensitive_columns_allow_by_default_and_deny_on_request(
+        build, monkeypatch):
+    """SAHS_SENSITIVE_COLUMNS: the same query is refused under deny and
+    passes under allow with the SAME code as a note — the record still
+    says a sensitive column was read. allow is the default: unset, or
+    any word but deny."""
+    from sahs.tools.validate_sql import (SENSITIVE_SWITCH, sensitive_policy,
+                                         sensitive_policy_note)
+    column_sql = f"SELECT cm13 FROM {GMS} {DATED}"
+    star_sql = f"SELECT * FROM {WWCAS} {DATED}"
+    # the default is allow, read from the process environment
+    monkeypatch.delenv(SENSITIVE_SWITCH, raising=False)
+    assert sensitive_policy() == "allow"
+    assert sensitive_policy({}) == "allow"
+    assert sensitive_policy({SENSITIVE_SWITCH: "Allow"}) == "allow"
+    assert sensitive_policy({SENSITIVE_SWITCH: "DENY"}) == "deny"
+    assert sensitive_policy({SENSITIVE_SWITCH: "no"}) == "allow"    # only deny denies
+    assert "unset" in sensitive_policy_note({})
+    assert "deny" in sensitive_policy_note({SENSITIVE_SWITCH: "deny"})
+    assert "reads as allow" in sensitive_policy_note({SENSITIVE_SWITCH: "no"})
+
+    for sql, code in ((column_sql, "sensitive_column"),
+                      (star_sql, "select_star_over_sensitive")):
+        refused = validate_sql(build, sql, env={SENSITIVE_SWITCH: "deny"})
+        assert not refused["ok"] and code in _codes(refused)
+        assert code not in _warning_codes(refused)
+        denied = next(v for v in refused["violations"] if v["code"] == code)
+        assert denied["policy"] == "deny"
+        # the same query under allow: not refused, the note carries the
+        # same code, the column's name and the policy that allowed it
+        allowed = validate_sql(build, sql, env={SENSITIVE_SWITCH: "allow"})
+        assert allowed["ok"], allowed["violations"]
+        assert code not in _codes(allowed)
+        assert code in _warning_codes(allowed)
+        note = next(w for w in allowed["warnings"] if w["code"] == code)
+        assert note["policy"] == "allow"
+        assert f"{SENSITIVE_SWITCH}=allow" in note["detail"]
+        assert "record" in note["detail"]
+        assert "cm13" in note["detail"] or "sensitive" in note["detail"]
+        # unset in the environment is allow too
+        default = validate_sql(build, sql)
+        assert default["ok"] and code in _warning_codes(default)
+    # the other checks are untouched by the policy: a real violation
+    # still refuses under allow
+    still = validate_sql(build, f"SELECT wrong_col FROM {GMS}",
+                         env={SENSITIVE_SWITCH: "allow"})
+    assert not still["ok"] and "unknown_column" in _codes(still)
 
 
 def test_violation_cross_join(build):

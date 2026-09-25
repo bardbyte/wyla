@@ -2,7 +2,7 @@
 
 The schema the laptop's stores become when Synapse leaves the laptop:
 GoogleSQL DDL files, applied in file order (001, 002, 003, 004, 005,
-006, 007), one database per environment.
+006, 007, 008), one database per environment.
 
 | file | holds | replaces |
 |---|---|---|
@@ -13,6 +13,7 @@ GoogleSQL DDL files, applied in file order (001, 002, 003, 004, 005,
 | `005_build_bundles.sql` | the promoted build's bytes: one bundle row per build and its chunks, interleaved under `Builds` (`sahs/builds/spanner_store.py`, `MERIDIAN_BUILDS_SOURCE=spanner`) | `builds/<id>/` on a shared disk |
 | `006_external_identities.sql` | identity-provider links (Okta) and the one-time authorization states both sign-in hops park | nothing: the laptop has no sign-in |
 | `007_content.sql` | a chat file's bytes (`ChatFileChunks`, at most 8 MiB a row, interleaved in `ChatFiles`) and the review board (`ReviewSubmissions`, `ReviewVersions`, `ReviewEvents`, `ReviewSeen`) | the bytes under each workspace's `files/`; `graph/runs/reviews/ledger.jsonl`, `files/<id>/v<n>.md`, `seen.json` |
+| `008_chat_model.sql` | four `ALTER TABLE` statements, no new table: `ChatSessions.Model` becomes `STRING(64)` and loses the plane `CHECK` (the composer records a catalog choice, `plane:model`, and the catalog in the `.env` says which exist), and `ChatArtifacts.Type`'s `CHECK` is replaced by the list in `sahs/assistant/artifacts.py` (`kpi` included) | the first rollout's narrower `002` constraints (`docs/spanner-wiring.md`, "Schema notes") |
 
 The stores that write them: `IdentityStore` (`sahs/identity/store.py`)
 for `001`, `004` and `006`; `SpannerBuildStore`
@@ -53,10 +54,16 @@ database will: every table keyed, every interleave on a parent
 defined earlier with a key that extends the parent's, every foreign
 key and index on columns that exist, every row deletion policy on a
 timestamp, no reserved word as a column name, the property graph
-keyed on primary keys — and the graph half's CHECK lists equal to the
-Python registries (`sahs.graph.quads.RELATIONS`, `WITNESSES`,
-`sahs.graph.ids.ID_PATTERNS`), so a relation added in code fails the
-check until the DDL learns it. `tests/test_spanner_ddl.py` runs it.
+keyed on primary keys, every `ALTER TABLE` (drop constraint, alter
+column, add constraint) on a table and a name that exist, applied to
+the model in file order — and the CHECK lists equal to the Python
+registries: the graph half's (`sahs.graph.quads.RELATIONS`,
+`WITNESSES`, `sahs.graph.ids.ID_PATTERNS`) and the chat half's
+(`sahs.assistant.artifacts.TYPES` for `ChatArtifacts.Type`;
+`ChatSessions.Model` as wide as `sahs.assistant.spanner_store` writes,
+with no plane list left on it), so a relation or an artifact type added
+in code fails the check until the DDL learns it.
+`tests/test_spanner_ddl.py` runs it.
 
 ## Apply
 
@@ -80,7 +87,13 @@ done
 Then the same commands against the real instance. Each file is one
 DDL batch; Spanner applies a batch atomically, so a file that fails
 leaves nothing half-made. On a database that already carries `001`
-to `006`, apply `007_content.sql` alone the same way.
+to `006`, apply `007_content.sql` and then `008_chat_model.sql` alone
+the same way; on one that carries `007`, `008` alone. `008` is the
+first file made of `ALTER TABLE` statements: it changes the tables
+`002` created, so a fresh database applied `001` … `008` and the live
+E1 database with `008` on top end up the same, and
+`scripts/spanner_ddl_check.py` applies the ALTERs to its model in file
+order before it holds the schema to the code's registries.
 
 Two things to know about the target:
 
