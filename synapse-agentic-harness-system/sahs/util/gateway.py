@@ -621,11 +621,18 @@ def _error_text(status: int, body: bytes,
 
 def _generation_config(cfg: Config, thinking_key: str,
                        max_tokens: int = 1024) -> dict[str, Any]:
+    """The check's generationConfig in the model's own thinking dialect:
+    a budget for 2.5, a level for 3.x, nothing for a model that does not
+    think (thinking_kind decides, GATEWAY_MODEL_THINKING overrides)."""
     out: dict[str, Any] = {"temperature": 0.3, "topP": 0.9, "topK": 40,
                            "maxOutputTokens": max_tokens}
-    if cfg.thinking_budget:
+    kind = thinking_kind(cfg.model)
+    if kind == "budget" and cfg.thinking_budget:
         out["thinkingConfig"] = {thinking_key: cfg.show_thoughts,
                                  "thinkingBudget": cfg.thinking_budget}
+    elif kind == "level":
+        out["thinkingConfig"] = {thinking_key: cfg.show_thoughts,
+                                 "thinkingLevel": thinking_levels().get("medium", "medium")}
     return out
 
 

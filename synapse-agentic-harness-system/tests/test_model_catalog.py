@@ -170,3 +170,18 @@ def test_the_runtime_switches_between_models_and_refuses_unknown_ones(compiled, 
     assert events[0]["ev"] == "turn_started" and events[0]["plane"] == "gateway"
     assert events[0]["model"] == "scripted"
     assert heard == ["gateway"]
+
+
+def test_the_granted_scopes_are_exactly_what_the_models_derive():
+    """The gateway team grants one path pattern per model; with the four
+    models named, the derived scopes are those patterns (plus the
+    embedding scopes), so GATEWAY_SCOPES need not repeat them."""
+    env = {"GATEWAY_MODELS": "gemini-2.5-pro gemini-3.5-flash gemini-3.7-flash gemini-3.1-flash-lite"}
+    derived = scopes_for(env)
+    for granted in ("/genai/google/v1/models/gemini-3.7-flash/**::post",
+                    "/genai/google/v1/models/gemini-3.5-flash/**::post",
+                    "/genai/google/v1/models/gemini-3.1-flash-lite/**::post",
+                    "/genai/google/v1/models/gemini-2.5-pro/**::post"):
+        assert granted in derived, granted
+    assert derived[-2:] == DEFAULT_SCOPES[-2:]
+    assert [thinking_kind(m, env) for m in gateway_models(env)] == ["budget", "level", "level", "level"]
