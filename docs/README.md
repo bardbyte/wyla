@@ -13,6 +13,8 @@ specs, eval baselines).
 | **The story deck** | [`presentation/radix-graph-end-to-end.pptx`](presentation/radix-graph-end-to-end.pptx) | 11 slides for a room: one question with three right answers, why the usual fix decays, the turn, then the architecture at three depths. [Source and how to rebuild it.](presentation/radix-graph-deck/README.md) |
 | **The mark** | [`brand/radix-graph/`](brand/radix-graph/README.md) | the Radix Graph logo — SVG masters and PNGs, with the geometry it was built from |
 | Design sweep | [`design_inventory.md`](design_inventory.md) | the sweep of the design files |
+| The enterprise port | [`enterprise-port.md`](enterprise-port.md) | what came across from the enterprise branch, every deviation, and how a change is carried back |
+| Spanner wiring | [`spanner-wiring.md`](spanner-wiring.md) | every path the app persists, the store class behind it, and the Spanner table it lands in under `SAHS_STORE=spanner`, or the gap |
 
 ## Reading order
 

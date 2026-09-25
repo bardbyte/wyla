@@ -32,6 +32,21 @@ class _CommitTimestamp:
 COMMIT_TS = _CommitTimestamp()
 
 
+class JsonValue:
+    """A cell bound for a JSON column, whatever JSON it holds: a dict, a
+    list, a scalar or null. Spanner takes it as a ``JsonObject``; sqlite
+    stores the text. A bare dict still travels as JSON (below); this
+    wrapper is for the lists and nulls a dict cannot express."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+    def __repr__(self) -> str:
+        return f"JsonValue({self.value!r})"
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -89,10 +104,15 @@ class SpannerDatabase:
     @staticmethod
     def _cell(value: Any) -> Any:
         from google.cloud import spanner
+        # JsonObject lives in spanner_v1; the top-level package does not
+        # re-export it, so a dict cell (an audit's Details) used to raise
+        from google.cloud.spanner_v1 import JsonObject
         if value is COMMIT_TS:
             return spanner.COMMIT_TIMESTAMP
+        if isinstance(value, JsonValue):
+            return JsonObject(value.value)
         if isinstance(value, dict):
-            return spanner.JsonObject(value)
+            return JsonObject(value)
         return value
 
     def _rows(self, result: Any) -> list[dict[str, Any]]:
@@ -197,7 +217,11 @@ CREATE TABLE IF NOT EXISTS AuthStates (
 _PARAM = re.compile(r"@([A-Za-z_][A-Za-z0-9_]*)")
 # how many leading columns form the primary key, for the update verb
 _KEY_WIDTH = {"UserRoles": 3, "GoogleOAuthConnections": 2, "UserCredentials": 2,
-              "RolePermissions": 2, "ExternalIdentities": 3}
+              "RolePermissions": 2, "ExternalIdentities": 3,
+              # the chat tables (002_chat.sql), interleaved under their chat
+              "ChatMessages": 2, "ChatArtifacts": 3, "ChatPlanVersions": 2,
+              "ChatFeedback": 2, "ChatFiles": 2, "ChatEvents": 2,
+              "ChatMemories": 2, "UserSkills": 2}
 
 
 class SqliteDatabase:
@@ -214,11 +238,20 @@ class SqliteDatabase:
         with self._lock:
             self._conn.executescript(SQLITE_SCHEMA)
 
+    def ensure(self, schema_sql: str) -> None:
+        """More tables on the same file (``CREATE TABLE IF NOT EXISTS``
+        statements): the chat tables the assistant store keeps beside
+        the identity ones, the way one Spanner database holds both."""
+        with self._lock:
+            self._conn.executescript(schema_sql)
+
     # values: datetimes and JSON travel as text, lists as JSON arrays
     @staticmethod
     def _cell(value: Any) -> Any:
         if value is COMMIT_TS:
             return iso(utcnow())
+        if isinstance(value, JsonValue):
+            return json.dumps(value.value)
         if isinstance(value, datetime):
             return iso(value)
         if isinstance(value, bool):
@@ -294,5 +327,5 @@ def open_database(settings: Any) -> Database:
     return SpannerDatabase.from_settings(settings)
 
 
-__all__ = ["COMMIT_TS", "Database", "SpannerDatabase", "SqliteDatabase",
+__all__ = ["COMMIT_TS", "Database", "JsonValue", "SpannerDatabase", "SqliteDatabase",
            "Transaction", "iso", "open_database", "utcnow"]
