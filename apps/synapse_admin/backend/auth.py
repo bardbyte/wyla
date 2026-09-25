@@ -35,6 +35,10 @@ _session_cache: dict[str, tuple[float, dict]] = {}
 # the Google consent hop parks its state in the store's AuthStates table
 # (the same table the Okta hop uses), so the callback may land on any pod
 _GOOGLE_STATE_KIND = "google_connect"
+# one token provider per person, shared by every runner built for them
+# (the ask lane builds one per runtime and one per message, the chat one
+# per runtime): one refresh trip per token lifetime, and disconnect
+# invalidates the one cache, so no access token outlives the connection
 _google_providers: dict[str, object] = {}
 _google_providers_lock = Lock()
 _GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -128,11 +132,21 @@ def _google_runner(user_id: str):
         if exc.status_code == 503:
             return None
         raise
-    provider = GoogleOAuthCredentialProvider(
-        lambda: _identity().google_connection(user_id), settings)
     with _google_providers_lock:
-        _google_providers[user_id] = provider
-    return BQJobRunner(token_provider=provider)
+        provider = _google_providers.get(user_id)
+        if provider is None:
+            provider = GoogleOAuthCredentialProvider(
+                lambda: _identity().google_connection(user_id), settings)
+            _google_providers[user_id] = provider
+    from sahs.util.auth import AuthError
+    try:
+        return BQJobRunner(token_provider=provider)
+    except AuthError as exc:
+        # the person's token can be minted but there is no BigQuery
+        # project to run in: live execution stays denied by the sandbox;
+        # opening a session must not fail on it
+        logger.warning("no user-delegated BigQuery runner for %s: %s", user_id, exc)
+        return None
 
 
 def _google_request_runner(access_token: str):
@@ -298,8 +312,13 @@ def current_user(
                 "roles": ["admin"], "surfaces": ["admin", "synapse"],
                 "permissions": sorted(ROLE_PERMISSIONS["admin"])}
     try:
-        token = _bearer_token(authorization) or synapse_session
-        user = _cached_session_user(token) if token else None
+        bearer = _bearer_token(authorization)
+        user = _cached_session_user(bearer) if bearer else None
+        if user is None and synapse_session:
+            # a Bearer that is not a session token (a Google access
+            # token riding a cookie session, google_bigquery_user)
+            # never unseats the cookie
+            user = _cached_session_user(synapse_session)
     except _google_api_error() as exc:
         raise _identity_unavailable(exc) from exc
     if user is None:
