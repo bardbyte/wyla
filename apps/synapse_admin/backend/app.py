@@ -31,6 +31,8 @@ from fastapi.staticfiles import StaticFiles
 from apps.synapse_admin.backend.auth import callback_router, router as auth_router
 from apps.synapse_admin.backend.admin import router as admin_router
 from apps.synapse_admin.backend.access import router as access_router
+from apps.synapse_admin.backend.okta import (callback_router as okta_callback_router,
+                                             router as okta_router)
 from apps.synapse_admin.backend.ask import router as ask_router
 from apps.synapse_admin.backend.chat import router as chat_router
 from apps.synapse_admin.backend.kc import router as kc_router
@@ -317,6 +319,8 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(callback_router)
+    app.include_router(okta_router)             # Okta sign-in, and the shared /callback
+    app.include_router(okta_callback_router)
     app.include_router(admin_router)
     app.include_router(access_router)
     app.include_router(meridian_router)

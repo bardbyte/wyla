@@ -31,25 +31,18 @@ def users(limit: int = 100) -> dict:
     limit = min(max(limit, 1), 500)
     try:
         store = _identity()
-        rows = store._query(
-            "SELECT u.UserId, u.Email, u.Username, u.FirstName, u.LastName, "
-            "u.DisplayName, u.Status, "
-            "ARRAY_AGG(r.Name) Roles FROM Users u LEFT JOIN UserRoles ur "
-            "ON u.UserId=ur.UserId AND ur.RevokedAt IS NULL LEFT JOIN Roles r "
-            "AND (ur.ExpiresAt IS NULL OR ur.ExpiresAt>CURRENT_TIMESTAMP()) "
-            "LEFT JOIN Roles r "
-            "ON ur.RoleId=r.RoleId WHERE u.Status != 'deleted' "
-            "GROUP BY u.UserId,u.Email,u.Username,u.FirstName,"
-            "u.LastName,u.DisplayName,u.Status "
-            "ORDER BY u.Email LIMIT @limit", {"limit": limit})
+        # the store's own listing: the same shape every route returns for a
+        # person, on Spanner and on the sqlite stand-in alike
+        users = store.list_users(limit)
     except _google_api_error() as exc:
         raise _identity_unavailable(exc) from exc
     return {"available": True, "users": [{
-        "user_id": row["UserId"], "email": row["Email"],
-        "username": row["Username"], "first_name": row.get("FirstName") or "",
-        "last_name": row.get("LastName") or "", "name": row["DisplayName"],
-        "status": row["Status"], "roles": list(row["Roles"] or [])}
-        for row in rows]}
+        "user_id": user["user_id"], "email": user["email"],
+        "username": user["username"], "first_name": user["first_name"],
+        "last_name": user["last_name"], "name": user["name"],
+        "status": user["status"], "roles": list(user["roles"]),
+        "last_login_at": user.get("last_login_at", "")}
+        for user in users]}
 
 
 @router.patch("/users/{user_id}")

@@ -207,17 +207,25 @@ def _identity():
         raise _identity_unavailable(exc) from exc
 
 
-def _secure_cookie() -> bool:
+def _secure_cookie(request: Request | None = None) -> bool:
+    """true and false say so; auto is Secure unless the request that
+    earned the cookie plainly arrived over http (a laptop at localhost),
+    and Secure when no request is known."""
     from sahs.spanner import AuthSettings
     value = AuthSettings.from_env().cookie_secure
+    if value == "auto" and request is not None:
+        forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+        return (forwarded or request.url.scheme) == "https"
     return value == "true" or value == "auto"
 
 
-def _set_session(response: Response, token: str) -> None:
+def _set_session(response: Response, token: str,
+                 request: Request | None = None) -> None:
     from apps.synapse_admin.backend.security import set_csrf_cookie
-    response.set_cookie(COOKIE, token, httponly=True, secure=_secure_cookie(),
+    secure = _secure_cookie(request)
+    response.set_cookie(COOKIE, token, httponly=True, secure=secure,
                         samesite="strict", path="/")
-    set_csrf_cookie(response, secure=_secure_cookie())
+    set_csrf_cookie(response, secure=secure)
 
 
 def _identity_unavailable(exc: Exception) -> HTTPException:
@@ -233,6 +241,18 @@ def _identity_unavailable(exc: Exception) -> HTTPException:
         status_code=503,
         detail="identity service is unavailable; verify Cloud Spanner API "
                "access and try again")
+
+
+def _require_local_login() -> None:
+    """The email-and-password routes exist for a laptop and as a
+    break-glass path; the enterprise front door is Okta, so they refuse
+    unless AUTH_LOCAL_LOGIN=1."""
+    from apps.synapse_admin.backend.meridian import _silo_import
+    _silo_import()
+    from sahs.spanner import AuthSettings
+    if not AuthSettings.from_env().local_login_enabled:
+        raise HTTPException(status_code=403,
+                            detail="email-and-password sign-in is off here; sign in with Okta")
 
 
 def _loopback_request(request: Request) -> bool:
@@ -385,7 +405,6 @@ def google_start(popup: bool = False,
 
 
 @router.get("/google/callback")
-@callback_router.get("/callback")
 def google_callback(code: str | None = None, state: str | None = None,
                     error: str | None = None,
                     synapse_session: str | None = Cookie(default=None)) -> dict:
@@ -509,6 +528,7 @@ def disconnect_google(user: dict = Depends(current_user)) -> dict:
 
 @router.post("/signup", status_code=201)
 def signup(body: Credentials, response: Response, request: Request = None) -> dict:
+    _require_local_login()
     from apps.synapse_admin.backend.security import audit_request
     store = _identity()
     try:
@@ -526,12 +546,13 @@ def signup(body: Credentials, response: Response, request: Request = None) -> di
     store.record_audit(
         "signup.ok", "success", actor_user_id=user["user_id"],
         subject_user_id=user["user_id"], **audit_request(request).as_kwargs())
-    _set_session(response, token)
+    _set_session(response, token, request)
     return {"available": True, "token": token, "user": user}
 
 
 @router.post("/login")
 def login(body: Credentials, response: Response, request: Request = None) -> dict:
+    _require_local_login()
     from apps.synapse_admin.backend.security import audit_request
     store = _identity()
     try:
@@ -548,7 +569,7 @@ def login(body: Credentials, response: Response, request: Request = None) -> dic
     store.record_audit(
         "login.ok", "success", actor_user_id=user["user_id"],
         subject_user_id=user["user_id"], **audit_request(request).as_kwargs())
-    _set_session(response, token)
+    _set_session(response, token, request)
     return {"available": True, "token": token, "user": user}
 
 
@@ -556,6 +577,7 @@ def login(body: Credentials, response: Response, request: Request = None) -> dic
 @router.post("/reset-password")
 def reset_password(body: PasswordReset, request: Request) -> dict:
     """Guarded direct reset; this is not an email-verified recovery flow."""
+    _require_local_login()
     if not _direct_reset_allowed(request):
         raise HTTPException(status_code=403,
                             detail="contact an administrator to reset your password")

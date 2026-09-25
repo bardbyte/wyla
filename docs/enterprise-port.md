@@ -33,6 +33,10 @@ the schema file `db/spanner/004_google_oauth.sql`; and their changes to
 | `app.py` | a second health path with the deployment's name | `SYNAPSE_HEALTH_ALIAS` | same |
 | `sahs/constants.py` | per-environment endpoint literals | maps filled from `SAHS_{VERTEX,OAUTH_TOKEN,SPANNER}_ENDPOINT_E{1,2,3}` | same |
 | `helm/`, `config/*.yml`, `Dockerfile`, `config/settings.py` | present | absent; the code tolerates the missing `config.settings` and reads the environment | deployment stays with the team; `.env.example` documents every variable |
+| `backend/auth.py` sign-up, login, reset | always on | refuse with 403 unless `AUTH_LOCAL_LOGIN=1` | the enterprise front door is Okta; the email-and-password path is a laptop and break-glass path, to be removed once Okta is live everywhere |
+| `backend/auth.py` `google_callback` | owned `GET /callback` | no route of its own; `backend/okta.py` serves `/callback` and hands any state that is not an Okta sign-in to `google_callback` unchanged | one registered callback URL for both providers |
+| `backend/auth.py` session cookie | `AUTH_COOKIE_SECURE=auto` always set `Secure` | `auto` follows the request: `Secure` over https or behind `x-forwarded-proto: https`, plain over http | a browser drops a `Secure` cookie set over `http://localhost`, so nobody could sign in on a laptop |
+| `backend/admin.py` `users()` | a hand-written SQL join that did not parse | `store.list_users(limit)` | the query had a syntax error; the store already knows how to list people |
 
 ## Written here to their interfaces
 
@@ -48,6 +52,9 @@ either implementation can replace the other file for file:
 | `sahs/util/bigquery_errors.py` | `bigquery_http_error_message`, `is_bigquery_auth_error` |
 | `sahs/constants.py` | the three endpoint maps `network.py` imports |
 | `AskRuntime`, `AssistantRuntime` | `owner_user_id=`, `runner=`; `start_turn(runner=)`; `BQConnection.from_env(require_key=)` |
+| `sahs/identity/oidc.py` | new here, not theirs: `OidcSettings.from_env()` (the `OKTA_*` variables), `OidcClient` (discovery, JWKS, PKCE authorize URL, code exchange, RS256 ID-token verification), `roles_for_groups` |
+| `backend/okta.py` | new here, not theirs: `GET /api/auth/okta` (status for the sign-in page), `GET /api/auth/okta/start?next=`, `GET /callback` for both providers; state, nonce and PKCE verifier live in the store's `AuthStates` table so any pod may take the callback |
+| `sahs/identity/store.py` additions | `find_or_create_external_user`, `set_roles`, `list_users`, `put_state`, `pop_state`; `db/spanner/006_external_identities.sql` adds `ExternalIdentities` and `AuthStates` |
 
 Additions with no counterpart on their side, all ours: `sahs/identity/database.py`
 (one interface, Spanner and a sqlite stand-in selected by `SAHS_STORE=sqlite`),
