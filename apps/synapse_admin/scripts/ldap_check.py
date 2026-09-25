@@ -561,10 +561,14 @@ def run_env(env: str, rep: Report) -> None:
         if INVENTORY:
             inventory(env, rep, conn, server, base_dn, dn)
     else:
+        root = ((getattr(server.info, "other", {}) or {}).get("defaultNamingContext") or [""])[0]
         rep.add(env, "lookup", "WARN",
                 f"{lookup} not found under {base_dn} ({conn.result.get('description')}); "
                 "the account may live in another OU, or the app searches a different attribute; "
-                f"set LDAP_LOOKUP_{env} to a real end-user account to test the app's path")
+                f"set LDAP_LOOKUP_{env} to a real end-user account to test the app's path. "
+                f"This server answers for {root or dc_domain(base_dn)}: a person in another domain "
+                "(another DC=... root) is invisible here, so point LDAP_SERVER at that domain's "
+                "directory, or at a global catalog of the forest (port 3269)")
     conn.unbind()
 
 
