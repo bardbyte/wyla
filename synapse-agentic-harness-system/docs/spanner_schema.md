@@ -661,8 +661,23 @@ filesystem: an append-only ledger (`graph/runs/reviews/ledger.jsonl`,
 one record per event — submitted, resubmitted, ai_review, approved,
 rejected, withdrawn) and the text of every version under
 `files/<id>/v<n>.md`; the current state of a submission is a fold, the
-graph's discipline. On Spanner that is one table and its children,
-to add to `002_chat.sql` when the store lands:
+graph's discipline. On Spanner that is one table and its children.
+**As built** (`007_content.sql`, `sahs/assistant/content_store.py`):
+`ReviewSubmissions` (the head row: the fields the person gave, the
+submitter's user id and name, the approver's name and band as the
+laptop's directory seam assigns them, `Status`, `Version`),
+`ReviewVersions` (the text of every version), `ReviewEvents` (one row
+per ledger record, `Seq` per submission, the record's other fields in
+`Payload` JSON, `Actor` and `OccurredAt` because `By` and `At` are
+reserved words) and `ReviewSeen` (`UserId`, `SeenAt`: how far each
+person has read their notices). The fold over the event rows is the
+ledger's own `fold_records`, so a submission reads the same from
+either. The bytes of a chat file, meanwhile, are `ChatFileChunks`
+(`SessionId`, `FileId`, `Seq`, `Chunk BYTES(MAX)`, at most 8 MiB a
+row, interleaved in `ChatFiles`), not a bucket: `ObjectPath` stays
+null. The design as first sketched, for the columns the directory
+will add when it lands (`ApproverUserId`, `Users.ManagerUserId`,
+`Users.Band`):
 
 * `Submissions` — `SubmissionId` (random), `Kind` (`skill` \|
   `knowledge`), `Name`, `Title`, `Description`, `Purpose`,

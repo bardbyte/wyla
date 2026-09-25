@@ -17,7 +17,11 @@ Two shelves, one index:
     the configured user, tomorrow the signed-in one). They are
     unreviewed like any user pack, carry ``owner``, and shadow a
     shared user pack of the same name for their owner alone — never
-    a built-in.
+    a built-in. Under ``SAHS_STORE=spanner|sqlite`` the runtime binds
+    a store-backed shelf for the owner (``bind_own_skills``: the
+    ``UserSkills`` rows, ``sahs/assistant/content_store.py``) and the
+    folder is not read for them; under ``local`` nothing is bound and
+    the folder is the shelf, as before.
 
 Progressive disclosure is the point: the system prompt carries only
 names and one-liners (``render_skill_index``); the full text enters a
@@ -31,6 +35,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable
 
 from sahs.loop.skills import (
     Skill,
@@ -105,6 +110,45 @@ def builtin_skills() -> list[Pack]:
     return _packs(builtin_root(), BUILTIN)
 
 
+# the store-backed shelves, one per owner slug: a callable returning the
+# owner's rows ({name, title, description, text, updated}); bound by
+# the runtime when a store is on, never under SAHS_STORE=local
+_OWN_SHELVES: dict[str, Callable[[], list[dict[str, Any]]]] = {}
+
+
+def bind_own_skills(owner: str,
+                    source: Callable[[], list[dict[str, Any]]]) -> None:
+    """Read this owner's own packs from ``source()`` (the store's
+    ``UserSkills`` rows) instead of their folder, in every reader —
+    ``all_skills``, ``get_skill``, ``load_packs``, the loop's index and
+    the ``load_skill`` tool — with no other call site changed."""
+    slug = owner_slug(owner)
+    if slug:
+        _OWN_SHELVES[slug] = source
+
+
+def unbind_own_skills(owner: str) -> None:
+    _OWN_SHELVES.pop(owner_slug(owner), None)
+
+
+def own_skills(graph_root: Path | None, owner: str) -> list[Pack]:
+    """The owner's own packs: the bound store shelf when one is bound
+    for them, else their folder under the graph's skills tree."""
+    slug = owner_slug(owner)
+    if not slug:
+        return []
+    source = _OWN_SHELVES.get(slug)
+    if source is not None:
+        return [Pack(name=str(row["name"]), title=str(row.get("title") or row["name"]),
+                     description=str(row.get("description") or ""),
+                     text=str(row.get("text") or ""), origin=UNREVIEWED,
+                     owner=slug, updated=str(row.get("updated") or ""))
+                for row in source()]
+    if graph_root is None:
+        return []
+    return _packs(user_root(Path(graph_root), owner), UNREVIEWED, slug)
+
+
 def all_skills(graph_root: Path | None = None,
                owner: str = "") -> list[Pack]:
     """Built-in packs first, then the owner's own, then the shared
@@ -112,10 +156,8 @@ def all_skills(graph_root: Path | None = None,
     over a shared one for its owner (see the module docstring)."""
     merged: dict[str, Pack] = {p.name: p for p in builtin_skills()}
     if graph_root is not None:
-        if owner_slug(owner):
-            for pack in _packs(user_root(Path(graph_root), owner),
-                               UNREVIEWED, owner_slug(owner)):
-                merged.setdefault(pack.name, pack)
+        for pack in own_skills(graph_root, owner):
+            merged.setdefault(pack.name, pack)
         for pack in _packs(skills_root(Path(graph_root)), UNREVIEWED):
             merged.setdefault(pack.name, pack)
     return list(merged.values())
@@ -169,6 +211,6 @@ def render_skill_index(packs: list[Pack],
 
 
 __all__ = ["BUILTIN", "UNREVIEWED", "Pack", "builtin_root", "author_of",
-           "owner_slug",
+           "owner_slug", "bind_own_skills", "unbind_own_skills", "own_skills",
            "user_root", "builtin_skills", "all_skills", "get_skill",
            "load_packs", "render_skill_index"]

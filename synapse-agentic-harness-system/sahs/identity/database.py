@@ -221,7 +221,9 @@ _KEY_WIDTH = {"UserRoles": 3, "GoogleOAuthConnections": 2, "UserCredentials": 2,
               # the chat tables (002_chat.sql), interleaved under their chat
               "ChatMessages": 2, "ChatArtifacts": 3, "ChatPlanVersions": 2,
               "ChatFeedback": 2, "ChatFiles": 2, "ChatEvents": 2,
-              "ChatMemories": 2, "UserSkills": 2}
+              "ChatMemories": 2, "UserSkills": 2,
+              # the content tables (007_content.sql)
+              "ChatFileChunks": 3, "ReviewVersions": 2, "ReviewEvents": 2}
 
 
 class SqliteDatabase:

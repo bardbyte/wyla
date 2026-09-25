@@ -14,7 +14,13 @@ with the reason, never silently dropped.
 Everything lands in the session's workspace under ``files/`` with a
 manifest, so a turn can name exactly what it carried; a file rides
 the message it is sent with (the history replays as text), and the
-stored user message says which files it carried.
+stored user message says which files it carried. Under
+``SAHS_STORE=spanner|sqlite`` the same manifest is a ``ChatFiles``
+row and the bytes are ``ChatFileChunks`` rows
+(``sahs/assistant/content_store.py``): ``prepare`` classifies and
+converts for both homes, ``build_parts`` builds the turn's parts for
+both, and the functions below that take a workspace are the
+filesystem home, unchanged.
 
 No new dependency: the workbook and the Word file are zipped XML,
 read with the standard library; a deck uses python-pptx when it is
@@ -32,7 +38,7 @@ import uuid
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from xml.etree import ElementTree as ET
 
 MAX_FILE_BYTES = 10 * 1024 * 1024      # one file
@@ -284,18 +290,20 @@ def check(name: str, size: int) -> tuple[str, str, str, str]:
     return suffix, mime, how, family
 
 
-def store(workspace: Path, name: str, data: bytes) -> Stored:
-    """Keep the file in the session's workspace, convert what needs
-    converting, and record it; refused files leave nothing behind."""
+def prepare(name: str, data: bytes) -> tuple[Stored, str | None]:
+    """The one classification for both homes of a file — the workspace
+    and the store's ``ChatFiles`` row: check the type and the size,
+    convert what needs converting, decode what is text, and describe
+    it; ``(the manifest row, the text or None)``. Refused files raise
+    ``FileRefused`` before anything is written anywhere."""
     suffix, mime, how, family = check(name, len(data))
     file_id = f"f_{uuid.uuid4().hex[:10]}"
     note = ""
     text_chars = 0
-    files_dir = _files_dir(workspace)
+    text: str | None = None
     if how == CONVERT:
         text = CONVERTERS[suffix](data)         # raises FileRefused
         text_chars = len(text)
-        (files_dir / f"{file_id}.txt").write_text(text, encoding="utf-8")
         note = (f"converted to text here ({text_chars:,} characters): "
                 "the model reads the text, not the file")
     elif how == TEXT:
@@ -307,11 +315,20 @@ def store(workspace: Path, name: str, data: bytes) -> Stored:
             text = text[:MAX_TEXT_CHARS] + "\n… truncated"
             note = f"truncated to {MAX_TEXT_CHARS:,} characters"
         text_chars = len(text)
-        (files_dir / f"{file_id}.txt").write_text(text, encoding="utf-8")
-    (files_dir / f"{file_id}.{suffix}").write_bytes(data)
     stored = Stored(id=file_id, name=f"{_slug(name)}.{suffix}",
                     suffix=suffix, mime=mime, family=family, rides=how,
                     size=len(data), text_chars=text_chars, note=note)
+    return stored, text
+
+
+def store(workspace: Path, name: str, data: bytes) -> Stored:
+    """Keep the file in the session's workspace, convert what needs
+    converting, and record it; refused files leave nothing behind."""
+    stored, text = prepare(name, data)
+    files_dir = _files_dir(workspace)
+    if text is not None:
+        (files_dir / f"{stored.id}.txt").write_text(text, encoding="utf-8")
+    (files_dir / f"{stored.id}.{stored.suffix}").write_bytes(data)
     rows = manifest(workspace)
     rows.append(stored.row())
     _write_manifest(workspace, rows)
@@ -350,17 +367,32 @@ def parts_for(workspace: Path,
     and the manifest rows they came from: inline data for a PDF or an
     image, a labelled text part for text and converted files. Over
     the inline budget the turn is refused, never trimmed in silence."""
-    rows = {r["id"]: r for r in manifest(workspace)}
+    files_dir = _files_dir(workspace)
+    return build_parts(
+        manifest(workspace), file_ids,
+        read_bytes=lambda row: (files_dir / f"{row['id']}.{row['suffix']}")
+        .read_bytes(),
+        read_text=lambda row: (files_dir / f"{row['id']}.txt")
+        .read_text(encoding="utf-8"))
+
+
+def build_parts(rows: list[dict[str, Any]], file_ids: list[str], *,
+                read_bytes: Callable[[dict[str, Any]], bytes],
+                read_text: Callable[[dict[str, Any]], str]
+                ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """``parts_for`` over any home for the bytes: the manifest rows and
+    two readers (the workspace's files, or the store's chunks and text
+    column). The same order, the same labels, the same budget."""
+    by_id = {r["id"]: r for r in rows}
     parts: list[dict[str, Any]] = []
     used: list[dict[str, Any]] = []
     inline_total = 0
-    files_dir = _files_dir(workspace)
     for file_id in file_ids[:MAX_FILES_PER_TURN]:
-        row = rows.get(file_id)
+        row = by_id.get(file_id)
         if row is None:
             raise FileRefused(f"no file {file_id} on this chat")
         if row["rides"] == INLINE:
-            raw = (files_dir / f"{file_id}.{row['suffix']}").read_bytes()
+            raw = read_bytes(row)
             inline_total += len(raw)
             if inline_total > MAX_INLINE_BYTES:
                 raise FileRefused(
@@ -372,8 +404,7 @@ def parts_for(workspace: Path,
                 "mimeType": row["mime"],
                 "data": base64.b64encode(raw).decode("ascii")}})
         else:
-            text = (files_dir / f"{file_id}.txt").read_text(
-                encoding="utf-8")
+            text = read_text(row)
             label = row["name"] + (" (converted to text)"
                                    if row["rides"] == CONVERT else "")
             parts.append({"text": f"[attached file: {label}]\n{text}\n"
@@ -384,6 +415,6 @@ def parts_for(workspace: Path,
 
 __all__ = ["SUPPORTED", "NOT_OFFERED", "MAX_FILE_BYTES", "MAX_INLINE_BYTES",
            "MAX_TEXT_CHARS", "MAX_FILES_PER_TURN", "FileRefused", "Stored",
-           "support_table", "suffix_of", "check", "store", "remove",
-           "manifest", "pending", "mark_sent", "parts_for", "xlsx_to_text",
-           "docx_to_text", "pptx_to_text"]
+           "support_table", "suffix_of", "check", "prepare", "store", "remove",
+           "manifest", "pending", "mark_sent", "parts_for", "build_parts",
+           "xlsx_to_text", "docx_to_text", "pptx_to_text"]

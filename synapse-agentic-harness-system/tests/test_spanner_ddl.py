@@ -82,6 +82,40 @@ def test_the_chat_store_is_the_sqlite_store_with_a_person():
     assert "IngestedRun" in ddl
 
 
+def test_the_content_tables_hold_the_bytes_and_the_board():
+    """007: a file's bytes in chunks under its ChatFiles row, and the
+    review ledger as a head row, its versions, its events and each
+    person's seen-mark — keyed, interleaved, CHECKed."""
+    ddl = _text("007_content.sql")
+    for table in ("ChatFileChunks", "ReviewSubmissions", "ReviewVersions",
+                  "ReviewEvents", "ReviewSeen"):
+        assert f"CREATE TABLE {table} (" in ddl, table
+    assert "PRIMARY KEY (SessionId, FileId, Seq)" in ddl
+    assert "INTERLEAVE IN PARENT ChatFiles ON DELETE CASCADE" in ddl
+    assert re.search(r"Chunk\s+BYTES\(MAX\)\s+NOT NULL", ddl)
+    assert ddl.count("INTERLEAVE IN PARENT ReviewSubmissions ON DELETE CASCADE") == 2
+    assert "INTERLEAVE IN PARENT Users ON DELETE CASCADE" in ddl      # ReviewSeen
+    assert "CHECK (Kind IN ('skill', 'knowledge'))" in ddl
+    assert "CHECK (Status IN ('pending', 'published', 'rejected', 'withdrawn'))" in ddl
+    assert "CHECK (Ext IN ('md', 'txt', 'csv', 'json', 'yaml', 'yml', 'sql'))" in ddl
+    assert "'submitted', 'resubmitted', 'ai_review', 'approved', 'rejected', 'withdrawn'" in ddl
+    assert "FOREIGN KEY (SubmitterUserId) REFERENCES Users (UserId)" in ddl
+    assert "PRIMARY KEY (SubmissionId, Seq)" in ddl and "Payload       JSON" in ddl
+    # the ledger's by/at are reserved words in GoogleSQL: Actor, OccurredAt
+    assert not re.search(r"^\s+(By|At)\s+", ddl, re.M)
+    # the lists the store writes are the DDL's
+    from sahs.assistant import reviews as rv
+    for status in rv.STATUSES:
+        assert f"'{status}'" in ddl, status
+    for event in rv.EVENTS:
+        assert f"'{event}'" in ddl, event
+    for ext in rv.EXTS:
+        assert f"'{ext}'" in ddl, ext
+    # the chunk ceiling stays under Spanner's 10 MiB cell
+    from sahs.assistant.content_store import CHUNK_BYTES
+    assert CHUNK_BYTES <= 8 * 1024 * 1024
+
+
 def test_the_graph_is_assertions_plus_a_fold_and_a_property_graph():
     from sahs.graph.ids import ID_PATTERNS
     from sahs.graph.quads import RELATIONS, WITNESSES

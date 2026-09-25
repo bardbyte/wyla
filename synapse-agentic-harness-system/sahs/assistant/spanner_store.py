@@ -18,11 +18,10 @@ or integers from sqlite; the readers below accept both.
 
 The event stream lands here too (``ChatEvents``): the runtime's bus
 hands every record to ``add_event`` and a pod that restarts replays a
-chat from ``events``. What stays on the filesystem, table or no table,
-is listed in ``docs/spanner-wiring.md``: the file bytes (``ChatFiles``
-wants an object store), a person's own skills (``UserSkills``), staged
-knowledge files (``KnowledgeFiles``) and the review ledger (no table
-yet).
+chat from ``events``. What sits beside it: ``sahs/assistant/content_store.py`` keeps the
+files on a chat, a person's own skills, the knowledge files and the
+review board in the same database; ``docs/spanner-wiring.md`` lists
+every path and the few that are still on the filesystem.
 """
 
 from __future__ import annotations

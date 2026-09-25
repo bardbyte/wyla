@@ -2,7 +2,7 @@
 
 The schema the laptop's stores become when Synapse leaves the laptop:
 GoogleSQL DDL files, applied in file order (001, 002, 003, 004, 005,
-006, then any later number), one database per environment.
+006, 007), one database per environment.
 
 | file | holds | replaces |
 |---|---|---|
@@ -12,10 +12,16 @@ GoogleSQL DDL files, applied in file order (001, 002, 003, 004, 005,
 | `004_google_oauth.sql` | a person's connected Google account (the encrypted refresh token) for user-delegated BigQuery | nothing: the laptop runs BigQuery as the service account |
 | `005_build_bundles.sql` | the promoted build's bytes: one bundle row per build and its chunks, interleaved under `Builds` (`sahs/builds/spanner_store.py`, `MERIDIAN_BUILDS_SOURCE=spanner`) | `builds/<id>/` on a shared disk |
 | `006_external_identities.sql` | identity-provider links (Okta) and the one-time authorization states both sign-in hops park | nothing: the laptop has no sign-in |
+| `007_content.sql` | a chat file's bytes (`ChatFileChunks`, at most 8 MiB a row, interleaved in `ChatFiles`) and the review board (`ReviewSubmissions`, `ReviewVersions`, `ReviewEvents`, `ReviewSeen`) | the bytes under each workspace's `files/`; `graph/runs/reviews/ledger.jsonl`, `files/<id>/v<n>.md`, `seen.json` |
 
-A gap in the numbers is deliberate: `007_*.sql` is reserved for the
-review board and the content store (another change), so numbers are
-never reused.
+The stores that write them: `IdentityStore` (`sahs/identity/store.py`)
+for `001`, `004` and `006`; `SpannerBuildStore`
+(`sahs/builds/spanner_store.py`) for `Builds` of `003` and `005`; `SpannerAssistantStore`
+(`sahs/assistant/spanner_store.py`) for the chat tables of `002`;
+`SpannerContentStore` (`sahs/assistant/content_store.py`) for
+`ChatFiles`, `UserSkills` and `KnowledgeFiles` of `002` and all of
+`007`. Which route lands in which table: `docs/spanner-wiring.md` at
+the repository root.
 
 The reasoning behind every table is in `docs/spanner_schema.md`.
 This file is the how.
@@ -26,7 +32,9 @@ Every file is applied; the first rollout writes to the identity
 tables that email-and-password sign-in needs (`Users`,
 `UserCredentials`, `Roles`, `Permissions`, `RolePermissions`,
 `UserRoles`, `AuthSessions`, `LoginAttempts`, `UserPreferences`,
-`AuditEvents`) and to every chat table. Five identity tables wait for
+`AuditEvents`), to every chat table, and to the content tables of
+`007` (a file's bytes go to `ChatFileChunks`, not to a bucket:
+`ChatFiles.ObjectPath` stays null). Five identity tables wait for
 phase 2 and stay empty — `RefreshTokens`, `MfaFactors`,
 `MfaRecoveryCodes`, `ActionTokens`, `Invitations`, marked in the file
 — and the graph file's tables stay empty too: the graph stays on the
@@ -40,7 +48,7 @@ the deployment fills is in `.env.example` (`SAHS_STORE=spanner`,
 python scripts/spanner_ddl_check.py
 ```
 
-reads the three files as statements and holds them to what the
+reads every file as statements and holds them to what the
 database will: every table keyed, every interleave on a parent
 defined earlier with a key that extends the parent's, every foreign
 key and index on columns that exist, every row deletion policy on a
@@ -69,9 +77,10 @@ for f in db/spanner/00*.sql; do
 done
 ```
 
-Then the same three commands against the real instance. Each file is
-one DDL batch; Spanner applies a batch atomically, so a file that
-fails leaves nothing half-made.
+Then the same commands against the real instance. Each file is one
+DDL batch; Spanner applies a batch atomically, so a file that fails
+leaves nothing half-made. On a database that already carries `001`
+to `006`, apply `007_content.sql` alone the same way.
 
 Two things to know about the target:
 
@@ -109,10 +118,17 @@ users before chats and runs before assertions):
 2. `sessions.sqlite3` → `ChatProjects`, `ChatSessions`,
    `ChatMessages` (Seq from rowid order), `ChatArtifacts`,
    `ChatPlanVersions`, `ChatFeedback`, `ChatMemories`;
-3. each workspace's `files/manifest.json` → `ChatFiles` (the bytes to
-   a bucket, `ObjectPath` the object);
+3. each workspace's `files/manifest.json` → `ChatFiles`, and each
+   file's bytes → `ChatFileChunks` in 8 MiB slices (the same split
+   `SpannerContentStore.add_file` makes);
 4. `graph/skills/users/<owner>/*.md` → `UserSkills`;
    `sources/artifacts/*` → `KnowledgeFiles`;
+   `graph/runs/reviews/ledger.jsonl` → `ReviewSubmissions` (one head
+   row per `submitted` record, its `Status` and `Version` from the
+   fold), `ReviewEvents` (one row per record, `Seq` per submission,
+   the record's other fields in `Payload`), `files/<id>/v<n>.md` →
+   `ReviewVersions`, `seen.json` → `ReviewSeen` (the count becomes the
+   instant of that record);
 5. not in the first rollout (the graph stays on the filesystem):
    `graph/runs/*/manifest.json` → `GraphRuns`, then every JSONL line
    → `GraphNodeAssertions` / `GraphEdgeAssertions` in file order

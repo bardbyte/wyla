@@ -16,6 +16,10 @@ renders its designed empty state. Nothing is mocked, ever.
 The ONLY write here is the feedback affordance (skill §5): append-only
 JSONL under ``graph/runs/feedback/`` — quads-adjacent records a
 steward can review, never graph writes (those stay with the clerk).
+The staging door (``POST /api/meridian/artifacts``) is a SOURCE drop:
+``sources/artifacts/`` under ``SAHS_STORE=local``, a ``KnowledgeFiles``
+row under a store (``docs/spanner-wiring.md``), and the Knowledge
+Files shelf lists whichever is on.
 """
 
 from __future__ import annotations
@@ -80,6 +84,59 @@ def _sources_dir() -> Path:
     if recorded is not None and recorded.exists():
         return recorded
     return default
+
+
+def _content_store():
+    """The content store (sahs/assistant/content_store.py) when
+    SAHS_STORE names one: the Knowledge Files shelf lists and stages
+    through its KnowledgeFiles rows. Bound to the signed-in person
+    when there is one; to a reader's placeholder for a listing without
+    one (the knowledge rows are shared, and a listing writes nothing).
+    None under SAHS_STORE=local: the shelf stays on sources/artifacts/."""
+    _silo_import()
+    from sahs.spanner import spanner_is_enabled
+    if not spanner_is_enabled():
+        return None
+    from apps.synapse_admin.backend.auth import _identity, request_user
+    from sahs.assistant.content_store import SpannerContentStore
+    user = request_user.get()
+    owner = str((user or {}).get("user_id") or "").strip()
+    return SpannerContentStore(_identity().db, owner or "shelf")
+
+
+class _StoredFile:
+    """A KnowledgeFiles row wearing the little bit of a Path the shelf
+    reads: name, suffix, stem, is_file, stat, open, read_text."""
+
+    def __init__(self, row: dict) -> None:
+        self.row = row
+        self.name = str(row["file"])
+        self.suffix = "." + str(row.get("ext") or "md")
+        self.stem = self.name[:-len(self.suffix)] if self.name.endswith(
+            self.suffix) else self.name
+        self._text = str(row.get("content") or "")
+
+    def is_file(self) -> bool:
+        return True
+
+    def stat(self):
+        import types
+        stamp = str(self.row.get("staged_at") or "")
+        try:
+            when = _dt.datetime.fromisoformat(stamp).timestamp() if stamp \
+                else 0.0
+        except ValueError:
+            when = 0.0
+        return types.SimpleNamespace(st_size=len(self._text.encode("utf-8")),
+                                     st_mtime=when)
+
+    def open(self, mode: str = "r", encoding: str = "utf-8",
+             errors: str = "strict"):
+        import io
+        return io.StringIO(self._text)
+
+    def read_text(self, encoding: str = "utf-8") -> str:
+        return self._text
 
 
 def _manifest_sources_root() -> Path | None:
@@ -583,12 +640,22 @@ class MeridianData:
                         family, folder = "knowledge", parts[0]
                     _add(path, "skills/" + "/".join(parts), area,
                          staged=False, family=family, folder=folder)
-        staged_dir = sources / "artifacts"
-        if staged_dir.exists():
-            for path in sorted(staged_dir.glob("*")):
-                if path.is_file():
-                    _add(path, f"artifacts/{path.name}", "staged",
-                         staged=True, family="knowledge")
+        store = _content_store()
+        if store is not None:
+            # the staged files are KnowledgeFiles rows: the same rel
+            # keys, the business unit as the author
+            for row in store.knowledge_files():
+                stored = _StoredFile(row)
+                _add(stored, f"artifacts/{stored.name}", "staged",
+                     staged=True, family="knowledge",
+                     author=str(row.get("business_unit") or ""))
+        else:
+            staged_dir = sources / "artifacts"
+            if staged_dir.exists():
+                for path in sorted(staged_dir.glob("*")):
+                    if path.is_file():
+                        _add(path, f"artifacts/{path.name}", "staged",
+                             staged=True, family="knowledge")
         if sources.exists():
             for path in sorted(sources.glob("*.md")):
                 _add(path, path.name, "reference docs", staged=False,
@@ -606,13 +673,18 @@ class MeridianData:
                  if s.get("family") == "knowledge"]
         files = self._knowledge_files()
         sources = _sources_dir()
+        stored = _content_store() is not None
         payload = {"available": build is not None,
                    **({} if build is not None else {"reason": reason}),
                    "known": known,
                    "files": files,
                    "staged": [f["name"] for f in files if f["staged"]],
                    "sources_dir": str(sources),
-                   "staging_dir": str(sources / "artifacts")}
+                   # where a staged file lands: the KnowledgeFiles table
+                   # under a store, the sources folder under local
+                   "staging_dir": ("KnowledgeFiles (SAHS_STORE)" if stored
+                                   else str(sources / "artifacts")),
+                   "staging_store": stored}
         payload["skills_dir"] = str(_skills_dir())
         if not files:
             # the honest empty state names the paths checked + the fix
@@ -748,6 +820,26 @@ def stage_artifact(req: ArtifactStageRequest) -> dict:
                    for c in req.name.strip().lower()).strip("-")[:60]
     if not slug:
         return {"staged": False, "reason": "name yields an empty slug"}
+    store = _content_store()
+    if store is not None:
+        # a KnowledgeFiles row, staged by the signed-in person (the
+        # row's StagedBy is a foreign key to Users: nobody, no row)
+        from apps.synapse_admin.backend.auth import request_user
+        user = request_user.get() or {}
+        who = str(user.get("user_id") or "").strip()
+        if not who or who == "local":
+            return {"staged": False,
+                    "reason": "sign in to stage a knowledge file"}
+        got = store.stage_knowledge(req.business_unit, slug, req.ext,
+                                    req.content, who)
+        if not got.get("ok"):
+            return {"staged": False, "reason": got.get("reason", "not staged")}
+        return {"staged": True, "file": got["file"],
+                "note": "staged for ingestion (a KnowledgeFiles row). The "
+                        "Knowledge Files loader picks this up when it "
+                        "lands (pinned follow-up); until then it is "
+                        "visible here as staged, never silently pretended "
+                        "into the graph"}
     staged_dir = _sources_dir() / "artifacts"
     staged_dir.mkdir(parents=True, exist_ok=True)
     path = staged_dir / f"{req.business_unit.lower()}_{slug}.{req.ext}"

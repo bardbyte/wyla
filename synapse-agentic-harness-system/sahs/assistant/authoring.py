@@ -8,11 +8,14 @@ Two formats, one discipline:
   * **a skill** is doctrine: the moves for a kind of ask and the
     checks each move must run. It steers where the agent looks; it
     never asserts a fact. Saved under ``<graph>/skills/users/<owner>/``
-    it loads for that owner alone, labelled unreviewed.
+    it loads for that owner alone, labelled unreviewed. With a content
+    store (``SAHS_STORE=spanner|sqlite``) the same save is a
+    ``UserSkills`` row (``sahs/assistant/content_store.py``).
   * **a knowledge file** is reference: definitions, tables and
     columns named exactly, metrics in words, caveats, the owner to
-    ask. Staged under ``sources/artifacts/`` it enters the graph on
-    the next build, with its provenance.
+    ask. Staged under ``sources/artifacts/`` (a ``KnowledgeFiles`` row
+    with a store) it enters the graph on the next build, with its
+    provenance.
 
 The model rewrites; it does not invent. The prompt says so, the
 draft carries the model's own notes on what the material left
@@ -174,10 +177,14 @@ def _parse_text(name: str, text: str) -> Skill:
 
 
 def save_skill(graph_root: Path, owner: str, name: str,
-               text: str) -> dict[str, Any]:
-    """A person's own pack, on disk where the loader reads it for
-    them. Refuses a built-in name (it would never load), an empty
-    owner, an empty text, and a text over the cap."""
+               text: str, *, store: Any = None,
+               user_id: str = "") -> dict[str, Any]:
+    """A person's own pack, where the loader reads it for them: on
+    disk under ``<graph>/skills/users/<owner>/``, or — with a content
+    store (``SAHS_STORE=spanner|sqlite``) — a ``UserSkills`` row, for
+    the store's owner or for ``user_id`` (the approver publishing the
+    submitter's pack). Refuses a built-in name (it would never load),
+    an empty owner, an empty text, and a text over the cap."""
     name = slug(name)
     if not name:
         return {"ok": False, "reason": "the skill needs a name"}
@@ -192,22 +199,33 @@ def save_skill(graph_root: Path, owner: str, name: str,
     if len(text) > MAX_SAVE_CHARS:
         return {"ok": False, "reason": f"over {MAX_SAVE_CHARS:,} characters: "
                                        "a skill is a briefing, not a book"}
-    root = user_root(Path(graph_root), owner)
-    root.mkdir(parents=True, exist_ok=True)
-    path = root / f"{name}.md"
-    existed = path.exists()
-    path.write_text(text, encoding="utf-8")
-    parsed = _parse(path)
+    if store is not None:
+        parsed = _parse_text(name, text)
+        row = store.save_skill(name, parsed.title, parsed.description, text,
+                               user_id=user_id)
+        existed = bool(row.get("replaced"))
+        path = f"UserSkills/{row.get('user_id', '')}/{name}"
+    else:
+        root = user_root(Path(graph_root), owner)
+        root.mkdir(parents=True, exist_ok=True)
+        file = root / f"{name}.md"
+        existed = file.exists()
+        file.write_text(text, encoding="utf-8")
+        parsed = _parse(file)
+        path = str(file)
     return {"ok": True, "name": parsed.name, "title": parsed.title,
             "description": parsed.description, "owner": owner_slug(owner),
             "origin": "unreviewed", "replaced": existed,
             # over the load ceiling: saved whole, will refuse to load
             # until SAHS_MAX_SKILL_CHARS is raised or the text is cut
             "truncated": len(text) > max_skill_chars(),
-            "path": str(path)}
+            "path": path}
 
 
-def delete_skill(graph_root: Path, owner: str, name: str) -> bool:
+def delete_skill(graph_root: Path, owner: str, name: str, *,
+                 store: Any = None) -> bool:
+    if store is not None:
+        return bool(store.delete_skill(slug(name)))
     path = user_root(Path(graph_root), owner) / f"{slug(name)}.md"
     if not path.exists():
         return False
