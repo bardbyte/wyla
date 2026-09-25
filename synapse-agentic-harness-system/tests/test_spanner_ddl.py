@@ -105,6 +105,23 @@ def test_the_graph_is_assertions_plus_a_fold_and_a_property_graph():
     assert "CHECK (Status IN ('active', 'superseded', 'retracted'))" in ddl
 
 
+def test_the_bundle_tables_hang_under_builds_and_every_file_is_in_the_readme():
+    """005: what sahs/builds/spanner_store.py writes, keyed as it reads,
+    interleaved so a re-publish's DELETE FROM Builds takes the old
+    bundle and its chunks with it."""
+    ddl = _text("005_build_bundles.sql")
+    assert "CREATE TABLE BuildBundles (" in ddl and "CREATE TABLE BuildBundleChunks (" in ddl
+    assert ddl.count("INTERLEAVE IN PARENT Builds ON DELETE CASCADE") == 1
+    assert ddl.count("INTERLEAVE IN PARENT BuildBundles ON DELETE CASCADE") == 1
+    assert re.search(r"Chunk\s+BYTES\(MAX\)\s+NOT NULL", ddl)
+    assert re.search(r"Complete\s+BOOL\s+NOT NULL DEFAULT \(false\)", ddl)
+    assert "PRIMARY KEY (BuildId, Seq)" in ddl
+    assert "PublishedAt  TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true)" in ddl
+    readme = (DDL / "README.md").read_text(encoding="utf-8")
+    for path in sorted(DDL.glob("*.sql")):
+        assert f"`{path.name}`" in readme, path.name
+
+
 def test_the_readme_and_the_design_say_how():
     readme = (DDL / "README.md").read_text(encoding="utf-8")
     assert not (SILO / "docs" / "specs" / "spanner_schema.md").exists()
