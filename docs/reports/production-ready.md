@@ -11,6 +11,8 @@ its own report; this page is the map.
 | content to Spanner | [`content-to-spanner.md`](content-to-spanner.md) | `007_content.sql` (file bytes in chunks, the review board), `SpannerContentStore` for chat files, own skills, knowledge files and reviews; the shelf and the staging door through the store |
 | multi-task turns | [`../../synapse-agentic-harness-system/docs/reports/multi-task-turns.md`](../../synapse-agentic-harness-system/docs/reports/multi-task-turns.md) | `planner.py`, tasks in dependency waves on a bounded pool under one budget, a synthesis turn and a "What was done" artifact, the task board on both chat pages |
 | Langfuse insight | [`../../synapse-agentic-harness-system/docs/reports/langfuse-insight.md`](../../synapse-agentic-harness-system/docs/reports/langfuse-insight.md) | backfill from `ChatEvents` with deterministic ids, prompt fingerprints and registered parts, dataset builders (precedents, silver, scenarios), `run_evals.py --sut assistant`, a coverage table, the guide `docs/runbooks/langfuse-insight.md` |
+| UI fixes | [`ui-fixes-stop-radix.md`](ui-fixes-stop-radix.md) | one-line composer pills, the chosen stop on the pill, an icon stop that stops the model mid-stream, Radix on both surfaces, persona-facing model and effort copy |
+| backend fixes | [`backend-fixes-sensitive-model-skills.md`](backend-fixes-sensitive-model-skills.md) | `SAHS_SENSITIVE_COLUMNS` (allow by default), the model choice at 64 with `008_chat_model.sql`, one skills tree for both shelves, `scripts/skills_check.py` |
 | research | [`../research/resilience-accuracy-latency.md`](../research/resilience-accuracy-latency.md) | the decisions on caches, memory, resilience and the accuracy loop, with sources |
 | skill retrieval | [`../../synapse-agentic-harness-system/docs/reports/skill-retrieval.md`](../../synapse-agentic-harness-system/docs/reports/skill-retrieval.md) | `skill_index.py` (chunker, FTS5 index, BM25), per-engine whole-load budgets, frontmatter as a preference, never a refusal (whole when it fits, a library when it does not), `skill_toc` / `skill_search` / `skill_read`, the `skills_loaded` record, the routing hint |
 
@@ -50,9 +52,9 @@ and sandbox scratch.
 
 | suite | result | exit |
 |---|---|---|
-| `apps/synapse_admin/tests` | 153 passed, 2 skipped | 0 |
-| `synapse-agentic-harness-system/tests` | 642 passed | 0 |
-| `scripts/spanner_ddl_check.py` | 44 tables across 7 files, ok | 0 |
+| `apps/synapse_admin/tests` | 158 passed, 2 skipped | 0 |
+| `synapse-agentic-harness-system/tests` | 654 passed | 0 |
+| `scripts/spanner_ddl_check.py` | 44 tables across 8 files, the ALTERs applied, ok | 0 |
 | CI `tests` job on PR #150 | success on the last head it ran on; the job is gated off draft pushes and runs once when the PR is marked ready | |
 
 Retrieval accuracy on the synthetic 2.5 MB pack (577 sections, 1,022
@@ -75,10 +77,9 @@ section, 10/10 on the routing hint; a search costs 3 to 5 ms.
    are new to the live database, `007_content.sql` is new everywhere. The
    Okta hop and the Google consent hop both 503 on a database without
    `AuthStates` (006). `make check ENV=e1` reports the schema diff.
-2. **Widen two `CHECK` lists in `002_chat.sql`** before real chats hit E1:
-   `ChatArtifacts.Type` lacks `kpi`; `ChatSessions.Model` allows only the
-   two plane names at 16 characters while the composer records choices
-   like `gateway:gemini-3.5-flash`.
+2. **Apply `008_chat_model.sql`** on E1 after `007`: it widens
+   `ChatSessions.Model` to 64 and lists every artifact type, closing the
+   two `CHECK` caveats.
 3. **Mark the eight governed skills' frontmatter**: `runtime_loading:
    full_file_required` (a preference: whole whenever it fits, a library
    with the reason recorded when it does not) on the contract skills

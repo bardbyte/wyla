@@ -237,11 +237,17 @@ class GatewayClient:
                  thinking_level: str = "",
                  include_thoughts: bool = True,
                  max_output_tokens: int = 8192,
-                 timeout: float = CALL_TIMEOUT) -> Iterator[dict[str, Any]]:
+                 timeout: float = CALL_TIMEOUT,
+                 should_stop: Callable[[], bool] | None = None
+                 ) -> Iterator[dict[str, Any]]:
         """One model call in Gemini's native tool protocol, delivered
         whole: the same events VertexClient.converse yields, in one
         burst — thought summaries, prose, tool calls, then done with
-        the parts verbatim (thought signatures included) for the echo."""
+        the parts verbatim (thought signatures included) for the echo.
+        No stream to cut short here: ``should_stop`` (the stop button)
+        is honoured the moment the call returns — the answer is
+        accounted for and ``done`` says ``STOPPED`` with no events
+        before it, so nothing of it is spoken or run."""
         body: dict[str, Any] = {
             "contents": contents,
             "generationConfig": self._config(thinking_level or "medium",
@@ -256,6 +262,11 @@ class GatewayClient:
         parts = parts_of(payload)
         finish = str(((payload.get("candidates") or [{}])[0]).get(
             "finishReason") or "")
+        if should_stop is not None and should_stop():
+            got = self._account(payload)
+            yield {"kind": "done", "parts": parts, "finish": "STOPPED",
+                   "usage": got}
+            return
         if finish == "MAX_TOKENS" and not self._usable(parts):
             # the budget went to thinking: grow the cap once and retry
             cap = body["generationConfig"]["maxOutputTokens"]

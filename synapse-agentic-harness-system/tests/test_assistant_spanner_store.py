@@ -100,6 +100,28 @@ def test_session_edits_land_in_the_columns(store, backend):
     store.set_title("s_nope", "nothing to update")               # a no-op, not an error
 
 
+def test_a_model_choice_round_trips_whole(store, backend):
+    """A catalog choice longer than a plane's name — plane:model, as
+    the composer sends a 3.x engine — is stored whole on both backends
+    (008_chat_model.sql: STRING(64), no plane CHECK) and read back as
+    sent; a choice over the column is refused by name, never cut."""
+    from sahs.assistant.spanner_store import MODEL_CHOICE_CHARS
+    sid = store.create_session("assistant")["id"]
+    choice = "gateway:gemini-3.7-flash"
+    assert len(choice) > 16                      # the old truncation
+    store.set_model(sid, f" {choice.upper()} ")
+    assert store.get_session(sid)["model"] == choice
+    assert backend[1]("ChatSessions")[0]["Model"] == choice
+    longest = "gateway:" + "m" * (MODEL_CHOICE_CHARS - len("gateway:"))
+    store.set_model(sid, longest)
+    assert store.get_session(sid)["model"] == longest
+    with pytest.raises(ValueError, match="65 characters"):
+        store.set_model(sid, longest + "x")
+    assert store.get_session(sid)["model"] == longest      # untouched
+    store.set_model(sid, "")
+    assert store.get_session(sid)["model"] == ""
+
+
 def test_projects_memories_and_artifacts(store):
     project = store.create_project("Churn", instructions="be brief", skills=["a", "b", "c", "d", "e"])
     assert project["skills"] == ["a", "b", "c", "d"] and project["archived"] is False

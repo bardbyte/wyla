@@ -178,6 +178,12 @@ flowchart LR
 |---|
 | `policy_unknown` · `restricted_table` · `select_star` · `no_where_filter` · `dims_unchecked` · `sensitive_column_in_filter` · `group_by_at_metric_grain` · `qualification_partial` |
 
+`sensitive_column` and `select_star_over_sensitive` are violations
+under `SAHS_SENSITIVE_COLUMNS=deny`; under `allow` — the default for
+the first launch — the same two codes come back as warnings with
+`policy: allow`, so the record still says a sensitive column was read
+and nothing is refused for it ([13-configuration](13-configuration.md)).
+
 **`metric_expression_missing` is what "never invents a metric" means in
 code.** The certified expression rides into the generator verbatim, and
 containment on the *canonical* text is checked on the way out. Drop the

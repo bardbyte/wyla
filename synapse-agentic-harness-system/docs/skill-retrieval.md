@@ -264,6 +264,49 @@ section.
 catalogue with `mode: library`, `preferred` and `reason`, and a note
 that says when the frontmatter preferred the whole file.
 
+## Where skill files go
+
+Two variables in the silo `.env` name the shelves, and the chat's
+picker (`skills_loader.all_skills`, called on every turn) reads them in
+one order, the first pack under a name winning every collision:
+
+1. the built-in packs (`sahs/assistant/skills/*.md`);
+2. the person's own packs (`<graph>/skills/users/<owner>/`, or the
+   store's `UserSkills` rows);
+3. **`MERIDIAN_SKILLS_DIR`**, when set: the skills tree the Knowledge
+   Files shelf walks (`apps/synapse_admin/backend/meridian.py`), read
+   here too — every `*.md` under it, nested folders allowed, the pack
+   name the relative path as a slug (`CFR/TLS/Semantics.md` →
+   `cfr-tls-semantics`), the title the frontmatter's or the first
+   heading, `description` and `aliases` the frontmatter's; the tree's
+   `users/` folder and hidden folders are never shared packs;
+4. **`MERIDIAN_GRAPH_DIR`**'s `<graph>/skills/*.md`, top level, named
+   by the stem.
+
+So one directory serves both shelves: the eight governed packs under
+`MERIDIAN_SKILLS_DIR` are on the Knowledge Files page and in the chat's
+picker, whole or as a library by the rules above. A later file with a
+name already taken is skipped and `collect_skills` returns the row
+(path, name, shelf, reason). The parsed packs are cached per file by
+(path, size, mtime), so the per-turn listing costs one `stat` a file.
+
+The frontmatter keys the loader reads — `runtime_loading` (`sectioned`
+or `full_file_required`), `truncation_allowed` (true or false),
+`description`, `aliases` — are the ones above; an unknown
+`runtime_loading` reads as `sectioned` and the check script says so; an
+opening `---` with no closing `---` makes the pack list with the reason
+and refuse to load (`SkillUnreadable`), like a non-UTF-8 file.
+
+`scripts/skills_check.py` prints the resolved roots in that order, every
+pack the picker would list with its size, whether it fits the whole-load
+limit (`--model` names the engine; the default is the unnamed engine's
+window under `SAHS_MAX_SKILL_CHARS`), its policy and aliases, then the
+packs that refuse to load and the files skipped, each with why; exit 1
+while any file is skipped or refuses. `--skills-dir` stands in for
+`MERIDIAN_SKILLS_DIR`, `--graph` for `MERIDIAN_GRAPH_DIR`, `--owner` for
+`SYNAPSE_USER_NAME`, `--json` for the data. The section on the app side
+is `apps/synapse_admin/README.md`, "Where skill files go".
+
 ## Checking retrieval on your own packs
 
 **How to verify on the real packs.** Point the check script at the

@@ -154,6 +154,72 @@ labeled door — never an unlabeled fake.
 runner); this app is the product and its copy of the read plane
 (`backend/meridian.py`) is the canonical one.
 
+## Where skill files go
+
+One directory serves both shelves. Two variables in the silo `.env`
+decide where the chat's skill picker and the Knowledge Files shelf
+look:
+
+| variable | who reads it | what it holds |
+|---|---|---|
+| `MERIDIAN_SKILLS_DIR` | the Knowledge Files shelf (`backend/meridian.py`, nested folders as areas) **and** the chat's skill picker (`sahs/assistant/skills_loader.py`) | the skills tree: every `*.md` under it, nested folders allowed (`CFR/TLS/semantics.md`), is a pack the chat can select |
+| `MERIDIAN_GRAPH_DIR` | the chat's skill picker | `<graph>/skills/*.md` (top level only) and `<graph>/skills/users/<owner>/` for a person's own packs |
+
+Put the governed packs under `MERIDIAN_SKILLS_DIR` and both surfaces
+see them. The picker lists, in this order, and the **first pack under a
+name wins** (a later file with a taken name is skipped, never merged):
+
+1. the built-in packs that ship with the assistant;
+2. the person's own packs (`<graph>/skills/users/<owner>/`, or the
+   `UserSkills` rows under a store);
+3. the skills tree, `MERIDIAN_SKILLS_DIR`, when it is set — the pack
+   name is the path relative to the tree as a slug (`CFR/TLS/Semantics.md`
+   → `cfr-tls-semantics`, `fiscal notes.md` → `fiscal-notes`; letters,
+   digits and dashes, at most 64 characters), the title the
+   frontmatter's or the first heading, the description and aliases the
+   frontmatter's. The tree's `users/` folder and hidden folders are not
+   read as shared packs;
+4. `<graph>/skills/*.md`, named by the file stem, as before.
+
+Unset `MERIDIAN_SKILLS_DIR` and the picker is what it was (1, 2 and 4).
+The parsed packs are cached per file by (path, size, mtime), so the
+per-turn listing costs a `stat` a file; an edited file is re-read on
+its next listing.
+
+A pack's frontmatter (the leading `---` block; stdlib parse, no YAML
+dependency) may carry four keys:
+
+```markdown
+---
+description: Settlement windows and the reconciliation runs
+aliases: [settle, recon, late close]
+runtime_loading: sectioned        # or full_file_required
+truncation_allowed: true          # or false
+---
+```
+
+`description` is the one-liner the shelf and the routing hint use;
+`aliases` the words the hint matches; `runtime_loading` and
+`truncation_allowed` the pack's preference for loading whole
+(`full_file_required` or `truncation_allowed: false`) — a preference,
+not a gate: the pack loads whole whenever it fits the turn's whole-load
+limit (`SAHS_MAX_SKILL_CHARS` under the engine's window) and as a
+searchable library when it does not, saying so
+(`synapse-agentic-harness-system/docs/skill-retrieval.md`). An
+unknown `runtime_loading` value reads as `sectioned`; a `---` block
+that never closes makes the pack list with the reason and refuse to
+load, like a file that is not UTF-8.
+
+To see what the picker would list on this machine, with sizes, the
+whole-load verdict, the policy and every file skipped or refusing to
+load, and why:
+
+```bash
+cd synapse-agentic-harness-system
+python scripts/skills_check.py                       # the .env's roots
+python scripts/skills_check.py --skills-dir /path/to/skills --model gemini-3.7-flash
+```
+
 ## Tests
 
 ```bash

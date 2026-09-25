@@ -22,6 +22,24 @@ Two shelves, one index:
     ``UserSkills`` rows, ``sahs/assistant/content_store.py``) and the
     folder is not read for them; under ``local`` nothing is bound and
     the folder is the shelf, as before.
+  * **the skills tree** (``MERIDIAN_SKILLS_DIR``, when set) is the
+    one directory that serves both shelves: the Knowledge Files shelf
+    walks it (``apps/synapse_admin/backend/meridian.py``) and so does
+    this picker — every ``*.md`` under it, nested folders included,
+    named by its path as a slug (``CFR/TLS/semantics.md`` →
+    ``cfr-tls-semantics``; a top-level file keeps its stem, lowered),
+    the title from the frontmatter or the first heading, description
+    and aliases from the frontmatter. Its ``users/`` folder is never
+    read as shared (that is the own-packs folder when the tree IS the
+    graph's). Origin ``unreviewed``, like every pack that did not
+    ship with the assistant. It comes after the built-ins and the
+    owner's own and before ``<graph>/skills``, under one rule: the
+    first pack listed under a name wins, later files with that name
+    are skipped and ``collect_skills`` says so (``scripts/
+    skills_check.py`` prints it).
+
+``all_skills`` is called on every turn, so the parsed packs are cached
+per file by (path, size, mtime): an unchanged file costs a ``stat``.
 
 Progressive disclosure is the point: the system prompt carries only
 names and one-liners (``render_skill_index``); the full text enters a
@@ -42,6 +60,8 @@ disclosed.
 
 from __future__ import annotations
 
+import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -71,10 +91,36 @@ class Pack(Skill):
     origin: str = BUILTIN
     owner: str = ""             # a person's own pack: the owner's slug
     updated: str = ""           # the file's last write, ISO, for the shelf
+    path: str = ""              # the file it came from; '' for a store row
+
+
+SKILLS_DIR_VAR = "MERIDIAN_SKILLS_DIR"
+OWN_FOLDER = "users"          # <graph>/skills/users/<owner>/: never shared
+NAME_CHARS = 64               # ChatSessions.Skills is ARRAY<STRING(64)>
 
 
 def builtin_root() -> Path:
     return Path(__file__).parent / "skills"
+
+
+def skills_dir(env: Mapping[str, str] | None = None) -> Path | None:
+    """The skills tree both shelves read (``MERIDIAN_SKILLS_DIR``), or
+    None when the variable is not set — the picker adds nothing then."""
+    source: Mapping[str, str] = os.environ if env is None else env
+    raw = str(source.get(SKILLS_DIR_VAR, "")).strip()
+    return Path(raw).expanduser() if raw else None
+
+
+def pack_name(rel: Path | str) -> str:
+    """The name a file under the skills tree gets from its path: the
+    folders and the stem, lowered, anything but letters and digits
+    folded to one dash, joined by dashes — ``CFR/TLS/Semantics.md`` →
+    ``cfr-tls-semantics``, ``fiscal notes.md`` → ``fiscal-notes`` —
+    cut to the store's 64 characters. '' when nothing is left."""
+    parts = [re.sub(r"[^a-z0-9]+", "-", p.lower()).strip("-")
+             for p in Path(rel).with_suffix("").parts]
+    slug = "-".join(p for p in parts if p)
+    return re.sub(r"-{2,}", "-", slug)[:NAME_CHARS].rstrip("-")
 
 
 def author_of(text: str) -> str:
@@ -111,17 +157,92 @@ def _updated(path: Path) -> str:
         stamp, tz=_dt.timezone.utc).isoformat(timespec="seconds")
 
 
-def _packs(root: Path, origin: str, owner: str = "") -> list[Pack]:
-    if not root.exists():
+# the parse cache: path → ((size, mtime_ns), the parsed skill, updated).
+# all_skills runs every turn; an unchanged file costs one stat here
+_PARSED: dict[str, tuple[tuple[int, int], Skill, str]] = {}
+
+
+def _parsed(path: Path) -> tuple[Skill, str]:
+    try:
+        stat = path.stat()
+        key: tuple[int, int] | None = (stat.st_size, stat.st_mtime_ns)
+    except OSError:
+        key = None
+    hit = _PARSED.get(str(path))
+    if hit is not None and key is not None and hit[0] == key:
+        return hit[1], hit[2]
+    skill, updated = _parse(path), _updated(path)
+    if key is not None:
+        _PARSED[str(path)] = (key, skill, updated)
+    return skill, updated
+
+
+def clear_cache() -> None:
+    """Forget every parsed file (tests; a shelf moved under a process)."""
+    _PARSED.clear()
+
+
+def _pack(path: Path, name: str, origin: str, owner: str = "") -> Pack:
+    s, updated = _parsed(path)
+    # a file without a heading is titled by its pack name, not its stem
+    title = name if s.title == path.stem else s.title
+    return Pack(name=name, title=title, description=s.description,
+                text=s.text, error=s.error, origin=origin, owner=owner,
+                updated=updated, path=str(path))
+
+
+def _files(root: Path, recursive: bool) -> list[Path]:
+    """The pack files of a shelf: the top-level ``*.md`` of a flat
+    shelf; every ``*.md`` under a tree, hidden folders and the
+    ``users/`` folder left out, in relative-path order regardless of
+    case (so ``a-b.md`` comes before ``a/b.md`` and ``CFR/`` sorts
+    with ``c``) — the order that decides which file wins a name."""
+    if not root.is_dir():
         return []
+    if not recursive:
+        return sorted(p for p in root.glob("*.md") if p.is_file())
     out = []
-    for path in sorted(root.glob("*.md")):
-        s = _parse(path)
-        out.append(Pack(name=s.name, title=s.title,
-                        description=s.description, text=s.text,
-                        error=s.error,
-                        origin=origin, owner=owner, updated=_updated(path)))
+    for path in sorted(root.rglob("*.md"),
+                       key=lambda p: p.relative_to(root).as_posix().lower()):
+        rel = path.relative_to(root)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        if rel.parts[0] == OWN_FOLDER:
+            continue
+        if path.is_file():
+            out.append(path)
     return out
+
+
+def _packs(root: Path, origin: str, owner: str = "") -> list[Pack]:
+    """A flat shelf: each top-level ``*.md`` named by its stem."""
+    return [_pack(p, p.stem, origin, owner) for p in _files(root, False)]
+
+
+def tree_packs(root: Path, origin: str = UNREVIEWED
+               ) -> tuple[list[Pack], list[dict[str, str]]]:
+    """The skills tree as packs: every ``*.md`` under ``root`` (nested
+    folders allowed), named by ``pack_name`` of its relative path,
+    first wins within the tree. → (packs, skipped) where each skipped
+    row says which file, which name and why."""
+    packs: list[Pack] = []
+    skipped: list[dict[str, str]] = []
+    seen: dict[str, str] = {}
+    for path in _files(root, True):
+        name = pack_name(path.relative_to(root))
+        if not name:
+            skipped.append({"path": str(path), "name": "",
+                            "reason": "no name: the path has no letters "
+                                      "or digits"})
+            continue
+        if name in seen:
+            skipped.append({"path": str(path), "name": name,
+                            "reason": f"name collision: {seen[name]} was "
+                                      "listed first (first wins)"})
+            continue
+        seen[name] = str(path)
+        packs.append(_pack(path, name, origin))
+    return packs, skipped
 
 
 def builtin_skills() -> list[Pack]:
@@ -167,18 +288,68 @@ def own_skills(graph_root: Path | None, owner: str) -> list[Pack]:
     return _packs(user_root(Path(graph_root), owner), UNREVIEWED, slug)
 
 
-def all_skills(graph_root: Path | None = None,
-               owner: str = "") -> list[Pack]:
-    """Built-in packs first, then the owner's own, then the shared
-    user packs; built-in names win every collision, an own pack wins
-    over a shared one for its owner (see the module docstring)."""
-    merged: dict[str, Pack] = {p.name: p for p in builtin_skills()}
+def shelf_roots(graph_root: Path | None,
+                env: Mapping[str, str] | None = None
+                ) -> list[tuple[str, Path, bool]]:
+    """The shared shelves after the built-ins and the owner's own, in
+    precedence order: (label, root, nested) — the skills tree
+    (``MERIDIAN_SKILLS_DIR``, nested) when it is set, then
+    ``<graph>/skills`` (top level) when there is a graph."""
+    roots: list[tuple[str, Path, bool]] = []
+    tree = skills_dir(env)
+    if tree is not None:
+        roots.append((SKILLS_DIR_VAR, tree, True))
     if graph_root is not None:
-        for pack in own_skills(graph_root, owner):
-            merged.setdefault(pack.name, pack)
-        for pack in _packs(skills_root(Path(graph_root)), UNREVIEWED):
-            merged.setdefault(pack.name, pack)
-    return list(merged.values())
+        roots.append(("<graph>/skills", skills_root(Path(graph_root)), False))
+    return roots
+
+
+def collect_skills(graph_root: Path | None = None, owner: str = "",
+                   env: Mapping[str, str] | None = None
+                   ) -> tuple[list[Pack], list[dict[str, str]]]:
+    """The picker's list and what it left out. Built-in packs first,
+    then the owner's own, then the skills tree (``MERIDIAN_SKILLS_DIR``),
+    then the shared ``<graph>/skills``; the first pack under a name
+    wins every collision — a built-in over everything, an own pack
+    over a shared one for its owner — and each later file with a taken
+    name is a skipped row (path, name, shelf, reason)."""
+    merged: dict[str, Pack] = {p.name: p for p in builtin_skills()}
+    skipped: list[dict[str, str]] = []
+
+    def take(pack: Pack, shelf: str) -> None:
+        winner = merged.get(pack.name)
+        if winner is None:
+            merged[pack.name] = pack
+            return
+        skipped.append({
+            "path": pack.path, "name": pack.name, "shelf": shelf,
+            "reason": f"name collision: the {winner.origin} pack "
+                      f"{winner.name!r}"
+                      + (f" at {winner.path}" if winner.path else "")
+                      + " was listed first (first wins)"})
+
+    for pack in own_skills(graph_root, owner):
+        take(pack, "own")
+    for label, root, nested in shelf_roots(graph_root, env):
+        if nested:
+            packs, dropped = tree_packs(root)
+            skipped.extend({**row, "shelf": label} for row in dropped)
+        else:
+            packs = _packs(root, UNREVIEWED)
+        for pack in packs:
+            take(pack, label)
+    return list(merged.values()), skipped
+
+
+def all_skills(graph_root: Path | None = None,
+               owner: str = "",
+               env: Mapping[str, str] | None = None) -> list[Pack]:
+    """Built-in packs first, then the owner's own, then the skills
+    tree (``MERIDIAN_SKILLS_DIR``), then the shared user packs;
+    built-in names win every collision, an own pack wins over a shared
+    one for its owner (see the module docstring and ``collect_skills``,
+    which also says what was skipped)."""
+    return collect_skills(graph_root, owner, env)[0]
 
 
 def get_skill(graph_root: Path | None, name: str,
@@ -511,6 +682,8 @@ def rank_shelf(index: Any, packs: list[Pack], question: str,
 __all__ = ["BUILTIN", "UNREVIEWED", "Pack", "builtin_root", "author_of",
            "owner_slug", "bind_own_skills", "unbind_own_skills", "own_skills",
            "user_root", "builtin_skills", "all_skills", "get_skill",
+           "SKILLS_DIR_VAR", "skills_dir", "pack_name", "tree_packs",
+           "shelf_roots", "collect_skills", "clear_cache",
            "load_packs", "render_skill_index", "SkillContext",
            "skill_context", "toc_lines", "TOC_TOOL_CAP",
            "whole_load_limit", "split_by_policy", "preference_of",

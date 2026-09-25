@@ -41,6 +41,22 @@ it (git ignores everything there but the examples) and fill it in.
 what CI runs (`.github/workflows/tests.yml`: both suites and the DDL
 lint, nothing on the network).
 
+## The first launch's policy switch: sensitive columns
+
+`SAHS_SENSITIVE_COLUMNS` says what the SQL validator does with a query
+that projects a column the build flags sensitive (the acl's
+`pii_columns`: a FICO score, a CDSS field). It is read where the verdict
+is made (`sahs/tools/validate_sql.py`), not by the sandbox's gates:
+
+| value | what happens | where |
+|---|---|---|
+| `allow` (the default, unset included) | the query runs; `sensitive_column` and `select_star_over_sensitive` come back as **notes** on the check result (`warnings`, with `policy: allow`), so the turn's record says the column was read | every profile's example |
+| `deny` | the same two codes are **violations** and the query is refused, as before the first launch | what a deployment sets when the read must not happen; `e3.env.example` carries the comment |
+
+Only the word `deny` denies. The other gates — statement class, tables
+and columns that exist, row-access policy, the live switch, cost — are
+untouched by it.
+
 ## The checks, and what each proves
 
 `make check ENV=<profile>` runs `scripts/readiness.py --env <profile>`:
@@ -81,7 +97,8 @@ the emulator recipe is in `db/spanner/README.md`):
 4. `004_google_oauth.sql` — a person's connected Google account
 5. `005_build_bundles.sql` — the promoted build's bytes under `Builds`
 6. `006_external_identities.sql` — Okta links and the one-time authorization states
-7. `007_*.sql` — the review board and the content store, when that change lands
+7. `007_content.sql` — a chat file's bytes and the review board
+8. `008_chat_model.sql` — `ALTER TABLE` only: `ChatSessions.Model` widened to 64 characters with no plane `CHECK` (the composer's `plane:model` choices), `ChatArtifacts.Type` listing every type the code knows (`kpi` included); applied on top of a database that already has `002`, so E1 ends up the same as a fresh database
 
 `make ddl-check` before applying; `make check` after, to see the
 `spanner` row say every designed table is present.
@@ -102,7 +119,7 @@ one). Until a decision needs them, both stay `''`.
 
 1. `cp synapse-agentic-harness-system/env/e1.env.example synapse-agentic-harness-system/env/e1.env` and fill every `<placeholder>`; secrets come from the secret store, never from a file in the repository.
 2. Register `https://<host>/callback` as a Login redirect URI on the environment's Okta client (and on the Google client if BigQuery runs as the person).
-3. Create the Spanner database; apply `001` … `006` in order.
+3. Create the Spanner database; apply `001` … `008` in order (on a database that already has `001` … `004`: `005`, `006`, `007`, `008`; on one that has `001` … `007`: `008` alone; run `python scripts/spanner_check.py` first to see which tables are missing — `008` adds no table, so check `ChatSessions.Model`'s width in the console for that one).
 4. `make ddl-check`.
 5. `make check ENV=e1` — fix every row that is not `ok` or an allowed `skipped`.
 6. Publish a build: `python scripts/pipeline.py publish-build` from a host that compiled one (the `spanner` row stays `ok`; the app's `/api/synapse/planes` will name the build).

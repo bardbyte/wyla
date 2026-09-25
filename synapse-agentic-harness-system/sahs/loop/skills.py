@@ -264,12 +264,59 @@ def _parse(path: Path) -> Skill:
     return parse_skill(path.stem, raw)
 
 
+def frontmatter_error(text: str) -> str:
+    """Why the frontmatter cannot be read at all: an opening ``---``
+    on the first line with no closing ``---`` (or ``...``), which would
+    turn the whole file into keys. '' when it is fine or absent. A
+    skill with this error still LISTS and refuses to LOAD by name
+    (``SkillUnreadable``), like a file that is not UTF-8."""
+    lines = (text or "").splitlines()
+    if not lines or lines[0].strip() != "---":
+        return ""
+    for line in lines[1:]:
+        if line.strip() in ("---", "..."):
+            return ""
+    return "frontmatter: the opening --- on line 1 has no closing ---"
+
+
+def frontmatter_warnings(text: str) -> list[str]:
+    """What the frontmatter says that the loader reads differently
+    from how it was written — a ``runtime_loading`` outside the known
+    modes, a ``truncation_allowed`` that is not true/false, an
+    ``aliases`` that is not a list — each with what it is read as.
+    Warnings, never a refusal: ``policy_of`` folds them to the
+    defaults, and the check script prints them."""
+    fm = frontmatter(text)
+    out: list[str] = []
+    mode = fm.get("runtime_loading")
+    if mode is not None and str(mode).strip().lower() not in LOADING_MODES:
+        out.append(f"runtime_loading: {mode!r} is not one of "
+                   f"{' | '.join(LOADING_MODES)}; read as {LOADING_SECTIONED}")
+    allowed = fm.get("truncation_allowed")
+    if allowed is not None and not isinstance(allowed, bool):
+        folded = str(allowed).strip().lower() not in ("false", "no", "off")
+        out.append(f"truncation_allowed: {allowed!r} is not true/false; "
+                   f"read as {'true' if folded else 'false'}")
+    aliases = fm.get("aliases")
+    if aliases is not None and not isinstance(aliases, (list, str)):
+        out.append(f"aliases: {aliases!r} is not a list; ignored")
+    return out
+
+
 def parse_skill(name: str, raw: str) -> Skill:
     """A skill from its text: the title is the first heading after
     the frontmatter (else the name), the description the frontmatter's
     ``description:`` or the first prose line. The text stays whole,
-    frontmatter included — what loads is the file as written."""
+    frontmatter included — what loads is the file as written. A
+    frontmatter that cannot be read (``frontmatter_error``) makes the
+    skill list with the reason and refuse to load, never load as a
+    file of keys."""
     title, description = name, ""
+    broken = frontmatter_error(raw)
+    if broken:
+        return Skill(name=name, title=name,
+                     description=f"unreadable: {broken}", text=raw,
+                     error=broken)
     fm = frontmatter(raw)
     for line in strip_frontmatter(raw).splitlines():
         stripped = line.strip()

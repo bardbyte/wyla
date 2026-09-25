@@ -74,12 +74,13 @@ def test_each_engine_has_its_map_and_the_dial_folds_onto_it():
     lite = profile_for("gemini-3.1-flash-lite")
     assert lite.accepts == ("minimal", "low", "medium", "high")
     assert lite.level_for("minimal") == "minimal" and lite.level_for("json") == "minimal"
-    assert "JSON" in lite.fit
+    assert "JSON" in lite.facts and "quick checks" in lite.fit
     # a model the table does not name gets its family's map
     assert profile_for("gemini-3.9-ultra").accepts == ("low", "medium", "high")
     legacy = profile_for(LEGACY)
     assert legacy.thinking == "budget" and legacy.accepts == ()
-    assert legacy.family == "gemini-2.5" and "Retiring" in legacy.fit
+    assert legacy.family == "gemini-2.5" and "Retiring" in legacy.facts
+    assert "compatibility" in legacy.fit
     assert legacy.level_for("minimal") == "minimal"                   # nothing to fold onto
     assert profile_for("gpt-5").thinking == "budget" and profile_for("gpt-5").family == "other"
     # the environment's word: the probe's levels, a forced style, a cap
@@ -256,7 +257,8 @@ def test_the_catalog_lists_every_model_on_every_plane(monkeypatch):
     by = {r["id"]: r for r in rows}
     # the Vertex engine's map rides its row: 3.1 Pro takes a level, not a budget
     assert by["vertex"]["thinking"] == "level" and by["vertex"]["levels"] == ["low", "medium", "high"]
-    assert by["vertex"]["family"] == "gemini-3" and "Deep" in by["vertex"]["fit"]
+    assert by["vertex"]["family"] == "gemini-3" and "Most careful" in by["vertex"]["fit"]
+    assert "streams on Vertex" in by["vertex"]["facts"]
     monkeypatch.setenv("GATEWAY_MODELS", MODELS)
     for key, value in HOSTS.items():
         monkeypatch.setenv(key, value)
@@ -271,7 +273,7 @@ def test_the_catalog_lists_every_model_on_every_plane(monkeypatch):
     assert by["gateway:gemini-3.5-flash"]["label"] == "Gemini 3.5 Flash"
     assert by["gateway:gemini-3.5-flash"]["levels"] == ["medium", "high"]
     assert by["gateway:gemini-3.1-flash-lite"]["levels"][0] == "minimal"
-    assert "JSON" in by["gateway:gemini-3.1-flash-lite"]["fit"]
+    assert "JSON" in by["gateway:gemini-3.1-flash-lite"]["facts"]
     assert all(r["plane"] == "gateway" and r["available"] and not r["default"]
                for r in rows[2:])
     assert not by["vertex"]["available"] and "SYNAPSE_VERTEX_SA_KEY" in by["vertex"]["reason"]

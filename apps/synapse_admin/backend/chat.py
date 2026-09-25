@@ -156,8 +156,10 @@ class NewMessage(BaseModel):
     # the autonomy slider (v3 §5): chat hands queries over for the
     # person to run; autopilot runs and builds without stopping
     mode: str = Field(default="", max_length=12)
-    # the model switch: vertex | gateway, or empty for the chat's own
-    model: str = Field(default="", max_length=12)
+    # the model switch: a catalog choice — a plane (vertex | gateway) or
+    # plane:model such as gateway:gemini-3.7-flash — or empty for the
+    # chat's own; 64 is the store's column width (008_chat_model.sql)
+    model: str = Field(default="", max_length=64)
     # the files that ride this message (ids from POST …/files)
     files: list[str] = Field(default_factory=list, max_length=10)
 
@@ -176,7 +178,7 @@ class DraftRequest(BaseModel):
     title: str = Field(default="", max_length=200)
     hint: str = Field(default="", max_length=1000)
     material: str = Field(min_length=1, max_length=60_000)
-    model: str = Field(default="", max_length=12)
+    model: str = Field(default="", max_length=64)
 
 
 class SaveSkill(BaseModel):
@@ -185,8 +187,9 @@ class SaveSkill(BaseModel):
 
 
 class SessionModel(BaseModel):
-    """The composer's model switch, remembered on the chat."""
-    model: str = Field(default="", max_length=12)
+    """The composer's model switch, remembered on the chat: a plane or
+    plane:model from the catalog (GET /dials), up to 64 characters."""
+    model: str = Field(default="", max_length=64)
 
 
 class RunProposal(BaseModel):

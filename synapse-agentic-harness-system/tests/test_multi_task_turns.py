@@ -90,7 +90,8 @@ class RoutedAgent(ScriptedAgent):
     def converse(self, contents: list[dict[str, Any]], *,
                  system: str = "", tools: list[dict[str, Any]] | None = None,
                  thinking_level: str = "",
-                 max_output_tokens: int = 8192) -> Iterator[dict[str, Any]]:
+                 max_output_tokens: int = 8192,
+                 should_stop: Any = None) -> Iterator[dict[str, Any]]:
         ask = self.newest_ask(contents)
         self.calls.append({"contents": contents, "system": system,
                            "tools": [t["name"] for t in (tools or [])],
