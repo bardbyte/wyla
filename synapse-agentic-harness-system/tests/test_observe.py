@@ -228,11 +228,15 @@ def sdk_client():
         return httpx.Response(207, json={"successes": [], "errors": []})
     # a fresh public key per client: the SDK keeps one resource set
     # per key, and an earlier test's exporter must not receive ours
+    # the id generator the emitter pins observation ids through, as
+    # setup.langfuse_client() hands it to the real client
+    from sahs.observe.langfuse_emitter import PINNED
     client = Langfuse(public_key=f"pk-test-{uuid.uuid4().hex[:8]}",
                       secret_key="sk-test", base_url="http://127.0.0.1:1",
                       httpx_client=httpx.Client(
                           transport=httpx.MockTransport(handler)),
-                      span_exporter=exporter, flush_interval=0.2)
+                      span_exporter=exporter, flush_interval=0.2,
+                      id_generator=PINNED)
     yield client, exporter, posted
     client.shutdown()
 

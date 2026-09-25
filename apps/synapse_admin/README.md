@@ -65,6 +65,10 @@ lives on the filesystem: [`docs/spanner-wiring.md`](../../docs/spanner-wiring.md
 Which `.env` the server reads is `SAHS_ENV_FILE` (`make run ENV=e1` from
 the repo root sets it and starts uvicorn on 8810); the profiles, the
 readiness checks and the DDL order: [`docs/deploy.md`](../../docs/deploy.md).
+Langfuse, when the team turns it on, is a mirror of those tables — the
+traces, sessions, users, scores, prompt versions and datasets are all
+rebuilt from them:
+[`langfuse-insight.md`](../../synapse-agentic-harness-system/docs/runbooks/langfuse-insight.md).
 
 With a store, the shell boots as the signed-in person (`js/session.js`):
 nobody signed in means every route is the sign-in page, every API call

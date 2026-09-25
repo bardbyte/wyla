@@ -25,6 +25,11 @@ from typing import Any
 
 ASSISTANT_PROMPT = "wyla-assistant-system"
 LOOP_PROMPT = "wyla-loop-system"
+# the static parts the assembled prompt is made of, each its own
+# registered prompt so a part can be diffed on its own; the assembled
+# template above is what a generation links to
+PART_PREFIX = "wyla-assistant"
+PRODUCTION_LABEL = "production"
 
 
 def _section(tag: str, body: str) -> str:
@@ -35,7 +40,8 @@ def assistant_template() -> str:
     from sahs.assistant.loop import CHAIN, IDENTITY
     return "\n\n".join([
         _section("identity", IDENTITY), _section("chain", CHAIN),
-        _section("mode", "{{mode}}"), _section("graph", "{{graph}}"),
+        _section("mode", "{{mode}}"), _section("style", "{{style}}"),
+        _section("graph", "{{graph}}"),
         _section("skills", "{{skills}}"), _section("memory", "{{memory}}"),
         _section("session", "{{session}}")])
 
@@ -48,15 +54,56 @@ def loop_template() -> str:
                       TONE, "", PROTOCOL + "{{tools}}"])
 
 
-def registry() -> list[dict[str, str]]:
+def content_version(text: str) -> str:
+    """A version string for a one-shot with no version constant of
+    its own: the text's own hash, so a change is a new version and
+    unchanged text is a no-op (drift cannot happen by construction)."""
+    import hashlib
+    return "text-" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+
+
+def part_registry() -> list[dict[str, Any]]:
+    """The static parts: identity, chain, one blurb per mode, one
+    style section per engine family, the planner's one-shot, the
+    judge's and the reviewer's. Labels: ``production`` on all, the
+    engine family on a family's style."""
+    from sahs.ask.verify import JUDGE_SYSTEM
+    from sahs.assistant.loop import ASSISTANT_VERSION, CHAIN, IDENTITY, MODES
+    from sahs.assistant.planner import PLAN_SYSTEM
+    from sahs.assistant.reviews import REVIEW_SYSTEM
+    from sahs.util.profiles import STYLES
+    rows: list[dict[str, Any]] = [
+        {"name": f"{PART_PREFIX}-identity", "version": ASSISTANT_VERSION,
+         "prompt": IDENTITY, "labels": [PRODUCTION_LABEL]},
+        {"name": f"{PART_PREFIX}-chain", "version": ASSISTANT_VERSION,
+         "prompt": CHAIN, "labels": [PRODUCTION_LABEL]},
+    ]
+    for mode, blurb in MODES.items():
+        rows.append({"name": f"{PART_PREFIX}-mode-{mode}",
+                     "version": ASSISTANT_VERSION, "prompt": blurb,
+                     "labels": [PRODUCTION_LABEL]})
+    for family, style in STYLES.items():
+        rows.append({"name": f"{PART_PREFIX}-style-{label_for(family)}",
+                     "version": ASSISTANT_VERSION, "prompt": style,
+                     "labels": [PRODUCTION_LABEL, label_for(family)]})
+    for name, text in (("wyla-planner-system", PLAN_SYSTEM),
+                       ("wyla-judge-system", JUDGE_SYSTEM),
+                       ("wyla-review-system", REVIEW_SYSTEM)):
+        rows.append({"name": name, "version": content_version(text),
+                     "prompt": text, "labels": [PRODUCTION_LABEL]})
+    return rows
+
+
+def registry(parts: bool = True) -> list[dict[str, Any]]:
     from sahs.assistant.loop import ASSISTANT_VERSION
     from sahs.loop.prompt import PROMPT_VERSION
-    return [
+    rows: list[dict[str, Any]] = [
         {"name": ASSISTANT_PROMPT, "version": ASSISTANT_VERSION,
-         "prompt": assistant_template()},
+         "prompt": assistant_template(), "labels": [PRODUCTION_LABEL]},
         {"name": LOOP_PROMPT, "version": PROMPT_VERSION,
-         "prompt": loop_template()},
+         "prompt": loop_template(), "labels": [PRODUCTION_LABEL]},
     ]
+    return rows + (part_registry() if parts else [])
 
 
 def label_for(version: str) -> str:
@@ -111,7 +158,8 @@ def register_prompts(client: Any, out: Path,
         if existing is not None and not drift:
             version, created = existing.version, False
         else:
-            labels = [label] + ([f"git-{sha}"] if sha else [])
+            labels = [label] + list(entry.get("labels") or []) \
+                + ([f"git-{sha}"] if sha else [])
             made = client.create_prompt(
                 name=entry["name"], prompt=entry["prompt"], labels=labels,
                 type="text",
@@ -155,6 +203,7 @@ class PromptLinks:
         return self._by_version.get(version)
 
 
-__all__ = ["ASSISTANT_PROMPT", "LOOP_PROMPT", "PromptLinks",
-           "assistant_template", "label_for", "links_path", "load_links",
-           "loop_template", "register_prompts", "registry"]
+__all__ = ["ASSISTANT_PROMPT", "LOOP_PROMPT", "PART_PREFIX",
+           "PRODUCTION_LABEL", "PromptLinks", "assistant_template",
+           "content_version", "label_for", "links_path", "load_links",
+           "loop_template", "part_registry", "register_prompts", "registry"]

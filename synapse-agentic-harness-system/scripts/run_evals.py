@@ -2,8 +2,17 @@
 """Run the Meridian eval suite.
 
     python scripts/run_evals.py --tasks <jsonl> [--tasks <jsonl> ...]
-        --sut oracle|null [--out <dir>] [--fail-under 0.9]
-        [--max-ambiguous 0.1] [--json] [--plain]
+        --sut oracle|null|resolver:<builds>|assistant:<builds>|planner
+        [--out <dir>] [--fail-under 0.9] [--max-ambiguous 0.1]
+        [--json] [--plain] [--langfuse] [--run-name <name>]
+
+--tasks takes a task file (meridian.task/1) or an item file the
+dataset builders wrote (wyla.precedent/1, wyla.silver/1,
+wyla.scenario/1: langfuse_sync.py datasets --build ...). The assistant
+SUT runs each prompt as a real turn on the engine the .env names and
+reads the SQL and the skills loaded off the record; the planner SUT
+splits each compound ask. With --langfuse every verdict lands on the
+dataset item as a score (docs/runbooks/langfuse-insight.md).
 
 Exit codes: 0 ok · 1 gate failure · 2 validation error.
 """
@@ -22,8 +31,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sahs import __version__ as SCRIPT_VERSION                    # noqa: E402
 from sahs.canon.canonical import CANON_VERSION                    # noqa: E402
 from sahs.evals.harness import format_report, run_suite, write_report  # noqa: E402
-from sahs.evals.schema import read_tasks                          # noqa: E402
 from sahs.evals.suts import BUILTIN_SUTS                          # noqa: E402
+from sahs.observe.experiments import read_any_tasks               # noqa: E402
 from sahs.util.console import (                                   # noqa: E402
     EXIT_GATE_FAILURE,
     EXIT_OK,
@@ -54,11 +63,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-name", default="",
                         help="the Langfuse run name; default names the "
                              "SUT, tasks version, canon version and time")
+    parser.add_argument("--wait-seconds", type=float, default=180.0,
+                        help="assistant SUT: the wall clock per turn")
     args = parser.parse_args(argv)
 
     tasks = []
     for path in args.tasks:
-        tasks.extend(read_tasks(Path(path)))
+        tasks.extend(read_any_tasks(Path(path)))
     loaded = len(tasks)
     excluded = 0
     if not args.include_external:
@@ -77,6 +88,23 @@ def main(argv: list[str] | None = None) -> int:
         from sahs.tools.resolver import resolver_sut
         build = Build.open(Path(args.sut.split(":", 1)[1]))
         sut = resolver_sut(build)
+    elif args.sut.startswith("assistant:"):
+        # the real loop on the engine the .env names (SAHS_MODEL_PLANE)
+        from sahs.assistant.agent import agent_for
+        from sahs.evals.assistant_sut import assistant_sut
+        from sahs.tools.api import Build
+        from sahs.util.auth import load_dotenv
+        load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+        build = Build.open(Path(args.sut.split(":", 1)[1]))
+        sut = assistant_sut(
+            build, lambda budget, plane="": agent_for(plane, budget),
+            wait_seconds=args.wait_seconds)
+    elif args.sut == "planner":
+        from sahs.assistant.agent import agent_from_env
+        from sahs.evals.assistant_sut import planner_sut
+        from sahs.util.auth import load_dotenv
+        load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+        sut = planner_sut(agent_from_env())
     elif args.sut in BUILTIN_SUTS:
         sut = BUILTIN_SUTS[args.sut]
     else:

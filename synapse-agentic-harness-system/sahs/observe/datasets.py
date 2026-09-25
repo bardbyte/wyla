@@ -79,6 +79,7 @@ def precedent_items(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
                                 "frame": dict(row.get("frame") or {}),
                                 "skill": str(row.get("skill") or "")},
             "metadata": {"source": str(row.get("source") or "precedents"),
+                         "skill": str(row.get("skill") or ""),
                          "notes": str(row.get("notes") or ""),
                          "canonical_fp": _fp(sql),
                          "tags": list(row.get("tags") or [])}})

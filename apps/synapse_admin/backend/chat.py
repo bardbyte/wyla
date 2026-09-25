@@ -110,11 +110,15 @@ def _make_runtime(owner: str, user: dict | None):
     # ones; resolved at publish time, so the .env decides
     runtime.knowledge_dir = lambda: _sources_dir() / "artifacts"
     # the Langfuse mirror of every turn's record: attached only
-    # when SAHS_LANGFUSE=1 (sahs.observe); off is the default
+    # when SAHS_LANGFUSE=1 (sahs.observe); off is the default. The
+    # user is the owner's id (ChatSessions.OwnerUserId), the same id a
+    # backfill from the chat tables files the trace under; the laptop
+    # with no store keeps its configured name
     from sahs.observe import langfuse_observer
     from sahs.observe.prompts import links_path
     runtime.observer = langfuse_observer(
-        user_id=runtime.user_name, model_of=runtime.label_for,
+        user_id=runtime.owner_user_id or runtime.user_name,
+        model_of=runtime.label_for,
         prompt_links=links_path(_graph_root()))
     return runtime
 
