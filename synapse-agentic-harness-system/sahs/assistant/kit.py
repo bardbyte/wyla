@@ -25,7 +25,8 @@ from sahs.tools.sandbox import (DEFAULT_MAX_BYTES, execute_sandboxed,
 from sahs.tools.validate_sql import validate_sql
 
 from . import checks as _checks
-from .artifacts import TYPES, validate_artifact
+from .artifacts import (CHART_KIND_ALIASES, CHART_KINDS, TYPES,
+                        choose_for_series, validate_artifact)
 from .hooks import literal_warnings
 from .sandbox import run_python, save_rows
 from .skills_loader import (TOC_TOOL_CAP, all_skills, get_skill,
@@ -342,6 +343,32 @@ def build_kit(build: Build, state: AssistantState, *,
                     "edges": graph.get("edges", []),
                     **({"caption": spec["caption"]}
                        if spec.get("caption") else {})}
+        # a chart with no kind: the heuristic picks one from the
+        # series' shape and its one-sentence reason rides in the spec
+        # (the card shows it); a kind the model names is kept, with
+        # its own reason when it gave one
+        if (type == "chart" and isinstance(spec, dict)
+                and not str(spec.get("kind") or "").strip()):
+            pick = choose_for_series(spec.get("series") or [],
+                                     str(spec.get("intent") or title or ""))
+            if pick["kind"] not in CHART_KINDS:
+                return {"error": "artifact refused", "problems": [{
+                    "code": "chart_kind",
+                    "detail": "no kind, and these series do not read "
+                              f"as a chart but as a {pick['kind']}",
+                    "hint": pick["reason"] + " — build that instead, "
+                            "or name a kind"}],
+                    "hint": "the heuristic: time on x → line; one "
+                            "category → bar; two measures → scatter; "
+                            "parts → stacked bar; one number → kpi"}
+            spec = {**spec, "kind": pick["kind"],
+                    "reason": str(spec.get("reason") or pick["reason"]),
+                    **({"sort": pick["sort"]}
+                       if pick.get("sort") and not spec.get("sort")
+                       else {})}
+        elif type == "chart" and isinstance(spec, dict):
+            raw = str(spec.get("kind") or "").lower().strip()
+            spec = {**spec, "kind": CHART_KIND_ALIASES.get(raw, raw)}
         if artifact_id:
             current = store.get_artifact(artifact_id)
             if current is None or current["session_id"] != session_id:
@@ -730,18 +757,38 @@ def build_kit(build: Build, state: AssistantState, *,
             description=(
                 "Put something in the panel the user keeps: "
                 + " | ".join(TYPES) + ". spec_json is ONE JSON object. "
-                "chart: {kind: line|bar|scatter|area, series: [{name, "
-                "points: [[x, y], …], dashed?}], unit?} — every series "
-                "shares ONE x axis of labels; y is null where a series "
-                "has no value (a forecast is null over the actual "
-                "periods and starts at the last actual, dashed: true); "
-                "the charts skill says which kind for which question. "
-                "table: {columns: "
-                "[{key, label}], rows: [{…}]}. document: {markdown}. "
-                "kpi: {value, unit?, label?, delta?}. dashboard: "
-                "{panels: [{type, title?, spec}], filters?: [{slot, "
-                "options}], notes?} — every numeric panel carries its "
-                "OWN provenance. diagram: {kind: graph, nodes, edges} "
+                "chart: {kind?: " + "|".join(CHART_KINDS) + ", series: "
+                "[{name, points: [[x, y], …], dashed?, role?}], unit?, "
+                "format?, x_label?, y_label?, reference?: {value, "
+                "label}, sort?: x|-y, reason?} — every series shares "
+                "ONE x axis of labels; y is null where a series has no "
+                "value (a forecast is null over the actual periods and "
+                "starts at the last actual, dashed: true). Leave kind "
+                "out and the heuristic picks it from the data's shape "
+                "(time on x → line; one category and a measure → bar, "
+                "sorted, horizontal for long labels or > 8 categories; "
+                "two measures → scatter; parts of a whole → stacked_bar "
+                "or percent_bar, never a pie; a distribution → "
+                "histogram; two categories and a measure → heatmap; "
+                "> 12 series → small_multiples; actual vs plan → combo; "
+                "a bridge → waterfall) and writes its one-sentence "
+                "reason into the spec; when you pick the kind, say why "
+                "in reason. heatmap: {kind: heatmap, x: [labels], y: "
+                "[labels], values: [[row per y]]}; histogram: {kind: "
+                "histogram, values: [numbers], bins?}; combo: role bar|"
+                "line per series; waterfall: one series of steps, "
+                "totals: [labels]. Numbers format themselves from the "
+                "data (the decimals they carry, % and currency from the "
+                "column name or unit, K/M/B past 100k); put the unit on "
+                "the column or the spec, and format ({kind, decimals, "
+                "unit} or a kind word) only to override. table: "
+                "{columns: [{key, label, unit?, format?}], rows: [{…}]}. "
+                "document: {markdown}. kpi: {value, unit?, label?, "
+                "delta?, delta_format?, compare_label?, format?}. "
+                "dashboard: {grid?: 1|2|3, panels: [{type, title?, "
+                "span?, spec}], filters?: [{slot, options}], notes?} — "
+                "every numeric panel carries its OWN provenance. "
+                "diagram: {kind: graph, nodes, edges} "
                 "or {from_subgraph: [ids]} to draw what you used, or "
                 "{kind: mermaid, source}. Any spec showing numbers "
                 "MUST carry provenance {status, meridian_line, "

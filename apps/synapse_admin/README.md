@@ -306,3 +306,15 @@ on every record a task's sub-turn emits) ride the same stream; there is
 no new route. The mental model, the gate, the budget split and the
 report are in `synapse-agentic-harness-system/docs/multi-task-turns.md`.
 
+Charts, tables, KPI tiles and dashboards render on both surfaces from
+one identical module, `js/artifacts-render.js` (a surface test pins the
+two copies equal): numbers format themselves from the data (the
+decimals the column carries, thousands grouped, K/M/B past a hundred
+thousand, the unit from the column's metadata or name), a chart spec
+with no kind gets one from the harness's written heuristic with a
+one-sentence reason shown on the card, and twelve chart kinds draw as
+hand-drawn SVG in light and dark with reduced-motion parity. The
+formatting rules, the heuristic table, every kind's encoding, the
+override keys and how to add a kind:
+`synapse-agentic-harness-system/docs/visualizations.md`.
+

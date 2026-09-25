@@ -1626,3 +1626,63 @@ table.result tr:last-child td { border-bottom: none; }
 }
 .chat-row.on .chat-usage { color: inherit; opacity: 0.8; }
 .search-hit .search-usage { font-variant-numeric: tabular-nums; }
+
+
+/* ══ artifacts-render: charts, tables, tiles, the strip under a number ══
+ * The rules for js/artifacts-render.js — one block, identical on both
+ * surfaces; keep chart/table/tile CSS between these two markers.
+ * Colours come from the tokens, so dark mode needs no second copy. */
+/* the strip under a chart, a tile or a dashboard panel wraps: never
+   clipped to one line, never an ellipsis over the disclaimer */
+.tile-footer { flex-wrap: wrap; align-items: baseline; row-gap: 2px; }
+.tile-footer .meridian, .artifact-footer .meridian {
+  white-space: normal; overflow: visible; text-overflow: clip;
+  overflow-wrap: anywhere; min-width: 0; flex: 1 1 100%;
+  font-style: italic; line-height: 1.35; color: var(--ink-3, #7a756a);
+}
+.artifact-footer { align-items: baseline; row-gap: 2px; }
+.chart-reason {
+  font-size: var(--fs-12, 0.75rem); margin-top: 4px; font-style: italic;
+  overflow-wrap: anywhere;
+}
+/* the plot: recessive hairline grid, a firmer zero line, ticks in the
+   muted ink, a dashed reference line with its label */
+.chartv2 .grid { stroke: var(--line, rgba(0, 0, 0, 0.08)); stroke-width: 1; }
+.chartv2 .grid.zero { stroke: var(--line-strong, #a9b8d4); }
+.chartv2 .tick { fill: var(--ink-3, #7a756a); }
+.chartv2 .tick.axis { font-style: italic; }
+.chartv2 .facet-title { font-weight: 700; fill: var(--ink-2, #33415f); }
+.chartv2 .legend { fill: var(--ink-2, #33415f); }
+.chartv2 .reference { stroke: var(--ink-3, #7a756a); stroke-width: 1.2; stroke-dasharray: 4 3; }
+.chartv2 .reference-label { fill: var(--ink-2, #33415f); font-weight: 600; }
+.chartv2 .connector { stroke: var(--line-strong, #a9b8d4); stroke-width: 1; }
+/* the heatmap: one hue (the accent) from light to dark, an empty cell
+   the second surface colour; a label inside a dark cell reads light */
+.chartv2 .cell { fill: var(--accent, #2f6feb); animation: fade 0.4s ease both; }
+.chartv2 .cell.empty { fill: var(--surface-2, #eef3fa); fill-opacity: 1; }
+.chartv2 .cell-label { font-size: 10px; fill: var(--ink, #222018); pointer-events: none; }
+.chartv2 .cell-label.on-dark { fill: var(--on-accent, #ffffff); }
+/* horizontal bars grow from the left, not from the baseline */
+.chartv2 .chart-bar.hbar { transform-origin: left; animation: grow-x 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes grow-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+/* the table: Show all lifts the scroll box so the page scrolls the
+   rows, and the toggle reads its state, not its words */
+.tablev3.all { max-height: none; }
+.tablev3 th .muted { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.table-more .table-all { padding: 4px 12px; font-size: var(--fs-12, 0.75rem); }
+/* the dashboard grid: the spec's columns (1 to 3) when it names them,
+   each panel its span; one column on a narrow screen */
+.dash-grid.fixed { grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); }
+.dash-grid.fixed .dash-panel { grid-column: span var(--span, 1); }
+.dash-panel .chartv2 { width: 100%; height: auto; }
+@media (max-width: 640px) {
+  .dash-grid, .dash-grid.fixed { grid-template-columns: minmax(0, 1fr); }
+  .dash-grid .dash-panel, .dash-grid.fixed .dash-panel { grid-column: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chartv2 .cell, .chartv2 .chart-bar.hbar, .chartv2 .line, .chartv2 .dot,
+  .chartv2 .fill, .chartv2 .chart-bar { animation: none; opacity: 1;
+    transform: none; stroke-dashoffset: 0; }
+  .chartv2 .fill { fill-opacity: 0.15; }
+}
+/* ══ end artifacts-render ══ */

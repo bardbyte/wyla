@@ -235,12 +235,15 @@ def test_the_composer_reads_as_asked():
 def test_the_chart_places_points_by_their_label():
     """Both surfaces' renderers: one x axis from every series' labels,
     each point on its own label, nulls as gaps, a dashed forecast."""
+    # the renderer is js/artifacts-render.js on both surfaces (one
+    # identical module the chat page imports)
     for surface in ("synapse", "synapse_admin"):
-        js = (REPO / "apps" / surface / "frontend" / "js" / "pages" / "chat.js") \
-            .read_text(encoding="utf-8")
+        js = (REPO / "apps" / surface / "frontend" / "js"
+              / "artifacts-render.js").read_text(encoding="utf-8")
         for piece in ("if (!cats.includes(label)) cats.push(label);",
-                      "cats.every(isDate)) cats.sort()",
-                      "by.has(c) ? by.get(c) : NaN", "const runs = (values)",
+                      "cats.every(isDate)", "if (dated) cats.sort()",
+                      "lookup[i].has(c) ? lookup[i].get(c) : NaN",
+                      "const runs = (values)",
                       'stroke-dasharray="6 4"', "s.dashed",
                       "/forecast|projection|projected|estimate|target|"):
             assert piece in js, (surface, piece)

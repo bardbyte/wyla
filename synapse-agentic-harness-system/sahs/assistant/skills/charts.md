@@ -21,6 +21,17 @@ says what the rows say — a forecast after the actuals, one axis, no pie.
    axes on one plot.
 7. A distribution → bars over bins you name ("0–1k", "1k–5k", …).
 
+## Twelve kinds; leave `kind` out and the heuristic picks
+`line area bar hbar stacked_bar percent_bar scatter histogram heatmap
+small_multiples combo waterfall`. With no `kind` the artifact tool picks
+by the data's shape (time → line; category + measure → sorted bar, hbar
+for long labels; two measures → scatter; parts ≤ 6 → stacked/percent bar;
+distribution → histogram; two categories → heatmap; > 12 series → small
+multiples; one number → kpi) and writes its `reason` into the spec. When
+you pick, write `reason` yourself. Numbers format themselves from the
+data (0.125 → 12.5%, thousands grouped, K/M/B past 100k): name columns
+for what they are, set `unit`, and use `format` only to override.
+
 ## Build the spec so the axis tells the truth
 1. Every series rides ONE shared x axis of labels: `points: [[x, y], …]`
    with the same kind of x in every series (`2026-01`, `2026-02`, … or
