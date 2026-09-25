@@ -1857,6 +1857,11 @@ export async function renderChat(outlet, wanted = "") {
         doneThinking(task, (event.cost || {}).elapsed_ms);
         break;
       }
+      case "skills_loaded":
+        // the loader record (per skill: whole, sectioned or refused,
+        // with the characters sent) rides the transcript for Operate;
+        // a refusal already shows as the error card that follows it
+        break;
       case "turn_started": {
         if (turn.task) {            // a task's own start: its row only
           turn.startedAt = Date.parse(event.ts || "") || Date.now();
@@ -1985,7 +1990,7 @@ export async function renderChat(outlet, wanted = "") {
     const source = new EventSource(
       api.chatStreamUrl(state.session.id, state.seq));
     for (const name of [
-      "turn_started", "plan_made", "task_started", "task_done",
+      "turn_started", "skills_loaded", "plan_made", "task_started", "task_done",
       "model_prompt", "thinking", "tool_call",
       "tool_step", "tool_result", "say_token", "artifact", "proposal",
       "chips", "budget_tick", "turn_done", "error"]) {

@@ -299,7 +299,7 @@ def test_a_simple_ask_runs_byte_identical_to_the_plain_turn(compiled,
     plain = rt.bus.since(0)
     assert _normalize(events) == _normalize(plain)
     assert [e["ev"] for e in events] == [
-        "turn_started", "model_prompt", "model_prompt", "thinking",
+        "turn_started", "skills_loaded", "model_prompt", "model_prompt", "thinking",
         "say_token", "budget_tick", "tool_call", "tool_step",
         "tool_result", "chips", "turn_done"]
     assert through.calls[0]["system"] == direct.calls[0]["system"]
