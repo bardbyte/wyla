@@ -62,6 +62,9 @@ With `sqlite` or `spanner`, every `/api/chat/*` call needs the session
 cookie and every chat, message, project, memory and artifact row carries
 the person who made it. What lands where, table by table, and what still
 lives on the filesystem: [`docs/spanner-wiring.md`](../../docs/spanner-wiring.md).
+Which `.env` the server reads is `SAHS_ENV_FILE` (`make run ENV=e1` from
+the repo root sets it and starts uvicorn on 8810); the profiles, the
+readiness checks and the DDL order: [`docs/deploy.md`](../../docs/deploy.md).
 
 With a store, the shell boots as the signed-in person (`js/session.js`):
 nobody signed in means every route is the sign-in page, every API call
