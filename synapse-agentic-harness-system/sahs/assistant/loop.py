@@ -36,7 +36,8 @@ from sahs.tools.api import Build
 from sahs.util.profiles import prompt_style
 
 from .agent import ROUTING_KEY, declarations
-from .artifacts import validate_artifact
+from .artifacts import (CHART_KIND_ALIASES, CHART_KINDS, MAX_FACETS,
+                        MAX_SERIES, choose_visual, validate_artifact)
 from .events import EventBus
 from .kit import RESULT_CAP, build_kit
 from .planner import plan_for, waves
@@ -129,7 +130,10 @@ composed / exploratory) in one clause and its meridian line; the \
 artifact validator refuses undisclosed numbers, and composed numbers \
 keep an EXPLORATORY watermark until a passing check stands behind \
 them. Prefer certified; say plainly when something is pending or \
-mined; an honest "here is where I stopped" beats a confident guess.
+mined; an honest "here is where I stopped" beats a confident guess. \
+A picture's kind and a number's decimals follow the data: leave kind \
+out of a chart spec and the artifact tool picks one by its heuristic \
+and records why; when you pick, write the reason; never a pie.
 
 A failed tool call is information, not a verdict. Read the error, \
 fix what is yours — the SQL, a name, a filter — and try again. When \
@@ -170,6 +174,24 @@ MODES: dict[str, str] = {
         "and stop."),
 }
 DEFAULT_MODE = "chat"
+# the <style> section every model gets: how a picture is chosen and
+# how a number reads (the heuristic itself is artifacts.choose_visual;
+# docs/visualizations.md tabulates it)
+VISUAL_STYLE = (
+    "Pictures: a chart's kind follows the data's shape — time on x is "
+    "a line; one category and a measure is a sorted bar (horizontal "
+    "for long labels or more than eight); two measures a scatter; "
+    "parts of a whole a stacked bar, never a pie; a distribution a "
+    "histogram; two categories and a measure a heatmap; more than "
+    "twelve series small multiples; actual against plan a combo; a "
+    "bridge a waterfall; one number a kpi, with its delta when there "
+    "is a comparison. Leave kind out of a chart spec and the artifact "
+    "tool picks by that heuristic and records its reason; when you "
+    "pick, put your one-sentence reason in the spec's reason. Numbers "
+    "format themselves from the data (12.5%, not 12.50000% and not "
+    "13%; thousands grouped; K/M/B past a hundred thousand): put the "
+    "unit on the column or the spec, never in the label, and use "
+    "format only to override.")
 # the autonomy slider as the composer explains it
 MODE_MEANS: dict[str, dict[str, str]] = {
     "chat": {
@@ -305,8 +327,11 @@ def system_prompt(build: Build, skills: list[Skill] | None = None,
         _DIGEST_CACHE[build.version] = digest
     parts = [_section("identity", IDENTITY), _section("chain", CHAIN),
              _section("mode", MODES.get(mode, MODES[DEFAULT_MODE]))]
+    # the model family's style, the visual rules riding after it (a
+    # family with no style keeps no section: the identity carries the
+    # one-line rule for every model, and the prefix stays cached)
     if style:
-        parts.append(_section("style", style))
+        parts.append(_section("style", style + "\n\n" + VISUAL_STYLE))
     parts.append(_section("graph", digest))
     skill_text = render_skills(skills or [])
     shelf = render_skill_index(
@@ -1671,6 +1696,72 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def _chart_spec(rows: list[dict[str, Any]], kind: str, axis: str,
+                series_cols: list[str], split: str, pick: dict[str, Any],
+                reason: str) -> dict[str, Any]:
+    """The rows as the chart spec the heuristic (or the person) asked
+    for: series per measure, or one per value of a splitting column;
+    a heatmap's matrix; a histogram's raw values; a scatter's numeric
+    pairs; the top N when the list is long."""
+    spec: dict[str, Any] = {"kind": kind, "x_label": axis}
+    if reason:
+        spec["reason"] = reason
+    if pick.get("sort") and kind not in ("scatter", "heatmap", "histogram"):
+        spec["sort"] = pick["sort"]
+    head = series_cols[0] if series_cols else ""
+    if kind == "histogram" and head:
+        spec.update(name=head, values=[
+            v for v in (_number(r.get(head)) for r in rows)
+            if v is not None])
+        return spec
+    if kind == "scatter" and head:
+        spec.update(y_label=head, series=[{"name": head, "points": [
+            [_number(r.get(axis)), _number(r.get(head))] for r in rows
+            if _number(r.get(axis)) is not None
+            and _number(r.get(head)) is not None]}])
+        return spec
+    if kind == "heatmap" and split and head:
+        xs = list(dict.fromkeys(str(r.get(axis, "")) for r in rows))
+        ys = list(dict.fromkeys(str(r.get(split, "")) for r in rows))
+        cells: dict[tuple[str, str], float] = {}
+        for r in rows:
+            v = _number(r.get(head))
+            if v is None:
+                continue
+            key = (str(r.get(split, "")), str(r.get(axis, "")))
+            cells[key] = cells.get(key, 0.0) + v
+        spec.update(name=head, x=xs, y=ys, values=[
+            [cells.get((yv, xv)) for xv in xs] for yv in ys])
+        return spec
+    top_n = int(pick.get("top_n") or 0)
+    if top_n and head and not split:
+        rows = sorted(rows, key=lambda r: _number(r.get(head)) or 0.0,
+                      reverse=True)[:top_n]
+    if split and head:
+        totals: dict[str, float] = {}
+        for r in rows:
+            v = _number(r.get(head))
+            if v is not None:
+                key = str(r.get(split, ""))
+                totals[key] = totals.get(key, 0.0) + v
+        cap = MAX_FACETS if kind == "small_multiples" else MAX_SERIES
+        keep = [k for k, _ in sorted(totals.items(), key=lambda kv: -kv[1])
+                ][:cap]
+        spec["y_label"] = head
+        spec["series"] = [{"name": cat, "points": [
+            [str(r.get(axis, "")), _number(r.get(head))]
+            for r in rows if str(r.get(split, "")) == cat
+            and _number(r.get(head)) is not None]} for cat in keep]
+        return spec
+    if len(series_cols) == 1:
+        spec["y_label"] = head
+    spec["series"] = [{"name": c, "points": [
+        [str(r.get(axis, "")), _number(r.get(c))]
+        for r in rows if _number(r.get(c)) is not None]}
+        for c in series_cols]
+    return spec
+
+
 def chart_rows_turn(*, build: Build, store: AssistantStore,
                     bus: EventBus, budget: Any, session: dict[str, Any],
                     turn_id: str, saved_as: str, title: str,
@@ -1703,19 +1794,49 @@ def chart_rows_turn(*, build: Build, store: AssistantStore,
     numeric = [c for c in columns
                if any(_number(r.get(c)) is not None for r in rows)]
     wanted_y = [c for c in (y or []) if c in columns]
+    # the heuristic reads the rows' shape (artifacts.choose_visual);
+    # a kind, an x or a y the person named wins over it
+    pick = choose_visual(rows, columns, intent=title) if rows else {}
+    asked = CHART_KIND_ALIASES.get(str(kind or "").lower().strip(),
+                                   str(kind or "").lower().strip())
     if x and x in columns:
         axis = x
     else:
-        axis = next((c for c in columns
-                     if any(_DATE_LIKE.match(str(r.get(c, "")))
-                            for r in rows)), None) \
-            or next((c for c in columns if c not in numeric), None) \
-            or (columns[0] if columns else "")
-    series_cols = wanted_y or [c for c in numeric if c != axis][:4]
+        axis = str(pick.get("x") or "") or next(
+            (c for c in columns
+             if any(_DATE_LIKE.match(str(r.get(c, ""))) for r in rows)),
+            None) or next((c for c in columns if c not in numeric),
+                          None) or (columns[0] if columns else "")
     dated = bool(axis) and any(_DATE_LIKE.match(str(r.get(axis, "")))
                                for r in rows)
-    chart_kind = kind if kind in ("line", "bar", "area", "scatter") \
-        else ("line" if dated else "bar")
+    if asked in CHART_KINDS:
+        chart_kind = asked
+        reason = f"A {asked.replace('_', ' ')} chart, as asked."
+    elif pick.get("kind") in CHART_KINDS:
+        chart_kind = pick["kind"]
+        reason = str(pick["reason"])
+    else:
+        # the heuristic said kpi or table; the picture is still owed,
+        # so the nearest chart — a top-N bar for a long list
+        chart_kind = "hbar" if pick.get("chart") == "hbar" \
+            else ("line" if dated else "bar")
+        reason = str(pick.get("reason") or "")
+    series_cols = wanted_y or [c for c in (pick.get("y") or [])
+                               if c in numeric and c != axis] \
+        or [c for c in numeric if c != axis][:4]
+    split = str(pick.get("series") or "") if not wanted_y else ""
+    if split in (axis, *series_cols) or split not in columns:
+        split = ""
+    if chart_kind == "scatter":
+        pair = [c for c in numeric if c != split][:2]
+        if len(pair) == 2 and (axis not in numeric or not series_cols):
+            axis, series_cols = pair[0], [pair[1]]
+        elif axis not in numeric:
+            chart_kind, reason = "bar", ""
+    if chart_kind == "heatmap" and not split:
+        chart_kind = "hbar" if len(rows) > 8 else "bar"
+    if chart_kind == "waterfall":
+        series_cols = series_cols[:1]
     args = {"saved_as": saved_as, "x": axis, "y": series_cols,
             "kind": chart_kind}
     bus.emit("tool_call", turn_id=turn_id, n=1, tool="chart",
@@ -1735,12 +1856,9 @@ def chart_rows_turn(*, build: Build, store: AssistantStore,
         summary = "ERROR: no numeric column"
         status = "partial"
     else:
-        spec = {"kind": chart_kind,
-                "series": [{"name": c, "points": [
-                    [str(r.get(axis, "")), _number(r.get(c))]
-                    for r in rows if _number(r.get(c)) is not None]}
-                    for c in series_cols],
-                "provenance": dict(provenance or {})}
+        spec = _chart_spec(rows, chart_kind, axis, series_cols, split,
+                           pick, reason)
+        spec["provenance"] = dict(provenance or {})
         made = kit["artifact"].fn("chart", f"{title} — chart",
                                   json.dumps(spec))
         if isinstance(made, dict) and made.get("_artifact"):
@@ -1750,9 +1868,10 @@ def chart_rows_turn(*, build: Build, store: AssistantStore,
                      artifact_id=row["artifact_id"],
                      version=row["version"], type=row["type"],
                      title=row["title"], spec=row["spec"])
-            said = (f"Drew it: a {chart_kind} chart of "
+            said = (f"Drew it: a {chart_kind.replace('_', ' ')} chart of "
                     + ", ".join(series_cols) + f" by {axis}, {len(rows)} "
                     f"rows, under the query's own provenance. "
+                    + (reason + " " if reason else "")
                     + str((provenance or {}).get("meridian_line") or "")
                     + _future_note(rows, verb="points"))
             summary = (f"{chart_kind} · {len(series_cols)} series · "

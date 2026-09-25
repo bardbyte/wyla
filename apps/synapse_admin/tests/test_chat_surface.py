@@ -20,6 +20,11 @@ SILO = REPO_ROOT / "synapse-agentic-harness-system"
 
 CHAT_JS = (FRONTEND / "js" / "pages" / "chat.js").read_text(
     encoding="utf-8")
+# the artifact rendering (charts, tables, tiles, the strip under a
+# number) is its own module, imported by the page
+RENDER_JS = (FRONTEND / "js" / "artifacts-render.js").read_text(
+    encoding="utf-8")
+PAGE_JS = CHAT_JS + RENDER_JS
 CHATS_JS = (FRONTEND / "js" / "chats.js").read_text(encoding="utf-8")
 API_JS = (FRONTEND / "js" / "api.js").read_text(encoding="utf-8")
 MAIN_JS = (FRONTEND / "js" / "main.js").read_text(encoding="utf-8")
@@ -187,7 +192,8 @@ def test_dashboards_and_diagrams_render():
     for piece in ("kpiTile", "diagramSVG", "dash-grid",
                   "filter-opt", "mermaid-src",
                   "bindDashboardFilters", "tileFooter"):
-        assert piece in CHAT_JS, piece
+        assert piece in PAGE_JS, piece
+    assert 'from "../artifacts-render.js"' in CHAT_JS
     for cls in (".dash-grid", ".kpi-tile", ".tile-footer",
                 ".diagramv2", ".filter-opt"):
         assert cls in CSS, cls
@@ -202,9 +208,9 @@ def test_dashboards_and_diagrams_render():
 
 def test_governance_is_visible_not_just_enforced():
     # status chips, meridian line, and the watermark all render
-    assert "status-chip" in CHAT_JS
+    assert "status-chip" in PAGE_JS
     assert "meridian_line" in CHAT_JS
-    assert "watermark" in CHAT_JS
+    assert "watermark" in PAGE_JS
     for status in ("s-certified", "s-pending", "s-composed",
                    "s-exploratory"):
         assert status in CSS, status
@@ -274,10 +280,12 @@ def test_the_artifact_drawer_and_the_report():
     # artifact into view; the masthead carries no tokens or build id
     for piece in ('classList.add("open")', "panel-open", "scrollTop = 0",
                   'id="chat-meter" hidden', 'id="chat-build" hidden',
-                  "tableReport", "animateNumbers", "sparkline",
+                  "bindTable(", "animateNumbers("):
+        assert piece in CHAT_JS, piece
+    for piece in ("tableReport", "animateNumbers", "sparkline",
                   "report-strip", "tablev3", "Show all",
                   'class="line"', 'class="chart-bar"', "--i:"):
-        assert piece in CHAT_JS, piece
+        assert piece in RENDER_JS, piece
     for cls in (".chat-panel.open", ".chatv2.panel-open .chat-main",
                 "--panel-w", ".report-strip", ".stat-spark", ".tablev3",
                 "@keyframes draw", "@keyframes grow", "@keyframes tile-in",
