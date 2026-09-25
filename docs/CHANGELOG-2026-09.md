@@ -110,7 +110,7 @@ class, its table or its gap.
 
 ### #150 · Production-ready (draft at time of writing)
 Four workstreams integrated on `claude/production-ready`; both suites green
-(153 app, 642 harness); the repository's first CI workflow, green on the PR.
+(158 app, 654 harness); the repository's first CI workflow, green on the PR.
 
 - **One flag for local / dev / prod.** `SAHS_ENV_FILE` picks the profile;
   `env/{local,e1,e2,e3}.env.example`; `make run ENV=e1`, `make check
@@ -156,6 +156,20 @@ Four workstreams integrated on `claude/production-ready`; both suites green
   on item files; `langfuse_sync.py coverage` prints which Langfuse concept
   is built from which Spanner columns. The guide is
   `docs/runbooks/langfuse-insight.md`.
+- **Laptop-test fixes.** A 3.x model choice no longer answers 422: the
+  chat API's `model` fields take 64 characters, the store writes the
+  choice whole, and `008_chat_model.sql` widens `ChatSessions.Model` and
+  lists every artifact type (`kpi` included); the DDL lint understands
+  the ALTERs. Sensitive columns are readable under the new default
+  `SAHS_SENSITIVE_COLUMNS=allow` (the read is noted on the check record;
+  `deny` restores the refusal per environment). The chat's skill picker
+  reads `MERIDIAN_SKILLS_DIR` as well as `<graph>/skills`, nested
+  folders included, with `scripts/skills_check.py` to list what it sees
+  and why a file was skipped. The composer's pills are one-line controls,
+  the Thinking-effort pill names the chosen stop, the stop is an icon
+  button that actually stops the model mid-stream, the model rows say
+  in plain words when to pick each (engineer facts on hover), and the
+  assistant is Radix on both surfaces.
 - **Research and decisions.** `docs/research/resilience-accuracy-latency.md`:
   no Redis for memory (Spanner already holds it), Memorystore later for hot
   state only, a plan cache with governed keys rather than an answer
@@ -174,8 +188,8 @@ inside the build bundle.
 
 | | PR #140 | PR #150 |
 |---|---|---|
-| app tests | 84 | 153 |
-| harness tests | 445 | 642 |
-| Spanner tables in the repo DDL | 34 | 44 |
+| app tests | 84 | 158 |
+| harness tests | 445 | 654 |
+| Spanner tables in the repo DDL | 34 | 44 (8 DDL files) |
 | persistence paths on Spanner under a store | identity only | identity, chats, events, files, skills, knowledge, reviews, builds |
 | CI | none | both suites plus the DDL lint on every PR |

@@ -1225,6 +1225,15 @@ table.result tr:last-child td { border-bottom: none; }
   font-size: var(--fs-11, 0.6875rem); margin-top: 1px;
 }
 .chat-send { width: 32px; height: 32px; border-radius: 999px; padding: 0; font-size: 16px; }
+/* the stop: a square in the send button's place while a turn runs; it
+   dims and breathes once pressed, until the turn's end restores the send */
+.chat-stop { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.chat-stop .stop-glyph {
+  display: block; width: 12px; height: 12px; border-radius: 2px; background: currentColor;
+}
+.chat-stop.stopping { opacity: 0.7; cursor: progress; }
+.chat-stop.stopping .stop-glyph { animation: think-orb 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .chat-stop.stopping .stop-glyph { animation: none; } }
 .chat-foot {
   max-width: 860px; margin: 8px auto 0; text-align: center;
   font-size: var(--fs-11, 0.6875rem); color: var(--ink-3, #5b6b8f);
@@ -1556,14 +1565,21 @@ table.result tr:last-child td { border-bottom: none; }
 
 /* ── the composer's knobs (js/knobs.js): a pill opens a panel above ── */
 .chat-pill {
-  display: inline-flex; align-items: center; gap: 6px; height: 30px;
-  padding: 0 12px; border-radius: 999px; border: 1px solid var(--line, #d5d2ca);
+  display: inline-flex; flex-flow: row nowrap; align-items: center; gap: 6px;
+  height: 30px; line-height: 1; padding: 0 12px; border-radius: 999px;
+  border: 1px solid var(--line, #d5d2ca);
   background: var(--surface-2, #f3f2ee); color: var(--ink, #222018);
   font: inherit; font-size: var(--fs-12, 0.75rem); font-weight: 600;
-  cursor: pointer; margin-right: 6px; white-space: nowrap; max-width: 220px;
+  cursor: pointer; margin-right: 6px; white-space: nowrap;
+  flex: 0 1 auto; min-width: 0; max-width: 240px;
 }
-.chat-pill .pill-label { overflow: hidden; text-overflow: ellipsis; }
-.chat-pill .chev { font-size: 14px; line-height: 1; color: var(--ink-3, #5b6b8f); }
+/* one line, always: the value truncates with an ellipsis, the chevron
+   never drops below the label */
+.chat-pill .pill-label {
+  display: block; min-width: 0; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.chat-pill .chev { flex: none; font-size: 14px; line-height: 1; color: var(--ink-3, #5b6b8f); }
 .chat-pill:hover, .chat-pill[aria-expanded="true"] {
   border-color: var(--accent, #2f6feb); color: var(--accent, #2f6feb);
 }
@@ -1573,8 +1589,10 @@ table.result tr:last-child td { border-bottom: none; }
   border: 1px solid var(--line, #d5d2ca); border-radius: 16px;
   box-shadow: var(--shadow-lift); padding: 14px 16px 16px; text-align: left;
   color: var(--ink-2, #3a3a36); font-size: var(--fs-12, 0.75rem);
+  box-sizing: border-box; max-height: calc(100vh - 24px); overflow-y: auto;
 }
 .knob-pop.below { top: calc(100% + 6px); bottom: auto; }
+.knob-hint { margin: 0 10px 6px; color: var(--ink-3, #5b6b8f); font-size: var(--fs-11, 0.6875rem); }
 .knob-title {
   display: flex; align-items: center; justify-content: center; gap: 4px;
   width: 100%; border: 0; background: transparent; color: var(--ink, #222018);
@@ -1598,6 +1616,14 @@ table.result tr:last-child td { border-bottom: none; }
 .knob-dots i { width: 6px; height: 6px; border-radius: 50%;
   background: var(--ink-3, #5b6b8f); opacity: 0.55; }
 .knob-dots i.on { background: var(--on-accent, #fff); opacity: 0.85; }
+/* the stops by name under the rail; the one that is on is checked */
+.knob-stops { display: flex; justify-content: space-between; margin: 2px -4px 0; }
+.knob-stop {
+  border: 0; background: transparent; font: inherit; font-size: var(--fs-11, 0.6875rem);
+  color: var(--ink-3, #5b6b8f); cursor: pointer; padding: 2px 4px; border-radius: 6px;
+}
+.knob-stop:hover { background: var(--accent-soft, #eaf2fb); }
+.knob-stop.on, .knob-stop[aria-checked="true"] { color: var(--accent, #2f6feb); font-weight: 600; }
 .knob-range {
   position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
   background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer;

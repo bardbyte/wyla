@@ -71,30 +71,28 @@ THINKING_LEVELS = {"minimal": "minimal", "quick": "low", "standard": "medium",
 DEPTHS: dict[str, dict[str, str]] = {
     "minimal": {
         "label": "Minimal", "level": "minimal",
-        "means": "Almost no thinking before a step: a one-line answer, "
-                 "a rename, a yes or no on what is already here.",
+        "means": "Yes-or-no answers and simple lookups. Fastest and "
+                 "cheapest; not for analysis.",
     },
     "quick": {
         "label": "Quick", "level": "low",
-        "means": "A short think before each step. Right for a lookup, "
-                 "a definition, or a follow-up on rows already here.",
+        "means": "Simple questions: a definition, one number, a "
+                 "follow-up on rows already here. Fast and cheap.",
     },
     "standard": {
         "label": "Standard", "level": "medium",
-        "means": "The default. Enough thinking to find the right "
-                 "metric, prove the query and hand it over.",
+        "means": "Most questions. The default: a balance of speed, "
+                 "cost and care.",
     },
     "deep": {
         "label": "Deep", "level": "high",
-        "means": "More thinking per step: a multi-step analysis, an "
-                 "unfamiliar join, or a question with several ways to "
-                 "read it. Slower, and it costs more.",
+        "means": "Multi-step analysis or a tricky definition. Slower, "
+                 "and it costs more.",
     },
     "max": {
         "label": "Extra deep", "level": "max",
-        "means": "The most thinking the model allows, on every step. "
-                 "For the hardest questions only: slowest, and the "
-                 "costliest.",
+        "means": "When Deep got it wrong, or the question spans several "
+                 "metrics. Slowest and costliest.",
     },
 }
 DEFAULT_THINKING = "medium"
@@ -176,13 +174,13 @@ DEFAULT_MODE = "chat"
 MODE_MEANS: dict[str, dict[str, str]] = {
     "chat": {
         "label": "Chat",
-        "means": "Synapse finds the definition, proves the query with "
+        "means": "Radix finds the definition, proves the query with "
                  "a dry run and hands it over on a card. You press Run. "
                  "Nothing is scanned until you do.",
     },
     "autopilot": {
         "label": "Autopilot",
-        "means": "Synapse runs the query itself under the limits, "
+        "means": "Radix runs the query itself under the limits, "
                  "checks the rows and builds the deliverable without "
                  "stopping to hand over.",
     },
@@ -549,6 +547,19 @@ def _response_payload(result: Any) -> tuple[dict[str, Any], str]:
         kept + f"\n…[{note}]"
 
 
+def _converse(model: Any, contents: list[dict[str, Any]], *,
+              should_stop: Any = None, **kw: Any) -> Any:
+    """The model's stream with the stop flag riding along. A double
+    written before the flag existed (converse without ``should_stop``)
+    still serves: the loop's own checks stop it at the next chunk."""
+    try:
+        return model.converse(contents, should_stop=should_stop, **kw)
+    except TypeError as e:
+        if "should_stop" not in str(e):
+            raise
+        return model.converse(contents, **kw)
+
+
 def _closing(reason: str, said: bool) -> str:
     if said:
         return f"\n\n— I stopped there: {reason}"
@@ -705,35 +716,48 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
             pending: list[dict[str, Any]] = []
             spoken: list[str] = []
             done: dict[str, Any] = {}
-            for event in model.converse(contents, system=system,
-                                        tools=tools,
-                                        thinking_level=thinking_level,
-                                        max_output_tokens=
-                                        MAX_OUTPUT_TOKENS):
-                kind = event.get("kind")
-                if kind == "text":
-                    delta = str(event.get("delta") or "")
-                    if delta:
-                        spoken.append(delta)
-                        _stream(delta)
-                elif kind == "thought":
-                    delta = str(event.get("delta") or "")
-                    if delta.strip():
-                        bus.emit("thinking", turn_id=turn_id, delta=delta)
-                        if trace and trace[-1].get("kind") == "thought" \
-                                and trace[-1].get("call") == calls:
-                            trace[-1]["text"] += delta
-                        else:
-                            trace.append({"kind": "thought",
-                                          "call": calls, "text": delta})
-                elif kind == "call":
-                    pending.append(event)
-                elif kind == "done":
-                    done = event
-                abort.check()
+            # the stop button, three ways: the client stops reading the
+            # stream when the flag fires (should_stop), the loop checks
+            # it before every chunk it would show, and once more the
+            # moment the call returns — nothing is spoken or run after
+            stream = _converse(model, contents, system=system, tools=tools,
+                               thinking_level=thinking_level,
+                               max_output_tokens=MAX_OUTPUT_TOKENS,
+                               should_stop=abort.fired)
+            try:
+                for event in stream:
+                    abort.check()
+                    kind = event.get("kind")
+                    if kind == "text":
+                        delta = str(event.get("delta") or "")
+                        if delta:
+                            spoken.append(delta)
+                            _stream(delta)
+                    elif kind == "thought":
+                        delta = str(event.get("delta") or "")
+                        if delta.strip():
+                            bus.emit("thinking", turn_id=turn_id,
+                                     delta=delta)
+                            if trace and trace[-1].get("kind") == "thought" \
+                                    and trace[-1].get("call") == calls:
+                                trace[-1]["text"] += delta
+                            else:
+                                trace.append({"kind": "thought",
+                                              "call": calls,
+                                              "text": delta})
+                    elif kind == "call":
+                        pending.append(event)
+                    elif kind == "done":
+                        done = event
+                    abort.check()
+            finally:
+                if spoken:
+                    said.append("".join(spoken))   # kept, even on a stop
+                close = getattr(stream, "close", None)
+                if callable(close):
+                    close()
+            abort.check()
             bus.emit("budget_tick", turn_id=turn_id, **budget.tick())
-            if spoken:
-                said.append("".join(spoken))
 
             if not pending:
                 if said or state.artifacts_touched:
@@ -756,6 +780,7 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                                  for c in pending]})
             responses: list[dict[str, Any]] = []
             for call in pending:
+                abort.check()             # a stop lands before the tool runs
                 name = str(call.get("name", ""))
                 args = call.get("args") if isinstance(call.get("args"),
                                                       dict) else {}

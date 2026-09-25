@@ -506,6 +506,85 @@ def test_stop_lands_in_a_recorded_stop_not_a_vanished_turn(compiled):
         "assistant"
 
 
+def test_stop_mid_stream_ends_the_turn_and_nothing_runs_after(compiled):
+    """The stop button while the answer streams: the client stops
+    reading at the next chunk (the flag rides converse as should_stop),
+    the loop shows nothing more and runs no tool, the turn lands as
+    ``stopped`` with the partial prose kept in the transcript, marked
+    as stopped in plain language."""
+    from sahs.assistant.agent import ScriptedAgent
+    box: dict = {}
+
+    class MidStream(ScriptedAgent):
+        def converse(self, contents, *, should_stop=None, **kw):
+            self.calls.append({"contents": contents,
+                               "system": kw.get("system", ""),
+                               "tools": [], "thinking_level": ""})
+            usage = {"prompt_tokens": 100, "output_tokens": 20,
+                     "thought_tokens": 5, "cached_tokens": 0}
+            yield {"kind": "thought", "delta": "Looking at spend"}
+            yield {"kind": "text", "delta": "Acquirer net spend fell "}
+            box["rt"].stop(box["sid"])            # the button, mid-stream
+            box["flag_seen"] = bool(should_stop and should_stop())
+            if should_stop is not None and should_stop():
+                box["drained"] = False            # the client stops reading
+                yield {"kind": "done", "finish": "STOPPED", "usage": usage,
+                       "parts": [{"text": "Acquirer net spend fell "}]}
+                return
+            box["drained"] = True                 # never, with the flag wired
+            yield {"kind": "text", "delta": "by 4% in March."}
+            yield {"kind": "call", "name": "note", "id": "call_1",
+                   "args": {"text": "after the stop"}}
+            yield {"kind": "done", "finish": "STOP", "usage": usage,
+                   "parts": [{"text": "…"}]}
+
+    model = MidStream([])
+    runtime = _runtime(compiled, model)
+    session = runtime.create_session()
+    box.update(rt=runtime, sid=session["id"])
+    events = _turn(runtime, session["id"], "how did spend move")
+    assert box["flag_seen"] is True and box["drained"] is False
+    assert len(model.calls) == 1                  # no second model call
+    assert not _by(events, "tool_call") and not _by(events, "tool_step")
+    done = _by(events, "turn_done")[-1]
+    assert done["status"] == "stopped" and done["model_calls"] == 1
+    prose = _prose(events)
+    assert prose.startswith("Acquirer net spend fell ")
+    assert "by 4%" not in prose and "you stopped me" in prose
+    # the transcript keeps the partial prose, marked as stopped
+    last = runtime.store.messages(session["id"])[-1]
+    assert last["role"] == "assistant"
+    assert last["text"].startswith("Acquirer net spend fell ")
+    assert "I stopped there: you stopped me." in last["text"]
+    assert runtime.store.get_session(session["id"])["handoff"]["status"] \
+        == "stopped"
+    # the thought that streamed before the stop stays in the trace
+    assert any(t.get("kind") == "thought" for t in last["payload"]["trace"])
+
+
+def test_stop_between_the_call_and_the_tool_runs_nothing(compiled):
+    """A stop that lands after the model asked for a tool and before it
+    ran: the flag is checked before every tool, so the call is never
+    made and the turn ends stopped."""
+    from sahs.assistant.agent import ScriptedAgent
+    box: dict = {}
+
+    class AfterCall(ScriptedAgent):
+        def converse(self, contents, **kw):
+            yield from super().converse(contents, **kw)
+            box["rt"].stop(box["sid"])            # after the call returned
+
+    model = AfterCall([[_call("note", text="was about to look")],
+                       [{"text": "never reached"}]])
+    runtime = _runtime(compiled, model)
+    session = runtime.create_session()
+    box.update(rt=runtime, sid=session["id"])
+    events = _turn(runtime, session["id"], "long question")
+    assert not _by(events, "tool_step")
+    assert _by(events, "turn_done")[-1]["status"] == "stopped"
+    assert len(model.calls) == 1
+
+
 def test_a_lost_connection_mid_turn_keeps_what_was_said(compiled):
     from sahs.ask.model import ModelUnavailable
     from sahs.assistant.agent import ScriptedAgent

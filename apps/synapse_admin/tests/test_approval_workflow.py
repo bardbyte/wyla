@@ -207,7 +207,7 @@ def test_the_composer_reads_as_asked():
         assert piece in CHAT, piece
     for gone in ('class="chat-modes"', "chat-mode on",
                  'id="chat-mode"', "synapse-chat-mode",
-                 'role="radiogroup"\n                aria-label="How Synapse works this ask"'):
+                 'role="radiogroup"\n                aria-label="How Radix works this ask"'):
         assert gone not in CHAT, gone
     # a bare /name from the Skills page becomes the chip, text stays text
     assert 'const bare = prefill.match(' in CHAT and "pickSlash(bare[1])" in CHAT

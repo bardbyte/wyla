@@ -1,6 +1,6 @@
 /** The Skills page (V2.7): the doctrine shelf, browsable.
  *
- * Nobody selects skills any more — Synapse loads the matching pack
+ * Nobody selects skills any more — Radix loads the matching pack
  * itself when a task calls for it (intent routing). This page is
  * where people READ the shelf: what each pack teaches, in a line,
  * with the full doctrine a click away. Built-in packs ship with the
@@ -17,7 +17,7 @@ export async function renderSkills(outlet) {
     <div class="skills-page">
       <div class="page-head">
         <h1>Skills</h1>
-        <p class="muted">Doctrine packs Synapse applies on its own:
+        <p class="muted">Doctrine packs Radix applies on its own:
         when a question matches a pack, it loads the pack into the
         turn and says so in the activity trail — nothing to select.
         Drop a markdown briefing in <code>graph/skills/</code> to
