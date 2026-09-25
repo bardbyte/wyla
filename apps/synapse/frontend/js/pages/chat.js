@@ -92,7 +92,9 @@ export async function renderChat(outlet, wanted = "") {
                 title="What the thinking levels and the models mean"
                 aria-label="Explain the dials" aria-expanded="false">?</button>
               <div class="chat-help-pop" id="chat-help-pop" hidden></div>
-              <button class="btn" id="chat-stop" hidden>stop</button>
+              <button class="btn primary chat-send chat-stop" id="chat-stop" type="button"
+                hidden aria-label="Stop" title="Stop"><span class="stop-glyph"
+                aria-hidden="true"></span></button>
               <button class="btn primary chat-send" id="chat-send"
                 title="Send · Enter">↑</button>
             </div>
@@ -227,9 +229,10 @@ export async function renderChat(outlet, wanted = "") {
       </div>
       <div class="help-group">
         <div class="help-head">Model <span>${esc(notes.plane || "")}</span></div>
-        ${models.map((m) => helpRow(m.label, m.means, m.available
-          ? (m.default ? "available · where a new chat starts" : "available")
-          : `not available here: ${m.reason}`)).join("")}
+        ${models.map((m) => helpRow(m.label, m.fit ? `${m.fit} ${m.means}` : m.means, [
+          m.available ? (m.default ? "available · where a new chat starts" : "available")
+                      : `not available here: ${m.reason}`,
+          m.facts || ""].filter(Boolean).join(" · "))).join("")}
       </div>`;
   }
   loadDials();
@@ -1283,7 +1286,7 @@ export async function renderChat(outlet, wanted = "") {
     return turn;
   }
 
-  // what Synapse is doing, in the user's words: the model's own
+  // what Radix is doing, in the user's words: the model's own
   // thought summary when it narrates, a plain verb for the tool
   // otherwise — never a tool name, an id, or raw output
   const argOf = (event, key) => {
@@ -1726,6 +1729,7 @@ export async function renderChat(outlet, wanted = "") {
     switch (event.ev) {
       case "turn_started": {
         setRunning(true);
+        state.liveTurn = turn;             // the turn a stop would end
         setEmpty(false);
         // a turn this page did not send — the build chained after a
         // run, or an ask from another tab — still shows as the
@@ -1946,8 +1950,35 @@ export async function renderChat(outlet, wanted = "") {
   // ── sending ──────────────────────────────────────────────
   function setRunning(running) {
     state.running = running;
-    el("chat-send").disabled = running;
-    el("chat-stop").hidden = !running;
+    const sendBtn = el("chat-send");
+    const stopBtn = el("chat-stop");
+    sendBtn.disabled = running;
+    sendBtn.hidden = running;            // the stop takes its place
+    stopBtn.hidden = !running;
+    if (!running) {                      // the turn ended: the composer is back
+      state.stopping = false;
+      stopBtn.disabled = false;
+      stopBtn.classList.remove("stopping");
+      stopBtn.title = "Stop";
+    }
+  }
+  // the stop: pressed once, the button locks and the live line says
+  // "Stopping…" until the server's turn_done (status stopped) lands
+  // through the stream and setRunning(false) restores the composer
+  async function stop() {
+    if (!state.running || state.stopping) return;
+    state.stopping = true;
+    const stopBtn = el("chat-stop");
+    stopBtn.disabled = true;
+    stopBtn.classList.add("stopping");
+    stopBtn.title = "Stopping…";
+    const turn = state.liveTurn;
+    if (turn && !turn.done) pulse(turn, "Stopping…");
+    try {
+      await api.chatStop(state.session.id);
+    } catch {
+      // the stream's turn_done restores the composer either way
+    }
   }
   async function send(text) {
     if (!text.trim() || state.running) return;
@@ -1978,12 +2009,9 @@ export async function renderChat(outlet, wanted = "") {
       send(input.value);
     }
     if (e.key === "Escape" && !slash.hidden) slash.hidden = true;
-    else if (e.key === "Escape" && state.running) {
-      api.chatStop(state.session.id);
-    }
+    else if (e.key === "Escape" && state.running) stop();
   });
-  el("chat-stop").addEventListener("click", () =>
-    api.chatStop(state.session.id));
+  el("chat-stop").addEventListener("click", stop);
 
   subscribe();
   pingShelf();

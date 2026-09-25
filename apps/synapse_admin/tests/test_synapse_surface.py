@@ -415,7 +415,7 @@ def test_metric_cards_open_in_place_with_the_definition_and_the_table():
 
 def test_skills_showcase_what_the_agent_knows(client, tmp_path, monkeypatch):
     """One shelf, the way a settings page lists it: the packs (author
-    Synapse for what ships with the assistant, You for your own, a
+    Radix for what ships with the assistant, You for your own, a
     shared pack's own author line) and the knowledge files (the folders
     under graph/skills/ such as CFR/ and TLS/ — author from the file or
     its folder — the staged drops by business unit, the reference docs),
@@ -428,7 +428,7 @@ def test_skills_showcase_what_the_agent_knows(client, tmp_path, monkeypatch):
             "synapse-data-connect"} <= set(by)
     for s in got["skills"]:
         assert s["text"] and s["origin"] and s["updated"] and s["author"]
-    assert by["analysis-playbooks"]["author"] == "Synapse"
+    assert by["analysis-playbooks"]["author"] == "Radix"
     # the knowledge files: CFR/ and TLS/ folders under the skills root,
     # a staged drop for a business unit, a reference doc
     skills_dir = tmp_path / "skills"
@@ -587,7 +587,7 @@ def test_memory_is_a_document_the_person_edits(client):
                              scope="global", source="assistant")
     doc = client.get("/api/chat/memory.md").json()
     assert doc["available"] and doc["count"] == 1
-    assert doc["text"].startswith("# What Synapse remembers about")
+    assert doc["text"].startswith("# What Radix remembers about")
     assert "- by spend I mean acquirer net spend" in doc["text"]
     edited = doc["text"] + "- quarters are fiscal\n"
     saved = client.put("/api/chat/memory.md", json={"text": edited}).json()
@@ -617,8 +617,9 @@ def test_the_thread_follows_only_while_you_read_at_the_bottom():
     takes another step, "trying another way" — never a raw error. The
     italic line under a number is Radix's disclaimer, with the graph's
     definition line one hover away. The two behavior fixes ride both chat
-    pages; the Radix names and the disclaimer stay on this surface — the
-    admin console keeps its own copy."""
+    pages; the assistant is Radix on both (the owner's call after PR
+    #145, which had named it only here); the disclaimer stays on this
+    surface, the admin console keeps its definition line in the open."""
     admin = (REPO_ROOT / "apps" / "synapse_admin" / "frontend" / "js"
              / "pages" / "chat.js").read_text(encoding="utf-8")
     for src in (CHAT, admin):
@@ -633,9 +634,17 @@ def test_the_thread_follows_only_while_you_read_at_the_bottom():
         assert piece in CHAT, piece
     assert "prose(prov.meridian_line)" not in CHAT
     assert "Synapse is AI" not in CHAT and "Synapse thinks" not in CHAT
-    # the admin console is out of the rename's scope
-    assert "Radix" not in admin and "Synapse is AI" in admin
+    # the admin console says Radix too: every line of chat copy, the
+    # wordmark untouched
+    assert "Radix is AI" in admin and "Synapse is AI" not in admin
+    assert "Synapse thinks" not in admin and "How deeply Radix thinks" in admin
+    assert 'aria-label="How Radix works this ask"' in admin
+    assert "how much Radix thinks before each step" in admin
+    assert "Prepared by Radix" not in admin        # the disclaimer is this surface's
     assert "prose(prov.meridian_line)" in admin
+    admin_index = (REPO_ROOT / "apps" / "synapse_admin" / "frontend"
+                   / "index.html").read_text(encoding="utf-8")
+    assert "<title>Synapse by Lumi</title>" in admin_index and "Radix" not in admin_index
     admin_css = (REPO_ROOT / "apps" / "synapse_admin" / "frontend" / "styles"
                  / "app.css").read_text(encoding="utf-8")
     app_css = (FRONT / "styles" / "app.css").read_text(encoding="utf-8")

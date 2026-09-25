@@ -271,13 +271,16 @@ class VertexClient:
     def generate_stream(self, prompt: str, *, system: str = "",
                         temperature: float | None = 0.3,
                         max_output_tokens: int = 1500,
-                        json_mode: bool = False):
+                        json_mode: bool = False,
+                        should_stop: Callable[[], bool] | None = None):
         """Yield text deltas as the model produces them.
 
         No retry loop here on purpose: a stream that dies mid-answer
         cannot be silently restarted without lying about what the user
         already read. The caller surfaces the break as an honest error
-        event and offers regenerate."""
+        event and offers regenerate. ``should_stop`` is the stop
+        button: once it answers True the stream is left unread and the
+        response closed, so no more of the answer is pulled."""
         body: dict[str, Any] = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
@@ -299,6 +302,8 @@ class VertexClient:
         if self.stream_transport is not None:
             for chunk in self.stream_transport(body):
                 yield chunk
+                if should_stop is not None and should_stop():
+                    return
             return
 
         request = urllib.request.Request(
@@ -311,6 +316,8 @@ class VertexClient:
             with self.connection.opener().open(
                     request, timeout=120) as response:
                 for raw in response:
+                    if should_stop is not None and should_stop():
+                        return           # leaving the block closes it
                     line = raw.decode("utf-8").strip()
                     if not line.startswith("data:"):
                         continue
@@ -349,7 +356,8 @@ class VertexClient:
                  thinking_level: str = "",
                  include_thoughts: bool = True,
                  max_output_tokens: int = 8192,
-                 timeout: float = STREAM_SILENCE_SECONDS):
+                 timeout: float = STREAM_SILENCE_SECONDS,
+                 should_stop: Callable[[], bool] | None = None):
         """One model call in Gemini's native tool protocol, streamed.
 
         Yields events as they arrive:
@@ -365,6 +373,11 @@ class VertexClient:
         the functionResponse parts go back. Temperature is left at
         the model default on purpose (lowering it loops a reasoning
         model); JSON mode is never requested here.
+
+        ``should_stop`` is the stop button's flag: it is asked after
+        every chunk, and once it answers True the stream is left
+        unread, the HTTP response is closed, and ``done`` comes back
+        at once with ``finish == "STOPPED"`` and the parts so far.
         """
         body: dict[str, Any] = {
             "contents": contents,
@@ -383,7 +396,8 @@ class VertexClient:
 
         chunks = (self.stream_transport(body)
                   if self.stream_transport is not None
-                  else self._sse(body, timeout=timeout))
+                  else self._sse(body, timeout=timeout,
+                                 should_stop=should_stop))
         parts: list[dict[str, Any]] = []
         usage: dict[str, Any] = {}
         finish = ""
@@ -392,6 +406,9 @@ class VertexClient:
         # a bare exception the turn dies on
         try:
             for chunk in chunks:
+                if should_stop is not None and should_stop():
+                    finish = "STOPPED"       # the stop button: no more is read
+                    break
                 usage = chunk.get("usageMetadata") or usage
                 for candidate in chunk.get("candidates", []):
                     finish = candidate.get("finishReason") or finish
@@ -424,6 +441,9 @@ class VertexClient:
                             if part["text"]:
                                 yield {"kind": "text",
                                        "delta": part["text"]}
+                if should_stop is not None and should_stop():
+                    finish = "STOPPED"
+                    break
         except EnrichTransportError:
             raise
         except (TimeoutError, socket.timeout) as e:
@@ -436,6 +456,12 @@ class VertexClient:
             raise EnrichTransportError(
                 f"the model stream was cut off: {type(e).__name__}: "
                 f"{e}") from e
+        finally:
+            # a stream left mid-way (stopped, or the consumer went
+            # away) is closed here, which closes the HTTP response
+            close = getattr(chunks, "close", None)
+            if callable(close):
+                close()
         self.usage["prompt_tokens"] = self.usage.get("prompt_tokens", 0) \
             + int(usage.get("promptTokenCount") or 0)
         self.usage["output_tokens"] = self.usage.get("output_tokens", 0) \
@@ -453,8 +479,11 @@ class VertexClient:
                    "cached_tokens": int(usage.get(
                        "cachedContentTokenCount") or 0)}}
 
-    def _sse(self, body: dict[str, Any], *, timeout: float = 300.0):
-        """The raw SSE chunks of one streamGenerateContent call."""
+    def _sse(self, body: dict[str, Any], *, timeout: float = 300.0,
+             should_stop: Callable[[], bool] | None = None):
+        """The raw SSE chunks of one streamGenerateContent call. With
+        ``should_stop`` answering True the read ends there and leaving
+        the block closes the response."""
         request = urllib.request.Request(
             self._url("streamGenerateContent") + "?alt=sse",
             data=json.dumps(body).encode("utf-8"),
@@ -467,6 +496,8 @@ class VertexClient:
             with self.connection.opener().open(
                     request, timeout=timeout) as response:
                 for raw in response:
+                    if should_stop is not None and should_stop():
+                        return
                     line = raw.decode("utf-8").strip()
                     if not line.startswith("data:"):
                         continue

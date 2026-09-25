@@ -51,8 +51,9 @@ class ModelProfile:
     thinking: str                  # level | budget | none
     accepts: tuple[str, ...]       # thinkingLevel values, shallow → deep
     cap: int = DEFAULT_CAP
-    fit: str = ""                  # where it belongs in the harness
+    fit: str = ""                  # when to pick it, for the product's people
     source: str = "family"         # docs | probe | family | env
+    facts: str = ""                # the engineer's line: dialect, ceiling, status
 
     def level_for(self, stop: str) -> str:
         """The dial stop (or "json") as this model spells it: the
@@ -78,47 +79,73 @@ class ModelProfile:
     def as_row(self) -> dict[str, Any]:
         return {"model": self.model, "family": self.family,
                 "thinking": self.thinking, "levels": list(self.accepts),
-                "cap": self.cap, "fit": self.fit, "source": self.source}
+                "cap": self.cap, "fit": self.fit, "facts": self.facts,
+                "source": self.source}
 
 
 # ── the known engines ─────────────────────────────────────────
-# keyed by the model's stem: gemini-3.1-pro-preview → gemini-3.1-pro
+# keyed by the model's stem: gemini-3.1-pro-preview → gemini-3.1-pro.
+# ``fit`` is the line under the model's name in the composer's picker,
+# written for the people who pick: risk analysts asking metric, SQL and
+# dashboard questions, stewards curating knowledge, admins. One plain
+# sentence on when to pick it. ``facts`` is the engineer's line — the
+# thinking dialect, the levels, the ceiling, the status — and rides the
+# hover title and the "?" explainer, never the row.
 PROFILES: dict[str, ModelProfile] = {
     "gemini-3.1-pro": ModelProfile(
         "gemini-3.1-pro", FAMILY_GEMINI_3, THINKING_LEVEL,
         ("low", "medium", "high"),
-        fit="Deep and Extra deep; the multi-step SQL and python turns; "
-            "streams on Vertex", source="docs"),
+        fit="Most careful. Pick for complex metric questions, multi-step "
+            "SQL and dashboards. Slower.",
+        source="docs",
+        facts="Thinks by level (low, medium, high); Deep and Extra deep "
+              "fold onto high; streams on Vertex; 65,536-token ceiling."),
     "gemini-3.7-flash": ModelProfile(
         "gemini-3.7-flash", FAMILY_GEMINI_3, THINKING_LEVEL,
         ("low", "medium", "high"),          # minimal is refused
-        fit="Everyday chat at Standard; Quick autopilot at high",
-        source="docs"),
+        fit="Fast everyday answers: definitions, quick lookups, simple "
+            "queries.",
+        source="docs",
+        facts="Thinks by level (low, medium, high); Minimal folds onto "
+              "low; the gateway's default; 65,536-token ceiling."),
     "gemini-3.5-flash": ModelProfile(
         "gemini-3.5-flash", FAMILY_GEMINI_3, THINKING_LEVEL,
         ("medium", "high"),                 # nothing shallower is listed
-        fit="The alternate workhorse when 3.7 Flash is not served",
-        source="docs"),
+        fit="As fast as 3.7 Flash; use when 3.7 is not offered in your "
+            "environment.",
+        source="docs",
+        facts="Thinks by level (medium, high); Minimal and Quick fold "
+              "onto medium; 65,536-token ceiling."),
     "gemini-3.1-flash-lite": ModelProfile(
         "gemini-3.1-flash-lite", FAMILY_GEMINI_3, THINKING_LEVEL,
         ("minimal", "low", "medium", "high"),
-        fit="The one-shot JSON calls (classify, judge, reviews, "
-            "suggestions) and Minimal depth", source="docs"),
+        fit="Fastest and lightest: short factual questions and quick "
+            "checks, not multi-step analysis.",
+        source="docs",
+        facts="Thinks by level (minimal to high); also serves the "
+              "harness's one-shot JSON calls (classify, judge, reviews, "
+              "suggestions); 65,536-token ceiling."),
 }
 
 # the family fallbacks, for a model the table does not name
 _FAMILY_DEFAULTS: dict[str, ModelProfile] = {
     FAMILY_GEMINI_3: ModelProfile(
         "", FAMILY_GEMINI_3, THINKING_LEVEL, ("low", "medium", "high"),
-        fit="A Gemini 3 model the table does not know: the common "
-            "three levels until the probe says otherwise"),
+        fit="A newer Gemini 3 model: fine for everyday questions until "
+            "it has been tried here.",
+        facts="Not in the engine table: the common three levels (low, "
+              "medium, high) until the probe says otherwise."),
     FAMILY_GEMINI_25: ModelProfile(
         "", FAMILY_GEMINI_25, THINKING_BUDGET, (),
-        fit="Retiring: a thinking budget under the cap; kept only for "
-            "an environment that still names it"),
+        fit="Older model kept for compatibility; prefer 3.1 Pro or 3.7 "
+            "Flash.",
+        facts="Retiring: thinks by token budget under the output cap; "
+              "kept only for an environment that still names it."),
     FAMILY_OTHER: ModelProfile(
         "", FAMILY_OTHER, THINKING_BUDGET, (),
-        fit="Unknown to the table: treated as a budget model"),
+        fit="A model outside the Gemini family: use only if your "
+            "environment names it.",
+        facts="Unknown to the engine table: treated as a budget model."),
 }
 
 
@@ -178,7 +205,7 @@ def profile_for(model: str, env: dict[str, str] | None = None) -> ModelProfile:
     if raw_cap.isdigit():
         cap = int(raw_cap)
     return ModelProfile(name or base.model, base.family, thinking, accepts,
-                        cap, base.fit, source)
+                        cap, base.fit, source, base.facts)
 
 
 # ── the sampling policy ───────────────────────────────────────

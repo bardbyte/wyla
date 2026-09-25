@@ -12,12 +12,17 @@ harness system · **Lumi** = the brand family (and the eventual end-user surface
 "Meridian" appear as the product name in UI chrome (it appears in the *meridian line*
 disclosure strip, which keeps its name on the admin console).
 
-Two names live ONLY on the second surface (`apps/synapse`) and in the system prompt's identity
-sentence, by decision: **Radix** = the assistant people talk to there ("Radix thinks", "Radix's
-read", the prompt's "You are Radix") · **Radix Graph** = what the prompt calls the graph. On that
-surface the italic line under a number, an artifact or a proposal is a disclaimer ("Prepared by
-Radix…") with the definition line on its hover title. Do not carry either name into the admin
-console or into backend strings beyond the identity sentence.
+Two more names, by the owner's decision (PR #145 put them on the second surface alone; the
+owner then extended them to the admin console): **Radix** = the assistant people talk to on BOTH
+surfaces ("Radix thinks", "Radix's read", "Draft with Radix", "Radix is AI and can make
+mistakes", the prompt's "You are Radix") · **Radix Graph** = what the prompt and the chat call the
+graph. The backend strings that reach the chat say Radix too: the memory document's heading
+("What Radix remembers about …"), the mode blurbs, the built-in packs' author label. What does
+NOT change: the wordmark stays "Synapse · by Lumi" (title, logo alt), the `MERIDIAN_*` variables,
+the `/api/meridian/*` routes and the backend module names, and the *meridian line* disclosure
+strip on the admin console. The second surface's italic line under a number, an artifact or a
+proposal is a disclaimer ("Prepared by Radix…") with the definition line on its hover title; the
+admin console shows the definition line itself.
 
 ## 0 · Ground-truth ritual (do this before ANY design or build work)
 

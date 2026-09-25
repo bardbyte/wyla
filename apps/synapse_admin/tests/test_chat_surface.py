@@ -27,6 +27,9 @@ INDEX = (FRONTEND / "index.html").read_text(encoding="utf-8")
 CSS = (FRONTEND / "styles" / "app.css").read_text(encoding="utf-8")
 BACKEND = (REPO_ROOT / "apps" / "synapse_admin" / "backend"
            / "chat.py").read_text(encoding="utf-8")
+SECOND = REPO_ROOT / "apps" / "synapse" / "frontend"
+sys.path.insert(0, str(REPO_ROOT / "apps" / "synapse_admin" / "tests"))
+from test_synapse_surface import client, compiled  # noqa: E402,F401
 
 
 def test_every_assistant_event_reaches_the_page():
@@ -320,3 +323,98 @@ def test_the_composer_switches_models_and_explains_every_dial():
     for piece in ('"/dials"', "SessionModel", "set_session_model",
                   "model=req.model", '"plane": plane'):
         assert piece in BACKEND, piece
+
+
+def test_the_stop_is_an_icon_button_in_the_send_buttons_place():
+    """Both surfaces: while a turn runs the send button gives way to a
+    square stop glyph of the same size; pressed, it locks and the live
+    line says Stopping… until the turn's end (turn_done, status
+    stopped) restores the composer through the stream. The two pills
+    are one-line controls: the value truncates, the chevron never
+    drops below the label."""
+    for root in (FRONTEND, SECOND):
+        js = (root / "js" / "pages" / "chat.js").read_text(encoding="utf-8")
+        css = (root / "styles" / "app.css").read_text(encoding="utf-8")
+        assert '<button class="btn" id="chat-stop" hidden>stop</button>' not in js
+        for piece in ('class="btn primary chat-send chat-stop" id="chat-stop"',
+                      'aria-label="Stop" title="Stop"', 'class="stop-glyph"',
+                      "sendBtn.hidden = running;", "stopBtn.hidden = !running;",
+                      "async function stop()", "if (!state.running || state.stopping) return;",
+                      "stopBtn.disabled = true;", 'stopBtn.classList.add("stopping");',
+                      'pulse(turn, "Stopping…")', "await api.chatStop(state.session.id);",
+                      "state.liveTurn = turn;", 'el("chat-stop").addEventListener("click", stop);',
+                      'e.key === "Escape" && state.running) stop();',
+                      'stopBtn.classList.remove("stopping");',
+                      'event.status === "stopped"'):
+            assert piece in js, (root.name, piece)
+        for cls in (".chat-stop {", ".chat-stop .stop-glyph", ".chat-stop.stopping",
+                    "flex-flow: row nowrap", ".chat-pill .pill-label {",
+                    "text-overflow: ellipsis", ".chat-pill .chev { flex: none;"):
+            assert cls in css, (root.name, cls)
+        # the same size as the send button: the stop wears its class
+        assert ".chat-send { width: 32px; height: 32px;" in css
+
+
+def test_the_stop_route_ends_a_running_turn(client, compiled, tmp_path):
+    """POST /api/chat/sessions/{id}/stop on a running turn: the abort
+    flag reaches the model client mid-stream, the worker ends, the
+    session reads as not running, the turn lands as stopped with the
+    partial prose kept, and a second stop says nothing is running."""
+    import threading
+    import time
+    from apps.synapse_admin.backend import chat as chat_module
+    sys.path.insert(0, str(SILO))
+    from sahs.assistant import AssistantRuntime
+    from sahs.assistant.agent import ScriptedAgent
+    streaming = threading.Event()
+
+    class Slow(ScriptedAgent):
+        def converse(self, contents, *, should_stop=None, **kw):
+            usage = {"prompt_tokens": 100, "output_tokens": 20,
+                     "thought_tokens": 5, "cached_tokens": 0}
+            yield {"kind": "text", "delta": "Working on it: "}
+            streaming.set()
+            deadline = time.time() + 20
+            while time.time() < deadline and not (should_stop and should_stop()):
+                time.sleep(0.02)                  # the stream, waiting on Vertex
+            yield {"kind": "done", "finish": "STOPPED", "usage": usage,
+                   "parts": [{"text": "Working on it: "}]}
+
+    runtime = AssistantRuntime(
+        builds_root=compiled["builds"], graph_root=tmp_path / "graph",
+        store_path=tmp_path / "chat.sqlite3",
+        model_factory=lambda budget: Slow())
+    previous = chat_module._RUNTIME
+    chat_module._RUNTIME = runtime
+    try:
+        sid = client.post("/api/chat/sessions").json()["session"]["id"]
+        accepted = client.post(f"/api/chat/sessions/{sid}/messages",
+                               json={"text": "a long one"}).json()
+        assert accepted["available"], accepted
+        assert streaming.wait(10), "the turn never started streaming"
+        assert client.get(f"/api/chat/sessions/{sid}").json()["running"] is True
+        stopped = client.post(f"/api/chat/sessions/{sid}/stop").json()
+        assert stopped["available"] and stopped["stopped"]
+        assert stopped["turn_id"] == accepted["turn_id"]
+        assert runtime.wait(sid, 10), "the worker did not end on stop"
+        detail = client.get(f"/api/chat/sessions/{sid}").json()
+        assert detail["running"] is False and detail["turn_id"] == ""
+        events = runtime.runtime(sid).bus.since(0)
+        done = [e for e in events if e["ev"] == "turn_done"][-1]
+        assert done["status"] == "stopped"
+        last = detail["messages"][-1]
+        assert last["role"] == "assistant"
+        assert last["text"].startswith("Working on it: ")
+        assert "you stopped me" in last["text"]
+        again = client.post(f"/api/chat/sessions/{sid}/stop").json()
+        assert again["stopped"] is False and "no turn is running" in again["reason"]
+        # the composer is free again: the next message is accepted,
+        # and stops the same way
+        streaming.clear()
+        assert client.post(f"/api/chat/sessions/{sid}/messages",
+                           json={"text": "again"}).json()["available"]
+        assert streaming.wait(10)
+        assert client.post(f"/api/chat/sessions/{sid}/stop").json()["stopped"]
+        assert runtime.wait(sid, 10)
+    finally:
+        chat_module._RUNTIME = previous

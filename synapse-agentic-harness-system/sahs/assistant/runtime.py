@@ -274,9 +274,9 @@ class AssistantRuntime:
                         "conversation remembers that it was sent, not "
                         "its bytes. Attach it again to ask more."}
 
-    # ── memory.md: what Synapse remembers, as a document a person
+    # ── memory.md: what Radix remembers, as a document a person
     #    can read and edit; a line is a memory ──────────────────
-    MEMORY_HEAD = ("# What Synapse remembers about {name}\n\n"
+    MEMORY_HEAD = ("# What Radix remembers about {name}\n\n"
                    "One line per memory: a preference or a choice you "
                    "settled in chat. Edit the list and save — a line you "
                    "add is remembered, a line you remove is retired. "
@@ -422,10 +422,10 @@ class AssistantRuntime:
                  "description": p.description, "origin": p.origin,
                  "owner": p.owner, "mine": bool(p.owner),
                  "updated": p.updated,
-                 # the author as the shelf shows it: Synapse for what
+                 # the author as the shelf shows it: Radix for what
                  # ships with the assistant, You for your own, and a
                  # shared pack's own word for itself (an author line)
-                 "author": ("Synapse" if p.origin == "built-in"
+                 "author": ("Radix" if p.origin == "built-in"
                             else "You" if p.owner
                             else author_of(p.text) or "Shared"),
                  "text": p.text}
@@ -763,7 +763,7 @@ class AssistantRuntime:
                 continue
             return payload["proposal"]
         raise ValueError("no query has been proposed in this chat yet: "
-                         "ask a data question and Synapse hands one over")
+                         "ask a data question and Radix hands one over")
 
     def run_proposal(self, session_id: str, *, message_id: str = "",
                      sql: str = "", limit: int = 200,

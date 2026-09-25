@@ -17,7 +17,7 @@ unconfigured machine gets an honest error card, never a pretend one.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterator, Protocol
+from typing import Any, Callable, Iterator, Protocol
 
 from sahs.enrich.client import (EnrichTransportError, VertexClient,
                                 parse_json_answer)
@@ -91,13 +91,21 @@ class VertexModel:
 
     def stream(self, prompt: str, *, system: str = "",
                temperature: float = 0.3,
-               max_tokens: int = 1500) -> Iterator[str]:
+               max_tokens: int = 1500,
+               should_stop: Callable[[], bool] | None = None
+               ) -> Iterator[str]:
+        """The composed answer, chunk by chunk; ``should_stop`` (the
+        stop button's flag) ends the read at the next chunk and closes
+        the response."""
         before = dict(self.client.usage)
         try:
             for chunk in self.client.generate_stream(
                     prompt, system=system, temperature=temperature,
-                    max_output_tokens=max_tokens):
+                    max_output_tokens=max_tokens,
+                    should_stop=should_stop):
                 yield chunk
+                if should_stop is not None and should_stop():
+                    return
         except EnrichTransportError as e:
             raise ModelUnavailable(str(e)) from e
         finally:
