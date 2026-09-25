@@ -58,8 +58,22 @@ def _ask(user: dict | None = None):
             runner = _google_runner(owner)
             if runner is not None:
                 options["runner"] = runner
-        _RUNTIMES[owner] = AskRuntime(**options)
+        runtime = AskRuntime(**options)
+        if user and owner != "local" and _store_is_on():
+            # a store is on: this lane's sessions, messages, plans and
+            # feedback go to the chat tables (002_chat.sql, kind analyst
+            # or steward) bound to this person, on the same database
+            # object the identity store holds, exactly as chat.py does
+            from apps.synapse_admin.backend.auth import _identity
+            from sahs.assistant.spanner_store import SpannerAssistantStore
+            runtime.store = SpannerAssistantStore(_identity().db, owner)
+        _RUNTIMES[owner] = runtime
     return _RUNTIMES[owner], sse_frame
+
+
+def _store_is_on() -> bool:
+    from sahs.spanner import spanner_is_enabled
+    return bool(spanner_is_enabled())
 
 
 _RUNTIME: Any = None

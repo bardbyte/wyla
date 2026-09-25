@@ -10,6 +10,7 @@ a call ceiling in the loop, a session token ceiling here.
 from __future__ import annotations
 
 import inspect
+import logging
 import os
 import re
 import threading
@@ -45,8 +46,12 @@ CHAT_BUDGET = {"session_tokens": 6_000_000, "session_calls": 800,
                "turn_tokens": 2_500_000, "turn_calls": MAX_CALLS + 20}
 
 
+_log = logging.getLogger("sahs.assistant.runtime")
+
+
 class _SessionRuntime:
-    def __init__(self, session_id: str, events_dir: Path | None) -> None:
+    def __init__(self, session_id: str, events_dir: Path | None,
+                 store: Any = None) -> None:
         path = (events_dir / f"{session_id}.jsonl") if events_dir else None
         self.bus = EventBus(session_id, path,
                             events=ASSISTANT_EVENTS)
@@ -54,6 +59,32 @@ class _SessionRuntime:
         self.abort = Abort()
         self.thread: threading.Thread | None = None
         self.current_turn: str = ""
+        # a store that keeps events (SpannerAssistantStore.add_event)
+        # gets every record the bus emits, after the JSONL and before
+        # the observers; the bus resumes after what the store already
+        # holds so a pod that restarted never reuses a seq. A store
+        # write that fails is logged and counted, never raised: the
+        # page still sees the live stream, the turn goes on.
+        self.store = store if callable(getattr(store, "add_event", None)) \
+            else None
+        self.store_errors = 0
+        self.empty_gap: tuple[int, int] | None = None
+        if self.store is not None:
+            try:
+                self.bus.resume(int(self.store.last_event_seq(session_id)))
+            except Exception as exc:                 # noqa: BLE001
+                _log.warning("events for %s: could not read the store's "
+                             "head (%s); numbering from 1", session_id, exc)
+            self.bus.sinks.append(self._keep)
+
+    def _keep(self, record: dict[str, Any]) -> None:
+        try:
+            self.store.add_event(self.bus.session_id, record)
+        except Exception as exc:                     # noqa: BLE001
+            self.store_errors += 1
+            _log.warning("events for %s: seq %s not stored (%s: %s)",
+                         self.bus.session_id, record.get("seq"),
+                         type(exc).__name__, exc)
 
     @property
     def running(self) -> bool:
@@ -361,11 +392,45 @@ class AssistantRuntime:
         with self._lock:
             rt = self._runtimes.get(session_id)
             if rt is None:
-                rt = _SessionRuntime(session_id, self.events_dir)
+                # the store is read here, not at construction: the app
+                # swaps in the chat-table store after building the runtime
+                rt = _SessionRuntime(session_id, self.events_dir, self.store)
                 if self.observer is not None:
                     rt.bus.sinks.append(self.observer)
                 self._runtimes[session_id] = rt
             return rt
+
+    def events_since(self, session_id: str, after: int) -> list[dict]:
+        """The records after ``after`` for the stream: the bus's, and
+        when the bus has nothing there but the store does (this pod
+        came up after the events were emitted, or the bus trimmed
+        them), the store's. The bus resumes past the store's head, so
+        the two never overlap."""
+        rt = self.runtime(session_id)
+        batch = rt.bus.since(after)
+        if rt.store is None:
+            return batch
+        # the first seq the bus can serve; everything between ``after``
+        # and it was emitted before this bus existed
+        gap_end = batch[0]["seq"] if batch else rt.bus.head() + 1
+        if gap_end <= after + 1:
+            return batch
+        # a gap the store could not fill (a row that never landed) is
+        # remembered, so a stream polling every 50 ms does not ask the
+        # database the same question every time
+        gap = (after, gap_end)
+        if rt.empty_gap == gap:
+            return batch
+        try:
+            stored = rt.store.events(session_id, after)
+        except Exception as exc:                     # noqa: BLE001
+            _log.warning("events for %s: replay from the store failed "
+                         "(%s: %s)", session_id, type(exc).__name__, exc)
+            return batch
+        kept = [e for e in stored if e["seq"] < gap_end]
+        if not kept:
+            rt.empty_gap = gap
+        return kept + batch
 
     def create_session(self, *, actor: str = "admin") -> dict:
         try:
@@ -904,8 +969,34 @@ class AssistantRuntime:
         switching chats or tabs never stops or loses a turn."""
         rt = self._runtimes.get(session_id)
         if rt is None or not rt.running:
+            # no thread here: either nothing runs, or this pod came up
+            # after the turn started elsewhere and the store holds the
+            # events. A stored turn that never closed is reported with
+            # where it began (and ``interrupted``: no thread will finish
+            # it), so the page can replay what the person saw.
+            store = getattr(self.store, "last_turn", None)
+            if callable(store) and (rt is None or not rt.bus.since(0)):
+                try:
+                    last = store(session_id)
+                except Exception as exc:             # noqa: BLE001
+                    _log.warning("turn window for %s: the store did not "
+                                 "answer (%s: %s)", session_id,
+                                 type(exc).__name__, exc)
+                    last = None
+                if last and last["turn_id"] and not last["closed"]:
+                    first = last["first_seq"]
+                    return {"running": False, "turn_id": last["turn_id"],
+                            "after": (first - 1) if first else None,
+                            "interrupted": True}
             return {"running": False, "turn_id": "", "after": None}
         first = rt.bus.first_seq(rt.current_turn)
+        if first is None and rt.store is not None:
+            try:
+                last = rt.store.last_turn(session_id)
+                if last["turn_id"] == rt.current_turn:
+                    first = last["first_seq"]
+            except Exception:                        # noqa: BLE001
+                first = None
         return {"running": True, "turn_id": rt.current_turn,
                 "after": (first - 1) if first is not None else None}
 

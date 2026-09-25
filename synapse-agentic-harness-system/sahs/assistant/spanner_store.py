@@ -16,11 +16,13 @@ stand-in rehearses the deployment table for table. Columns that come
 back typed on Spanner (TIMESTAMP, BOOL, ARRAY, JSON) come back as text
 or integers from sqlite; the readers below accept both.
 
-What stays on the filesystem, table or no table, is listed in
-``docs/spanner-wiring.md``: the file bytes (``ChatFiles`` wants an
-object store), the event log (``ChatEvents``), a person's own skills
-(``UserSkills``), staged knowledge files (``KnowledgeFiles``) and the
-review ledger (no table yet).
+The event stream lands here too (``ChatEvents``): the runtime's bus
+hands every record to ``add_event`` and a pod that restarts replays a
+chat from ``events``. What stays on the filesystem, table or no table,
+is listed in ``docs/spanner-wiring.md``: the file bytes (``ChatFiles``
+wants an object store), a person's own skills (``UserSkills``), staged
+knowledge files (``KnowledgeFiles``) and the review ledger (no table
+yet).
 """
 
 from __future__ import annotations
@@ -74,6 +76,10 @@ CREATE TABLE IF NOT EXISTS ChatMemories (
   Source TEXT NOT NULL DEFAULT 'assistant', CreatedAt TEXT NOT NULL, RetiredAt TEXT,
   PRIMARY KEY (UserId, MemoryId));
 CREATE INDEX IF NOT EXISTS ChatMemoriesActive ON ChatMemories (UserId, Status, Scope);
+CREATE TABLE IF NOT EXISTS ChatEvents (
+  SessionId TEXT NOT NULL, Seq INTEGER NOT NULL, TurnId TEXT NOT NULL DEFAULT '',
+  Ev TEXT NOT NULL, Ts TEXT NOT NULL, Payload TEXT NOT NULL,
+  PRIMARY KEY (SessionId, Seq));
 """
 
 SESSION_KINDS = ("analyst", "steward", "assistant")
@@ -403,6 +409,70 @@ class SpannerAssistantStore:
                  "vote": str(r.get("Vote") or ""), "note": str(r.get("Note") or ""),
                  "actor": str(r.get("UserId") or ""), "created_at": _iso(r.get("CreatedAt"))}
                 for r in rows]
+
+    # ── the event stream (ChatEvents): what the page replays ─
+    def add_event(self, session_id: str, record: dict[str, Any]) -> None:
+        """One bus record into ChatEvents, keyed by the bus's own seq.
+        The whole record is the Payload, so a replay hands the page
+        exactly what the live stream did. Raises on a database error:
+        the caller (the runtime's bus sink) decides that a turn never
+        fails for it."""
+        seq = int(record["seq"])
+        self.db.run(lambda tx: tx.insert(
+            "ChatEvents",
+            ("SessionId", "Seq", "TurnId", "Ev", "Ts", "Payload"),
+            [(session_id, seq, str(record.get("turn_id") or "")[:24],
+              str(record.get("ev") or "")[:32], utcnow(),
+              JsonValue(dict(record)))]))
+
+    def events(self, session_id: str, after_seq: int = 0,
+               limit: int = 4000) -> list[dict[str, Any]]:
+        """The records after ``after_seq``, in order, for a chat this
+        owner holds: the bus's ``since`` served from the table."""
+        rows = self.db.query(
+            "SELECT Seq, Payload FROM ChatEvents WHERE SessionId = @id "
+            "AND Seq > @after AND SessionId IN (SELECT SessionId FROM ChatSessions "
+            "WHERE OwnerUserId = @owner) ORDER BY Seq LIMIT @limit",
+            {"id": session_id, "after": int(after_seq), "owner": self.owner_user_id,
+             "limit": int(limit)})
+        out = []
+        for r in rows:
+            record = _loads(r.get("Payload"))
+            if not isinstance(record, dict):
+                continue
+            record["seq"] = int(r["Seq"])
+            out.append(record)
+        return out
+
+    def last_event_seq(self, session_id: str) -> int:
+        """The highest seq in the table for the chat, 0 when none: a
+        fresh bus resumes from here so its numbering never collides."""
+        rows = self.db.query(
+            "SELECT MAX(Seq) AS S FROM ChatEvents WHERE SessionId = @id "
+            "AND SessionId IN (SELECT SessionId FROM ChatSessions WHERE OwnerUserId = @owner)",
+            {"id": session_id, "owner": self.owner_user_id})
+        return int((rows[0]["S"] if rows else 0) or 0)
+
+    def last_turn(self, session_id: str) -> dict[str, Any]:
+        """The last turn the table knows: its id, its first seq, and
+        whether it closed (a turn_done or error event). A pod that came
+        back mid-turn reads this to tell the page where to replay from."""
+        rows = self.db.query(
+            "SELECT Seq, TurnId, Ev FROM ChatEvents WHERE SessionId = @id "
+            "AND TurnId != '' AND SessionId IN (SELECT SessionId FROM ChatSessions "
+            "WHERE OwnerUserId = @owner) ORDER BY Seq DESC LIMIT 1",
+            {"id": session_id, "owner": self.owner_user_id})
+        if not rows:
+            return {"turn_id": "", "first_seq": None, "closed": True}
+        turn_id = str(rows[0]["TurnId"])
+        kinds = self.db.query(
+            "SELECT MIN(Seq) AS First, "
+            "SUM(CASE WHEN Ev IN ('turn_done', 'error') THEN 1 ELSE 0 END) AS Closed "
+            "FROM ChatEvents WHERE SessionId = @id AND TurnId = @turn",
+            {"id": session_id, "turn": turn_id})
+        first = int((kinds[0]["First"] if kinds else 0) or 0)
+        closed = int((kinds[0]["Closed"] if kinds else 0) or 0) > 0
+        return {"turn_id": turn_id, "first_seq": first or None, "closed": closed}
 
     # ── projects ─────────────────────────────────────────────
     def create_project(self, name: str, *, instructions: str = "",
