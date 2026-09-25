@@ -89,25 +89,50 @@ def _audit(request: Request):
     return audit_request(request)
 
 
+def _local_login_status() -> tuple[bool, str, str]:
+    """(open, the reason it is shut, the store mode): the email-and-
+    password form is open only when a store runs, AUTH_LOCAL_LOGIN=1,
+    and the store's own settings read (a pepper of eight characters
+    under Spanner). Each refusal names its variable, so the laptop's
+    sign-in card can say which line of the .env to fix."""
+    from sahs.spanner import AuthSettings, SpannerConfigurationError, store_mode
+    try:
+        mode = store_mode()
+    except SpannerConfigurationError as exc:
+        return False, str(exc), ""
+    if mode == "local":
+        return (False, "no identity store: SAHS_STORE=local runs as the local "
+                       "developer with no accounts; set SAHS_STORE=spanner "
+                       "(or sqlite on a laptop) for sign-in", mode)
+    try:
+        enabled = AuthSettings.from_env().local_login_enabled
+    except SpannerConfigurationError as exc:
+        # a store is on but misconfigured: the form cannot open; the
+        # sign-in page says why, and the log keeps it
+        logger.warning("auth settings unreadable: %s", exc)
+        return False, str(exc), mode
+    if not enabled:
+        return False, "AUTH_LOCAL_LOGIN is not 1: the email-and-password path is off", mode
+    return True, "", mode
+
+
 @router.get("")
 def okta_status() -> dict:
     """What the sign-in page needs to draw itself."""
-    from sahs.spanner import AuthSettings, SpannerConfigurationError, spanner_is_enabled
+    from sahs.spanner import spanner_is_enabled
     settings = _settings()
-    try:
-        local_login = AuthSettings.from_env().local_login_enabled
-    except SpannerConfigurationError as exc:
-        # a store is on but misconfigured: the form cannot open; the
-        # sign-in page still draws, and the reason is in the log
-        logger.warning("auth settings unreadable: %s", exc)
-        local_login = False
+    local_login, reason, mode = _local_login_status()
     return {
         "available": True,
         "configured": bool(settings.configured and spanner_is_enabled()),
         "provider": settings.provider,
         "issuer_host": urlsplit(settings.issuer).hostname or "",
         "start": f"{router.prefix}/start",
-        "local_login": bool(local_login and spanner_is_enabled()),
+        "local_login": local_login,
+        # why the form is shut (a variable to set), '' when it is open
+        "local_login_reason": reason,
+        # local | sqlite | spanner: where the people (and the chats) live
+        "store": mode,
     }
 
 

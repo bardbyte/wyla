@@ -32,8 +32,9 @@ logger = logging.getLogger(__name__)
 # entry immediately so it never outlives the session it was cached for.
 _SESSION_CACHE_SECONDS = 5.0
 _session_cache: dict[str, tuple[float, dict]] = {}
-_google_oauth_states: dict[str, tuple[float, str, str, str, bool]] = {}
-_google_oauth_states_lock = Lock()
+# the Google consent hop parks its state in the store's AuthStates table
+# (the same table the Okta hop uses), so the callback may land on any pod
+_GOOGLE_STATE_KIND = "google_connect"
 _google_providers: dict[str, object] = {}
 _google_providers_lock = Lock()
 _GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -386,15 +387,13 @@ def google_start(popup: bool = False,
     settings = _google_oauth_settings()
     state = secrets.token_urlsafe(32)
     verifier = _pkce_verifier()
-    now = time.monotonic()
-    with _google_oauth_states_lock:
-        expired = [key for key, value in _google_oauth_states.items()
-                   if value[0] <= now]
-        for key in expired:
-            _google_oauth_states.pop(key, None)
-        _google_oauth_states[state] = (
-            now + _GOOGLE_OAUTH_STATE_TTL_SECONDS,
-            user["user_id"], user["email"], verifier, popup)
+    try:
+        _identity().put_state(
+            state, _GOOGLE_STATE_KIND,
+            {"email": user["email"], "verifier": verifier, "popup": bool(popup)},
+            user_id=user["user_id"], ttl_seconds=_GOOGLE_OAUTH_STATE_TTL_SECONDS)
+    except _google_api_error() as exc:
+        raise _identity_unavailable(exc) from exc
     query = urlencode({
         "client_id": settings.client_id,
         "redirect_uri": settings.redirect_uri,
@@ -422,9 +421,11 @@ def google_callback(code: str | None = None, state: str | None = None,
         raise HTTPException(status_code=400, detail=f"Google authorization failed: {error}")
     if not code or not state:
         raise HTTPException(status_code=400, detail="Google callback is missing code or state")
-    with _google_oauth_states_lock:
-        pending = _google_oauth_states.pop(state, None)
-    if pending is None or pending[0] <= time.monotonic():
+    try:
+        pending = _identity().pop_state(state, _GOOGLE_STATE_KIND)
+    except _google_api_error() as exc:
+        raise _identity_unavailable(exc) from exc
+    if pending is None:
         raise HTTPException(status_code=400, detail="Google OAuth state is invalid or expired")
     if not synapse_session:
         raise HTTPException(status_code=401, detail="sign in required")
@@ -432,7 +433,7 @@ def google_callback(code: str | None = None, state: str | None = None,
         user = _cached_session_user(synapse_session)
     except _google_api_error() as exc:
         raise _identity_unavailable(exc) from exc
-    if user is None or user["user_id"] != pending[1]:
+    if user is None or user["user_id"] != pending.get("user_id"):
         raise HTTPException(status_code=401, detail="ESL session does not match OAuth request")
 
     settings = _google_oauth_settings()
@@ -440,7 +441,7 @@ def google_callback(code: str | None = None, state: str | None = None,
         "client_id": settings.client_id,
         "client_secret": settings.client_secret,
         "code": code,
-        "code_verifier": pending[3],
+        "code_verifier": str(pending.get("verifier", "")),
         "grant_type": "authorization_code",
         "redirect_uri": settings.redirect_uri,
     })
@@ -477,7 +478,7 @@ def google_callback(code: str | None = None, state: str | None = None,
         raise HTTPException(status_code=503,
                             detail="Google connection could not be saved") from exc
     logger.info("Google OAuth identity connected for ESL user %s", user["user_id"])
-    if len(pending) > 4 and pending[4]:
+    if pending.get("popup"):
         return HTMLResponse(
             "<!doctype html><meta charset=\"utf-8\"><title>Google connected</title>"
             "<script>if(window.opener){window.opener.postMessage({type:'google-connected'},"
@@ -604,8 +605,12 @@ def reset_password(body: PasswordReset, request: Request) -> dict:
 
 
 @router.get("/me")
+@callback_router.get("/api/whoami")
 def me(synapse_session: str | None = Cookie(default=None),
        authorization: str | None = Header(default=None)) -> dict:
+    """Who the cookie says you are: ``/api/auth/me`` (the shells boot
+    from it) and ``/api/whoami``, the same answer under the name a
+    curl reaches for."""
     user = current_user(synapse_session, authorization)
     return {"available": True, "user": user}
 

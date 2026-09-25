@@ -69,6 +69,8 @@ export async function renderSignin(outlet, query = "") {
           <p class="muted">Sign-in is not configured on this server: set the
           <b class="mono">OKTA_*</b> variables, or <b class="mono">AUTH_LOCAL_LOGIN=1</b>
           for the email-and-password path on a laptop.</p>
+          ${status.local_login_reason
+            ? `<p class="signin-error" role="alert">${prose(status.local_login_reason)}</p>` : ""}
           ${who.reason && who.status !== 401
             ? `<p class="signin-error" role="alert">${prose(who.reason)}</p>` : ""}` : ""}
       </div>

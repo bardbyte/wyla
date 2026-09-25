@@ -52,11 +52,16 @@ enrichment and dry-runs stay with `pipeline.py`.
 
 Three modes, picked by `SAHS_STORE` in the silo `.env`:
 
-| `SAHS_STORE` | who you are | when |
-|---|---|---|
-| `local` (default) | the local developer, admin, no cookie | a laptop working on the graph |
-| `sqlite` | the people in one local file, real sessions and roles | trying the sign-in, the account and People pages, tests |
-| `spanner` | the people in Cloud Spanner | the deployment |
+| `SAHS_STORE` | who you are | where the chats go | when |
+|---|---|---|---|
+| `local` (default) | the local developer, admin, no cookie | `graph/runs/chat/sessions.sqlite3`, one shared runtime | a laptop working on the graph |
+| `sqlite` | the people in one local file, real sessions and roles | the chat tables in that same file, one runtime per person | trying the sign-in, the account and People pages, tests |
+| `spanner` | the people in Cloud Spanner | the chat tables in that database, one runtime per person | the deployment, and a laptop pointed at a dev database |
+
+With `sqlite` or `spanner`, every `/api/chat/*` call needs the session
+cookie and every chat, message, project, memory and artifact row carries
+the person who made it. What lands where, table by table, and what still
+lives on the filesystem: [`docs/spanner-wiring.md`](../../docs/spanner-wiring.md).
 
 With a store, the shell boots as the signed-in person (`js/session.js`):
 nobody signed in means every route is the sign-in page, every API call
@@ -67,21 +72,52 @@ everyone else is sent to `/synapse/`.
 The front door is Okta (`OKTA_*` in `.env.example`). To try the whole
 hop on a laptop, use the non-production Okta client and add
 `http://localhost:8400/callback` to its Login redirect URIs; never the
-production client. The email-and-password form is off unless a
-deployment opens it:
+production client. The email-and-password form (sign-up and sign-in) is
+off unless **one flag** opens it: `AUTH_LOCAL_LOGIN=1`. Okta is never
+required for it; the two doors are independent, and the sign-in page
+draws whichever is configured (both, when both are).
+
+**Local laptop** (email and password on, the store on Spanner, Okta off).
+The minimal `.env` block, names only; the values are yours:
 
 ```sh
-# a laptop without Okta: the form, the first account is the admin
-SAHS_STORE=sqlite AUTH_LOCAL_LOGIN=1 AUTH_PEPPER=anything \
-AUTH_BOOTSTRAP_ADMIN_EMAIL=you@example.com AUTH_COOKIE_SECURE=auto \
-uvicorn apps.synapse_admin.backend.app:app --port 8400
+SAHS_STORE=spanner
+SPANNER_PROJECT_ID=
+SPANNER_INSTANCE_ID=
+SPANNER_DATABASE_ID=
+SYNAPSE_SPANNER_SA_KEY=          # or GOOGLE_APPLICATION_CREDENTIALS; unset with gcloud ADC
+AUTH_PEPPER=                     # 8 characters at least; the store refuses to start without
+AUTH_LOCAL_LOGIN=1
+AUTH_COOKIE_SECURE=auto          # plain over http://127.0.0.1, Secure behind TLS
+AUTH_BOOTSTRAP_ADMIN_EMAIL=      # the sign-up with this address is the first admin
+# no OKTA_* lines
 ```
+
+Then `uvicorn apps.synapse_admin.backend.app:app --port 8810` and open
+`http://127.0.0.1:8810/#/signin`: the card shows the email-and-password
+form with "Create an account". No Spanner at hand: `SAHS_STORE=sqlite`
+with the same `AUTH_*` lines gives the same form on one local file.
+
+When the card says "Sign-in is not configured on this server" it also
+says why, from `GET /api/auth/okta` (`local_login_reason`): the flag is
+not `1`, the store is `local`, or a store setting is wrong (a pepper
+under eight characters is the usual one under `spanner`). Fix that line
+and reload; nothing else is cached.
+
+**Production**: Okta on (`OKTA_ISSUER`, `OKTA_CLIENT_ID`,
+`OKTA_CLIENT_SECRET`, `OKTA_REDIRECT_URI=https://<host>/callback`,
+`AUTH_GROUP_ROLE_MAP` with one group mapped to `admin`), `AUTH_LOCAL_LOGIN`
+unset, `SAHS_STORE=spanner` with the same `SPANNER_*` and `AUTH_PEPPER`
+lines. The local routes then answer 403 ("sign in with Okta") and the
+card offers Okta alone.
 
 `AUTH_COOKIE_SECURE=auto` follows the request: plain over `http://localhost`,
 `Secure` behind TLS. Pages: `#/signin?next=`, `#/account` (roles, the
 Google connection when BigQuery is delegated to people, sign out),
 `#/users` (admins: roles granted or taken back, accounts disabled or
 restored, the access contexts behind each person's sign-ins).
+`GET /api/whoami` (the same answer as `/api/auth/me`) says who the cookie
+is, for a curl.
 
 ## Surfaces
 

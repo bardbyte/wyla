@@ -3,6 +3,12 @@ the assistant loop, in-process, with the same contract shape as Ask —
 the frontend is a pure consumer of the event stream, never holds a
 key, never calls a model.
 
+With an identity store (SAHS_STORE=spanner|sqlite) every route below
+needs the session cookie and each signed-in person has their own
+runtime, its chats in the store's chat tables (docs/spanner-wiring.md);
+without one (SAHS_STORE=local) the one shared runtime and its sqlite
+file serve the local developer as before.
+
     POST /api/chat/sessions                        → session
     GET  /api/chat/sessions                        → the sidebar
     GET  /api/chat/sessions/{id}                   → transcript + artifacts (+ turn_after when a turn is running)
@@ -50,43 +56,86 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+from apps.synapse_admin.backend.auth import current_user, request_user
 from apps.synapse_admin.backend.meridian import (_builds_root, _graph_root,
                                                  _silo_import, _sources_dir)
 
-router = APIRouter(prefix="/api/chat")
+# with an identity store (SAHS_STORE=spanner|sqlite) every chat route
+# needs the session cookie: the chats belong to the person. Without one
+# (SAHS_STORE=local) current_user is the local developer and nothing
+# is asked of the browser.
+router = APIRouter(prefix="/api/chat", dependencies=[Depends(current_user)])
 
 POLL_SECONDS = 0.05
 HEARTBEAT_SECONDS = 15.0
 
+# the single-developer runtime (SAHS_STORE=local), as before
 _RUNTIME: Any = None
+# one runtime per signed-in person under a store: their own chat rows
+# (the chat tables of the identity database), their own event log
+_RUNTIMES: dict[str, Any] = {}
+
+
+def _make_runtime(owner: str, user: dict | None):
+    from sahs.assistant import AssistantRuntime
+    chat_dir = _graph_root() / "runs" / "chat"
+    runtime = AssistantRuntime(
+        builds_root=_builds_root(), graph_root=_graph_root(),
+        store_path=chat_dir / "sessions.sqlite3",
+        events_dir=chat_dir / "events",
+        owner_user_id=owner,
+        # the memory section addresses the signed-in person by name;
+        # None keeps the laptop's SYNAPSE_USER_NAME
+        user_name=(str(user.get("name") or "").strip() or None) if user else None)
+    if owner:
+        # a store is on: the chats live in its chat tables (002_chat.sql),
+        # not in the per-person sqlite file the runtime opened, and every
+        # row carries this owner. The same database object the identity
+        # store holds, so one connection serves both.
+        from apps.synapse_admin.backend.auth import _identity
+        from sahs.assistant.spanner_store import SpannerAssistantStore
+        runtime.store = SpannerAssistantStore(_identity().db, owner)
+    # approved knowledge files land where the shelf reads staged
+    # ones; resolved at publish time, so the .env decides
+    runtime.knowledge_dir = lambda: _sources_dir() / "artifacts"
+    # the Langfuse mirror of every turn's record: attached only
+    # when SAHS_LANGFUSE=1 (sahs.observe); off is the default
+    from sahs.observe import langfuse_observer
+    from sahs.observe.prompts import links_path
+    runtime.observer = langfuse_observer(
+        user_id=runtime.user_name, model_of=runtime.label_for,
+        prompt_links=links_path(_graph_root()))
+    return runtime
+
+
+def _owner() -> tuple[str, dict | None]:
+    """The signed-in person when a store runs, else '' (the local
+    developer, one shared runtime)."""
+    from sahs.spanner import spanner_is_enabled
+    user = request_user.get()
+    if not user or not spanner_is_enabled():
+        return "", None
+    owner = str(user.get("user_id") or "").strip()
+    return (owner, user) if owner and owner != "local" else ("", None)
 
 
 def _chat():
     _silo_import()
-    from sahs.assistant import AssistantRuntime
     from sahs.assistant.events import sse_frame
     global _RUNTIME
-    if _RUNTIME is None:
-        chat_dir = _graph_root() / "runs" / "chat"
-        _RUNTIME = AssistantRuntime(
-            builds_root=_builds_root(), graph_root=_graph_root(),
-            store_path=chat_dir / "sessions.sqlite3",
-            events_dir=chat_dir / "events")
-        # approved knowledge files land where the shelf reads staged
-        # ones; resolved at publish time, so the .env decides
-        _RUNTIME.knowledge_dir = lambda: _sources_dir() / "artifacts"
-        # the Langfuse mirror of every turn's record: attached only
-        # when SAHS_LANGFUSE=1 (sahs.observe); off is the default
-        from sahs.observe import langfuse_observer
-        from sahs.observe.prompts import links_path
-        _RUNTIME.observer = langfuse_observer(
-            user_id=_RUNTIME.user_name, model_of=_RUNTIME.label_for,
-            prompt_links=links_path(_graph_root()))
-    return _RUNTIME, sse_frame
+    owner, user = _owner()
+    if not owner:
+        if _RUNTIME is None:
+            _RUNTIME = _make_runtime("", None)
+        return _RUNTIME, sse_frame
+    runtime = _RUNTIMES.get(owner)
+    if runtime is None:
+        runtime = _RUNTIMES[owner] = _make_runtime(owner, user)
+    return runtime, sse_frame
 
 
 class NewMessage(BaseModel):

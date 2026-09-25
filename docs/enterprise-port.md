@@ -27,7 +27,11 @@ the schema file `db/spanner/004_google_oauth.sql`; and their changes to
 
 | where | theirs | here | why |
 |---|---|---|---|
-| `backend/chat.py` | one runtime per signed-in person; the `/api/chat/reviews*` routes removed | unchanged: one process-wide runtime, the review board kept | the second surface's skill submission flow and its tests depend on the review routes; the per-person change is pending (see below) |
+| `backend/chat.py` | one runtime per signed-in person; the `/api/chat/reviews*` routes removed | one runtime per signed-in person under a store, its chats in the store's chat tables (`002_chat.sql`) through `sahs/assistant/spanner_store.py`; the one shared runtime and its sqlite file under `SAHS_STORE=local`; the review board kept | the second surface's skill submission flow and its tests depend on the review routes; the per-person runtime now matches theirs in shape, with the store swapped for the chat tables rather than a per-person sqlite file (`docs/spanner-wiring.md`) |
+| `backend/auth.py` `google_start`, `google_callback` | the consent hop's state in a process dictionary | parked in the store's `AuthStates` table (`put_state` / `pop_state`, kind `google_connect`), as the Okta hop's is | the callback may land on any pod; one table for both hops |
+| `backend/auth.py` `GET /api/whoami` | absent | the same handler as `/api/auth/me`, under the name a curl reaches for | a laptop convenience |
+| `backend/okta.py` `GET /api/auth/okta` | (new here) | also answers `local_login_reason` (why the email-and-password form is shut: the flag, the store, a bad setting) and `store`; both sign-in pages show the reason | a laptop with `AUTH_LOCAL_LOGIN=1` and a short pepper used to see "not configured" with the cause only in the server log |
+| `sahs/identity/database.py` `SpannerDatabase._cell` | (ours) imported `JsonObject` from `google.cloud.spanner` | imported from `google.cloud.spanner_v1`, where it lives | the top-level package does not re-export it; a dict cell (an audit's `Details`, the Okta claims) raised `AttributeError` against a real Spanner; found by the SDK double in `tests/fake_spanner.py` |
 | `sahs/util/tls.py` | imports the enterprise certificate package by name; probes a fixed secret mount | package named by `SAHS_CA_PACKAGE`; mount named by `SAHS_SECRETS_DIR`; neither consulted when unset | this repository is public |
 | `sahs/util/auth.py` | fixed secret-mount paths for the BigQuery key | `SAHS_SECRETS_DIR` | same |
 | `app.py` | a second health path with the deployment's name | `SYNAPSE_HEALTH_ALIAS` | same |
@@ -59,6 +63,8 @@ either implementation can replace the other file for file:
 | `sahs/identity/oidc.py` | new here, not theirs: `OidcSettings.from_env()` (the `OKTA_*` variables), `OidcClient` (discovery, JWKS, PKCE authorize URL, code exchange, RS256 ID-token verification), `roles_for_groups` |
 | `backend/okta.py` | new here, not theirs: `GET /api/auth/okta` (status for the sign-in page), `GET /api/auth/okta/start?next=`, `GET /callback` for both providers; state, nonce and PKCE verifier live in the store's `AuthStates` table so any pod may take the callback |
 | `sahs/identity/store.py` additions | `find_or_create_external_user`, `set_roles`, `list_users`, `put_state`, `pop_state`; `db/spanner/006_external_identities.sql` adds `ExternalIdentities` and `AuthStates` |
+| `sahs/assistant/spanner_store.py` | new here, not theirs: `SpannerAssistantStore(database, owner_user_id)`, the `AssistantStore` verbs (sessions, messages, plan versions, feedback, artifacts, projects, memory) over the chat tables of `002_chat.sql`, on `SpannerDatabase` or the sqlite stand-in; `sahs/identity/database.py` gained `JsonValue` (a JSON cell that is not a dict), `SqliteDatabase.ensure` and the chat tables' key widths |
+| `tests/fake_spanner.py` | new here: a stand-in for the SDK's `Database` (`snapshot`, `run_in_transaction`) over sqlite, so the Spanner code path runs in a test |
 | both frontends: `js/session.js`, `pages/signin.js`, `pages/account.js`; admin `pages/users.js` | new here, not theirs: every `api.js` call goes through `apiFetch` (the `X-CSRF-Token` header from the `synapse_csrf` cookie on state-changing calls, the sign-in page on a 401); the shell boots from `/api/auth/me` and draws the account row from it; Okta first on the sign-in page, the email-and-password form only under `AUTH_LOCAL_LOGIN=1`; the account page holds their Google connect popup (`google-connected` message) and disconnect; People uses their `/api/admin/users` and `/api/admin/access` routes |
 
 Additions with no counterpart on their side, all ours: `sahs/identity/database.py`
@@ -101,6 +107,16 @@ git fetch wyla
 git checkout -b feature/okta-signin origin/feature/unified-changes
 git cherry-pick 998aa24 561a0ef 1857044 16e69af
 ```
+
+The local-login and Spanner-wiring commits (branch
+`claude/local-login-spanner-wiring`) cherry-pick the same way, after the
+four above. They touch two files they own: `backend/auth.py` (the Google
+consent state in `AuthStates`, the `/api/whoami` alias) and
+`backend/chat.py` (one runtime per person, the store swapped for the chat
+tables). On a conflict in either, take the wyla side for the hunks the
+deviations table names and theirs for the rest; `sahs/assistant/spanner_store.py`,
+`sahs/identity/database.py`, `tests/fake_spanner.py`, `docs/spanner-wiring.md`
+and the tests are ours whole.
 
 During a cherry-pick, git's `--ours` is the enterprise branch and
 `--theirs` is the wyla commit being applied. For each conflicted path take
