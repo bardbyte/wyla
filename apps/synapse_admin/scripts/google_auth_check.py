@@ -25,6 +25,17 @@ Then, unless --no-matrix, every distinct client is probed against the OTHER
 environments' callbacks (only meaningful when environments use different
 clients; one shared client is already probed against every callback).
 
+--inventory <ENV> answers "what do we actually get from Google": it runs the
+consent once, through a browser, on that environment's client with a local
+callback (GOOGLE_LOCAL_REDIRECT_URI, default http://localhost:8400/callback;
+Google allows http on localhost, add it to the client's redirect URIs), asks
+for offline access, then prints every claim of the ID token and of /userinfo,
+the scopes actually granted, whether a refresh token came back (the app's
+stored connection needs one), whether the account is a Workspace account
+(the hd claim) and, with GOOGLE_BQ_PROJECT set, whether the token can run a
+BigQuery dry run there. --redact masks personal values; --out writes the
+JSON for identity_map.py.
+
 Configuration comes from environment variables; NAME_<ENV> wins over NAME:
 
   AUTHCHECK_ENVS              comma list of environments, default E1,E2,E3
@@ -33,6 +44,10 @@ Configuration comes from environment variables; NAME_<ENV> wins over NAME:
   GOOGLE_REDIRECT_URI_<ENV>   https:// is assumed when the scheme is missing
                               (Google refuses plain http except on localhost)
   GOOGLE_SCOPES               default "openid email profile"
+  GOOGLE_LOCAL_REDIRECT_URI   --inventory: the local callback, default http://localhost:8400/callback
+  GOOGLE_INVENTORY_SCOPES     --inventory: default GOOGLE_SCOPES + the BigQuery scope
+  GOOGLE_BQ_PROJECT           --inventory: a project to dry-run "SELECT 1" in (no bytes billed)
+  GOOGLE_EXPECTED_HD          --inventory: the Workspace domain the account should belong to
   OKTA_REDIRECT_URI_<ENV>     optional; reported as parity with the Google callback
 
 TLS: `truststore` (the OS keychain, where corporate roots live) when it is
@@ -43,6 +58,7 @@ HTTPS_PROXY is honoured.
 Usage:
   python google_auth_check.py --env-file .env.authcheck.local
   python google_auth_check.py --envs E1 --json
+  python google_auth_check.py --env-file .env.authcheck.local --inventory E1 --redact --out google.json
 
 Exit code: 0 everything passed, 1 something FAILED, 2 configuration problem.
 """
@@ -240,6 +256,319 @@ def pkce() -> dict:
     digest = hashlib.sha256(verifier.encode()).digest()
     return {"code_challenge": base64.urlsafe_b64encode(digest).rstrip(b"=").decode(),
             "code_challenge_method": "S256"}
+
+
+# ------------------------------------------------------------ inventory --
+REDACT = False
+KEEP_UNDER_REDACT = {"iss", "aud", "azp", "alg", "kid", "typ", "scope", "hd", "token_type", "groups",
+                     "email_verified", "access_type", "locale"}
+BIGQUERY_SCOPE = "https://www.googleapis.com/auth/bigquery"
+TOKENINFO = "https://oauth2.googleapis.com/tokeninfo"
+BIGQUERY = "https://bigquery.googleapis.com/bigquery/v2"
+
+
+def b64url_decode(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def decode_jwt(token: str) -> tuple[dict, dict] | None:
+    """(header, claims) of a JWT, unverified; None when the string is not one."""
+    parts = (token or "").split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        header = json.loads(b64url_decode(parts[0]))
+        claims = json.loads(b64url_decode(parts[1]))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(header, dict) or not isinstance(claims, dict):
+        return None
+    return header, claims
+
+
+def verify_rs256(token: str, jwks: dict) -> str:
+    decoded = decode_jwt(token)
+    if not decoded:
+        return "unverified: not a JWT"
+    header, _ = decoded
+    if header.get("alg") != "RS256":
+        return f"unverified: alg {header.get('alg')} is not RS256"
+    key = next((k for k in (jwks or {}).get("keys", []) if k.get("kid") == header.get("kid")), None)
+    if key is None:
+        return f"failed: no key {header.get('kid')!r} in the JWKS"
+    try:
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+    except ImportError:
+        return "unverified: pip install cryptography to verify the signature here"
+    head, body, sig = token.split(".")
+    try:
+        public = rsa.RSAPublicNumbers(int.from_bytes(b64url_decode(key["e"]), "big"),
+                                      int.from_bytes(b64url_decode(key["n"]), "big")).public_key()
+        public.verify(b64url_decode(sig), f"{head}.{body}".encode(), padding.PKCS1v15(),
+                      hashes.SHA256())
+    except Exception as exc:  # noqa: BLE001
+        return f"failed: {type(exc).__name__}"
+    return "verified"
+
+
+def mask(value, key: str = ""):
+    if not REDACT or value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, list):
+        return [mask(v, key) for v in value]
+    if isinstance(value, dict):
+        return {k: mask(v, k) for k, v in value.items()}
+    if key.lower() in KEEP_UNDER_REDACT:
+        return value
+    text = str(value)
+    if "@" in text and " " not in text:
+        local, _, domain = text.partition("@")
+        return f"{local[:1]}***@{domain}"
+    if text.startswith("http"):
+        return "url(" + urllib.parse.urlsplit(text).netloc + ")"
+    if len(text) <= 3:
+        return "***"
+    return f"{text[:2]}...{text[-1]}({len(text)})"
+
+
+def show(value) -> str:
+    if isinstance(value, list):
+        inner = ", ".join(str(v) for v in value[:12]) + (", ..." if len(value) > 12 else "")
+        return f"list[{len(value)}]: {inner}"
+    if isinstance(value, dict):
+        return "object: " + ", ".join(sorted(value)[:12])
+    return f"{type(value).__name__}: {value}"
+
+
+def receive_code(redirect_uri: str, state: str, timeout: int, open_browser: bool,
+                 url: str) -> dict:
+    """Serve the local callback once and return its query as a dict, or {"error": ...}."""
+    import http.server
+
+    parts = urllib.parse.urlsplit(redirect_uri)
+    host, port, path = parts.hostname or "127.0.0.1", parts.port or 80, parts.path or "/"
+    got: dict = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            u = urllib.parse.urlsplit(self.path)
+            if u.path.rstrip("/") != path.rstrip("/"):
+                self.send_response(404)
+                self.end_headers()
+                return
+            got.update({k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()})
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"<!doctype html><title>Synapse preflight</title>"
+                             b"<p>Received. Close this tab and return to the terminal.</p>")
+
+        def log_message(self, *args):
+            pass
+
+    try:
+        server = http.server.HTTPServer((host, port), Handler)
+    except OSError as exc:
+        return {"error": f"cannot listen on {host}:{port} for the callback: {exc}"}
+    server.timeout = 1
+    print(f"\nConsent here (the browser should open by itself):\n  {url}\n", file=sys.stderr)
+    if open_browser:
+        import webbrowser
+        webbrowser.open(url)
+    deadline = time.time() + timeout
+    try:
+        while not got and time.time() < deadline:
+            server.handle_request()
+    finally:
+        server.server_close()
+    if not got:
+        return {"error": f"no callback arrived within {timeout}s"}
+    if got.get("state") != state:
+        return {"error": "the callback carried another state; start again"}
+    return got
+
+
+def bq_get(path: str, token: str) -> Resp:
+    return http(BIGQUERY + path, headers={"Authorization": f"Bearer {token}",
+                                          "Accept": "application/json"})
+
+
+def bq_dry_run(project: str, token: str) -> tuple[str, str]:
+    """('ok' | 'denied' | 'error', detail): a dry run of SELECT 1 costs nothing
+    and proves the scope, the API enablement and the IAM on the project."""
+    body = json.dumps({"query": "SELECT 1", "useLegacySql": False, "dryRun": True}).encode()
+    r = http(f"{BIGQUERY}/projects/{urllib.parse.quote(project)}/queries", "POST", body,
+             {"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+              "Accept": "application/json"})
+    doc = r.json() or {}
+    if r.status == 200:
+        return "ok", f"dry run accepted in {project} (jobComplete={doc.get('jobComplete')})"
+    err = (doc.get("error") or {})
+    msg = str(err.get("message") or r.error or f"HTTP {r.status}")[:200]
+    if r.status in (401, 403):
+        return "denied", f"HTTP {r.status}: {msg}"
+    return "error", f"HTTP {r.status}: {msg}"
+
+
+GOOGLE_CLAIM_ORDER = ("sub", "email", "email_verified", "hd", "name", "given_name", "family_name",
+                      "picture", "locale", "iss", "aud", "azp", "iat", "exp", "nonce", "at_hash")
+
+
+def ordered(claims: dict) -> list[str]:
+    return ([c for c in GOOGLE_CLAIM_ORDER if c in claims]
+            + sorted(c for c in claims if c not in GOOGLE_CLAIM_ORDER))
+
+
+def inventory(env: str, rep: Report, disc: dict, *, timeout: int, open_browser: bool) -> None:
+    client_id = cfg("GOOGLE_CLIENT_ID", env)
+    secret = cfg("GOOGLE_CLIENT_SECRET", env)
+    if not client_id:
+        rep.add(env, "inventory", "FAIL", f"GOOGLE_CLIENT_ID(_{env}) not set")
+        return
+    redirect_local = norm_redirect(cfg("GOOGLE_LOCAL_REDIRECT_URI", env,
+                                       "http://localhost:8400/callback"))
+    if redirect_local.startswith("https://localhost"):
+        redirect_local = "http://" + redirect_local[len("https://"):]
+    base_scopes = split_list(cfg("GOOGLE_SCOPES", env, "openid email profile"))
+    scopes = split_list(cfg("GOOGLE_INVENTORY_SCOPES", env, "")) or [
+        *dict.fromkeys([*base_scopes, "openid", "email", "profile", BIGQUERY_SCOPE])]
+    expected_hd = (cfg("GOOGLE_EXPECTED_HD", env) or "").lower().lstrip("@")
+    project = cfg("GOOGLE_BQ_PROJECT", env)
+
+    state, nonce = secrets.token_urlsafe(16), secrets.token_urlsafe(16)
+    verifier = secrets.token_urlsafe(48)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    url = disc["authorization_endpoint"] + "?" + urllib.parse.urlencode({
+        "client_id": client_id, "redirect_uri": redirect_local, "response_type": "code",
+        "scope": " ".join(scopes), "state": state, "nonce": nonce, "access_type": "offline",
+        "prompt": "consent", "include_granted_scopes": "true",
+        "code_challenge": challenge, "code_challenge_method": "S256"})
+    got = receive_code(redirect_local, state, timeout, open_browser, url)
+    if got.get("error"):
+        why = got["error"]
+        if got.get("error_description"):
+            why = f"Google refused: {why}: {got['error_description']}"
+        rep.add(env, "consent", "FAIL", why)
+        return
+    form = {"grant_type": "authorization_code", "code": got.get("code", ""),
+            "redirect_uri": redirect_local, "code_verifier": verifier, "client_id": client_id}
+    if secret:
+        form["client_secret"] = secret
+    r = http(disc["token_endpoint"], "POST", urllib.parse.urlencode(form).encode(),
+             {"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"})
+    tokens = r.json() or {}
+    if r.status != 200 or not tokens.get("access_token"):
+        rep.add(env, "consent", "FAIL",
+                f"the code exchange failed: {tokens.get('error', '')} {tokens.get('error_description', '')}"
+                f"{r.error}".strip()
+                + ("" if secret else " (a Web application client needs GOOGLE_CLIENT_SECRET)"))
+        return
+    granted = split_list(str(tokens.get("scope", "")))
+    rep.add(env, "consent", "PASS",
+            f"consent given; tokens: access_token ({tokens.get('expires_in', '?')}s)"
+            + (", id_token" if tokens.get("id_token") else ", no id_token")
+            + (", refresh_token" if tokens.get("refresh_token") else ", no refresh_token"))
+    missing = [s_ for s_ in scopes if s_ not in granted and s_ != "openid"
+               and not any(g.endswith(s_) or s_.endswith(g.split("/")[-1]) for g in granted)]
+    rep.add(env, "scopes granted", "PASS" if not missing else "WARN",
+            ", ".join(granted) + (f"; NOT granted: {', '.join(missing)} (unticked on the consent screen?)"
+                                  if missing else ""))
+
+    claims: dict = {}
+    if tokens.get("id_token"):
+        decoded = decode_jwt(tokens["id_token"])
+        if decoded:
+            header, claims = decoded
+            jr = http(disc.get("jwks_uri", ""))
+            verdict = verify_rs256(tokens["id_token"], jr.json() if jr.status == 200 else {})
+            problems = []
+            if claims.get("iss") not in ("https://accounts.google.com", "accounts.google.com"):
+                problems.append(f"iss {claims.get('iss')}")
+            if claims.get("aud") != client_id:
+                problems.append("aud is not our client")
+            if claims.get("nonce") != nonce:
+                problems.append("nonce mismatch")
+            status = "PASS" if verdict == "verified" and not problems else (
+                "WARN" if verdict.startswith("unverified") and not problems else "FAIL")
+            rep.add(env, "id_token.verify", status,
+                    f"alg {header.get('alg')} kid {header.get('kid')}: signature {verdict}"
+                    + ("; " + "; ".join(problems) if problems else "; iss, aud and nonce match"))
+            for name in ordered(claims):
+                rep.add(env, f"id_token.{name}", "INFO", show(mask(claims[name], name)))
+
+    ui: dict = {}
+    if disc.get("userinfo_endpoint"):
+        ur = http(disc["userinfo_endpoint"], headers={
+            "Authorization": f"Bearer {tokens['access_token']}", "Accept": "application/json"})
+        ui = ur.json() if ur.status == 200 and isinstance(ur.json(), dict) else {}
+        extra = [c for c in ordered(ui) if c not in claims]
+        rep.add(env, "userinfo", "PASS" if ui else "WARN",
+                f"{len(ui)} claims; beyond the id_token: {', '.join(extra) or 'none'}" if ui
+                else f"HTTP {ur.status} {ur.error}")
+        for name in extra:
+            rep.add(env, f"userinfo.{name}", "INFO", show(mask(ui[name], name)))
+
+    tr = http(TOKENINFO + "?" + urllib.parse.urlencode({"access_token": tokens["access_token"]}))
+    ti = tr.json() if tr.status == 200 and isinstance(tr.json(), dict) else {}
+    if ti:
+        rep.add(env, "tokeninfo", "INFO",
+                f"aud {ti.get('aud')}; scope {ti.get('scope')}; expires_in {ti.get('expires_in')}; "
+                f"access_type {ti.get('access_type')}")
+
+    everything = {**ui, **claims}
+    hd = str(everything.get("hd") or "").lower()
+    if expected_hd:
+        rep.add(env, "need: workspace account", "PASS" if hd == expected_hd else "FAIL",
+                f"hd={hd or 'absent'}" + ("" if hd == expected_hd else
+                                           f" (expected {expected_hd}: a personal Google account, or another domain)"))
+    else:
+        rep.add(env, "need: workspace account", "PASS" if hd else "WARN",
+                f"hd={hd}: a Workspace account" if hd else
+                "no hd claim: a personal Google account, not a Workspace one (set GOOGLE_EXPECTED_HD to pin the domain)")
+    rep.add(env, "need: verified email", "PASS" if everything.get("email_verified") is True else "FAIL",
+            f"{mask(everything.get('email'), 'email')} email_verified={everything.get('email_verified')}")
+    rep.add(env, "need: refresh token", "PASS" if tokens.get("refresh_token") else "FAIL",
+            "refresh_token present: the app can hold the connection and mint access tokens later"
+            if tokens.get("refresh_token") else
+            "no refresh_token: the stored connection cannot outlive this hour (access_type=offline and "
+            "prompt=consent were sent; a client of type other than Web application behaves so)")
+    bq_scope = any(g.rstrip("/").endswith("/bigquery") or g.endswith("bigquery.readonly") for g in granted)
+    rep.add(env, "need: bigquery scope", "PASS" if bq_scope else "WARN",
+            "granted" if bq_scope else "not granted; queries as this person will fail")
+    bq: dict = {"project": project}
+    if bq_scope:
+        pr = bq_get("/projects?maxResults=50", tokens["access_token"])
+        projects = [p_.get("id") for p_ in ((pr.json() or {}).get("projects") or [])] if pr.status == 200 else None
+        if projects is not None:
+            bq["projects_visible"] = len(projects)
+            rep.add(env, "bigquery projects", "INFO",
+                    f"{len(projects)} project(s) visible to this account: {', '.join(projects[:8])}"
+                    + (", ..." if len(projects) > 8 else ""))
+        else:
+            rep.add(env, "bigquery projects", "WARN", f"HTTP {pr.status} {pr.error or text_of(pr)[:120]}")
+        if project:
+            kind, detail = bq_dry_run(project, tokens["access_token"])
+            bq["dry_run"] = kind
+            rep.add(env, "bigquery dry-run", {"ok": "PASS", "denied": "FAIL", "error": "WARN"}[kind], detail)
+        else:
+            rep.add(env, "bigquery dry-run", "SKIP", "GOOGLE_BQ_PROJECT not set")
+
+    rep.facts.setdefault("inventory", {})[env] = mask({
+        "provider": "google", "client_id": client_id, "scopes_requested": scopes,
+        "scopes_granted": granted, "refresh_token": bool(tokens.get("refresh_token")),
+        "access_token_expires_in": tokens.get("expires_in"),
+        "sub": everything.get("sub"), "email": everything.get("email"),
+        "email_verified": everything.get("email_verified"), "hd": hd or None,
+        "name": everything.get("name"), "given_name": everything.get("given_name"),
+        "family_name": everything.get("family_name"), "picture": bool(everything.get("picture")),
+        "id_token_claims": ordered(claims), "userinfo_claims": ordered(ui), "bigquery": bq,
+    })
+
+
+def text_of(resp: Resp) -> str:
+    text = html.unescape(re.sub(r"<[^>]+>", " ", resp.body))
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _pb_strings(raw: bytes) -> list[str]:
@@ -444,8 +773,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-matrix", action="store_true",
                     help="skip probing each client against the other environments' callbacks")
     ap.add_argument("--timeout", type=int, default=_TIMEOUT, help="seconds per request")
+    ap.add_argument("--inventory", metavar="ENV",
+                    help="run the consent once on this environment's client through the browser "
+                         "and list everything Google returns (needs GOOGLE_LOCAL_REDIRECT_URI on the client)")
+    ap.add_argument("--redact", action="store_true",
+                    help="mask personal values in the inventory (e-mails keep their domain)")
+    ap.add_argument("--no-browser", action="store_true",
+                    help="print the consent URL instead of opening a browser")
+    ap.add_argument("--wait", type=int, default=180, help="seconds to wait for the consent")
+    ap.add_argument("--out", metavar="FILE", help="write the JSON report here as well")
     args = ap.parse_args(argv)
     _TIMEOUT = args.timeout
+    global REDACT
+    REDACT = args.redact
     if args.env_file:
         if not os.path.exists(args.env_file):
             print(f"env file not found: {args.env_file}", file=sys.stderr)
@@ -483,7 +823,13 @@ def main(argv: list[str] | None = None) -> int:
             run_env(env, rep, disc, clients, redirects)
         if not args.no_matrix and clients and len(redirects) > 1:
             run_matrix(rep, disc, clients, redirects)
+        if args.inventory:
+            inventory(args.inventory.strip(), rep, disc, timeout=args.wait,
+                      open_browser=not args.no_browser)
 
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            json.dump(rep.dump(), fh, indent=2)
     if args.json:
         print(json.dumps(rep.dump(), indent=2))
     else:
