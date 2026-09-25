@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from sahs.ask.budget import Budget
 from sahs.ask.model import ModelUnavailable, VertexModel
@@ -60,20 +60,30 @@ class VertexAgent:
     def converse(self, contents: list[dict[str, Any]], *,
                  system: str = "", tools: list[dict[str, Any]] | None = None,
                  thinking_level: str = "",
-                 max_output_tokens: int = 8192) -> Iterator[dict[str, Any]]:
+                 max_output_tokens: int = 8192,
+                 should_stop: Callable[[], bool] | None = None
+                 ) -> Iterator[dict[str, Any]]:
+        """One model call, streamed. ``should_stop`` is the stop
+        button's flag: the client stops reading at the next chunk and
+        closes the response; a stream left mid-way for any other
+        reason is closed here too."""
         before = dict(self.client.usage)
         yielded = False
         attempts = 0
         try:
             while True:
                 attempts += 1
+                stream = self.client.converse(
+                    contents, system=system, tools=tools,
+                    thinking_level=thinking_level,
+                    max_output_tokens=max_output_tokens,
+                    should_stop=should_stop)
                 try:
-                    for event in self.client.converse(
-                            contents, system=system, tools=tools,
-                            thinking_level=thinking_level,
-                            max_output_tokens=max_output_tokens):
+                    for event in stream:
                         yielded = True
                         yield event
+                        if should_stop is not None and should_stop():
+                            return
                     return
                 except EnrichTransportError as e:
                     # the same contents, the same call: safe to ask
@@ -81,6 +91,10 @@ class VertexAgent:
                     # the user, or the retry would duplicate it
                     if yielded or attempts >= 2:
                         raise ModelUnavailable(str(e)) from e
+                finally:
+                    close = getattr(stream, "close", None)
+                    if callable(close):
+                        close()
         finally:
             self._charge(before)
 
@@ -240,8 +254,9 @@ def model_catalog() -> list[dict[str, Any]]:
     the choice id (plane, or plane:model), the plane, the model, the
     label, availability with the reason, what choosing it means, its
     engine map (how it takes its depth — level | budget | none — the
-    levels it accepts, where it fits), and which one a new chat starts
-    on. Vertex serves its one model; the gateway serves GATEWAY_MODELS,
+    levels it accepts, ``fit``: one plain sentence on when to pick it,
+    ``facts``: the engineer's line for the hover), and which one a new
+    chat starts on. Vertex serves its one model; the gateway serves GATEWAY_MODELS,
     the default first."""
     from sahs.util.gateway import gateway_models
     rows: list[dict[str, Any]] = []
@@ -254,6 +269,7 @@ def model_catalog() -> list[dict[str, Any]]:
                  "means": vertex["means"], "feel": vertex["feel"],
                  "thinking": engine.thinking, "levels": list(engine.accepts),
                  "family": engine.family, "fit": engine.fit,
+                 "facts": engine.facts,
                  "default": vertex["default"]})
     gateway = planes["gateway"]
     for index, model in enumerate(gateway_models()):
@@ -265,6 +281,7 @@ def model_catalog() -> list[dict[str, Any]]:
                      "means": gateway["means"], "feel": gateway["feel"],
                      "thinking": engine.thinking, "levels": list(engine.accepts),
                      "family": engine.family, "fit": engine.fit,
+                     "facts": engine.facts,
                      "default": gateway["default"] and index == 0})
     return rows
 
@@ -310,7 +327,9 @@ class ScriptedAgent:
     def converse(self, contents: list[dict[str, Any]], *,
                  system: str = "", tools: list[dict[str, Any]] | None = None,
                  thinking_level: str = "",
-                 max_output_tokens: int = 8192) -> Iterator[dict[str, Any]]:
+                 max_output_tokens: int = 8192,
+                 should_stop: Callable[[], bool] | None = None
+                 ) -> Iterator[dict[str, Any]]:
         self.calls.append({"contents": contents, "system": system,
                            "tools": [t["name"] for t in (tools or [])],
                            "thinking_level": thinking_level})
@@ -320,6 +339,13 @@ class ScriptedAgent:
             step = step()
         parts: list[dict[str, Any]] = []
         for item in step or []:
+            if should_stop is not None and should_stop():
+                # the stop button mid-stream, as the real client does
+                # it: the parts so far, done says STOPPED, nothing more
+                yield {"kind": "done", "parts": parts, "finish": "STOPPED",
+                       "usage": {"prompt_tokens": 100, "output_tokens": 20,
+                                 "thought_tokens": 5, "cached_tokens": 0}}
+                return
             if "text" in item:
                 yield {"kind": "text", "delta": item["text"]}
                 parts.append({"text": item["text"]})

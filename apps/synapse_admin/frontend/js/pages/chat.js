@@ -55,19 +55,19 @@ export async function renderChat(outlet, wanted = "") {
                 title="More" aria-expanded="false">+</button>
               <div class="chat-plus-pop" id="chat-plus-pop" hidden></div>
               <div class="chat-modes" role="radiogroup"
-                aria-label="How Synapse works this ask">
+                aria-label="How Radix works this ask">
                 <button class="chat-mode on" data-mode="chat"
                   role="radio" aria-checked="true"
-                  title="Synapse writes the query and hands it over; you run it">Chat</button>
+                  title="Radix writes the query and hands it over; you run it">Chat</button>
                 <button class="chat-mode" data-mode="autopilot"
                   role="radio" aria-checked="false"
-                  title="Synapse runs the query under the limits and builds the deliverable">Autopilot</button>
+                  title="Radix runs the query under the limits and builds the deliverable">Autopilot</button>
               </div>
               <span class="spacer"></span>
               <select id="chat-model" class="chat-depth chat-plane" hidden
                 title="Which model answers this chat"></select>
               <select id="chat-depth" class="chat-depth" hidden
-                title="How deeply Synapse thinks on this ask">
+                title="How deeply Radix thinks on this ask">
                 <option value="minimal">Minimal</option>
                 <option value="quick">Quick</option>
                 <option value="standard" selected>Standard</option>
@@ -81,19 +81,21 @@ export async function renderChat(outlet, wanted = "") {
                 aria-label="Model"></div>
               <button class="chat-pill" id="chat-depth-btn" type="button"
                 aria-haspopup="dialog" aria-expanded="false"
-                title="How deeply Synapse thinks on this ask"><span class="pill-label">Thinking effort</span><span class="chev">⌄</span></button>
+                title="How deeply Radix thinks on this ask"><span class="pill-label">Thinking effort</span><span class="chev">⌄</span></button>
               <div class="knob-pop depth-pop" id="chat-depth-pop" hidden role="dialog"
                 aria-label="Thinking effort"></div>
               <button class="icon-btn chat-help" id="chat-help"
                 title="What Chat, Autopilot, the thinking levels and the models mean"
                 aria-label="Explain the dials" aria-expanded="false">?</button>
               <div class="chat-help-pop" id="chat-help-pop" hidden></div>
-              <button class="btn" id="chat-stop" hidden>stop</button>
+              <button class="btn primary chat-send chat-stop" id="chat-stop" type="button"
+                hidden aria-label="Stop" title="Stop"><span class="stop-glyph"
+                aria-hidden="true"></span></button>
               <button class="btn primary chat-send" id="chat-send"
                 title="Send · Enter">↑</button>
             </div>
           </div>
-          <div class="chat-foot">Synapse is AI and can make mistakes.
+          <div class="chat-foot">Radix is AI and can make mistakes.
             Check the receipts before you act on a number.</div>
         </div>
       </div>
@@ -242,14 +244,15 @@ export async function renderChat(outlet, wanted = "") {
     const notes = dials.notes || {};
     helpPop.innerHTML = `
       <div class="help-group">
-        <div class="help-head">Thinking effort <span>how much Synapse thinks before each step</span></div>
+        <div class="help-head">Thinking effort <span>how much Radix thinks before each step</span></div>
         ${(dials.depths || []).map((d) => helpRow(d.label, d.means)).join("")}
       </div>
       <div class="help-group">
         <div class="help-head">Model <span>${esc(notes.plane || "")}</span></div>
-        ${models.map((m) => helpRow(m.label, m.means, m.available
-          ? (m.default ? "available · where a new chat starts" : "available")
-          : `not available here: ${m.reason}`)).join("")}
+        ${models.map((m) => helpRow(m.label, m.fit ? `${m.fit} ${m.means}` : m.means, [
+          m.available ? (m.default ? "available · where a new chat starts" : "available")
+                      : `not available here: ${m.reason}`,
+          m.facts || ""].filter(Boolean).join(" · "))).join("")}
       </div>`;
   }
   loadDials();
@@ -461,7 +464,7 @@ export async function renderChat(outlet, wanted = "") {
       </div>`).join("")
       : `<div class="muted" style="padding:6px">Nothing remembered
          yet. Memory is on: when you settle a preference in chat
-         ("by spend I mean acquirer net spend"), Synapse keeps it,
+         ("by spend I mean acquirer net spend"), Radix keeps it,
          says so inline with an undo, and lists it here — never a
          metric definition.</div>`;
     for (const btn of memPop.querySelectorAll("[data-mem]")) {
@@ -1178,7 +1181,7 @@ export async function renderChat(outlet, wanted = "") {
     return turn;
   }
 
-  // what Synapse is doing, in the user's words: the model's own
+  // what Radix is doing, in the user's words: the model's own
   // thought summary when it narrates, a plain verb for the tool
   // otherwise — never a tool name, an id, or raw output
   const argOf = (event, key) => {
@@ -1748,6 +1751,7 @@ export async function renderChat(outlet, wanted = "") {
           break;
         }
         setRunning(true);
+        state.liveTurn = turn;             // the turn a stop would end
         setEmpty(false);
         // a turn this page did not send — the build chained after a
         // run, or an ask from another tab — still shows as the
@@ -2031,8 +2035,35 @@ export async function renderChat(outlet, wanted = "") {
   // ── sending ──────────────────────────────────────────────
   function setRunning(running) {
     state.running = running;
-    el("chat-send").disabled = running;
-    el("chat-stop").hidden = !running;
+    const sendBtn = el("chat-send");
+    const stopBtn = el("chat-stop");
+    sendBtn.disabled = running;
+    sendBtn.hidden = running;            // the stop takes its place
+    stopBtn.hidden = !running;
+    if (!running) {                      // the turn ended: the composer is back
+      state.stopping = false;
+      stopBtn.disabled = false;
+      stopBtn.classList.remove("stopping");
+      stopBtn.title = "Stop";
+    }
+  }
+  // the stop: pressed once, the button locks and the live line says
+  // "Stopping…" until the server's turn_done (status stopped) lands
+  // through the stream and setRunning(false) restores the composer
+  async function stop() {
+    if (!state.running || state.stopping) return;
+    state.stopping = true;
+    const stopBtn = el("chat-stop");
+    stopBtn.disabled = true;
+    stopBtn.classList.add("stopping");
+    stopBtn.title = "Stopping…";
+    const turn = state.liveTurn;
+    if (turn && !turn.done) pulse(turn, "Stopping…");
+    try {
+      await api.chatStop(state.session.id);
+    } catch {
+      // the stream's turn_done restores the composer either way
+    }
   }
   async function send(text) {
     if (!text.trim() || state.running) return;
@@ -2058,12 +2089,9 @@ export async function renderChat(outlet, wanted = "") {
       send(input.value);
     }
     if (e.key === "Escape" && !slash.hidden) slash.hidden = true;
-    else if (e.key === "Escape" && state.running) {
-      api.chatStop(state.session.id);
-    }
+    else if (e.key === "Escape" && state.running) stop();
   });
-  el("chat-stop").addEventListener("click", () =>
-    api.chatStop(state.session.id));
+  el("chat-stop").addEventListener("click", stop);
 
   subscribe();
   pingShelf();
