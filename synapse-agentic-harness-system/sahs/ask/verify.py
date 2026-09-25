@@ -74,7 +74,8 @@ def _cost_cap(build: Build, tables: list[str]) -> tuple[int, str]:
 def verify(build: Build, plan: Plan, contract: Contract, gen: Generation,
            model: Any, *,
            on_progress: Callable[[dict[str, Any]], None] | None = None,
-           abort_check: Callable[[], None] | None = None) -> Contract:
+           abort_check: Callable[[], None] | None = None,
+           runner: Any = None) -> Contract:
     def flip(criterion_id: str, passed: bool, evidence: str) -> None:
         if contract.get(criterion_id) is None:
             return
@@ -85,7 +86,7 @@ def verify(build: Build, plan: Plan, contract: Contract, gen: Generation,
     # ── 1. it runs (the verifier executes it itself) ─────────
     if abort_check:
         abort_check()
-    envelope = run_query(build, gen.sql)
+    envelope = run_query(build, gen.sql, runner=runner)
     data = envelope.get("data") or {}
     ran = envelope.get("status") == "ok" and (
         data.get("valid") is True or bool(data.get("rows") is not None))

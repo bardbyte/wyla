@@ -46,8 +46,12 @@ env/auth — per the E10 console contract), never a stack trace.
 from __future__ import annotations
 
 import base64
+import binascii
+import hashlib
+import json
 import os
 import ssl
+import tempfile
 import urllib.request
 from typing import Any
 from dataclasses import dataclass, field
@@ -259,6 +263,9 @@ def resolve_ssl() -> tuple[bool, str | None]:
     if os.environ.get("BQ_SSL_NO_VERIFY") == "1":
         return False, None
     bundle = _first_env("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE")
+    if not bundle:
+        from sahs.util.tls import corporate_ca_bundle
+        bundle = corporate_ca_bundle() or None
     return True, bundle
 
 
@@ -278,13 +285,94 @@ def _first_env(*names: str) -> str | None:
     for name in names:
         value = os.environ.get(name)
         if value and value.strip():
-            return value.strip()
+            return str(value).strip()
+    if os.environ.get("SAHS_ENV_FILE"):
+        return None
+    try:
+        from config.settings import Settings
+        configured = Settings.load()
+    except ImportError:
+        return None
+    for name in names:
+        value = configured.get(name)
+        if value and value.strip():
+            return str(value).strip()
     return None
+
+
+def _service_account_tempfile(value: str, *, label: str) -> Path | None:
+    contents: bytes | None = None
+    raw = value.strip()
+    if raw.startswith("data:application/json;base64,"):
+        encoded = raw.removeprefix("data:application/json;base64,")
+        try:
+            contents = base64.b64decode(encoded, validate=True)
+        except binascii.Error as exc:
+            raise AuthError(f"invalid base64-encoded {label} service-account JSON") from exc
+    elif raw.startswith("{"):
+        contents = raw.encode("utf-8")
+    else:
+        try:
+            decoded = base64.b64decode(raw, validate=True)
+            json.loads(decoded)
+            contents = decoded
+        except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError):
+            contents = None
+    if contents is None:
+        return None
+    try:
+        document = json.loads(contents)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AuthError(f"invalid {label} service-account JSON") from exc
+    if document.get("type") != "service_account":
+        raise AuthError(f"{label} service-account JSON has an invalid type")
+    digest = hashlib.sha256(contents).hexdigest()
+    path = Path(tempfile.gettempdir()) / f"{label}-sa-{digest}.json"
+    if not path.exists():
+        path.write_bytes(contents)
+        path.chmod(0o600)
+    return path
+
+
+def _secret_mount_candidates(*names: str) -> list[Path]:
+    """Files under the deployment's secret mount, when one is named by
+    SAHS_SECRETS_DIR. The enterprise build hard-codes its mount path;
+    this repository is public and does not."""
+    directory = (os.environ.get("SAHS_SECRETS_DIR") or "").strip()
+    return [Path(directory) / name for name in names] if directory else []
 
 
 def resolve_bq_key_path() -> Path | None:
     v = _first_env("SYNAPSE_BQ_SA_KEY", "GOOGLE_APPLICATION_CREDENTIALS")
-    return Path(v).expanduser() if v else None
+    if v:
+        inline = _service_account_tempfile(v, label="bq")
+        return inline or Path(v).expanduser()
+    for candidate in _secret_mount_candidates("key.json", "bq_key.json",
+                                              "sa_key.json"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def resolve_bq_auth_mode() -> str:
+    raw = (_first_env("SAHS_BQ_AUTH_MODE", "BQ_AUTH_MODE")
+           or "service_account").strip().lower().replace("-", "_")
+    aliases = {
+        "sa": "service_account",
+        "svc": "service_account",
+        "svc_id": "service_account",
+        "serviceaccount": "service_account",
+        "service_account": "service_account",
+        "user": "user",
+        "adc": "user",
+        "user_adc": "user",
+    }
+    mode = aliases.get(raw)
+    if mode is None:
+        raise AuthError(
+            "invalid BigQuery auth mode: set SAHS_BQ_AUTH_MODE or "
+            "BQ_AUTH_MODE to service_account or user")
+    return mode
 
 
 def resolve_vertex_key_path() -> Path | None:
@@ -413,12 +501,14 @@ class BQConnection:
     proxies: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def from_env(cls) -> "BQConnection":
+    def from_env(cls, *, require_key: bool = True) -> "BQConnection":
         """The full laptop bootstrap, mirroring the proven bq_connect
         flow: .env → validate → resolve endpoint → the route (direct,
         pinned on the connection) → SSL settings. Fails fast with a
         typed error (exit 3). The process environment is read, never
-        written."""
+        written. With ``require_key=False`` (a caller that brings its
+        own token provider, e.g. a user's delegated Google token) a
+        missing service-account key is not an error."""
         load_dotenv()
         project = resolve_bq_project()
         if not project:
@@ -426,12 +516,12 @@ class BQConnection:
                 "no BigQuery project configured: set BQ_PROJECT_ID (or "
                 "SYNAPSE_BQ_PROJECT / GOOGLE_CLOUD_PROJECT), e.g. in .env")
         key = resolve_bq_key_path()
-        if key is None:
+        if key is None and require_key:
             raise AuthError(
                 "no SA key configured: set GOOGLE_APPLICATION_"
                 "CREDENTIALS (or SYNAPSE_BQ_SA_KEY) to the key-file path, "
                 "e.g. in .env")
-        if not key.exists():
+        if key is not None and not key.exists():
             raise AuthError(f"BigQuery SA key not found on disk: {key}")
         endpoint = resolve_bq_endpoint()
         verify, bundle = resolve_ssl()

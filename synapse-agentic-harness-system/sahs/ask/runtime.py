@@ -18,6 +18,7 @@ from sahs.tools.api import Build
 from .budget import Abort, Budget
 from .events import EventBus
 from .loop import run_turn
+from sahs.util.paths import owner_paths
 from .store import SessionStore
 
 
@@ -75,9 +76,17 @@ class AskRuntime:
     def __init__(self, *, builds_root: Path, graph_root: Path,
                  store_path: Path, events_dir: Path | None = None,
                  model_factory: Callable[[Budget], Any] | None = None,
-                 snapshot_runner: Any = None) -> None:
+                 snapshot_runner: Any = None, runner: Any = None,
+                 owner_user_id: str = "") -> None:
         self.builds_root = Path(builds_root)
         self.graph_root = Path(graph_root)
+        # a signed-in person's runtime keeps its own store and event log
+        # under runs/ask/users/<id>/; "" is the single-developer mode
+        self.owner_user_id = (owner_user_id or "").strip()
+        store_path, events_dir = owner_paths(self.owner_user_id, store_path, events_dir)
+        # the live runner (a person's delegated BigQuery token, or the
+        # service account); None keeps live execution denied
+        self.runner = runner
         # the exploratory lane (Agent Loop v1 §9.5) is just the loop
         # with a frozen-extract runner attached; None keeps run_sql's
         # snapshot mode honest ("no frozen snapshot is attached")
@@ -181,7 +190,8 @@ class AskRuntime:
 
     # ── turns ────────────────────────────────────────────────
     def start_turn(self, session_id: str, text: str, *,
-                   choice: dict[str, Any] | None = None) -> dict:
+                   choice: dict[str, Any] | None = None,
+                   runner: Any = None) -> dict:
         session = self.store.get_session(session_id)
         if session is None:
             raise KeyError(session_id)
@@ -208,7 +218,8 @@ class AskRuntime:
                      budget=rt.budget, abort=rt.abort, model=model,
                      session=session, turn_id=turn_id, text=text,
                      choice=choice,
-                     snapshot_runner=self.snapshot_runner)
+                     snapshot_runner=self.snapshot_runner,
+                     runner=runner if runner is not None else self.runner)
 
         rt.thread = threading.Thread(target=worker, daemon=True,
                                      name=f"ask-{turn_id}")

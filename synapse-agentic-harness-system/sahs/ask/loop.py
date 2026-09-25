@@ -120,7 +120,7 @@ def _sentences(text: str):
 def _finish(*, build: Build, store: SessionStore, bus: EventBus,
             budget: Budget, abort: Abort, model: Any,
             session: dict[str, Any], turn_id: str, plan: Plan,
-            tables: list[str]) -> str:
+            tables: list[str], runner: Any = None) -> str:
     """contract → generate → verify → render: the ONE exit every
     answered turn shares. The fast path reaches it when the opening
     resolved everything; the agent loop reaches it at ``final``. The
@@ -145,7 +145,7 @@ def _finish(*, build: Build, store: SessionStore, bus: EventBus,
         model, build, plan,
         on_token=lambda chunk: bus.emit(
             "generate_token", turn_id=turn_id, delta=chunk),
-        abort_check=abort.check)
+        abort_check=abort.check, runner=runner)
     bus.emit("budget_tick", turn_id=turn_id, **budget.tick())
 
     # verify (fresh context, default-FAIL)
@@ -154,7 +154,7 @@ def _finish(*, build: Build, store: SessionStore, bus: EventBus,
         build, plan, contract, gen, model,
         on_progress=lambda criterion: bus.emit(
             "verify_progress", turn_id=turn_id, criterion=criterion),
-        abort_check=abort.check)
+        abort_check=abort.check, runner=runner)
     bus.emit("verify_verdict", turn_id=turn_id, **contract.to_dict())
 
     # render (refuses an ungoverned payload)
@@ -200,7 +200,7 @@ def run_turn(*, build: Build, store: SessionStore, bus: EventBus,
              session: dict[str, Any], turn_id: str, text: str,
              choice: dict[str, Any] | None = None,
              navigate: bool | None = None,
-             snapshot_runner: Any = None) -> None:
+             snapshot_runner: Any = None, runner: Any = None) -> None:
     session_id = session["id"]
     started = time.perf_counter()
     bus.emit("turn_started", turn_id=turn_id, text=text,
@@ -221,7 +221,7 @@ def run_turn(*, build: Build, store: SessionStore, bus: EventBus,
             return _finish(build=build, store=store, bus=bus,
                            budget=budget, abort=abort, model=model,
                            session=session, turn_id=turn_id,
-                           plan=plan, tables=tables)
+                           plan=plan, tables=tables, runner=runner)
 
         # ── a chip answer to the loop's OWN question resumes it ─
         # (resolver chips name a real slot; the loop's ask names

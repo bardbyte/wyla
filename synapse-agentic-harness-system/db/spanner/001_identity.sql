@@ -26,6 +26,10 @@ CREATE TABLE Users (
   Username            STRING(64)  NOT NULL,
   UsernameNormalized  STRING(64)  NOT NULL AS (LOWER(TRIM(Username))) STORED,
   DisplayName         STRING(200) NOT NULL,
+  -- the two halves of the name when the sign-in provides them; the
+  -- display name stays the one the app shows
+  FirstName           STRING(100),
+  LastName            STRING(100),
   -- pending_verification | active | locked | disabled | deleted
   Status              STRING(24)  NOT NULL DEFAULT ('pending_verification'),
   EmailVerifiedAt     TIMESTAMP,
