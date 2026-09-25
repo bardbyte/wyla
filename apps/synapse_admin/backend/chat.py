@@ -386,7 +386,7 @@ def post_message(session_id: str, req: NewMessage) -> dict:
     from sahs.ask.model import ModelUnavailable
     from sahs.ask.runtime import BuildUnavailable, TurnBusy
     from sahs.assistant.files import FileRefused
-    from sahs.loop.skills import SkillTooLarge
+    from sahs.loop.skills import SkillUnreadable
     try:
         return {"available": True,
                 **runtime.start_turn(session_id, req.text,
@@ -396,10 +396,11 @@ def post_message(session_id: str, req: NewMessage) -> dict:
         return _unavailable(f"no session {session_id}")
     except TurnBusy as e:
         return {"available": False, "reason": str(e), "busy": True}
-    # a pinned or slash-loaded skill over the size ceiling refuses the
-    # turn by name, the way a missing plane or a refused file does
+    # a pinned or slash-loaded skill whose file cannot be read refuses
+    # the turn by name, the way a missing plane or a refused file does
+    # (size never refuses: a pack over the ceiling loads as a library)
     except (BuildUnavailable, ModelUnavailable, FileRefused,
-            SkillTooLarge) as e:
+            SkillUnreadable) as e:
         return _unavailable(str(e))
 
 

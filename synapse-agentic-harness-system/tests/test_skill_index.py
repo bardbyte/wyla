@@ -247,6 +247,123 @@ def test_a_changed_skill_reindexes_only_itself(tmp_path):
     fresh.close()
 
 
+# ─── the index never fails a turn ────────────────────────────
+
+
+def test_an_index_file_that_cannot_be_used_falls_back_to_memory_once(
+        tmp_path, caplog):
+    """A corrupt file, a path that cannot be created, and a file that
+    stops taking writes: each falls back to one in-memory index for
+    the process, logged once per path, and the pack stays searchable.
+    The file is left as derived data to delete."""
+    import logging
+    import sqlite3
+
+    from sahs.loop import skill_index as si
+    from sahs.loop.skill_index import SkillIndex, open_index
+    pack = Source("notes", "Notes", "# Notes\n\n## Quorvex\n\nThe quorvex "
+                                    "rule holds.\n\n## Other\n\nUnrelated.\n")
+    caplog.set_level(logging.WARNING, logger="sahs.loop.skill_index")
+
+    # a corrupt file: not a database
+    graph = tmp_path / "corrupt"
+    (graph / "runs").mkdir(parents=True)
+    (graph / "runs" / "skill_index.sqlite3").write_bytes(b"not a database\n" * 40)
+    index = open_index(graph)
+    assert index.fallback.startswith("cannot open") and index.path is not None
+    assert index.ensure([pack]) == {"notes": "indexed"}
+    assert index.search("quorvex rule", ["notes"])[0].heading_path \
+        == "Notes > Quorvex"
+    assert index.toc("notes")[1]["heading_path"] == "Notes > Quorvex"
+    assert (graph / "runs" / "skill_index.sqlite3").read_bytes().startswith(
+        b"not a database")                      # left alone
+    # the process reuses that memory index: the pack is unchanged there
+    again = open_index(graph)
+    assert again.fallback and again.ensure([pack]) == {"notes": "unchanged"}
+    again.close()                               # never closes the shared db
+    assert again.search("quorvex", ["notes"])
+    warned = [r for r in caplog.records if "in-memory index" in r.getMessage()]
+    assert len(warned) == 1 and str(graph) in warned[0].getMessage()
+
+    # a path that cannot be created: runs/ is a file
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    (blocked / "runs").write_text("a file where the folder should be")
+    index = open_index(blocked)
+    assert index.fallback.startswith("cannot open")
+    assert index.ensure([pack]) == {"notes": "indexed"}
+    assert index.search("quorvex", ["notes"])
+
+    # a file that stops taking writes after it opened
+    ro = tmp_path / "ro"
+    index = open_index(ro)
+    assert not index.fallback
+    index._db.close()
+    index._db = sqlite3.connect(f"file:{si.index_path(ro)}?mode=ro", uri=True,
+                                check_same_thread=False)
+    index._db.row_factory = sqlite3.Row
+    assert index.ensure([pack]) == {"notes": "indexed"}
+    assert index.fallback.startswith("cannot write")
+    assert index.search("quorvex", ["notes"])[0].chunk_id == "c2"
+    assert index.ensure_routing([pack]) == {"notes": "indexed"}
+    assert index.rank_skills("quorvex")[0]["skill"] == "notes"
+    # three paths, three warnings — and none repeated
+    warned = [r for r in caplog.records if "in-memory index" in r.getMessage()]
+    assert len(warned) == 3
+    # a real file elsewhere still works as before
+    good = SkillIndex(tmp_path / "good" / "skill_index.sqlite3")
+    assert not good.fallback and good.ensure([pack]) == {"notes": "indexed"}
+
+
+def test_a_pack_the_chunker_cannot_read_is_indexed_as_one_chunk(
+        tmp_path, monkeypatch, caplog):
+    """When chunking a pack throws, the pack is still indexed — the
+    whole text as one section and one chunk, offsets exact — so it is
+    searchable and readable; the fault is logged once, and the pack is
+    re-chunked properly on the next load once the chunker can."""
+    import logging
+
+    from sahs.loop import skill_index as si
+    from sahs.loop.skill_index import (CHUNKER_VERSION,
+                                       FALLBACK_CHUNKER_VERSION, SkillIndex)
+    caplog.set_level(logging.WARNING, logger="sahs.loop.skill_index")
+    text = "# Notes\n\n## Quorvex\n\nThe quorvex rule holds.\n"
+    good = Source("fine", "Fine", "# Fine\n\nA fine pack.\n")
+    bad = Source("notes", "Notes", text)
+    real = si.chunk_markdown
+
+    def flaky(text, skill="", **kw):
+        if skill == "notes":
+            raise RuntimeError("boom")
+        return real(text, skill, **kw)
+
+    monkeypatch.setattr(si, "chunk_markdown", flaky)
+    index = SkillIndex(tmp_path / "skill_index.sqlite3")
+    assert index.ensure([good, bad]) == {"fine": "indexed", "notes": "indexed"}
+    assert index.single_chunk == ["notes"]
+    assert index.status("notes")["chunker_version"] == FALLBACK_CHUNKER_VERSION
+    assert index.status("fine")["chunker_version"] == CHUNKER_VERSION
+    assert index.overview("notes")["sections"] == 1 \
+        and index.overview("notes")["chunks"] == 1
+    (row,) = index.toc("notes")
+    assert row["heading_path"] == "Notes" and row["chunk_ids"] == ["c1"]
+    assert (row["start"], row["end"]) == (0, len(text))
+    hit = index.search("quorvex rule", ["notes"])[0]
+    assert hit.chunk_id == "c1" and (hit.start, hit.end) == (0, len(text))
+    page = index.read("notes", "c1")
+    assert page["text"] == text and text[page["start"]:page["end"]] == text
+    # logged once, even across a second ensure (which re-tries)
+    assert index.ensure([bad]) == {"notes": "reindexed"}
+    warned = [r for r in caplog.records if "single chunk" in r.getMessage()]
+    assert len(warned) == 1 and "'notes'" in warned[0].getMessage()
+    # the chunker recovers: the next load re-chunks properly
+    monkeypatch.setattr(si, "chunk_markdown", real)
+    assert index.ensure([bad, good]) == {"notes": "reindexed", "fine": "unchanged"}
+    assert index.status("notes")["chunker_version"] == CHUNKER_VERSION
+    assert [s["heading_path"] for s in index.toc("notes")] \
+        == ["Notes", "Notes > Quorvex"]
+
+
 def test_toc_and_read_carry_breadcrumbs_and_offsets(indexed):
     index, text, truths = indexed
     toc = index.toc("bundle")

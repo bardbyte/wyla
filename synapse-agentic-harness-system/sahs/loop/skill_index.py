@@ -21,6 +21,14 @@ to delete. It is keyed by (skill name, content hash, chunker version):
 an unchanged skill is never re-chunked, a changed one re-indexes on
 its next load, and only itself. Built lazily on first use.
 
+It never fails a turn. A file that cannot be opened or written (a
+read-only disk, a corrupt file) falls back to one in-memory index for
+the process, logged once per path; a pack the chunker cannot read
+falls back to a single chunk (the whole text as one section), logged
+once per pack, so it is still searchable and readable — and it is
+re-tried on the next load, since the fallback row carries no chunker
+version.
+
 Query expansion is lexical and deterministic: the query's terms, a
 small stemming of plural and verb endings, FTS5 prefix matching on
 the stem, the terms ANDed first and ORed to fill. ``Embedder`` is the
@@ -32,13 +40,18 @@ from __future__ import annotations
 
 import datetime as _dt
 import hashlib
+import logging
 import re
 import sqlite3
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Protocol
 
+_log = logging.getLogger("sahs.loop.skill_index")
+
 CHUNKER_VERSION = 1
+FALLBACK_CHUNKER_VERSION = 0    # a single-chunk row: re-tried next load
 CHARS_PER_TOKEN = 4                     # the estimate every budget uses
 TARGET_TOKENS = 1200
 OVERLAP_TOKENS = 150
@@ -451,23 +464,88 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+# the process's in-memory fallbacks, one per file path that could not
+# be used, so a turn after the first does not re-chunk what the last
+# one indexed; plus the paths already warned about (logged once)
+_MEMORY_FALLBACKS: dict[str, sqlite3.Connection] = {}
+_WARNED: set[str] = set()
+_FALLBACK_LOCK = threading.Lock()
+
+
+def _warn_once(key: str, message: str) -> None:
+    with _FALLBACK_LOCK:
+        if key in _WARNED:
+            return
+        _WARNED.add(key)
+    _log.warning(message)
+
+
+def _memory_db() -> sqlite3.Connection:
+    db = sqlite3.connect(":memory:", timeout=30.0, check_same_thread=False)
+    db.row_factory = sqlite3.Row
+    db.executescript(_SCHEMA)
+    return db
+
+
+def _shared_memory_db(path: str) -> sqlite3.Connection:
+    """The process's fallback index for a file that cannot be used:
+    created once per path, shared by every SkillIndex that falls
+    back on it."""
+    with _FALLBACK_LOCK:
+        db = _MEMORY_FALLBACKS.get(path)
+        if db is None:
+            db = _memory_db()
+            _MEMORY_FALLBACKS[path] = db
+        return db
+
+
 class SkillIndex:
-    """The card catalogue and the pages, over sqlite FTS5."""
+    """The card catalogue and the pages, over sqlite FTS5. ``fallback``
+    says why the index is in memory instead of at ``path`` ('' when
+    the file is in use); ``single_chunk`` names the skills the
+    chunker could not read, indexed as one chunk each."""
 
     def __init__(self, path: Path | str | None = None,
                  embedder: Embedder | None = None) -> None:
         self.path = Path(path) if path not in (None, ":memory:") else None
         self.embedder = embedder
         self.chunked: list[str] = []        # skills chunked this process
-        if self.path is not None:
+        self.fallback = ""                  # why memory, when it is
+        self.single_chunk: list[str] = []   # packs the chunker gave up on
+        self._shared = False                # a process-wide memory db
+        if self.path is None:
+            self._db = _memory_db()
+            return
+        try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(str(self.path) if self.path else ":memory:",
-                                   timeout=30.0, check_same_thread=False)
-        self._db.row_factory = sqlite3.Row
-        self._db.executescript(_SCHEMA)
+            self._db = sqlite3.connect(str(self.path), timeout=30.0,
+                                       check_same_thread=False)
+            self._db.row_factory = sqlite3.Row
+            self._db.executescript(_SCHEMA)
+        except (sqlite3.Error, OSError) as e:
+            self._go_memory(f"cannot open {self.path}: {e}")
+
+    def _go_memory(self, reason: str) -> None:
+        """Fall back to the process's in-memory index for this path:
+        the turn goes on, the file is left alone, and the reason is
+        logged once per path."""
+        key = str(self.path) if self.path else ":memory:"
+        _warn_once(key, f"skill index: {reason}; using an in-memory "
+                        "index for this process (the file is derived "
+                        "data: delete it, or fix the disk, and it "
+                        "rebuilds)")
+        try:
+            if getattr(self, "_db", None) is not None and not self._shared:
+                self._db.close()
+        except sqlite3.Error:
+            pass
+        self.fallback = reason
+        self._db = _shared_memory_db(key)
+        self._shared = True
 
     def close(self) -> None:
-        self._db.close()
+        if not self._shared:
+            self._db.close()
 
     def __enter__(self) -> "SkillIndex":
         return self
@@ -485,7 +563,19 @@ class SkillIndex:
 
     def ensure(self, sources: Iterable[SkillSource]) -> dict[str, str]:
         """Index what changed, skip what did not. Returns name →
-        indexed | reindexed | unchanged."""
+        indexed | reindexed | unchanged. A write the file refuses
+        (read-only, full, corrupt) moves the index to memory and
+        indexes every source there — the turn never fails."""
+        sources = list(sources)
+        try:
+            return self._ensure(sources)
+        except sqlite3.Error as e:
+            if self._shared:
+                raise
+            self._go_memory(f"cannot write {self.path}: {e}")
+            return self._ensure(sources)
+
+    def _ensure(self, sources: list[SkillSource]) -> dict[str, str]:
         out: dict[str, str] = {}
         for source in sources:
             name = str(source.name)
@@ -500,6 +590,30 @@ class SkillIndex:
             out[name] = "reindexed" if current else "indexed"
         return out
 
+    def _chunk(self, source: SkillSource
+               ) -> tuple[list[Section], list[Chunk], int]:
+        """The chunker's sections and chunks — or, when it throws on
+        this pack, one section and one chunk holding the whole text
+        (still searchable, still readable, offsets exact), logged
+        once per pack and re-tried on the next load."""
+        name = str(source.name)
+        try:
+            sections, chunks = chunk_markdown(source.text, name)
+            return sections, chunks, CHUNKER_VERSION
+        except Exception as e:    # noqa: BLE001 — any chunker fault
+            _warn_once(f"chunk:{name}",
+                       f"skill index: chunking {name!r} failed ({e!r}); "
+                       "indexed as a single chunk (the whole text as one "
+                       "section) until the next load")
+            if name not in self.single_chunk:
+                self.single_chunk.append(name)
+            title = str(source.title or name)
+            text = source.text
+            chunk = Chunk(name, "c1", "s1", title, 0, len(text), text, title)
+            section = Section(name, "s1", title, 1, title, 0, len(text),
+                              ("c1",))
+            return [section], [chunk], FALLBACK_CHUNKER_VERSION
+
     def drop(self, name: str) -> None:
         """Forget a skill's pages (its routing row stays until its
         text changes or ``drop_routing``)."""
@@ -511,7 +625,7 @@ class SkillIndex:
 
     def _index(self, source: SkillSource, digest: str) -> None:
         name = str(source.name)
-        sections, chunks = chunk_markdown(source.text, name)
+        sections, chunks, chunker_version = self._chunk(source)
         version = str(getattr(source, "updated", "")
                       or getattr(source, "version", "")
                       or getattr(source, "mtime", "") or "")
@@ -521,7 +635,7 @@ class SkillIndex:
             self.drop(name)
             self._db.execute(
                 "INSERT INTO skills VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (name, digest, CHUNKER_VERSION, str(source.title or name),
+                (name, digest, chunker_version, str(source.title or name),
                  version, len(source.text), len(sections), len(chunks),
                  stamp, source.text))
             self._db.executemany(
@@ -545,7 +659,19 @@ class SkillIndex:
         """Index what routes to each skill — its frontmatter
         description and aliases, its title, its section headings —
         for every pack on the shelf, whatever its size. Keyed by the
-        content hash like the pages: unchanged skills cost a hash."""
+        content hash like the pages: unchanged skills cost a hash.
+        A write the file refuses moves the index to memory, like
+        ``ensure``."""
+        sources = list(sources)
+        try:
+            return self._ensure_routing(sources)
+        except sqlite3.Error as e:
+            if self._shared:
+                raise
+            self._go_memory(f"cannot write {self.path}: {e}")
+            return self._ensure_routing(sources)
+
+    def _ensure_routing(self, sources: list[SkillSource]) -> dict[str, str]:
         from .skills import policy_of
         out: dict[str, str] = {}
         stamp = _dt.datetime.now(tz=_dt.timezone.utc).isoformat(
@@ -835,11 +961,14 @@ def _span(section: dict[str, Any]) -> dict[str, Any]:
 def open_index(graph_root: Path | None,
                embedder: Embedder | None = None) -> SkillIndex:
     """The graph's index (``<graph>/runs/skill_index.sqlite3``), or an
-    in-memory one when there is no graph root."""
+    in-memory one when there is no graph root — or when the file
+    cannot be used (then the process's fallback for that path, see
+    ``SkillIndex``)."""
     return SkillIndex(index_path(graph_root), embedder=embedder)
 
 
-__all__ = ["CHUNKER_VERSION", "TARGET_CHARS", "OVERLAP_CHARS", "INDEX_FILE",
+__all__ = ["CHUNKER_VERSION", "FALLBACK_CHUNKER_VERSION", "TARGET_CHARS",
+           "OVERLAP_CHARS", "INDEX_FILE",
            "Chunk", "Section", "Hit", "Embedder", "SkillSource",
            "SkillIndex", "chunk_markdown", "estimate_tokens",
            "stem_variants", "query_terms", "fts_queries", "index_path",

@@ -8,6 +8,7 @@ turn runs is refused with a reason rather than queued invisibly.
 
 from __future__ import annotations
 
+import os
 import threading
 import uuid
 from pathlib import Path
@@ -126,6 +127,16 @@ class AskRuntime:
         from .model import VertexModel          # imported late: env-bound
         return VertexModel.from_env(budget)
 
+    @property
+    def model_name(self) -> str:
+        """The engine this lane runs on, for the skill budgets
+        (``sahs.util.profiles``): the Vertex model the .env names;
+        '' (the conservative unknown-engine row) under a scripted
+        model factory or an unset env."""
+        if self._model_factory is not None:
+            return ""
+        return (os.environ.get("VERTEX_MODEL") or "").strip()
+
     # ── sessions ─────────────────────────────────────────────
     def runtime(self, session_id: str) -> _SessionRuntime:
         with self._lock:
@@ -162,7 +173,7 @@ class AskRuntime:
         silently 'loaded'."""
         from sahs.loop.skills import (
             LOADED_VAR,
-            SkillTooLarge,
+            SkillUnreadable,
             load_skills,
             max_loaded,
         )
@@ -177,8 +188,10 @@ class AskRuntime:
                               "matters for this session"}
         try:
             loaded, missing = load_skills(self.graph_root, list(names))
-        except SkillTooLarge as e:
-            # over the size ceiling: refused by name, never cut
+        except SkillUnreadable as e:
+            # broken input (a file that cannot be read): refused by
+            # name with the reason. Size never refuses — a skill over
+            # the ceiling pins and the turn holds it as a library.
             return {"ok": False, "reason": str(e)}
         if missing:
             return {"ok": False,
@@ -213,11 +226,23 @@ class AskRuntime:
         rt.abort = Abort()
         rt.current_turn = turn_id
         # the session's loaded skills ride the session dict into the
-        # turn (Agent Loop v1 §2: Context(..., skills=session.skills))
+        # turn (Agent Loop v1 §2: Context(..., skills=session.skills)):
+        # whole when they fit this engine's whole-load limit, and as
+        # a library when they do not — this lane has no lookup tools,
+        # so the library is STATIC retrieval: the contents plus the
+        # top passages for this ask under the engine's budget, built
+        # here and rendered into the navigator's prompt (never a
+        # refusal, never a cut)
+        from sahs.assistant.skills_loader import skill_context
         from sahs.loop.skills import load_skills
         loaded, _missing = load_skills(self.graph_root,
                                        list(session.get("skills") or []))
-        session["_skills_loaded"] = loaded
+        library = skill_context(self.graph_root, loaded, text,
+                                self.model_name, "medium", tools=False)
+        session["_skills_loaded"] = library.whole
+        session["_skill_library"] = library.block
+        session["_skills_library"] = library.searchable_names
+        session["_skills_record"] = library.event()
         self.store.add_message(session_id, "user", text, turn_id=turn_id,
                                payload={"choice": choice} if choice else None)
         model = LazyModel(lambda: self.model_for(rt.budget))

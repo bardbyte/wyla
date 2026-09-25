@@ -28,12 +28,16 @@ names and one-liners (``render_skill_index``); the full text enters a
 turn only when the model calls ``load_skill`` — the tool result IS
 the injection — or when the user preloads packs via the session
 picker (``load_packs``). A pack over the whole-load ceiling
-(``SAHS_MAX_SKILL_CHARS``) loads as a LIBRARY instead: its table of
-contents and the passages matching the ask, fitted to the engine's
-budget (``skill_context``), with the kit's ``skill_toc`` /
-``skill_search`` / ``skill_read`` for the rest (docs/skill-retrieval.md).
-Either way the pins from v1 hold: skills steer, they never assert
-facts, and every load is disclosed.
+(``SAHS_MAX_SKILL_CHARS``, under the engine's own window) loads as a
+LIBRARY instead: its table of contents and the passages matching the
+ask, fitted to the engine's budget (``skill_context``), with the kit's
+``skill_toc`` / ``skill_search`` / ``skill_read`` for the rest
+(docs/skill-retrieval.md). Whole when it fits, a library when it does
+not, never a refusal: a frontmatter that asks for the whole file is
+a preference the block and the loader record disclose (``preferred:
+whole``) when the pack does not fit. Either way the pins from v1
+hold: skills steer, they never assert facts, and every load is
+disclosed.
 """
 
 from __future__ import annotations
@@ -44,10 +48,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 from sahs.loop.skills import (
+    PREFERRED_SECTIONED,
+    PREFERRED_WHOLE,
     SearchableSkill,
     Skill,
-    SkillRefused,
     _parse,
+    check_readable,
+    library_reason,
     max_loaded,
     max_skill_chars,
     policy_of,
@@ -112,6 +119,7 @@ def _packs(root: Path, origin: str, owner: str = "") -> list[Pack]:
         s = _parse(path)
         out.append(Pack(name=s.name, title=s.title,
                         description=s.description, text=s.text,
+                        error=s.error,
                         origin=origin, owner=owner, updated=_updated(path)))
     return out
 
@@ -185,26 +193,20 @@ def load_packs(graph_root: Path | None,
                names: list[str],
                owner: str = "") -> tuple[list[Pack], list[str]]:
     """(loaded, missing) across the shelves — the session-preload
-    resolver. Missing names are reported, never invented. A pack over
-    the size ceiling loads too: the turn splits the list with
-    ``split_by_policy`` and the oversized ones enter the prompt as a
-    searchable library (``skill_context``), never as a cut of
-    themselves — unless the pack's frontmatter requires the whole
-    file and it is over the global ceiling, which no engine can
-    exceed: that refuses here, by name, fail closed (``SkillRefused``,
-    a ``SkillTooLarge`` the pickers already catch)."""
+    resolver. Missing names are reported, never invented. Size never
+    refuses: a pack over the ceiling pins too, and the turn splits
+    the list with ``split_by_policy`` so the oversized ones enter the
+    prompt as a searchable library (``skill_context``), never as a
+    cut of themselves. The one refusal is a file that cannot be read
+    (``SkillUnreadable``, by name — the pickers show the reason)."""
     available = {p.name: p for p in all_skills(graph_root, owner)}
-    ceiling = max_skill_chars()
     loaded, missing = [], []
     for name in names[:max_loaded()]:
         pack = available.get(name)
         if pack is None:
             missing.append(name)
             continue
-        policy = policy_of(pack.text)
-        if policy.requires_whole and pack.chars > ceiling:
-            raise SkillRefused(pack, ceiling, why=policy.why)
-        loaded.append(pack)
+        loaded.append(check_readable(pack))
     return loaded, missing
 
 
@@ -220,32 +222,47 @@ def whole_load_limit(model_name: str = "",
 
 def split_by_policy(packs: list[Pack], limit: int, model_name: str = ""
                     ) -> tuple[list[Pack], list[Pack]]:
-    """(whole, searchable) at this turn's whole-load limit. A pack
-    over it whose frontmatter requires the whole file raises
-    ``SkillRefused`` naming the engine and its budget — never a
-    partial load, never a silent fall back to search."""
-    whole, searchable = [], []
-    for pack in packs:
-        if pack.chars <= limit:
-            whole.append(pack)
-            continue
-        policy = policy_of(pack.text)
-        if policy.requires_whole:
-            raise SkillRefused(pack, limit, model=model_name or "this model",
-                               why=policy.why)
-        searchable.append(pack)
+    """(whole, searchable) at this turn's whole-load limit: whole
+    when it fits, a library when it does not — never a refusal. The
+    frontmatter's ``runtime_loading`` / ``truncation_allowed`` do not
+    move a pack between the two lists; they are the preference
+    ``preference_of`` reports and the block discloses."""
+    whole = [p for p in packs if p.chars <= limit]
+    searchable = [p for p in packs if p.chars > limit]
     return whole, searchable
 
 
+def preference_of(pack: Skill) -> tuple[str, str]:
+    """(preferred, why) from the frontmatter: ``whole`` with the keys
+    that asked for it (``runtime_loading: full_file_required``,
+    ``truncation_allowed: false``), else ``sectioned`` and ''."""
+    policy = policy_of(pack.text)
+    if policy.requires_whole:
+        return PREFERRED_WHOLE, policy.why
+    return PREFERRED_SECTIONED, ""
+
+
+MODE_WHOLE = "whole"
+MODE_LIBRARY = "library"
+
+
 def loader_record(pack: Pack, mode: str, *, rendered: int = 0,
-                  sent: int = 0) -> dict[str, Any]:
+                  sent: int = 0, limit: int = 0,
+                  model_name: str = "") -> dict[str, Any]:
     """One line of the turn's loader record (the ``skills_loaded``
     event): what the skill is, what the renderer made of it, what
-    reached the prompt, and how — whole is never truncated."""
+    reached the prompt, how (``whole`` or ``library``), what its
+    frontmatter preferred, and — for a library — the sizes that put
+    it there. ``truncated`` says the prompt holds less than the file;
+    it is always false for a whole load, and for a library the whole
+    text stays reachable by section, so nothing is cut."""
+    preferred, why = preference_of(pack)
+    reason = (library_reason(pack, limit, model_name, why)
+              if mode == MODE_LIBRARY else "")
     return {"skill_name": pack.name, "source_chars": pack.chars,
             "rendered_chars": int(rendered), "sent_chars": int(sent),
-            "mode": mode,
-            "truncated": mode == "sectioned" and sent < pack.chars}
+            "mode": mode, "preferred": preferred, "reason": reason,
+            "truncated": mode == MODE_LIBRARY and sent < pack.chars}
 
 
 # ─── the searchable library: catalogue + pages, under a budget ──
@@ -314,8 +331,7 @@ class SkillContext:
     def event(self) -> dict[str, Any]:
         """The ``skills_loaded`` event's fields."""
         return {"skills": list(self.records),
-                "skills_loaded": [r["skill_name"] for r in self.records
-                                  if r["mode"] != "refused"],
+                "skills_loaded": [r["skill_name"] for r in self.records],
                 "aggregate_skill_chars": self.aggregate_skill_chars,
                 "whole_load_limit": self.limit,
                 "retrieval_budget": self.budget,
@@ -327,41 +343,36 @@ def skill_context(graph_root: Path | None, packs: list[Pack],
                   stop: str = "medium", *,
                   index: Any = None,
                   limit: int | None = None,
-                  shelf: list[Pack] | None = None) -> SkillContext:
+                  shelf: list[Pack] | None = None,
+                  tools: bool = True) -> SkillContext:
     """Split the loaded packs at this engine's whole-load limit
-    (``whole_load_limit``; a pack whose frontmatter requires the
-    whole file raises ``SkillRefused`` over it, carrying the partial
-    context as ``.context`` for the loader record) and, for the
-    searchable ones, build the prompt block: each pack's contents
-    (fitted) and the top passages for ``query`` at this engine's fold
-    for ``stop`` (``profiles.skill_retrieval_for``). With ``shelf``,
-    the routing hint ranks the shelf's packs for the query
-    (``likely``). The index lives at ``<graph>/runs/skill_index.sqlite3``
-    and is built lazily: an unchanged pack costs a hash, nothing more."""
+    (``whole_load_limit``): whole when it fits, a library when it
+    does not, never a refusal. For the searchable ones, build the
+    prompt block: each pack's contents (fitted) and the top passages
+    for ``query`` at this engine's fold for ``stop``
+    (``profiles.skill_retrieval_for``), each block saying ``mode:
+    library``, the frontmatter's preference and the sizes. With
+    ``shelf``, the routing hint ranks the shelf's packs for the query
+    (``likely``). ``tools=False`` renders the v1 navigator's static
+    block (no lookup tool named). The index lives at
+    ``<graph>/runs/skill_index.sqlite3`` and is built lazily: an
+    unchanged pack costs a hash, nothing more; it never fails a turn
+    (memory when the file cannot be used, one chunk when the chunker
+    cannot read a pack)."""
     from sahs.util.profiles import skill_retrieval_for
 
     from sahs.loop.skill_index import open_index
 
     limit = whole_load_limit(model_name) if limit is None else limit
     ctx = SkillContext(limit=limit)
-    try:
-        whole, searchable = split_by_policy(list(packs), limit, model_name)
-    except SkillRefused as refused:
-        # fail closed: the record says so, then the caller refuses
-        for pack in packs:
-            if pack.name == refused.skill.name:
-                ctx.records.append(loader_record(pack, "refused"))
-            elif pack.chars <= limit:
-                ctx.records.append(loader_record(
-                    pack, "whole", rendered=pack.chars, sent=0))
-        refused.context = ctx            # type: ignore[attr-defined]
-        raise
+    whole, searchable = split_by_policy(list(packs), limit, model_name)
     ctx.whole, ctx.searchable = whole, searchable
     for pack in whole:
         # what render_skills adds for this pack: the heading, the text
         shown = len(f"### {pack.title}\n{pack.text.strip()}\n")
-        ctx.records.append(loader_record(pack, "whole", rendered=shown,
-                                         sent=shown))
+        ctx.records.append(loader_record(pack, MODE_WHOLE, rendered=shown,
+                                         sent=shown, limit=limit,
+                                         model_name=model_name))
     if shelf:
         ctx.index = index if index is not None else open_index(graph_root)
         ctx.likely = rank_shelf(ctx.index, list(shelf), query)
@@ -375,9 +386,17 @@ def skill_context(graph_root: Path | None, packs: list[Pack],
     names = [p.name for p in searchable]
     hits = ctx.index.search(query, skills=names, k=k) if query.strip() \
         else []
+    # what each pack's frontmatter preferred, and the sizes that put
+    # it in the library: disclosed on the block and in the record
+    marks: dict[str, tuple[str, str]] = {}
+    for pack in searchable:
+        preferred, why = preference_of(pack)
+        marks[pack.name] = (preferred,
+                            library_reason(pack, limit, model_name, why))
     header = len(render_searchable_skills(
-        [SearchableSkill(p.name, p.title, p.chars, 0, 0)
-         for p in searchable], limit))
+        [SearchableSkill(p.name, p.title, p.chars, 0, 0,
+                         preferred=marks[p.name][0], reason=marks[p.name][1])
+         for p in searchable], limit, tools=tools))
     toc_budget = max(0, int(budget * TOC_SHARE) - header) // len(searchable)
     views: list[SearchableSkill] = []
     for pack in searchable:
@@ -386,7 +405,7 @@ def skill_context(graph_root: Path | None, packs: list[Pack],
         views.append(SearchableSkill(
             pack.name, pack.title, pack.chars,
             int(info.get("sections") or 0), int(info.get("chunks") or 0),
-            tuple(lines), omitted, (), 0))
+            tuple(lines), omitted, (), 0, *marks[pack.name]))
     # the pages: in rank order, each whole or not at all, while the
     # rendered block stays under the budget
     by_name = {v.name: i for i, v in enumerate(views)}
@@ -398,7 +417,8 @@ def skill_context(graph_root: Path | None, packs: list[Pack],
         return render_searchable_skills(
             [SearchableSkill(v.name, v.title, v.chars, v.sections, v.chunks,
                              v.toc, v.toc_omitted, tuple(passages[v.name]),
-                             matched.get(v.name, 0)) for v in views], limit)
+                             matched.get(v.name, 0), v.preferred, v.reason)
+             for v in views], limit, tools=tools)
     block = _render()
     found: dict[str, list[dict]] = {v.name: [] for v in views}
     for hit in hits:
@@ -421,7 +441,8 @@ def skill_context(graph_root: Path | None, packs: list[Pack],
     ctx.views = [SearchableSkill(v.name, v.title, v.chars, v.sections,
                                  v.chunks, v.toc, v.toc_omitted,
                                  tuple(passages[v.name]),
-                                 matched.get(v.name, 0)) for v in views]
+                                 matched.get(v.name, 0), v.preferred,
+                                 v.reason) for v in views]
     ctx.block = block
     by_pack = {p.name: p for p in searchable}
     for view in ctx.views:
@@ -430,13 +451,14 @@ def skill_context(graph_root: Path | None, packs: list[Pack],
         full = SearchableSkill(view.name, view.title, view.chars,
                                view.sections, view.chunks, view.toc,
                                view.toc_omitted, tuple(found[view.name]),
-                               view.matched)
+                               view.matched, view.preferred, view.reason)
         ctx.records.append(loader_record(
-            by_pack[view.name], "sectioned",
+            by_pack[view.name], MODE_LIBRARY,
             rendered=len(render_searchable_skills([full], limit,
-                                                  header=False)),
+                                                  header=False, tools=tools)),
             sent=len(render_searchable_skills([view], limit,
-                                              header=False))))
+                                              header=False, tools=tools)),
+            limit=limit, model_name=model_name))
     return ctx
 
 
@@ -491,5 +513,5 @@ __all__ = ["BUILTIN", "UNREVIEWED", "Pack", "builtin_root", "author_of",
            "user_root", "builtin_skills", "all_skills", "get_skill",
            "load_packs", "render_skill_index", "SkillContext",
            "skill_context", "toc_lines", "TOC_TOOL_CAP",
-           "whole_load_limit", "split_by_policy", "loader_record",
-           "rank_shelf"]
+           "whole_load_limit", "split_by_policy", "preference_of",
+           "loader_record", "MODE_WHOLE", "MODE_LIBRARY", "rank_shelf"]
