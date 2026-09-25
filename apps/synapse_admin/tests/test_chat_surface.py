@@ -241,7 +241,7 @@ def test_the_ask_starts_like_a_chat_assistant_and_hands_queries_over():
     assert "chatRun" in API_JS and "{ text, depth, mode, model }" in API_JS
     for piece in ("/run\"", "run_proposal", "RunProposal",
                   "mode=req.mode", "dashboard", '"user_name"',
-                  '"model": runtime.label_for(plane)'):
+                  '"choice": runtime.choice_of(session)'):
         assert piece in BACKEND, piece
     # the mode and the slash command are the runtime's, not the page's
     runtime_py = (SILO / "sahs" / "assistant" / "runtime.py").read_text(
@@ -310,7 +310,7 @@ def test_the_composer_switches_models_and_explains_every_dial():
                   "api.chatDials()", "api.chatSetModel(",
                   "state.mode, state.plane", "model not switched",
                   "help-row", "help-group", "not configured",
-                  "Depth <span>", "Model <span>",
+                  "Thinking effort <span>", "Model <span>",
                   "from the next message on"):
         assert piece in CHAT_JS, piece
     for cls in (".chat-plane", ".chat-help", ".chat-help-pop",

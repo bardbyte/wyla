@@ -285,29 +285,27 @@ def test_logo_from_the_env_replaces_the_words(client, tmp_path, monkeypatch):
     assert ".brand-logo" in CSS
 
 
-def test_the_second_surface_keeps_one_dial(client):
-    """DECISION: the composer on this surface carries the depth dial
-    and its "?" alone. No chat/autopilot switch — the mode is fixed
-    on the page — and no model picker: the send carries no plane, so
-    the chat rides the one it has. The "?" still reads the catalog
-    the admin console reads. The admin console keeps both switches."""
-    for piece in ('id="chat-depth"', 'id="chat-help"', "chat-help-pop",
-                  "api.chatDials()", 'const MODE = "chat"',
-                  'state.mode, ""', "help-group", "Depth <span>"):
+def test_the_second_surface_carries_the_two_knobs_and_one_mode(client):
+    """DECISION (revised): the composer on this surface carries the
+    Model knob and the Thinking-effort knob, the same two the admin
+    console has, over hidden selects the send path reads; the "?" reads
+    the catalog the admin console reads. No chat/autopilot switch: the
+    mode is fixed on the page."""
+    for piece in ('id="chat-depth"', 'id="chat-model"', 'id="chat-depth-btn"',
+                  'id="chat-model-btn"', 'id="chat-help"', "chat-help-pop",
+                  "api.chatDials()", "api.chatSetModel(", 'const MODE = "chat"',
+                  'state.mode, ""', "help-group", "Thinking effort <span>", "Model <span>"):
         assert piece in CHAT, piece
-    for gone in ('id="chat-model"', 'id="chat-mode"', "chatSetModel",
-                 "Autopilot", "synapse-chat-mode", "state.plane",
-                 "planeSel", "Model <span>"):
+    for gone in ('id="chat-mode"', "Autopilot", "synapse-chat-mode"):
         assert gone not in CHAT, gone
     app_css = (FRONT / "styles" / "app.css").read_text(encoding="utf-8")
-    for cls in (".chat-depth", ".chat-help", ".chat-help-pop",
+    for cls in (".chat-depth", ".chat-help", ".chat-help-pop", ".chat-pill", ".knob-pop",
                 ".help-group + .help-group", ".help-row"):
         assert cls in app_css, cls
-    for gone in (".chat-plane", ".chat-mode-select"):
-        assert gone not in app_css, gone
+    assert ".chat-mode-select" not in app_css
     dials = client.get("/api/chat/dials").json()
-    assert len(dials["depths"]) == 3
-    assert "chatSetModel" not in client.get("/synapse/js/api.js").text
+    assert len(dials["depths"]) == 5 and len(dials["models"]) >= 2
+    assert "chatSetModel" in client.get("/synapse/js/api.js").text
 
 
 def test_data_products_filter_by_line_of_business(client):
@@ -572,8 +570,8 @@ def test_the_shelf_and_the_help_read_plainly():
     assert "(row.messages ?? 1) > 0" in chats
     assert 'find((r) => r.messages === 0)' in CHAT
     assert "Mode <span>" not in CHAT and "on Vertex" not in CHAT
-    assert "Depth <span>how much Radix thinks before each step" in CHAT
-    assert 'if (d) o.title = d.means;' in CHAT
+    assert "Thinking effort <span>how much Radix thinks before each step" in CHAT
+    assert 'depthKnob.setDepths(dials.depths || [])' in CHAT
     assert "Metrics Explorer" not in INDEX
 
 

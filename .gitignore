@@ -114,3 +114,6 @@ node_modules/
 
 # laptop input data — never commit
 meridian-data/
+
+# the sanitizer's own scan state: local only, it names what it scrubbed
+.mystify/

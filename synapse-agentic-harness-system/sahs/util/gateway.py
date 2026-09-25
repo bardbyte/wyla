@@ -35,16 +35,123 @@ from typing import Any, Callable, Iterator
 from sahs.util.auth import (_first_env, describe_route, env_proxies,
                             plane_opener, redact_url)
 
-IDP_TOKEN_URL = ("https://oneidentityapi-dev.aexp.com/security/digital"
-                   "/v1/application/token")
-GATEWAY_BASE_URL = "https://eag-dev.aexp.com/genai/google/v1"
+# the two enterprise hosts are configuration, never source: the token
+# service that mints the bearer (IDP_TOKEN_URL) and the gateway's Gemini
+# root (GATEWAY_BASE_URL, …/genai/google/v1). Empty here; the .env names them
+IDP_TOKEN_URL = ""
+GATEWAY_BASE_URL = ""
 DEFAULT_MODEL = "gemini-2.5-pro"
-DEFAULT_SCOPES = [
-    "/genai/google/v1/models/gemini-2.5-pro/**::post",
-    "/genai/google/v1/models/gemini-2.5-flash/**::post",
+EMBEDDING_SCOPES = [
     "/genai/google/v1/models/bge-large-en/embeddings/**::post",
     "/genai/google/v1/models/bge-large-en/**::post",
 ]
+DEFAULT_SCOPES = [
+    "/genai/google/v1/models/gemini-2.5-pro/**::post",
+    "/genai/google/v1/models/gemini-2.5-flash/**::post",
+    *EMBEDDING_SCOPES,
+]
+
+
+# ── the models the gateway serves ──────────────────────────────
+# One plane, several models. GATEWAY_MODELS lists them (comma or space
+# separated); unset, the plane serves GATEWAY_MODEL alone, as before.
+# Each model has a thinking style and an output cap:
+#   budget  2.5: thinkingConfig.thinkingBudget, counted against the cap
+#   level   3.x: thinkingConfig.thinkingLevel (low | medium | high)
+#   none    no thinkingConfig at all
+# GATEWAY_MODEL_THINKING=gemini-3.1-flash-lite:none,… overrides the
+# family default; GATEWAY_MODEL_CAPS=gemini-3.5-flash:32768,… the caps.
+
+THINKING_KINDS = ("budget", "level", "none")
+DEFAULT_OUTPUT_CAP = 65536
+# the dial's five levels as a level model spells them: the ends fold
+# onto the nearest level every 3.x model accepts (Flash knows minimal;
+# Pro knows low and high; GATEWAY_THINKING_LEVELS says so per deployment)
+DEFAULT_THINKING_LEVELS = {"minimal": "low", "low": "low", "medium": "medium",
+                           "high": "high", "max": "high"}
+
+
+def _split_list(raw: str) -> list[str]:
+    return [x for x in raw.replace(",", " ").split() if x]
+
+
+def _pairs(raw: str) -> dict[str, str]:
+    """"a:1,b:2" → {"a": "1", "b": "2"}; anything without a colon is skipped."""
+    out: dict[str, str] = {}
+    for item in (raw or "").split(","):
+        key, sep, value = item.strip().partition(":")
+        if sep and key.strip() and value.strip():
+            out[key.strip()] = value.strip()
+    return out
+
+
+def model_scope(model: str) -> str:
+    """The gateway's path-pattern scope for one model."""
+    return f"/genai/google/v1/models/{model}/**::post"
+
+
+def default_gateway_model(env: dict[str, str] | None = None) -> str:
+    env = dict(os.environ if env is None else env)
+    return (env.get("GATEWAY_MODEL") or env.get("GEMINI_MODEL") or DEFAULT_MODEL).strip()
+
+
+def gateway_models(env: dict[str, str] | None = None) -> list[str]:
+    """The models this gateway serves, the default first: GATEWAY_MODELS,
+    else the one model GATEWAY_MODEL names."""
+    env = dict(os.environ if env is None else env)
+    default = default_gateway_model(env)
+    listed = _split_list(env.get("GATEWAY_MODELS") or "")
+    # the default is always served, and always first, whether or not the
+    # list names it: GATEWAY_MODEL keeps its meaning
+    ordered = [default]
+    ordered += [m for m in listed if m not in ordered]
+    return ordered
+
+
+def scopes_for(env: dict[str, str] | None = None) -> list[str]:
+    """The scopes the token asks for: GATEWAY_SCOPES as given; else, when
+    GATEWAY_MODELS names the models, one path pattern per model plus the
+    embedding scopes; else the guide's four."""
+    env = dict(os.environ if env is None else env)
+    given = [s.strip() for s in (env.get("GATEWAY_SCOPES") or "").split(",") if s.strip()]
+    if given:
+        return given
+    if (env.get("GATEWAY_MODELS") or "").strip():
+        return [model_scope(m) for m in gateway_models(env)] + list(EMBEDDING_SCOPES)
+    return list(DEFAULT_SCOPES)
+
+
+def thinking_kind(model: str, env: dict[str, str] | None = None) -> str:
+    """How this model takes its depth: by family, unless
+    GATEWAY_MODEL_THINKING says otherwise for it."""
+    env = dict(os.environ if env is None else env)
+    given = _pairs(env.get("GATEWAY_MODEL_THINKING") or "").get(model, "").lower()
+    if given in THINKING_KINDS:
+        return given
+    name = (model or "").lower()
+    if name.startswith("gemini-2.5"):
+        return "budget"
+    if name.startswith("gemini-3"):
+        return "level"
+    return "budget"
+
+
+def thinking_levels(env: dict[str, str] | None = None) -> dict[str, str]:
+    """The depth dial's levels as the API spells them for a level model:
+    GATEWAY_THINKING_LEVELS=minimal:low,low:low,medium:medium,high:high,max:high
+    (the default)."""
+    env = dict(os.environ if env is None else env)
+    out = dict(DEFAULT_THINKING_LEVELS)
+    for key, value in _pairs(env.get("GATEWAY_THINKING_LEVELS") or "").items():
+        if key in out:
+            out[key] = value
+    return out
+
+
+def output_cap(model: str, env: dict[str, str] | None = None) -> int:
+    env = dict(os.environ if env is None else env)
+    raw = _pairs(env.get("GATEWAY_MODEL_CAPS") or "").get(model, "")
+    return int(raw) if raw.isdigit() else DEFAULT_OUTPUT_CAP
 # the identity service answers {"authorization_token": "…"} (the laptop, 2026-09-05);
 # the other names are the usual suspects, tried after it
 TOKEN_FIELDS = ("authorization_token", "authorizationToken", "access_token",
@@ -410,6 +517,8 @@ class Config:
     token_url: str = IDP_TOKEN_URL
     base_url: str = GATEWAY_BASE_URL
     model: str = DEFAULT_MODEL
+    # every model this gateway serves (GATEWAY_MODELS); model is the default
+    models: list[str] = field(default_factory=lambda: [DEFAULT_MODEL])
     version: str = "2"
     scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
     timestamp_unit: str = "ms"
@@ -425,8 +534,8 @@ class Config:
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Config":
         env = dict(os.environ if env is None else env)
-        scopes = [s.strip() for s in (env.get("GATEWAY_SCOPES") or "").split(",")
-                  if s.strip()] or list(DEFAULT_SCOPES)
+        scopes = scopes_for(env)
+        models = gateway_models(env)
         try:
             budget = int(env.get("THINKING_BUDGET") or 1056)
         except ValueError:
@@ -441,8 +550,8 @@ class Config:
             # GATEWAY_MODEL first: GEMINI_MODEL is also read by the Vertex
             # plane as a fallback, so setting it for this check would
             # move the chat's model too
-            model=(env.get("GATEWAY_MODEL") or env.get("GEMINI_MODEL")
-                   or DEFAULT_MODEL).strip(),
+            model=models[0],
+            models=models,
             version=str(env.get("AUTH_VERSION") or "2").strip(),
             scopes=scopes,
             timestamp_unit=(env.get("IDP_TIMESTAMP_UNIT") or "ms").strip(),
@@ -458,7 +567,7 @@ class Config:
                 "app_secret": fingerprint(self.secret),
                 "bearer_from_env": fingerprint(self.bearer),
                 "token_url": self.token_url, "base_url": self.base_url,
-                "model": self.model, "version": self.version,
+                "model": self.model, "models": self.models, "version": self.version,
                 "scopes": self.scopes, "timestamp_unit": self.timestamp_unit,
                 "thinking_budget": self.thinking_budget,
                 "show_thoughts": self.show_thoughts,
@@ -512,11 +621,18 @@ def _error_text(status: int, body: bytes,
 
 def _generation_config(cfg: Config, thinking_key: str,
                        max_tokens: int = 1024) -> dict[str, Any]:
+    """The check's generationConfig in the model's own thinking dialect:
+    a budget for 2.5, a level for 3.x, nothing for a model that does not
+    think (thinking_kind decides, GATEWAY_MODEL_THINKING overrides)."""
     out: dict[str, Any] = {"temperature": 0.3, "topP": 0.9, "topK": 40,
                            "maxOutputTokens": max_tokens}
-    if cfg.thinking_budget:
+    kind = thinking_kind(cfg.model)
+    if kind == "budget" and cfg.thinking_budget:
         out["thinkingConfig"] = {thinking_key: cfg.show_thoughts,
                                  "thinkingBudget": cfg.thinking_budget}
+    elif kind == "level":
+        out["thinkingConfig"] = {thinking_key: cfg.show_thoughts,
+                                 "thinkingLevel": thinking_levels().get("medium", "medium")}
     return out
 
 
@@ -1098,8 +1214,8 @@ def plane_note(env: dict[str, str] | None = None) -> str:
 # the depth dial's three levels as token budgets; 2.5 Pro counts the
 # thinking against maxOutputTokens, so the client raises the cap by
 # the budget. Override with GATEWAY_THINKING_BUDGETS=low:512,medium:2048,…
-THINKING_BUDGETS = {"low": 1024, "medium": 4096, "high": 16384,
-                    "json": 512}
+THINKING_BUDGETS = {"minimal": 256, "low": 1024, "medium": 4096, "high": 16384,
+                    "max": 32768, "json": 512}
 
 
 def thinking_budgets(env: dict[str, str] | None = None) -> dict[str, int]:

@@ -45,16 +45,23 @@ MAX_CALLS = 40             # model calls in one turn: a ceiling, not a plan
 WALL_SECONDS = 600.0
 MAX_OUTPUT_TOKENS = 16384
 HISTORY_MESSAGES = 30      # stored messages replayed into the interaction
-THINKING_LEVELS = {"quick": "low", "standard": "medium", "deep": "high"}
-# the depth dial as the composer explains it (§5): each stop changes
-# how much the model thinks before every step — nothing else. The
-# call ceiling and the wall clock are the same at every depth.
+THINKING_LEVELS = {"minimal": "minimal", "quick": "low", "standard": "medium",
+                   "deep": "high", "max": "max"}
+# the depth dial as the composer explains it (§5): five stops on one
+# slider, each changing how much the model thinks before every step —
+# nothing else. The call ceiling and the wall clock are the same at
+# every depth. A level a model does not know is mapped to the nearest
+# it does (gateway: GATEWAY_THINKING_LEVELS; Vertex: VERTEX_THINKING_LEVELS).
 DEPTHS: dict[str, dict[str, str]] = {
+    "minimal": {
+        "label": "Minimal", "level": "minimal",
+        "means": "Almost no thinking before a step: a one-line answer, "
+                 "a rename, a yes or no on what is already here.",
+    },
     "quick": {
         "label": "Quick", "level": "low",
         "means": "A short think before each step. Right for a lookup, "
-                 "a definition, a rename, or a follow-up on rows "
-                 "already here.",
+                 "a definition, or a follow-up on rows already here.",
     },
     "standard": {
         "label": "Standard", "level": "medium",
@@ -63,9 +70,15 @@ DEPTHS: dict[str, dict[str, str]] = {
     },
     "deep": {
         "label": "Deep", "level": "high",
-        "means": "The most thinking per step: a multi-step analysis, "
-                 "an unfamiliar join, or a question with several ways "
-                 "to read it. Slower, and it costs more.",
+        "means": "More thinking per step: a multi-step analysis, an "
+                 "unfamiliar join, or a question with several ways to "
+                 "read it. Slower, and it costs more.",
+    },
+    "max": {
+        "label": "Extra deep", "level": "max",
+        "means": "The most thinking the model allows, on every step. "
+                 "For the hardest questions only: slowest, and the "
+                 "costliest.",
     },
 }
 DEFAULT_THINKING = "medium"
@@ -518,7 +531,8 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                        plane: str = "",
                        attachments: list[dict[str, Any]] | None = None,
                        file_names: list[str] | None = None,
-                       owner: str = "") -> str:
+                       owner: str = "",
+                       model_label: str = "") -> str:
     session_id = session["id"]
     started = time.perf_counter()
     mode = mode if mode in MODES else DEFAULT_MODE
@@ -528,6 +542,7 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
              memories=len(memories or []),
              project=(project or {}).get("name", ""),
              thinking_level=thinking_level, mode=mode, plane=plane,
+             model=model_label,
              files=list(file_names or []))
     budget.start_turn()
     prepare_workspace(workspace, build.root)

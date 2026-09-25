@@ -225,9 +225,18 @@ class Report:
     def failed(self) -> bool:
         return any(c.status == "FAIL" for c in self.checks)
 
+    @property
+    def inventoried(self) -> list[str]:
+        """The environments a person was actually inventoried in (empty: the
+        report holds the preflight and the provider's published metadata only)."""
+        return sorted((self.facts.get("inventory") or {}).keys())
+
     def dump(self) -> dict:
         return {"ok": not self.failed, "checks": [asdict(c) for c in self.checks],
-                "facts": self.facts}
+                "facts": self.facts, "inventory": self.inventoried,
+                "note": ("inventory for " + ", ".join(self.inventoried) if self.inventoried else
+                         "preflight and published metadata only: nobody signed in, so no claim, "
+                         "token or attribute values are in this report; add --inventory")}
 
 
 def print_report(rep: Report, title: str) -> None:
@@ -242,6 +251,13 @@ def print_report(rep: Report, title: str) -> None:
         counts[c.status] = counts.get(c.status, 0) + 1
     print("\n" + "  ".join(f"{k}={v}" for k, v in sorted(counts.items()))
           + ("\nRESULT: FAIL" if rep.failed else "\nRESULT: OK"))
+    if rep.inventoried:
+        print(f"INVENTORY: a person was signed in / looked up in {', '.join(rep.inventoried)}; "
+              "the id_token.*, userinfo.*, attr.* and need: rows above are that person's real values")
+    else:
+        print("INVENTORY: not run. The rows above are the preflight and the provider's published "
+              "metadata; no claim, token or attribute VALUES are in this report. "
+              "Run again with --inventory <ENV> to see what the provider returns for a person.")
 
 
 # ---------------------------------------------------------------- google --

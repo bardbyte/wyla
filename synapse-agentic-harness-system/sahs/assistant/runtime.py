@@ -117,72 +117,110 @@ class AssistantRuntime:
             self._build_stamp = stamp
         return self._build
 
-    def model_for(self, budget: Budget, plane: str = "") -> Any:
+    def model_for(self, budget: Budget, plane: str = "",
+                  model: str = "") -> Any:
         if self._model_factory is not None:
             if self._factory_hears_plane:
                 return self._model_factory(budget, plane)
             return self._model_factory(budget)
         from .agent import agent_for            # env-bound, late: the
-        return agent_for(plane, budget)         # .env is the switchboard
+        return agent_for(plane, budget, model=model)   # .env is the switchboard
 
-    # ── the planes and the dials, as the composer shows them ──
+    # ── the planes, the models and the dials, as the composer shows them ──
     def planes(self) -> list[dict[str, Any]]:
         from .agent import plane_catalog
         return plane_catalog()
 
+    def models(self) -> list[dict[str, Any]]:
+        """One row per plane × model, the composer's list: the choice
+        id is a plane (its default model) or plane:model."""
+        from .agent import model_catalog
+        return model_catalog()
+
     @staticmethod
-    def plane_of(session: dict[str, Any] | None) -> str:
-        """The plane a chat is on: its remembered switch, else the
-        .env default — the id, whether or not this machine can ride
-        it (the composer shows it greyed when it cannot)."""
+    def choice_of(session: dict[str, Any] | None) -> str:
+        """The model choice a chat is on: its remembered switch (a
+        plane, or plane:model), else the .env default plane."""
         from sahs.util.gateway import model_plane
         return (((session or {}).get("model") or "").strip().lower()
                 or model_plane())
 
-    def plane_for(self, session: dict[str, Any] | None,
-                  wanted: str = "") -> str:
-        """The plane a turn rides: the composer's choice for this
-        message, else the chat's remembered one, else the .env
-        default. A name that is not a plane, or a plane this machine
-        cannot ride, is a typed refusal with the reason — never a
-        silent fallback to a different model than the one picked."""
-        plane = (wanted or "").strip().lower() or self.plane_of(session)
-        rows = {row["id"]: row for row in self.planes()}
-        if plane not in rows:
+    @classmethod
+    def plane_of(cls, session: dict[str, Any] | None) -> str:
+        """The plane a chat is on: its remembered switch, else the
+        .env default — the id, whether or not this machine can ride
+        it (the composer shows it greyed when it cannot)."""
+        from .agent import split_choice
+        return split_choice(cls.choice_of(session))[0]
+
+    def choice_for(self, session: dict[str, Any] | None,
+                   wanted: str = "") -> str:
+        """The model choice a turn rides, normalized: the composer's
+        choice for this message, else the chat's remembered one, else
+        the .env default plane. A name that is not a plane, a model the
+        plane does not serve, or a plane this machine cannot ride, is a
+        typed refusal with the reason — never a silent fallback to a
+        different model than the one picked."""
+        from .agent import join_choice, split_choice
+        choice = (wanted or "").strip().lower() or self.choice_of(session)
+        plane, model = split_choice(choice)
+        planes = {row["id"]: row for row in self.planes()}
+        if plane not in planes:
             raise ModelUnavailable(f"no model plane called {plane!r}: "
                                    "the planes are vertex and gateway")
-        if not rows[plane]["available"] and self._model_factory is None:
+        if model:
+            served = [row for row in self.models() if row["plane"] == plane]
+            names = [row["model"] for row in served]
+            if model not in names:
+                raise ModelUnavailable(
+                    f"no model called {model!r} on the {plane} plane: it serves "
+                    + ", ".join(names))
+            # the plane's default model is the plane itself
+            if served and served[0]["model"] == model:
+                model = ""
+        if not planes[plane]["available"] and self._model_factory is None:
             raise ModelUnavailable(
-                f"the {rows[plane]['label']} plane is not configured on "
-                f"this machine: {rows[plane]['reason']}")
-        return plane
+                f"the {planes[plane]['label']} plane is not configured on "
+                f"this machine: {planes[plane]['reason']}")
+        return join_choice(plane, model)
 
-    def label_for(self, plane: str = "") -> str:
-        """The model as the composer names it, for a plane: "Gemini
-        2.5 Pro" (the plane is the catalog's business, not the
-        label's); a scripted transport says so."""
+    def plane_for(self, session: dict[str, Any] | None,
+                  wanted: str = "") -> str:
+        """The plane a turn rides (see choice_for)."""
+        from .agent import split_choice
+        return split_choice(self.choice_for(session, wanted))[0]
+
+    def label_for(self, choice: str = "") -> str:
+        """The model as the composer names it, for a choice: "Gemini
+        2.5 Pro" for a plane (its default model), "Gemini 3.5 Flash" for
+        plane:model; a scripted transport says so."""
         if self._model_factory is not None:
             return "scripted"
         from sahs.util.gateway import model_plane
-        plane = (plane or "").strip().lower() or model_plane()
-        for row in self.planes():
-            if row["id"] == plane:
+        from .agent import split_choice
+        plane, model = split_choice(choice)
+        plane = plane or model_plane()
+        for row in self.models():
+            if row["plane"] == plane and (row["model"] == model if model
+                                          else row["id"] == plane):
                 return row["label"]
-        return plane
+        return choice or plane
 
-    def set_session_model(self, session_id: str, plane: str) -> dict:
-        """The composer's model switch: remembered on the chat, so it
-        rides the next message and survives a reload. '' forgets it."""
+    def set_session_model(self, session_id: str, choice: str) -> dict:
+        """The composer's model switch: a plane, or plane:model,
+        remembered on the chat, so it rides the next message and
+        survives a reload. '' forgets it."""
         session = self.store.get_session(session_id)
         if session is None:
             raise KeyError(session_id)
-        plane = (plane or "").strip().lower()
-        if plane:
-            plane = self.plane_for(session, plane)     # validated
-        self.store.set_model(session_id, plane)
-        session["model"] = plane
-        now = self.plane_of(session)
-        return {"ok": True, "plane": now, "model": self.label_for(now)}
+        choice = (choice or "").strip().lower()
+        if choice:
+            choice = self.choice_for(session, choice)     # validated
+        self.store.set_model(session_id, choice)
+        session["model"] = choice
+        now = self.choice_of(session)
+        return {"ok": True, "plane": self.plane_of(session),
+                "choice": now, "model": self.label_for(now)}
 
     # ── files on a chat (the composer's Add files) ────────────
     def files(self, session_id: str) -> list[dict[str, Any]]:
@@ -288,6 +326,7 @@ class AssistantRuntime:
                   "default": key == DEFAULT_MODE}
                  for key, row in MODE_MEANS.items()]
         return {"modes": modes, "depths": depths, "planes": self.planes(),
+                "models": self.models(),
                 "notes": {
                     "depth": "Depth changes how much the model thinks "
                              "before each step, nothing else: the call "
@@ -564,12 +603,14 @@ class AssistantRuntime:
     def _model_turn(self, session_id: str, session: dict, rt: Any,
                     build: Build, turn_id: str, text: str, *,
                     depth: str = "", mode: str = "",
-                    plane: str = "",
+                    plane: str = "", model_id: str = "",
                     attachments: list[dict] | None = None,
                     file_names: list[str] | None = None) -> Any:
         """One model turn as a callable: start_turn runs it on a
         thread; a run with dashboard=true chains it after the rows."""
-        model = LazyModel(lambda: self.model_for(rt.budget, plane))
+        from .agent import join_choice
+        model = LazyModel(lambda: self.model_for(rt.budget, plane, model_id))
+        model_label = self.label_for(join_choice(plane, model_id))
         project = self.store.get_project(
             session.get("project_id") or "") \
             if session.get("project_id") else None
@@ -599,7 +640,7 @@ class AssistantRuntime:
                     runner=self.runner,
                     substrate=self.substrate,
                     thinking_level=level, user_name=self.user_name,
-                    mode=chosen, plane=plane,
+                    mode=chosen, plane=plane, model_label=model_label,
                     attachments=attachments or [],
                     file_names=file_names or [],
                     owner=self.owner)
@@ -647,12 +688,15 @@ class AssistantRuntime:
             raise TurnBusy("a turn is already running in this "
                            "session: stop it before sending another")
         build = self.build()
-        # the plane is settled before anything is stored: a refusal
-        # (an unconfigured plane) leaves the chat as it was
-        plane = self.plane_for(session, model)
-        if (model or "").strip().lower() and plane != (
+        # the model choice is settled before anything is stored: a
+        # refusal (an unconfigured plane, an unknown model) leaves the
+        # chat as it was
+        from .agent import split_choice
+        choice = self.choice_for(session, model)
+        plane, model_id = split_choice(choice)
+        if (model or "").strip().lower() and choice != (
                 session.get("model") or ""):
-            self.store.set_model(session_id, plane)   # remembered
+            self.store.set_model(session_id, choice)   # remembered
         # the files ride this message: their parts are built before
         # anything is stored, so an over-budget attachment is refused
         # with the reason and the chat stays as it was
@@ -677,13 +721,14 @@ class AssistantRuntime:
                                 [r["id"] for r in used], turn_id)
         worker = self._model_turn(session_id, session, rt, build,
                                   turn_id, text, depth=depth, mode=mode,
-                                  plane=plane, attachments=attachments,
-                                  file_names=names)
+                                  plane=plane, model_id=model_id,
+                                  attachments=attachments, file_names=names)
         rt.thread = threading.Thread(target=worker, daemon=True,
                                      name=f"chat-{turn_id}")
         rt.thread.start()
         return {"turn_id": turn_id, "session_id": session_id,
                 "mode": self.mode_for(mode), "plane": plane,
+                "choice": choice, "model": self.label_for(choice),
                 "files": names}
 
     def find_proposal(self, session_id: str,

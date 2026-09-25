@@ -198,11 +198,15 @@ def test_the_composer_reads_as_asked():
                   'id="chat-skills"', "skill-chip", "skill-x", "paintSkills()",
                   "pinSkills(", "api.chatSetSkills(", "boot.session.skills",
                   "four skills at most", "rides every message of this chat",
-                  'title="What Quick, Standard and Deep mean"'):
+                  'title="What the thinking levels and the models mean"'):
         assert piece in CHAT, piece
-    for gone in ('class="chat-modes"', "chat-mode on", "Model <span>",
-                 'id="chat-mode"', 'id="chat-model"', "synapse-chat-mode",
-                 "chatSetModel", "state.plane",
+    # the model switch is back on this surface (the Model knob); the
+    # chat/autopilot switch is not
+    for piece in ('id="chat-model"', "chatSetModel", "state.plane", "Model <span>",
+                  'id="chat-model-btn"', 'id="chat-depth-btn"'):
+        assert piece in CHAT, piece
+    for gone in ('class="chat-modes"', "chat-mode on",
+                 'id="chat-mode"', "synapse-chat-mode",
                  'role="radiogroup"\n                aria-label="How Synapse works this ask"'):
         assert gone not in CHAT, gone
     # a bare /name from the Skills page becomes the chip, text stays text

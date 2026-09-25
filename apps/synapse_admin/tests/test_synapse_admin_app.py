@@ -280,13 +280,15 @@ def test_the_dials_catalog_and_the_model_switch(client):
     dials = client.get("/api/chat/dials").json()
     assert dials["available"]
     assert [m["id"] for m in dials["modes"]] == ["chat", "autopilot"]
-    assert [d["id"] for d in dials["depths"]] == ["quick", "standard",
-                                                  "deep"]
+    assert [d["id"] for d in dials["depths"]] == ["minimal", "quick", "standard",
+                                                  "deep", "max"]
+    assert [d["label"] for d in dials["depths"]] == ["Minimal", "Quick", "Standard",
+                                                     "Deep", "Extra deep"]
     for d in dials["depths"]:
-        assert d["means"] and d["level"] in ("low", "medium", "high")
+        assert d["means"] and d["level"] in ("minimal", "low", "medium", "high", "max")
         assert d["on"]["vertex"].startswith("thinking level ")
         assert d["on"]["gateway"].endswith(" thinking tokens per call")
-    assert [d["default"] for d in dials["depths"]] == [False, True, False]
+    assert [d["default"] for d in dials["depths"]] == [False, False, True, False, False]
     assert [p["id"] for p in dials["planes"]] == ["vertex", "gateway"]
     for p in dials["planes"]:
         assert " via " not in p["label"]          # the model, nothing more
@@ -294,6 +296,15 @@ def test_the_dials_catalog_and_the_model_switch(client):
         assert p["means"] and isinstance(p["available"], bool)
         assert p["available"] or p["reason"]
     assert sum(p["default"] for p in dials["planes"]) == 1
+    # the models: one row per plane x model, the choice id a plane or
+    # plane:model; with one model per plane the ids are the planes
+    models = dials["models"]
+    assert [m["id"] for m in models][:2] == ["vertex", "gateway"]
+    for m in models:
+        assert m["plane"] in ("vertex", "gateway") and m["model"] and m["label"]
+        assert m["thinking"] in ("budget", "level", "none")
+        assert (":" in m["id"]) == (m["id"] not in ("vertex", "gateway"))
+    assert sum(m["default"] for m in models) == 1
     assert "nothing else" in dials["notes"]["depth"]
     assert "next message" in dials["notes"]["plane"]
     # the chat opens on a plane, configured here or not, with its label

@@ -36,6 +36,23 @@ class EnrichTransportError(RuntimeError):
     own explanation."""
 
 
+# the dial's five levels as Vertex's model spells them: the ends fold onto
+# the nearest level the model accepts; VERTEX_THINKING_LEVELS=max:high,…
+# overrides per deployment
+VERTEX_THINKING_LEVELS = {"minimal": "low", "low": "low", "medium": "medium",
+                          "high": "high", "max": "high"}
+
+
+def vertex_thinking_level(level: str, env: dict[str, str] | None = None) -> str:
+    env = dict(os.environ if env is None else env)
+    table = dict(VERTEX_THINKING_LEVELS)
+    for item in (env.get("VERTEX_THINKING_LEVELS") or "").split(","):
+        key, sep, value = item.strip().partition(":")
+        if sep and key.strip() in table and value.strip():
+            table[key.strip()] = value.strip()
+    return table.get((level or "").strip().lower(), level)
+
+
 @dataclass
 class VertexClient:
     connection: VertexConnection
@@ -348,7 +365,7 @@ class VertexClient:
             body["tools"] = [{"functionDeclarations": list(tools)}]
         if thinking_level and self.thinking_ok:
             body["generationConfig"]["thinkingConfig"] = {
-                "thinkingLevel": thinking_level,
+                "thinkingLevel": vertex_thinking_level(thinking_level),
                 "includeThoughts": bool(include_thoughts)}
         self.usage["calls"] = self.usage.get("calls", 0) + 1
 

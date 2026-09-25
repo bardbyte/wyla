@@ -344,3 +344,17 @@ def test_identity_map_reads_the_report_files(tmp_path):
     assert identity_map.load(str(tmp_path / "missing.json")) is None
     assert identity_map.main(["--okta", str(okta_file)]) == 0
     assert identity_map.main(["--okta", str(tmp_path / "missing.json")]) == 2
+
+
+def test_reports_say_whether_a_person_was_inventoried(capsys):
+    for mod in (okta, google):
+        rep = mod.Report()
+        rep.add("E1", "discovery", "PASS", "issuer x")
+        dumped = rep.dump()
+        assert dumped["inventory"] == [] and "nobody signed in" in dumped["note"]
+        mod.print_report(rep, "t")
+        assert "INVENTORY: not run" in capsys.readouterr().out
+        rep.facts["inventory"] = {"E1": {"provider": "okta", "sub": "s"}}
+        assert rep.dump()["inventory"] == ["E1"] and rep.dump()["note"] == "inventory for E1"
+        mod.print_report(rep, "t")
+        assert "real values" in capsys.readouterr().out

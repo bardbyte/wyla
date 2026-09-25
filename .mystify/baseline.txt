@@ -1,7 +1,0 @@
-# mystify baseline — 2026-09-08T03:05Z on 2f085e1
-## silo: python -m pytest synapse-agentic-harness-system/tests -q
-394 tests collected, 0 failed/errored, exit 0 (python-pptx and numpy installed for the assistant extra)
-## lumi: python -m pytest apps/lumi/tests -q
-65 passed, 2 warnings in 5.27s
-## compileall (living set)
-compileall: ok

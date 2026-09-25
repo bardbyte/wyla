@@ -22,6 +22,17 @@ from sahs.util.gateway import (Config, GatewayError, TokenManager, model_plane,
 
 SILO = Path(__file__).resolve().parents[1]
 FX = SILO / "tests" / "fixtures"
+# the enterprise hosts are configuration, never source: the tests name
+# placeholders the fake gateway answers for
+TOKEN_URL = "https://identity.example/security/digital/v1/application/token"
+BASE_URL = "https://gateway.example/genai/google/v1"
+
+
+def _cfg(**kw):
+    kw.setdefault("token_url", TOKEN_URL)
+    kw.setdefault("base_url", BASE_URL)
+    return Config(**kw)
+
 SECRET = base64.b64encode(b"a-32-byte-secret-for-the-tests!!").decode()
 
 
@@ -78,14 +89,14 @@ class FakeGateway:
 
 
 def _client(fake: FakeGateway, **cfg) -> GatewayClient:
-    config = Config(app_id="app", secret=SECRET, **cfg)
+    config = _cfg(app_id="app", secret=SECRET, **cfg)
     return GatewayClient(cfg=config, http=fake.http, sleep=fake.sleep,
                      tokens=TokenManager(config, fake.http, now=fake.clock))
 
 
 def test_token_manager_mints_reuses_refreshes_and_invalidates():
     fake = FakeGateway()
-    cfg = Config(app_id="app", secret=SECRET)
+    cfg = _cfg(app_id="app", secret=SECRET)
     tokens = TokenManager(cfg, fake.http, now=fake.clock)
     assert tokens.describe().startswith("no token yet")
     first = tokens.token()
@@ -102,13 +113,13 @@ def test_token_manager_mints_reuses_refreshes_and_invalidates():
     assert tokens.remaining() == 0.0
     assert tokens.token() != second and fake.minted == 3
     # the environment's bearer is used as it is, never minted
-    env_tokens = TokenManager(Config(auth_mode="env", bearer=_jwt(
+    env_tokens = TokenManager(_cfg(auth_mode="env", bearer=_jwt(
         {"exp": int(fake.now) + 100})), fake.http, now=fake.clock)
     assert env_tokens.token().startswith("eyJ") and fake.minted == 3
     with pytest.raises(GatewayError):
-        TokenManager(Config(auth_mode="env"), fake.http).token()
+        TokenManager(_cfg(auth_mode="env"), fake.http).token()
     with pytest.raises(GatewayError):
-        TokenManager(Config(), fake.http).token()   # no credentials
+        TokenManager(_cfg(), fake.http).token()   # no credentials
 
 
 def test_converse_delivers_one_call_as_the_loops_events():
@@ -221,7 +232,8 @@ def test_the_plane_switch_and_the_budgets():
     assert thinking_budgets({})["medium"] == 4096
     assert thinking_budgets({"GATEWAY_THINKING_BUDGETS": "low:512, high:8192",
                              "GATEWAY_JSON_THINKING_BUDGET": "256"}) == {
-        "low": 512, "medium": 4096, "high": 8192, "json": 256}
+        "minimal": 256, "low": 512, "medium": 4096, "high": 8192, "max": 32768,
+        "json": 256}
 
 
 def test_the_agent_factory_picks_the_plane_and_teaches_when_unconfigured(
@@ -237,6 +249,8 @@ def test_the_agent_factory_picks_the_plane_and_teaches_when_unconfigured(
     assert "APP_ID and APP_SECRET" in str(err.value)
     monkeypatch.setenv("APP_ID", "app")
     monkeypatch.setenv("APP_SECRET", SECRET)
+    monkeypatch.setenv("IDP_TOKEN_URL", "https://identity.example/security/digital/v1/application/token")
+    monkeypatch.setenv("GATEWAY_BASE_URL", "https://gateway.example/genai/google/v1")
     agent = agent_from_env()
     assert isinstance(agent, GatewayAgent) and agent.client.plane == "gateway"
     assert agent.client.cfg.model == "gemini-2.5-pro"
@@ -347,8 +361,11 @@ def test_the_plane_catalog_names_both_planes_and_why_one_cannot_be_ridden(
     assert rows["vertex"]["feel"] == "streams"
     assert rows["gateway"]["feel"] == "whole calls"
     # the gateway configured: available, and the default for a new chat
+    # (the enterprise hosts are configuration: the .env names them)
     monkeypatch.setenv("APP_ID", "app")
     monkeypatch.setenv("APP_SECRET", SECRET)
+    monkeypatch.setenv("IDP_TOKEN_URL", "https://identity.example/security/digital/v1/application/token")
+    monkeypatch.setenv("GATEWAY_BASE_URL", "https://gateway.example/genai/google/v1")
     rows = {r["id"]: r for r in plane_catalog()}
     assert rows["gateway"]["available"] and rows["gateway"]["default"]
     assert not rows["vertex"]["default"]
@@ -391,6 +408,8 @@ def test_a_chat_switches_planes_from_the_composer(compiled, monkeypatch,
     build, tmp = compiled
     monkeypatch.setenv("APP_ID", "app")
     monkeypatch.setenv("APP_SECRET", SECRET)
+    monkeypatch.setenv("IDP_TOKEN_URL", "https://identity.example/security/digital/v1/application/token")
+    monkeypatch.setenv("GATEWAY_BASE_URL", "https://gateway.example/genai/google/v1")
     monkeypatch.setenv("SAHS_MODEL_PLANE", "auto")
     heard: list[str] = []
 
@@ -405,11 +424,12 @@ def test_a_chat_switches_planes_from_the_composer(compiled, monkeypatch,
     assert session["model"] == ""                  # the .env default
     assert runtime.plane_for(session) == "gateway"     # auto → the gateway here
     dials = runtime.dials()
-    assert [d["id"] for d in dials["depths"]] == ["quick", "standard",
-                                                  "deep"]
-    assert dials["depths"][2]["on"] == {"vertex": "thinking level high",
+    assert [d["id"] for d in dials["depths"]] == ["minimal", "quick", "standard",
+                                                  "deep", "max"]
+    assert dials["depths"][3]["on"] == {"vertex": "thinking level high",
                                         "gateway": "16,384 thinking tokens "
                                                "per call"}
+    assert dials["depths"][4]["on"]["gateway"] == "32,768 thinking tokens per call"
     assert [m["id"] for m in dials["modes"]] == ["chat", "autopilot"]
     assert [p["id"] for p in dials["planes"]] == ["vertex", "gateway"]
     # the first message names Vertex for itself: remembered
@@ -427,7 +447,7 @@ def test_a_chat_switches_planes_from_the_composer(compiled, monkeypatch,
     assert heard == ["vertex", "vertex"]
     # the switch from the composer, then a message on the new plane
     assert runtime.set_session_model(session["id"], "gateway") == {
-        "ok": True, "plane": "gateway", "model": "scripted"}
+        "ok": True, "plane": "gateway", "choice": "gateway", "model": "scripted"}
     runtime.start_turn(session["id"], "and now")
     assert runtime.wait(session["id"], 30)
     assert heard[-1] == "gateway"
