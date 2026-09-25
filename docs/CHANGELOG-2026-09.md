@@ -110,7 +110,7 @@ class, its table or its gap.
 
 ### #150 · Production-ready (draft at time of writing)
 Four workstreams integrated on `claude/production-ready`; both suites green
-(153 app, 620 harness); the repository's first CI workflow, green on the PR.
+(153 app, 642 harness); the repository's first CI workflow, green on the PR.
 
 - **One flag for local / dev / prod.** `SAHS_ENV_FILE` picks the profile;
   `env/{local,e1,e2,e3}.env.example`; `make run ENV=e1`, `make check
@@ -138,6 +138,24 @@ Four workstreams integrated on `claude/production-ready`; both suites green
   the turn's budget, dependent ones in order with the finished tasks'
   findings; a synthesis turn and a "What was done" artifact; a task board
   on both chat pages; simple asks pinned byte-identical.
+- **No refusals in skill loading.** `SkillTooLarge` and the fail-closed
+  path are gone: a pack that fits loads whole, one that does not loads as
+  a library with `mode: library · preferred: whole|sectioned` and the
+  reason on the record; the v1 navigator gets the same static library
+  without tools; the only refusal left is an unreadable file, by name.
+  The index falls back to memory or a single chunk rather than failing a
+  turn.
+- **Langfuse insight, the mirror rebuilt from Spanner.** `langfuse_sync.py
+  backfill --from spanner` replays every turn in `ChatEvents` through the
+  tracer with deterministic trace, span and score ids (a second run
+  creates nothing); a prompt fingerprint per turn (`ASSISTANT_VERSION`
+  plus hashes of the prefix and each part) recorded on every generation,
+  and the prompt parts registered with labels; three dataset builders
+  (precedents from a checked-in JSONL, silver from thumbed-up or clean
+  turns, scenarios from `plan_made`); `run_evals.py --sut assistant|planner`
+  on item files; `langfuse_sync.py coverage` prints which Langfuse concept
+  is built from which Spanner columns. The guide is
+  `docs/runbooks/langfuse-insight.md`.
 - **Research and decisions.** `docs/research/resilience-accuracy-latency.md`:
   no Redis for memory (Spanner already holds it), Memorystore later for hot
   state only, a plan cache with governed keys rather than an answer
@@ -157,7 +175,7 @@ inside the build bundle.
 | | PR #140 | PR #150 |
 |---|---|---|
 | app tests | 84 | 153 |
-| harness tests | 445 | 620 |
+| harness tests | 445 | 642 |
 | Spanner tables in the repo DDL | 34 | 44 |
 | persistence paths on Spanner under a store | identity only | identity, chats, events, files, skills, knowledge, reviews, builds |
 | CI | none | both suites plus the DDL lint on every PR |

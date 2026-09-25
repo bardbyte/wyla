@@ -10,7 +10,9 @@ its own report; this page is the map.
 | storage foundation | [`storage-foundation.md`](storage-foundation.md) | the missing build-bundle DDL (`005`), `spanner_check --emit-ddl`, the turn event stream in `ChatEvents` with replay after a pod restart, the Ask lane on the Spanner store, `.env` parsed once per process, the four env profiles, `Makefile`, `scripts/readiness.py`, `docs/deploy.md`, the tenancy decision, the CI workflow |
 | content to Spanner | [`content-to-spanner.md`](content-to-spanner.md) | `007_content.sql` (file bytes in chunks, the review board), `SpannerContentStore` for chat files, own skills, knowledge files and reviews; the shelf and the staging door through the store |
 | multi-task turns | [`../../synapse-agentic-harness-system/docs/reports/multi-task-turns.md`](../../synapse-agentic-harness-system/docs/reports/multi-task-turns.md) | `planner.py`, tasks in dependency waves on a bounded pool under one budget, a synthesis turn and a "What was done" artifact, the task board on both chat pages |
-| skill retrieval | [`../../synapse-agentic-harness-system/docs/reports/skill-retrieval.md`](../../synapse-agentic-harness-system/docs/reports/skill-retrieval.md) | `skill_index.py` (chunker, FTS5 index, BM25), per-engine whole-load budgets, frontmatter-controlled sectioning that fails closed, `skill_toc` / `skill_search` / `skill_read`, the `skills_loaded` record, the routing hint |
+| Langfuse insight | [`../../synapse-agentic-harness-system/docs/reports/langfuse-insight.md`](../../synapse-agentic-harness-system/docs/reports/langfuse-insight.md) | backfill from `ChatEvents` with deterministic ids, prompt fingerprints and registered parts, dataset builders (precedents, silver, scenarios), `run_evals.py --sut assistant`, a coverage table, the guide `docs/runbooks/langfuse-insight.md` |
+| research | [`../research/resilience-accuracy-latency.md`](../research/resilience-accuracy-latency.md) | the decisions on caches, memory, resilience and the accuracy loop, with sources |
+| skill retrieval | [`../../synapse-agentic-harness-system/docs/reports/skill-retrieval.md`](../../synapse-agentic-harness-system/docs/reports/skill-retrieval.md) | `skill_index.py` (chunker, FTS5 index, BM25), per-engine whole-load budgets, frontmatter as a preference, never a refusal (whole when it fits, a library when it does not), `skill_toc` / `skill_search` / `skill_read`, the `skills_loaded` record, the routing hint |
 
 ## The one flag
 
@@ -49,9 +51,9 @@ and sandbox scratch.
 | suite | result | exit |
 |---|---|---|
 | `apps/synapse_admin/tests` | 153 passed, 2 skipped | 0 |
-| `synapse-agentic-harness-system/tests` | 620 passed | 0 |
+| `synapse-agentic-harness-system/tests` | 642 passed | 0 |
 | `scripts/spanner_ddl_check.py` | 44 tables across 7 files, ok | 0 |
-| CI `tests` job on PR #150 | success on the pre-merge head; re-runs on this push | |
+| CI `tests` job on PR #150 | success on the last head it ran on; the job is gated off draft pushes and runs once when the PR is marked ready | |
 
 Retrieval accuracy on the synthetic 2.5 MB pack (577 sections, 1,022
 chunks): 20/20 first-hit on the rephrased asks, 432/432 with one ask per
@@ -78,10 +80,10 @@ section, 10/10 on the routing hint; a search costs 3 to 5 ms.
    two plane names at 16 characters while the composer records choices
    like `gateway:gemini-3.5-flash`.
 3. **Mark the eight governed skills' frontmatter**: `runtime_loading:
-   full_file_required` on the contract skills (Portfolio Analytics,
-   Current-to-60, New Accounts, TLS), `sectioned` on the frameworks; and
-   `aliases:` for the routing hint. Without frontmatter a skill defaults to
-   `sectioned`.
+   full_file_required` (a preference: whole whenever it fits, a library
+   with the reason recorded when it does not) on the contract skills
+   (Portfolio Analytics, Current-to-60, New Accounts, TLS), `sectioned` on
+   the frameworks; and `aliases:` for the routing hint.
 4. **Prove context caching on the gateway plane** if the 502K skill is to
    load whole there; the whole skill rides in the cached prefix on Vertex.
 5. **Ship the eight skills inside the build bundle** rather than a per-pod
