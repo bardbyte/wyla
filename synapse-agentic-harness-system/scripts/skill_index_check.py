@@ -99,6 +99,13 @@ def main(argv: list[str] | None = None) -> int:
                   f"({s['chunks']} chunk{'s' if s['chunks'] != 1 else ''}, "
                   f"{s['chars']:,} chars)")
     print(f"Query: {args.query!r}")
+    # the routing hint the chat uses to order its shelf: every pack's
+    # frontmatter description, aliases and headings
+    index.ensure_routing(packs)
+    likely = index.rank_skills(args.query, k=3)
+    print("Likely skills (by description, aliases, headings): "
+          + (", ".join(f"{r['skill']} ({r['score']:.1f})" for r in likely)
+             or "none"))
     hits = index.search(args.query, [p.name for p in packs], k=args.k)
     if not hits:
         print("  no passage matched: try the pack's own words")

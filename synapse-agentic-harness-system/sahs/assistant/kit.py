@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sahs.loop.skills import CHARS_VAR, is_searchable, max_skill_chars
+from sahs.loop.skills import CHARS_VAR, SkillRefused, policy_of
 from sahs.loop.tools import ROW_CAP, ToolSpec, toolkit as v1_toolkit
 from sahs.tools.api import Build
 from sahs.tools.sandbox import (DEFAULT_MAX_BYTES, execute_sandboxed,
@@ -28,7 +28,8 @@ from . import checks as _checks
 from .artifacts import TYPES, validate_artifact
 from .hooks import literal_warnings
 from .sandbox import run_python, save_rows
-from .skills_loader import TOC_TOOL_CAP, all_skills, get_skill, toc_lines
+from .skills_loader import (TOC_TOOL_CAP, all_skills, get_skill, toc_lines,
+                            whole_load_limit)
 from .state import AssistantState
 from .store import AssistantStore
 
@@ -67,11 +68,15 @@ def build_kit(build: Build, state: AssistantState, *,
               project_id: str = "",
               owner: str = "",
               retriever: Any = None,
-              searchable: list[str] | None = None) -> dict[str, ToolSpec]:
-    """``retriever`` is the turn's SkillIndex (sahs.loop.skill_index)
-    and ``searchable`` the packs loaded as a library this turn; the
-    three skill_* tools are declared when any pack the turn can reach
-    is over the whole-load ceiling."""
+              searchable: list[str] | None = None,
+              skill_limit: int | None = None,
+              model_name: str = "") -> dict[str, ToolSpec]:
+    """``retriever`` is the turn's SkillIndex (sahs.loop.skill_index),
+    ``searchable`` the packs loaded as a library this turn, and
+    ``skill_limit`` this turn's whole-load limit (default: the
+    engine's, ``whole_load_limit(model_name)``); the three skill_*
+    tools are declared when any pack the turn can reach is over the
+    limit and its frontmatter allows sectioned loading."""
     v1 = v1_toolkit(build, state, substrate=substrate,
                     snapshot_runner=snapshot_runner)
     base = {name: v1[name].fn for name in (
@@ -380,9 +385,16 @@ def build_kit(build: Build, state: AssistantState, *,
 
     # ── the library: packs over the ceiling, read by the page ─
     library: list[str] = list(searchable or [])
-    shelf_limit = max_skill_chars()
+    shelf_limit = skill_limit if skill_limit is not None \
+        else whole_load_limit(model_name)
+
+    def _library_pack(pack: Any) -> bool:
+        """Over this turn's whole-load limit, and its frontmatter
+        allows sectioned loading."""
+        return pack.chars > shelf_limit and not policy_of(pack.text).requires_whole
+
     oversized = {p.name for p in all_skills(graph_root, owner)
-                 if is_searchable(p, shelf_limit)}
+                 if _library_pack(p)}
     index_box: list[Any] = [retriever]
 
     def _index() -> Any:
@@ -406,11 +418,19 @@ def build_kit(build: Build, state: AssistantState, *,
                               f"{p.name} ({p.origin})"
                               for p in all_skills(graph_root, owner))
                               or "none")}
-        if not is_searchable(pack, shelf_limit):
+        if pack.chars <= shelf_limit:
             return None, {"error": f"{name!r} is not a library pack: it "
                                    f"is {pack.chars:,} characters, under "
-                                   f"the {shelf_limit:,} ceiling",
+                                   f"the {shelf_limit:,} whole-load limit",
                           "hint": "load_skill(name) hands it over whole"}
+        policy = policy_of(pack.text)
+        if policy.requires_whole:
+            # fail closed: never a page of a pack that demands the file
+            return None, {"error": str(SkillRefused(
+                pack, shelf_limit, model=model_name or "this model",
+                why=policy.why)),
+                "hint": "nothing was loaded; the person can switch "
+                        "model or mark the skill sectioned"}
         _index().ensure([pack])
         if name not in library:
             library.append(name)
@@ -428,10 +448,11 @@ def build_kit(build: Build, state: AssistantState, *,
                 or "none"
             return {"error": f"no skill named {name!r}",
                     "hint": f"available: {names}"}
-        if is_searchable(pack, shelf_limit):
-            # on the shelf, over the ceiling: it loads as a library —
+        if pack.chars > shelf_limit:
+            # on the shelf, over the limit: it loads as a library —
             # the contents now, the pages by skill_search / skill_read
-            # — never as a cut of itself
+            # — never as a cut of itself; a pack that demands the whole
+            # file is refused with the reason (fail closed)
             _pack, problem = _in_library(name)
             if problem:
                 return problem

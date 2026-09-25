@@ -36,9 +36,11 @@ Three pins:
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 DEFAULT_MAX_LOADED = 4          # chips, not a library: choose what matters
 DEFAULT_MAX_SKILL_CHARS = 4000  # each skill is a briefing, not a book
@@ -95,6 +97,137 @@ class SkillTooLarge(ValueError):
             "or split the skill.")
 
 
+class SkillRefused(SkillTooLarge):
+    """A skill whose frontmatter demands the whole file
+    (``runtime_loading: full_file_required`` or ``truncation_allowed:
+    false``) that does not fit the whole-load budget: refused by name
+    with the reason. It never loads in part and never falls back to
+    search — fail closed. ``model`` names the engine when the budget
+    is the engine's; empty when it is the global ceiling."""
+
+    def __init__(self, skill: Skill, limit: int, model: str = "",
+                 why: str = "") -> None:
+        self.skill, self.limit, self.model = skill, limit, model
+        whose = (f"this model's ({model}) whole-load budget" if model
+                 else f"the whole-load ceiling ({CHARS_VAR})")
+        fix = ("switch to a model with a larger window or mark the "
+               "skill sectioned" if model else
+               f"raise {CHARS_VAR} or mark the skill sectioned")
+        ValueError.__init__(
+            self,
+            f"skill {skill.name!r} needs {skill.chars:,} chars whole "
+            f"({why or 'its frontmatter requires the full file'}), "
+            f"{whose} is {limit:,}; {fix}.")
+
+
+# ─── frontmatter: the skill's own word on how it may load ────
+
+LOADING_SECTIONED = "sectioned"
+LOADING_FULL = "full_file_required"
+LOADING_MODES = (LOADING_SECTIONED, LOADING_FULL)
+
+
+def frontmatter(text: str) -> dict[str, Any]:
+    """The leading ``---`` block as a flat mapping, stdlib only: scalar
+    values (quoted or bare; true/false/yes/no fold to bool), inline
+    lists ``[a, b]`` and block lists (``- item`` lines). Anything
+    else is kept as its raw string. {} when there is none."""
+    lines = (text or "").splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    out: dict[str, Any] = {}
+    key = ""
+    for line in lines[1:]:
+        if line.strip() in ("---", "..."):
+            break
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        item = re.match(r"^\s+-\s*(.*)$", line)
+        if item and key and isinstance(out.get(key), list):
+            out[key].append(_scalar(item.group(1)))
+            continue
+        m = re.match(r"^([A-Za-z_][\w-]*)\s*:\s*(.*)$", line)
+        if not m:
+            continue
+        key, raw = m.group(1).strip(), m.group(2).strip()
+        if raw == "":
+            out[key] = []                 # a block list may follow
+        elif raw.startswith("[") and raw.endswith("]"):
+            out[key] = [_scalar(v) for v in raw[1:-1].split(",")
+                        if v.strip()]
+        else:
+            out[key] = _scalar(raw)
+    return out
+
+
+def _scalar(raw: str) -> Any:
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        return value[1:-1]
+    low = value.lower()
+    if low in ("true", "yes", "on"):
+        return True
+    if low in ("false", "no", "off"):
+        return False
+    return value
+
+
+def strip_frontmatter(text: str) -> str:
+    """The text after the frontmatter block (the text itself when
+    there is none)."""
+    lines = (text or "").splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return text
+    for i, line in enumerate(lines[1:], 1):
+        if line.strip() in ("---", "..."):
+            return "".join(lines[i + 1:])
+    return text
+
+
+@dataclass(frozen=True)
+class LoadPolicy:
+    """How a skill may load, from its frontmatter: ``runtime_loading``
+    (sectioned, the default, or full_file_required) and
+    ``truncation_allowed`` (true unless said otherwise); plus the
+    ``description`` and ``aliases`` the routing hint indexes."""
+
+    runtime_loading: str = LOADING_SECTIONED
+    truncation_allowed: bool = True
+    description: str = ""
+    aliases: tuple[str, ...] = ()
+
+    @property
+    def requires_whole(self) -> bool:
+        return (self.runtime_loading == LOADING_FULL
+                or not self.truncation_allowed)
+
+    @property
+    def why(self) -> str:
+        parts = []
+        if self.runtime_loading == LOADING_FULL:
+            parts.append("runtime_loading: full_file_required")
+        if not self.truncation_allowed:
+            parts.append("truncation_allowed: false")
+        return ", ".join(parts)
+
+
+def policy_of(text: str) -> LoadPolicy:
+    fm = frontmatter(text)
+    mode = str(fm.get("runtime_loading", LOADING_SECTIONED)).strip().lower()
+    if mode not in LOADING_MODES:
+        mode = LOADING_SECTIONED
+    allowed = fm.get("truncation_allowed", True)
+    if not isinstance(allowed, bool):
+        allowed = str(allowed).strip().lower() not in ("false", "no", "off")
+    aliases = fm.get("aliases", [])
+    if isinstance(aliases, str):
+        aliases = [aliases]
+    return LoadPolicy(mode, bool(allowed),
+                      str(fm.get("description", "") or "").strip(),
+                      tuple(str(a).strip() for a in aliases
+                            if str(a).strip()))
+
+
 def check_size(skill: Skill, limit: int | None = None) -> Skill:
     """The skill, whole, or ``SkillTooLarge``."""
     limit = max_skill_chars() if limit is None else limit
@@ -126,18 +259,28 @@ def skills_root(graph_root: Path) -> Path:
 
 def _parse(path: Path) -> Skill:
     raw = path.read_text(encoding="utf-8")
-    title, description = path.stem, ""
-    for line in raw.splitlines():
+    return parse_skill(path.stem, raw)
+
+
+def parse_skill(name: str, raw: str) -> Skill:
+    """A skill from its text: the title is the first heading after
+    the frontmatter (else the name), the description the frontmatter's
+    ``description:`` or the first prose line. The text stays whole,
+    frontmatter included — what loads is the file as written."""
+    title, description = name, ""
+    fm = frontmatter(raw)
+    for line in strip_frontmatter(raw).splitlines():
         stripped = line.strip()
         if not stripped:
             continue
-        if stripped.startswith("#") and title == path.stem:
-            title = stripped.lstrip("#").strip() or path.stem
+        if stripped.startswith("#") and title == name:
+            title = stripped.lstrip("#").strip() or name
             continue
         description = stripped[:160]
         break
-    return Skill(name=path.stem, title=title,
-                 description=description, text=raw)
+    if str(fm.get("description", "") or "").strip():
+        description = str(fm["description"]).strip()[:160]
+    return Skill(name=name, title=title, description=description, text=raw)
 
 
 def list_skills(graph_root: Path) -> list[Skill]:
@@ -205,14 +348,17 @@ class SearchableSkill:
 
 
 def render_searchable_skills(skills: list[SearchableSkill],
-                             limit: int | None = None) -> str:
+                             limit: int | None = None, *,
+                             header: bool = True) -> str:
     """The prompt section for the packs over the ceiling. Empty when
     there are none, so the prompt of a session without one stays
-    byte-identical."""
+    byte-identical. ``header=False`` renders the packs' own blocks
+    alone (the loader record measures a pack's share with it)."""
     if not skills:
         return ""
     limit = max_skill_chars() if limit is None else limit
-    parts = ["## Skills loaded as a library (searchable)",
+    parts = [] if not header else [
+        "## Skills loaded as a library (searchable)",
              f"These packs are over the whole-load ceiling ({limit:,} "
              f"characters, {CHARS_VAR}), so you hold their table of "
              "contents and the passages that matched this message — "

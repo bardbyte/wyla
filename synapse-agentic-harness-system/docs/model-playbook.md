@@ -11,13 +11,21 @@ model reads from it; nothing else in the code names a model.
 
 ## The engines
 
-| Model | Plane | Thinking | Levels it accepts | Where it fits |
-|---|---|---|---|---|
-| Gemini 3.1 Pro (Preview) | Vertex, streams | `thinkingLevel` | low · medium · high | Deep and Extra deep; the multi-step SQL and python turns. The laptop's only engine. |
-| Gemini 3.7 Flash | gateway, whole calls | `thinkingLevel` | low · medium · high (minimal refused) | Everyday chat at Standard; Quick autopilot at high. The gateway's default. |
-| Gemini 3.5 Flash | gateway | `thinkingLevel` | medium · high | The alternate workhorse when 3.7 Flash is not served. |
-| Gemini 3.1 Flash Lite | gateway | `thinkingLevel` | minimal · low · medium · high | The one-shot JSON calls (judge, title, memory, reviews, suggestions) and Minimal depth. |
-| Gemini 2.5 Pro | gateway | `thinkingBudget` | — | Retiring. Not listed by default; an `.env` that still names it gets the budget dialect and nothing more. |
+| Model | Plane | Thinking | Levels it accepts | Window (tokens) → whole-load budget (chars) · library budget | Where it fits |
+|---|---|---|---|---|---|
+| Gemini 3.1 Pro (Preview) | Vertex, streams | `thinkingLevel` | low · medium · high | 1,048,576 → 2,097,152 · 120,000 | Deep and Extra deep; the multi-step SQL and python turns. The laptop's only engine. |
+| Gemini 3.7 Flash | gateway, whole calls | `thinkingLevel` | low · medium · high (minimal refused) | 1,048,576 → 2,097,152 · 80,000 | Everyday chat at Standard; Quick autopilot at high. The gateway's default. |
+| Gemini 3.5 Flash | gateway | `thinkingLevel` | medium · high | 1,048,576 → 2,097,152 · 80,000 | The alternate workhorse when 3.7 Flash is not served. |
+| Gemini 3.1 Flash Lite | gateway | `thinkingLevel` | minimal · low · medium · high | 1,048,576 → 2,097,152 · 40,000 | The one-shot JSON calls (judge, title, memory, reviews, suggestions) and Minimal depth. |
+| Gemini 2.5 Pro | gateway | `thinkingBudget` | — | 1,048,576 → 2,097,152 · 40,000 | Retiring. Not listed by default; an `.env` that still names it gets the budget dialect and nothing more. |
+| an engine the table does not know | — | budget | — | 131,072 → 262,144 · 32,000 | Assumed small until a row says otherwise. |
+
+The two skill budgets are the subject of [Skill retrieval](skill-retrieval.md):
+a skill under the whole-load budget (and under `SAHS_MAX_SKILL_CHARS`,
+the global ceiling on top) loads whole; over it, a skill whose
+frontmatter allows it loads as a searchable library under the library
+budget, folded by depth; one that requires the whole file is refused
+by name.
 
 The level lists come from Google's model pages (September 2026) and
 the laptop's `gateway_check.py --all-models` run. The `--levels` probe

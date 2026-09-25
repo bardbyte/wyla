@@ -29,7 +29,7 @@ from sahs.ask.budget import Aborted
 from sahs.ask.model import ModelUnavailable
 from sahs.loop.digest import synapse_digest
 from sahs.loop.loop import _short, compact_result
-from sahs.loop.skills import Skill, render_skills
+from sahs.loop.skills import Skill, SkillRefused, render_skills
 from sahs.tools.api import Build
 from sahs.util.profiles import prompt_style
 
@@ -276,7 +276,8 @@ def system_prompt(build: Build, skills: list[Skill] | None = None,
                   user_name: str = "", mode: str = DEFAULT_MODE,
                   today: _dt.date | None = None, style: str = "",
                   retrieval: str = "",
-                  library: list[str] | None = None) -> str:
+                  library: list[str] | None = None,
+                  likely: tuple[str, ...] = ()) -> str:
     """Identity → chain → mode → style (the model family's, when it has
     one) → the graph digest (business map + skills (loaded whole, then
     the library packs' contents and matched passages (``retrieval``,
@@ -298,7 +299,7 @@ def system_prompt(build: Build, skills: list[Skill] | None = None,
     shelf = render_skill_index(
         skill_index or [],
         exclude=frozenset(s.name for s in (skills or []))
-        | frozenset(library or []))
+        | frozenset(library or []), likely=tuple(likely or ()))
     if skill_text or retrieval or shelf:
         parts.append(_section("skills", "\n\n".join(
             p for p in (skill_text, retrieval, shelf) if p)))
@@ -574,25 +575,48 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
 
     state = AssistantState()
     state.notes = list(session.get("notes") or [])
-    # the skills, split at the ceiling: whole ones paste verbatim; a
-    # pack over it is a library — its contents and the passages that
-    # match this ask, under the engine's budget at this depth
-    library = skill_context(graph_root, list(skills or []), text,
-                            model_name, thinking_level)
+    # the skills, split at this engine's whole-load limit: whole ones
+    # paste verbatim; a pack over it is a library — its contents and
+    # the passages that match this ask, under the engine's budget at
+    # this depth — unless its frontmatter demands the whole file, which
+    # refuses the turn by name (fail closed, never a partial load)
+    shelf = all_skills(graph_root, owner)
+    try:
+        library = skill_context(graph_root, list(skills or []), text,
+                                model_name, thinking_level, shelf=shelf)
+    except SkillRefused as refused:
+        partial = getattr(refused, "context", None)
+        if partial is not None:
+            bus.emit("skills_loaded", turn_id=turn_id, **partial.event())
+        bus.emit("error", turn_id=turn_id, code="skill_refused",
+                 message="I could not load a skill this chat pins: "
+                         + str(refused),
+                 retryable=False,
+                 next_actions=["switch to a model with a larger window",
+                               "or mark the skill sectioned "
+                               "(runtime_loading: sectioned) in its "
+                               "frontmatter",
+                               "or unpin it for this chat"])
+        _finish(bus, budget, turn_id, "error", started, model_calls=0,
+                steps=0, thinking_level=thinking_level, skills_loaded=[])
+        return "error"
+    bus.emit("skills_loaded", turn_id=turn_id, **library.event())
     kit = build_kit(build, state, store=store, session_id=session_id,
                     turn_id=turn_id, workspace=workspace, model=model,
                     substrate=substrate, snapshot_runner=snapshot_runner,
                     runner=runner, graph_root=graph_root,
                     project_id=(project or {}).get("id", ""),
                     owner=owner, retriever=library.index,
-                    searchable=library.searchable_names)
+                    searchable=library.searchable_names,
+                    skill_limit=library.limit, model_name=model_name)
     tools = declarations(kit)
     system = system_prompt(
-        build, library.whole, skill_index=all_skills(graph_root, owner),
+        build, library.whole, skill_index=shelf,
         memories=memories, project=project,
         artifacts=store.list_artifacts(session_id), notes=state.notes,
         user_name=user_name, mode=mode, style=prompt_style(model_name),
-        retrieval=library.block, library=library.searchable_names)
+        retrieval=library.block, library=library.searchable_names,
+        likely=library.likely)
     bus.emit("model_prompt", turn_id=turn_id, n=0, kind="system",
              content=system[:12000])
     contents = _history(store, session_id, turn_id)

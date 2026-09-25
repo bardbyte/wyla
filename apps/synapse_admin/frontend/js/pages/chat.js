@@ -1627,6 +1627,11 @@ export async function renderChat(outlet, wanted = "") {
         pingShelf();                       // the shelf marks it working
         break;
       }
+      case "skills_loaded":
+        // the loader record (per skill: whole, sectioned or refused,
+        // with the characters sent) rides the transcript for Operate;
+        // a refusal already shows as the error card that follows it
+        break;
       case "model_prompt":
         // each model call restarts the clock and starts a new thought
         // segment: after a tool returns the line says Thinking, never
@@ -1723,9 +1728,9 @@ export async function renderChat(outlet, wanted = "") {
     const source = new EventSource(
       api.chatStreamUrl(state.session.id, state.seq));
     for (const name of [
-      "turn_started", "model_prompt", "thinking", "tool_call",
-      "tool_step", "tool_result", "say_token", "artifact", "proposal",
-      "chips", "budget_tick", "turn_done", "error"]) {
+      "turn_started", "skills_loaded", "model_prompt", "thinking",
+      "tool_call", "tool_step", "tool_result", "say_token", "artifact",
+      "proposal", "chips", "budget_tick", "turn_done", "error"]) {
       source.addEventListener(name, (message) => {
         let event;
         try { event = JSON.parse(message.data); } catch { return; }

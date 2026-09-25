@@ -442,6 +442,19 @@ def test_a_library_pack_reaches_the_model_as_contents_and_pages(
         events = runtime.runtime(session["id"]).bus.since(0)
         done = [e for e in events if e["ev"] == "turn_done"][-1]
         assert done["status"] == "answered"
+        # the loader record, one per turn, right after turn_started
+        kinds = [e["ev"] for e in events]
+        assert kinds[:2] == ["turn_started", "skills_loaded"]
+        record = events[1]
+        assert record["skills_loaded"] == ["bundle"]
+        (row,) = record["skills"]
+        assert row["skill_name"] == "bundle" and row["mode"] == "sectioned"
+        assert row["source_chars"] == len(text) and row["truncated"]
+        assert 0 < row["sent_chars"] <= row["rendered_chars"]
+        assert record["aggregate_skill_chars"] == row["sent_chars"]
+        assert record["retrieval_budget"] == skill_retrieval_for(
+            "", {"quick": "low", "deep": "high"}[depth])[1]
+        assert record["whole_load_limit"] == 4000
         steps = [e for e in events if e["ev"] == "tool_step"]
         assert [s["tool"] for s in steps] == ["skill_search", "skill_read"]
         assert steps[0]["input"] == f"{t.a} quota window"
@@ -486,3 +499,226 @@ def test_a_library_pack_reaches_the_model_as_contents_and_pages(
     assert page["text"].startswith(f"### {t.heading}")
     assert text[page["start"]:page["end"]] == page["text"]
     assert page["truncated"] and page["next_offset"] == 1200
+
+
+# ─── frontmatter policy, the per-model whole-load budget, fail closed ─
+
+
+def test_frontmatter_names_the_loading_policy_and_the_defaults():
+    from sahs.loop.skills import (LoadPolicy, frontmatter, parse_skill,
+                                  policy_of, strip_frontmatter)
+    text = ("---\n"
+            "description: \"Settlement windows and recon\"\n"
+            "aliases: [settle, recon, 'late close']\n"
+            "runtime_loading: full_file_required\n"
+            "truncation_allowed: false\n"
+            "owner:\n"
+            "  - ops\n"
+            "---\n"
+            "# Settlement\n\nThe first prose line.\n")
+    fm = frontmatter(text)
+    assert fm == {"description": "Settlement windows and recon",
+                  "aliases": ["settle", "recon", "late close"],
+                  "runtime_loading": "full_file_required",
+                  "truncation_allowed": False, "owner": ["ops"]}
+    assert strip_frontmatter(text) == "# Settlement\n\nThe first prose line.\n"
+    policy = policy_of(text)
+    assert policy == LoadPolicy("full_file_required", False,
+                                "Settlement windows and recon",
+                                ("settle", "recon", "late close"))
+    assert policy.requires_whole
+    assert policy.why == ("runtime_loading: full_file_required, "
+                          "truncation_allowed: false")
+    # the parse: title after the frontmatter, description from it
+    skill = parse_skill("settlement", text)
+    assert skill.title == "Settlement"
+    assert skill.description == "Settlement windows and recon"
+    assert skill.text == text                   # whole, frontmatter included
+    # defaults: no frontmatter → sectioned, truncation allowed
+    plain = policy_of("# Plain\n\nNo frontmatter.\n")
+    assert plain == LoadPolicy() and not plain.requires_whole
+    assert policy_of("---\ntruncation_allowed: no\n---\n# T\n").requires_whole
+    assert not policy_of("---\nruntime_loading: sectioned\n---\n# T\n"
+                         ).requires_whole
+    assert policy_of("---\nruntime_loading: whatever\n---\n# T\n"
+                     ).runtime_loading == "sectioned"
+
+
+def test_the_whole_load_budget_comes_from_the_engines_window(monkeypatch):
+    from sahs.assistant.skills_loader import whole_load_limit
+    from sahs.loop.skills import CHARS_VAR
+    from sahs.util.profiles import profile_for, whole_load_chars_for
+    # a 1M-token engine takes a 650,000-character bundle whole; an
+    # engine the table does not know is assumed small
+    for model in ("gemini-3.1-pro-preview", "gemini-3.7-flash",
+                  "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.9"):
+        assert profile_for(model).context_tokens == 1_048_576
+        assert whole_load_chars_for(model) == 2_097_152 >= 650_000
+    assert profile_for("").context_tokens == 131_072
+    assert whole_load_chars_for("") == 262_144 < 650_000
+    assert profile_for("gemini-3.7-flash").as_row()["whole_load_chars"] \
+        == 2_097_152
+    # SAHS_MAX_SKILL_CHARS is the global ceiling on top
+    monkeypatch.delenv(CHARS_VAR, raising=False)
+    assert whole_load_limit("gemini-3.7-flash") == 4000
+    monkeypatch.setenv(CHARS_VAR, "650000")
+    assert whole_load_limit("gemini-3.7-flash") == 650_000
+    assert whole_load_limit("") == 262_144
+    monkeypatch.setenv(CHARS_VAR, "5000000")
+    assert whole_load_limit("gemini-3.1-pro-preview") == 2_097_152
+
+
+def test_a_650k_bundle_loads_whole_on_a_big_engine_and_sectioned_on_a_small_one(
+        tmp_path, monkeypatch):
+    from sahs.assistant.skills_loader import Pack, skill_context
+    from sahs.loop.skills import CHARS_VAR
+    from synthetic_skill import build_pack
+    text, truths = build_pack(target_chars=620_000)
+    assert 600_000 < len(text) < 650_000
+    pack = Pack(name="bundle", title="Runtime knowledge bundle",
+                description="", text=text, origin="unreviewed")
+    monkeypatch.setenv(CHARS_VAR, "650000")
+    big = skill_context(tmp_path, [pack], "anything", "gemini-3.7-flash",
+                        "medium")
+    assert [p.name for p in big.whole] == ["bundle"] and not big.searchable
+    assert big.block == "" and big.limit == 650_000
+    (row,) = big.records
+    assert row["mode"] == "whole" and row["truncated"] is False
+    assert row["sent_chars"] == row["rendered_chars"] \
+        == len(f"### Runtime knowledge bundle\n{text.strip()}\n")
+    assert big.aggregate_skill_chars == row["sent_chars"]
+    small = skill_context(tmp_path, [pack], "anything", "", "medium")
+    assert not small.whole and [p.name for p in small.searchable] == ["bundle"]
+    assert small.limit == 262_144 and small.records[0]["mode"] == "sectioned"
+    assert small.records[0]["truncated"]
+
+
+def test_a_full_file_skill_over_the_budget_fails_closed(tmp_path, monkeypatch):
+    """A skill whose frontmatter demands the whole file and does not
+    fit this model's whole-load budget is refused by name with the
+    reason — never partially loaded, never silently searched."""
+    from sahs.assistant.skills_loader import Pack, skill_context
+    from sahs.loop.skills import CHARS_VAR, SkillRefused, SkillTooLarge
+    from synthetic_skill import build_pack
+    body, _ = build_pack(target_chars=300_000)
+    text = ("---\nruntime_loading: full_file_required\n"
+            "description: the whole bundle or nothing\n---\n" + body)
+    pack = Pack(name="bundle", title="Runtime knowledge bundle",
+                description="", text=text, origin="unreviewed")
+    monkeypatch.setenv(CHARS_VAR, "650000")
+    # the big engine takes it whole
+    big = skill_context(tmp_path, [pack], "q", "gemini-3.7-flash")
+    assert big.records[0]["mode"] == "whole"
+    # the small one refuses: the reason names the need, the budget
+    # and the two ways out; the record says refused, nothing sent
+    with pytest.raises(SkillRefused) as err:
+        skill_context(tmp_path, [pack], "q", "gemini-x-small")
+    said = str(err.value)
+    assert isinstance(err.value, SkillTooLarge)
+    assert f"'bundle' needs {len(text):,} chars whole" in said
+    assert "runtime_loading: full_file_required" in said
+    assert "this model's (gemini-x-small) whole-load budget is 262,144" in said
+    assert "switch to a model with a larger window or mark the skill " \
+           "sectioned" in said
+    ctx = err.value.context
+    assert ctx.records == [{"skill_name": "bundle", "source_chars": len(text),
+                            "rendered_chars": 0, "sent_chars": 0,
+                            "mode": "refused", "truncated": False}]
+    assert ctx.event()["skills_loaded"] == [] \
+        and ctx.event()["aggregate_skill_chars"] == 0
+    # truncation_allowed: false means the same
+    strict = Pack(name="strict", title="Strict", description="",
+                  text="---\ntruncation_allowed: false\n---\n" + body,
+                  origin="unreviewed")
+    with pytest.raises(SkillRefused) as err:
+        skill_context(tmp_path, [strict], "q", "")
+    assert "truncation_allowed: false" in str(err.value)
+    # a sectioned pack of the same size loads as a library instead
+    loose = Pack(name="loose", title="Loose", description="", text=body,
+                 origin="unreviewed")
+    assert skill_context(tmp_path, [loose], "q", "").records[0]["mode"] \
+        == "sectioned"
+
+
+def test_the_pickers_and_the_tool_refuse_a_full_file_skill_over_the_ceiling(
+        compiled, tmp_path, monkeypatch):
+    """At pin time the global ceiling decides (no engine can exceed
+    it): set_skills and a slash turn refuse by name. At turn time the
+    engine's budget decides: the turn ends on the refusal, the loader
+    record says so, and the model is never called. load_skill on such
+    a pack refuses too."""
+    from sahs.assistant.agent import ScriptedAgent
+    from sahs.loop.skills import CHARS_VAR, LOADED_VAR
+    from synthetic_skill import build_pack
+    body, _ = build_pack(target_chars=300_000)
+    graph_root = _user_shelf(tmp_path)
+    (graph_root / "skills" / "whole-only.md").write_text(
+        "---\nruntime_loading: full_file_required\n---\n" + body,
+        encoding="utf-8")
+    monkeypatch.delenv(CHARS_VAR, raising=False)
+    monkeypatch.delenv(LOADED_VAR, raising=False)
+    model = ScriptedAgent([[{"text": "never"}]])
+    runtime = _runtime(compiled, model, tmp_path)
+    session = runtime.create_session()
+    refused = runtime.set_skills(session["id"], ["whole-only"])
+    assert not refused["ok"]
+    assert "'whole-only' needs" in refused["reason"]
+    assert f"the whole-load ceiling ({CHARS_VAR}) is 4,000" in refused["reason"]
+    assert "mark the skill sectioned" in refused["reason"]
+    # the tool refuses the same way, nothing recorded as loaded
+    tools, state = _kit(compiled, tmp_path, graph_root=graph_root)
+    got = tools["load_skill"].fn("whole-only")
+    assert "needs" in got["error"] and "whole-load budget" in got["error"]
+    assert state.skills_loaded == [] and "skill_search" not in tools
+    # raise the global ceiling: the pack pins, but the scripted engine
+    # (an unknown model: a 262,144-character budget) cannot take it
+    monkeypatch.setenv(CHARS_VAR, "650000")
+    assert runtime.set_skills(session["id"], ["whole-only"])["ok"]
+    runtime.start_turn(session["id"], "what is in the bundle?")
+    assert runtime.wait(session["id"], 60)
+    events = runtime.runtime(session["id"]).bus.since(0)
+    kinds = [e["ev"] for e in events]
+    assert kinds[:2] == ["turn_started", "skills_loaded"]
+    assert "model_prompt" not in kinds and model.calls == []
+    (row,) = events[1]["skills"]
+    assert row["mode"] == "refused" and row["sent_chars"] == 0
+    assert events[1]["skills_loaded"] == []
+    error = next(e for e in events if e["ev"] == "error")
+    assert error["code"] == "skill_refused"
+    assert "whole-load budget is 262,144" in error["message"]
+    assert any("larger window" in a for a in error["next_actions"])
+    assert [e for e in events if e["ev"] == "turn_done"][-1]["status"] \
+        == "error"
+
+
+def test_the_shelf_lists_the_likely_pack_first(compiled, tmp_path):
+    """The routing hint: the pack whose description, aliases or
+    headings match the message's words is listed first and marked;
+    the model still decides. Without a hint the shelf is byte-identical
+    to before."""
+    from sahs.assistant.agent import ScriptedAgent
+    from sahs.assistant.loop import system_prompt
+    from sahs.assistant.skills_loader import all_skills, render_skill_index
+    build, _ = compiled
+    graph_root = _user_shelf(tmp_path)
+    (graph_root / "skills" / "kyc-vocab.md").write_text(
+        "---\ndescription: KYC statuses and the codes they are stored as\n"
+        "aliases: [know your customer, onboarding status]\n---\n"
+        "# KYC vocabulary\n\n## Status codes\n\nAPPROVED is A.\n",
+        encoding="utf-8")
+    model = ScriptedAgent([[{"text": "A."}]])
+    runtime = _runtime(compiled, model, tmp_path)
+    session = runtime.create_session()
+    runtime.start_turn(session["id"], "how is an onboarding status stored?")
+    assert runtime.wait(session["id"], 60)
+    system = model.calls[0]["system"]
+    shelf = system.split("## Skills on demand", 1)[1].split("</skills>")[0]
+    lines = [ln for ln in shelf.splitlines() if ln.startswith("- ")]
+    assert lines[0].startswith("- kyc-vocab [unreviewed] (likely) — KYC "
+                               "statuses and the codes")
+    assert "(likely)" not in "\n".join(lines[1:])
+    assert "matched this message's words" in shelf
+    # the plain shelf, no hint: unchanged bytes
+    index = all_skills(graph_root)
+    assert render_skill_index(index) == render_skill_index(index, likely=())
+    assert "(likely)" not in system_prompt(build, skill_index=index)

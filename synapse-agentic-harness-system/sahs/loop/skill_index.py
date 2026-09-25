@@ -421,7 +421,17 @@ CREATE TABLE IF NOT EXISTS chunks(
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     skill UNINDEXED, chunk_id UNINDEXED, title, heading_path, text,
     tokenize='unicode61 remove_diacritics 2');
+CREATE TABLE IF NOT EXISTS routing(
+    name TEXT PRIMARY KEY, content_hash TEXT NOT NULL, title TEXT,
+    description TEXT, aliases TEXT, headings TEXT, indexed_at TEXT);
+CREATE VIRTUAL TABLE IF NOT EXISTS routing_fts USING fts5(
+    skill UNINDEXED, title, description, aliases, headings,
+    tokenize='unicode61 remove_diacritics 2');
 """
+# the routing hint's weights, in routing_fts column order: an alias
+# is the strongest signal (someone wrote it for this), then the
+# description and the title, then the headings
+_ROUTING_WEIGHTS = "0.0, 2.0, 2.0, 3.0, 1.0"
 # BM25 column weights, in the FTS table's column order: the section's
 # own title counts double, its inherited breadcrumb half (else every
 # subsection outranks its parent on the parent's words), the text once
@@ -491,6 +501,8 @@ class SkillIndex:
         return out
 
     def drop(self, name: str) -> None:
+        """Forget a skill's pages (its routing row stays until its
+        text changes or ``drop_routing``)."""
         with self._db:
             self._db.execute("DELETE FROM chunks_fts WHERE skill=?", (name,))
             self._db.execute("DELETE FROM chunks WHERE skill=?", (name,))
@@ -527,6 +539,75 @@ class SkillIndex:
                 "text) VALUES (?,?,?,?,?)",
                 [(name, c.chunk_id, c.title, c.heading_path, c.text)
                  for c in chunks])
+
+    # ── the routing hint: which skill is likely, before any load ─
+    def ensure_routing(self, sources: Iterable[SkillSource]) -> dict[str, str]:
+        """Index what routes to each skill — its frontmatter
+        description and aliases, its title, its section headings —
+        for every pack on the shelf, whatever its size. Keyed by the
+        content hash like the pages: unchanged skills cost a hash."""
+        from .skills import policy_of
+        out: dict[str, str] = {}
+        stamp = _dt.datetime.now(tz=_dt.timezone.utc).isoformat(
+            timespec="seconds")
+        for source in sources:
+            name = str(source.name)
+            digest = content_hash(source.text)
+            row = self._db.execute(
+                "SELECT content_hash FROM routing WHERE name=?",
+                (name,)).fetchone()
+            if row and row["content_hash"] == digest:
+                out[name] = "unchanged"
+                continue
+            policy = policy_of(source.text)
+            headings = " | ".join(
+                b.title for b in _blocks(source.text) if b.kind == "heading")
+            title = str(source.title or name)
+            with self._db:
+                self._db.execute("DELETE FROM routing_fts WHERE skill=?",
+                                 (name,))
+                self._db.execute(
+                    "INSERT OR REPLACE INTO routing VALUES (?,?,?,?,?,?,?)",
+                    (name, digest, title, policy.description,
+                     " | ".join(policy.aliases), headings, stamp))
+                self._db.execute(
+                    "INSERT INTO routing_fts(skill, title, description, "
+                    "aliases, headings) VALUES (?,?,?,?,?)",
+                    (name, title, policy.description,
+                     " ".join(policy.aliases), headings))
+            out[name] = "reindexed" if row else "indexed"
+        return out
+
+    def rank_skills(self, question: str, k: int = 5) -> list[dict[str, Any]]:
+        """The skills a question likely wants, best first: BM25 over
+        the routing text (aliases 3, description and title 2,
+        headings 1), any term matching, absent terms dropped. A hint
+        for the catalogue's order — the model still decides."""
+        k = max(1, int(k or 5))
+        terms = [t for t in query_terms(question)
+                 if self._present_in("routing_fts", _fts_group(t))]
+        groups = [_fts_group(t) for t in terms]
+        if not groups:
+            return []
+        sql = (f"SELECT skill, bm25(routing_fts, {_ROUTING_WEIGHTS}) AS rank, "
+               f"snippet(routing_fts, -1, '[', ']', '…', 12) AS why "
+               f"FROM routing_fts WHERE routing_fts MATCH ? "
+               f"ORDER BY rank, skill LIMIT ?")
+        try:
+            rows = self._db.execute(sql, (" OR ".join(groups), k)).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [{"skill": r["skill"], "score": round(-float(r["rank"]), 3),
+                 "why": " ".join(str(r["why"]).split())} for r in rows]
+
+    def _present_in(self, table: str, match: str) -> bool:
+        try:
+            row = self._db.execute(
+                f"SELECT 1 FROM {table} WHERE {table} MATCH ? LIMIT 1",
+                (match,)).fetchone()
+        except sqlite3.OperationalError:
+            return False
+        return row is not None
 
     # ── reading ──────────────────────────────────────────────
     def skills(self) -> list[dict[str, Any]]:

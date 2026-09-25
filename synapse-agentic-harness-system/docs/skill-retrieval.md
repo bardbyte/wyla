@@ -23,16 +23,101 @@ The code: `sahs/loop/skill_index.py` (the chunker and the index),
 and the fitted block), `sahs/assistant/kit.py` (the three tools),
 `sahs/util/profiles.py` (the budgets), `scripts/skill_index_check.py`.
 
-## The ceiling, and what changed
+## Whole-load is the correctness path
 
-`SAHS_MAX_SKILL_CHARS` still means what it meant: the longest skill
-that loads **whole** (default 4,000 characters). What changed is what
-happens over it. Before, an oversized pack was listed but refused to
-load, by name. Now it loads as a library. `SAHS_MAX_LOADED_SKILLS`
-still caps how many packs one chat loads at once, whole or library.
+A skill that fits loads whole, verbatim, byte-identical to what the
+prompt carried before any of this existed (a pinned test holds the
+rendering to a golden string). What "fits" means is now per model:
+
+- **The engine's whole-load budget** comes from its context window in
+  `sahs/util/profiles.py` (`context_tokens` on the engine map): the
+  window in tokens × 4 characters a token × `WHOLE_LOAD_SHARE` (0.5),
+  the rest left for the digest, the conversation, tool results and the
+  answer. Every Gemini 3.x engine in the table has a 1,048,576-token
+  window, so its whole-load budget is 2,097,152 characters and a
+  650,000-character bundle loads whole. An engine the table does not
+  know is assumed to have 131,072 tokens (262,144 characters) — small
+  on purpose.
+- **`SAHS_MAX_SKILL_CHARS` is the global ceiling on top** (default
+  4,000 characters, the briefing size). The turn's limit is the
+  smaller of the two (`skills_loader.whole_load_limit`). To let the
+  big engines take a bundle whole, set `SAHS_MAX_SKILL_CHARS=650000`;
+  the small engines still fall to the library or refuse, below.
+- `SAHS_MAX_LOADED_SKILLS` still caps how many packs one chat loads at
+  once, whole or library.
 
 The v1 navigator (`sahs.ask`), which has no lookup tools, keeps the
 old refusal (`SkillTooLarge`).
+
+## The skill's own word: frontmatter policy
+
+Over the whole-load limit, the library path is allowed only when the
+skill's frontmatter permits it. Two keys, read from the leading
+`---` block (stdlib parse, no YAML dependency; the block stays part of
+the text that loads):
+
+```markdown
+---
+description: Settlement windows and the reconciliation runs
+aliases: [settle, recon, late close]
+runtime_loading: sectioned        # or full_file_required
+truncation_allowed: true          # or false
+---
+```
+
+- `runtime_loading: sectioned` (the default when absent) allows the
+  library path.
+- `runtime_loading: full_file_required`, or `truncation_allowed:
+  false`, means the skill must load whole or not at all. Over the
+  turn's whole-load limit it **fails closed**: refused by name with
+  the reason — `skill 'x' needs N chars whole (runtime_loading:
+  full_file_required), this model's (gemini-…) whole-load budget is M;
+  switch to a model with a larger window or mark the skill
+  sectioned` — never partially loaded, never silently sent to search.
+
+Where the refusal lands: at pin time (the session picker, a slash
+command, a project's pinned packs) the global ceiling decides, since
+no engine can exceed it (`load_packs` raises `SkillRefused`, a
+`SkillTooLarge`, and the pickers show the reason). At turn time the
+engine's budget decides: the turn ends before any model call with an
+`error` event (`code: skill_refused`, the reason, the ways out) and a
+`turn_done` of status `error`. `load_skill` on such a pack refuses the
+same way; the library tools never serve a page of it.
+
+## The loader record
+
+Every turn emits one `skills_loaded` event right after
+`turn_started`, the loader's record of what it did:
+
+| field | meaning |
+|---|---|
+| `skills[]` | one row per pinned or slash-loaded skill: `skill_name`, `source_chars` (the file), `rendered_chars` (what the renderer made of it: the whole text, or the contents plus every passage the search found), `sent_chars` (what reached the prompt after the budget), `mode` (`whole` / `sectioned` / `refused`), `truncated` (always false for whole and refused) |
+| `skills_loaded` | the names that loaded (whole or sectioned) |
+| `aggregate_skill_chars` | the sum of `sent_chars` this turn |
+| `whole_load_limit` | this turn's whole-load limit in characters |
+| `retrieval_budget`, `retrieval_chunks` | the library fold at this depth |
+
+The chat page subscribes to it (the record lives in the transcript for
+Operate); a refusal also shows as the error card that follows.
+
+## The routing hint: which skill, before any load
+
+The same sqlite file carries a second FTS5 table of every pack on the
+shelf, whatever its size: its frontmatter `description`, its
+`aliases` (a list, when present), its title and its section headings,
+keyed by the content hash like the pages (an unchanged pack costs a
+hash; nothing is chunked for this). `SkillIndex.rank_skills(question,
+k)` ranks the shelf for a question — aliases weighted 3, description
+and title 2, headings 1, any term matching, absent terms dropped —
+and the turn lists the likely packs first on the "Skills on demand"
+shelf, marked `(likely)`, with one sentence saying it is a hint. The
+model still decides what to load. With no hint the shelf is
+byte-identical to before. `scripts/skill_index_check.py` prints the
+same ranking as `Likely skills`.
+
+Ten questions over five small frontmatter'd packs plus the synthetic
+bundle rank the right pack first in `tests/test_skill_index.py`; a
+real turn shows `kyc-vocab … (likely)` first in `tests/test_v3_skills.py`.
 
 ## Chunking rules
 
@@ -85,20 +170,26 @@ calls an embedding service.
 
 ## Per-model budgets
 
-The prompt block for library packs (catalogue plus pages) is bounded
-per engine, in characters, in `sahs/util/profiles.py` next to the
-engine maps (`skill_budget`), and the depth dial folds onto it
-through `RETRIEVAL_FOLD`, keyed by the level the engine actually runs
-at (so Quick on 3.5 Flash, which folds to medium, gets medium's share).
+Two budgets per engine, both in `sahs/util/profiles.py` next to the
+engine maps. The **whole-load budget** (`whole_load_chars`, from
+`context_tokens`) says what loads whole; the **library budget**
+(`skill_budget`) bounds the prompt block for library packs (catalogue
+plus pages), and the depth dial folds onto it through
+`RETRIEVAL_FOLD`, keyed by the level the engine actually runs at (so
+Quick on 3.5 Flash, which folds to medium, gets medium's share).
 
-| Engine | `skill_budget` (chars) |
-|---|---|
-| Gemini 3.1 Pro | 120,000 |
-| Gemini 3.7 Flash | 80,000 |
-| Gemini 3.5 Flash | 80,000 |
-| Gemini 3.1 Flash Lite | 40,000 |
-| an unnamed Gemini 3 model | 80,000 |
-| Gemini 2.5, or unknown | 40,000 / 32,000 |
+| Engine | window (tokens) | whole-load budget (chars) | `skill_budget` (chars) |
+|---|---|---|---|
+| Gemini 3.1 Pro | 1,048,576 | 2,097,152 | 120,000 |
+| Gemini 3.7 Flash | 1,048,576 | 2,097,152 | 80,000 |
+| Gemini 3.5 Flash | 1,048,576 | 2,097,152 | 80,000 |
+| Gemini 3.1 Flash Lite | 1,048,576 | 2,097,152 | 40,000 |
+| an unnamed Gemini 3 model | 1,048,576 | 2,097,152 | 80,000 |
+| Gemini 2.5 | 1,048,576 | 2,097,152 | 40,000 |
+| unknown | 131,072 | 262,144 | 32,000 |
+
+The turn's whole-load limit is `min(SAHS_MAX_SKILL_CHARS, whole-load
+budget)`; the scripted test engine is "unknown".
 
 | Level the engine runs at | passages in the prompt | share of the budget |
 |---|---|---|
@@ -163,5 +254,13 @@ pack re-indexes only itself. `tests/test_v3_skills.py` drives the
 real loop with the scripted agent: a pinned pack over the ceiling
 reaches the model as its contents and matched passages within the
 engine's budget, Quick holds fewer passages than Deep, the prefix
-before the skills section is unchanged, and `skill_search` then
-`skill_read` return breadcrumbs and offsets.
+before the skills section is unchanged, `skill_search` then
+`skill_read` return breadcrumbs and offsets, and the `skills_loaded`
+record carries the row. The same file proves the frontmatter parse
+and its defaults; the whole-load budget per engine (a 620,000-character
+bundle loads whole on 3.7 Flash with `SAHS_MAX_SKILL_CHARS=650000` and
+sectioned on the unknown engine); a `full_file_required` pack over
+the budget refused with the exact reason, at pin time by the global
+ceiling and at turn time by the engine's budget with no model call;
+and the shelf listing the likely pack first. The routing hint ranks
+the right pack first for ten questions in `tests/test_skill_index.py`.

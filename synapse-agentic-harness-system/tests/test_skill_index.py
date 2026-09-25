@@ -342,3 +342,80 @@ def test_the_check_script_prints_toc_sizes_and_top_hits(pack, tmp_path):
     assert again.returncode == 1                # no hit: says so, exit 1
     assert "cfr/notes" in again.stdout and "unchanged" in again.stdout
     assert "no passage matched" in again.stdout
+
+
+# ─── the routing hint: which skill, before any load ──────────
+
+SHELF = {
+    "fiscal-calendar": (
+        "---\ndescription: How the fiscal year and its quarters are counted\n"
+        "aliases: [FY, fiscal quarter, quarter close]\n---\n"
+        "# Fiscal calendar\n\n## Quarter boundaries\n\nQ1 opens in "
+        "February.\n\n## Year end\n\nThe year ends in January.\n"),
+    "gmns-metrics": (
+        "---\ndescription: Reading the GMNS spend and volume metrics\n"
+        "aliases:\n  - gross merchant net spend\n  - GMNS\n---\n"
+        "# GMNS metrics\n\n## Net spend definition\n\nGross minus refunds."
+        "\n\n## Volume versus count\n\nUnits, not transactions.\n"),
+    "settlement-ops": (
+        "---\ndescription: Settlement windows and the reconciliation runs\n"
+        "aliases: [settle, recon]\nruntime_loading: sectioned\n---\n"
+        "# Settlement operations\n\n## Nightly reconciliation\n\nRuns at "
+        "close.\n\n## Late settlement close\n\nWhen the window slips.\n"),
+    "dashboard-grammar": (
+        "---\ndescription: How to lay out tiles and charts on a dashboard\n"
+        "aliases: [tiles, KPI row]\n---\n"
+        "# Dashboard grammar\n\n## Tile order\n\nBiggest number first."
+        "\n\n## Chart kinds\n\nA trend is a line.\n"),
+    "kyc-vocab": (
+        "---\ndescription: KYC statuses and the codes they are stored as\n"
+        "aliases: [know your customer, onboarding status]\n---\n"
+        "# KYC vocabulary\n\n## Status codes\n\nAPPROVED is A.\n\n"
+        "## Approved versus verified\n\nNot the same thing.\n"),
+}
+QUESTIONS = [
+    ("when does the FY end", "fiscal-calendar"),
+    ("what does GMNS stand for", "gmns-metrics"),
+    ("why did the nightly recon fail", "settlement-ops"),
+    ("which chart kind shows a trend", "dashboard-grammar"),
+    ("how is a KYC approved status stored", "kyc-vocab"),
+    ("quarter close dates this year", "fiscal-calendar"),
+    ("tile order on the KPI row", "dashboard-grammar"),
+    ("onboarding status codes", "kyc-vocab"),
+    ("the late settlement close window", "settlement-ops"),
+    ("net spend definition, gross merchant", "gmns-metrics"),
+]
+
+
+def test_rank_skills_lists_the_likely_pack_first_for_ten_questions(pack):
+    from sahs.loop.skill_index import SkillIndex
+    text, truths = pack
+    index = SkillIndex()
+    shelf = [Source(name, name, body) for name, body in SHELF.items()]
+    shelf.append(Source("bundle", "Runtime knowledge bundle", text))
+    status = index.ensure_routing(shelf)
+    assert set(status.values()) == {"indexed"}
+    # the routing rows hold the frontmatter and the headings, not the
+    # pages: the bundle was not chunked for this
+    assert index.chunked == [] and index.overview("bundle") is None
+    for question, want in QUESTIONS:
+        ranked = index.rank_skills(question, k=3)
+        assert ranked, question
+        assert ranked[0]["skill"] == want, (question, ranked)
+        assert ranked[0]["score"] > 0 and ranked[0]["why"]
+    # a heading of the bundle routes to the bundle, by its words alone
+    t = next(t for t in truths if not t.twin_of)
+    assert index.rank_skills(f"handling {t.a} {t.b} drift")[0]["skill"] \
+        == "bundle"
+    # nothing routes on words no pack carries; stopwords alone route nothing
+    assert index.rank_skills("zzqx plover") == []
+    assert index.rank_skills("the of a") == []
+    # keyed by content: unchanged packs cost a hash, a changed pack
+    # re-indexes only itself
+    assert set(index.ensure_routing(shelf).values()) == {"unchanged"}
+    changed = Source("kyc-vocab", "kyc-vocab",
+                     SHELF["kyc-vocab"].replace("Status codes", "Code table"))
+    again = index.ensure_routing(shelf[:4] + [changed])
+    assert again == {**{n: "unchanged" for n in list(SHELF)[:4]},
+                     "kyc-vocab": "reindexed"}
+    assert index.rank_skills("code table")[0]["skill"] == "kyc-vocab"

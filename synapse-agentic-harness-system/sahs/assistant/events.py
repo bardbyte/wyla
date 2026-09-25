@@ -16,6 +16,7 @@ from sahs.ask.events import EventBus, now_iso, sse_frame  # noqa: F401
 # contract gate — the model drives; the harness streams and records.
 ASSISTANT_EVENTS: tuple[str, ...] = (
     "turn_started",
+    "skills_loaded",      # the loader record: per skill, how it loaded
     "model_prompt",       # what the model saw: system once, then steps
     "thinking",           # a thought summary delta, the model's own
     "tool_call",          # a call announced, before it runs
