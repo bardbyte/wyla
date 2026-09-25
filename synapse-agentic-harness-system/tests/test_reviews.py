@@ -23,7 +23,7 @@ PACK = ("# Approvals triage\n\nThe moves for an approvals question.\n\n"
         "## Rate first\n1. search(\"approval rate\") for the definition.\n"
         "2. run_sql(mode=\"dry_run\") to prove the split.\n\n"
         "## Never\n- never quote a rate without its denominator\n")
-ME = "Saheb Singh"
+ME = "John Doe"
 
 
 def _reviews(tmp_path) -> rv.Reviews:
@@ -49,7 +49,7 @@ def test_a_submission_is_pending_and_off_the_loader(tmp_path):
     r = _reviews(tmp_path)
     got = r.submit(kind="skill", name="Approvals triage", text=PACK,
                    purpose="approvals asks", submitter=ME,
-                   submitter_slug="saheb-singh",
+                   submitter_slug="john-doe",
                    approver=rv.approver_for(ME, {}))
     assert got["ok"] and not got["resubmitted"]
     sub = got["submission"]
@@ -77,7 +77,7 @@ def test_a_submission_is_pending_and_off_the_loader(tmp_path):
                         (dict(kind="knowledge", name="x", text=PACK), "business unit"),
                         (dict(kind="skill", name="analysis-playbooks", text=PACK),
                          "built-in")):
-        got = r.submit(purpose="p", submitter=ME, submitter_slug="saheb-singh",
+        got = r.submit(purpose="p", submitter=ME, submitter_slug="john-doe",
                        approver=rv.approver_for(ME, {}),
                        reserved={"analysis-playbooks"}, **fields)
         assert not got["ok"] and why in got["reason"], (fields, got)
@@ -89,7 +89,7 @@ def test_the_checks_stand_in_and_the_model_reads(tmp_path):
     vague = PACK.replace('2. run_sql(mode="dry_run") to prove the split.', line)
     vague += "\n" + line + "\n"                     # the same line twice
     got = r.submit(kind="skill", name="triage", text=vague, purpose="p",
-                   submitter=ME, submitter_slug="saheb-singh",
+                   submitter=ME, submitter_slug="john-doe",
                    approver=rv.approver_for(ME, {}))
     sid = got["submission"]["id"]
     # the checks, synchronously, then the model's read in the background
@@ -131,7 +131,7 @@ def test_the_checks_stand_in_and_the_model_reads(tmp_path):
         i["category"] for i in dated["insights"]}
     # a model that answers nothing usable: the checks stay, marked failed
     got = r.submit(kind="skill", name="second", text=PACK, purpose="p",
-                   submitter=ME, submitter_slug="saheb-singh",
+                   submitter=ME, submitter_slug="john-doe",
                    approver=rv.approver_for(ME, {}))
     sid2 = got["submission"]["id"]
     r.start_ai(sid2, lambda sub, text: {"ok": False, "reason": "no model"})
@@ -150,7 +150,7 @@ def test_approve_publishes_reject_sends_back_resubmit_bumps(tmp_path):
     r = _reviews(tmp_path)
     approver = rv.approver_for(ME, {"SYNAPSE_USER_MANAGER": "Jane Doe"})
     sid = r.submit(kind="skill", name="triage", text=PACK, purpose="p",
-                   submitter=ME, submitter_slug="saheb-singh",
+                   submitter=ME, submitter_slug="john-doe",
                    approver=approver)["submission"]["id"]
     # a rejection needs the reason
     refused = r.decide(sid, "reject")
@@ -169,7 +169,7 @@ def test_approve_publishes_reject_sends_back_resubmit_bumps(tmp_path):
     assert r.text_of(sid, 1) == PACK and "search(q=" in r.text_of(sid)
     # a second submit under the same name is a new version, not a twin
     third = r.submit(kind="skill", name="triage", text=PACK, purpose="p",
-                     submitter=ME, submitter_slug="saheb-singh",
+                     submitter=ME, submitter_slug="john-doe",
                      approver=approver)
     assert third["resubmitted"] and third["submission"]["version"] == 3
     assert len(r.list()) == 1
@@ -183,7 +183,7 @@ def test_approve_publishes_reject_sends_back_resubmit_bumps(tmp_path):
     assert r.published_names() == {"triage"}
     # a publish door that refuses leaves it pending
     sid2 = r.submit(kind="skill", name="other", text=PACK, purpose="p",
-                    submitter=ME, submitter_slug="saheb-singh",
+                    submitter=ME, submitter_slug="john-doe",
                     approver=approver)["submission"]["id"]
     bad = r.decide(sid2, "approve",
                    publish=lambda sub, text: {"ok": False, "reason": "disk full"})
@@ -193,12 +193,12 @@ def test_approve_publishes_reject_sends_back_resubmit_bumps(tmp_path):
     junior = rv.approver_for(ME, {"SYNAPSE_USER_MANAGER": "Sam",
                                   "SYNAPSE_USER_MANAGER_BAND": "30"})
     sid3 = r.submit(kind="skill", name="third", text=PACK, purpose="p",
-                    submitter=ME, submitter_slug="saheb-singh",
+                    submitter=ME, submitter_slug="john-doe",
                     approver=junior)["submission"]["id"]
     held = r.decide(sid3, "approve")
     assert not held["ok"] and "band 40 or above" in held["reason"]
     assert r.withdraw(sid3, by=ME)["submission"]["status"] == "withdrawn"
-    assert r.find("skill", "third", "saheb-singh") is None
+    assert r.find("skill", "third", "john-doe") is None
 
 
 def test_the_notices_are_the_ledger_read_for_a_person(tmp_path):
@@ -207,18 +207,18 @@ def test_the_notices_are_the_ledger_read_for_a_person(tmp_path):
     sid = r.submit(kind="knowledge", name="TLS glossary", business_unit="TLS",
                    text="# TLS glossary\n\nNet sales: gross less cancels.\n",
                    purpose="definitions", submitter=ME,
-                   submitter_slug="saheb-singh", approver=approver)["submission"]["id"]
-    board = r.notices("saheb-singh")
+                   submitter_slug="john-doe", approver=approver)["submission"]["id"]
+    board = r.notices("john-doe")
     assert board["pending"] == 1 and board["unread"] == 2
     texts = [n["text"] for n in board["notices"]]
     assert any("submitted 'TLS glossary' (knowledge) for your review" in t
                for t in texts)
     assert any("submitted to Jane Doe for approval" in t for t in texts)
     assert {n["to"] for n in board["notices"]} == {"approver", "submitter"}
-    r.mark_seen("saheb-singh")
-    assert r.notices("saheb-singh")["unread"] == 0
+    r.mark_seen("john-doe")
+    assert r.notices("john-doe")["unread"] == 0
     r.decide(sid, "reject", comment="cite the source")
-    after = r.notices("saheb-singh")
+    after = r.notices("john-doe")
     assert after["unread"] == 1 and after["pending"] == 0
     assert after["notices"][0]["event"] == "rejected"
     assert "cite the source" in after["notices"][0]["text"]
@@ -256,7 +256,7 @@ def test_the_runtime_wires_the_doors(compiled, tmp_path, monkeypatch):  # noqa: 
     assert board["pending"] == 1 and board["approver"]["name"] == ME
     assert board["min_band"] == 40 and board["me"] == ME
     assert runtime.decide_review(sid, "approve", "fine")["ok"]
-    assert (tmp_path / "graph" / "skills" / "users" / "saheb-singh"
+    assert (tmp_path / "graph" / "skills" / "users" / "john-doe"
             / "approvals-triage.md").read_text(encoding="utf-8") == PACK
     mine = {p["name"]: p for p in runtime.skills()}
     assert mine["approvals-triage"]["mine"] and mine["approvals-triage"]["author"] == "You"

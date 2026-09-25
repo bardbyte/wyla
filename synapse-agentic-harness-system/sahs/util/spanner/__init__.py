@@ -22,8 +22,8 @@ Contract (the silo .env):
 database's state, its tables with columns and indexes, optional row
 counts, and the diff against the designed DDL under ``db/spanner``.
 
-This module became the package's ``__init__`` when the enterprise
-branch's ``sahs/util/spanner/settings.py`` arrived: the same names,
+This module became the package's ``__init__`` so that
+``sahs/util/spanner/settings.py`` has a package: the same names,
 importable as before; the settings live in the submodule.
 """
 

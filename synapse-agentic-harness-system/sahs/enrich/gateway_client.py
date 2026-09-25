@@ -92,7 +92,7 @@ class GatewayClient:
                                             ("GATEWAY_BASE_URL", cfg.base_url)) if not value]
         if missing:
             raise GatewayError("the gateway plane needs " + " and ".join(missing)
-                           + " in the silo .env: the enterprise hosts are not in this repository")
+                           + " in the silo .env: the hosts are configuration, never source")
         chooser = RouteChooser(candidate_routes(env))
         return cls(cfg=cfg, tokens=TokenManager(cfg, chooser.http),
                    http=chooser.http, log=log, budgets=thinking_budgets(env),

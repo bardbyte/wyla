@@ -25,7 +25,7 @@ from .datasets import DATASET_NAMES, ITEM_SCHEMAS, is_item_file, items_to_tasks
 from .langfuse_emitter import set_trace_attributes
 from .tracer import trace_id_for
 
-DATASET_PREFIX = "wyla"
+DATASET_PREFIX = "synapse"
 
 
 def tasks_version(paths: Iterable[Path]) -> str:

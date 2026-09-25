@@ -1,10 +1,10 @@
 # Langfuse: the mirror of the record
 
 Langfuse is a read-mostly analytics and review layer over material
-Wyla already writes. Every object in it is derived from a local
+Synapse already writes. Every object in it is derived from a local
 artifact by a one-way sync:
 
-| Wyla writes | Langfuse shows |
+| Synapse writes | Langfuse shows |
 |---|---|
 | the assistant's event stream, one turn | one trace: generations, tool spans, artifact events, a status score |
 | `tests/tasks/*/*.jsonl` | one dataset per file, items keyed by task id, the whole task in metadata |
@@ -111,7 +111,7 @@ the rule the trajectory ritual already states.
 
 An ambiguous verdict (fingerprint mismatch, result shape match) is
 neither a pass nor a fail until a person says so. With `--langfuse`,
-every ambiguous trial's trace goes on the `wyla-ambiguous` annotation
+every ambiguous trial's trace goes on the `synapse-ambiguous` annotation
 queue, which the run creates on first use with one categorical score
 config, `resolution`: accept or fail.
 

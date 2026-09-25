@@ -201,6 +201,21 @@ path.
   themselves in, dashboard tiles arrive in order. The masthead
   carries the title and Share, never tokens or a build id: the build
   travels on every artifact's footer.
+- **Charts, tables and dashboards format from the data and pick their
+  own form (BUILT 2026-09-25).** Every number reads through
+  `number_format` (the decimals the data carries — 12.5%, not
+  12.50000% and not 13% — thousands grouped, K/M/B past a 100k median,
+  the unit from the column's metadata or name, the percent 0..1 vs
+  0..100 rule from the range); a chart spec with no `kind` gets one from
+  `choose_visual`, a written heuristic whose one-sentence reason rides
+  in the spec and shows on the card; twelve kinds (line, area, bar,
+  hbar, stacked and hundred-percent bars, scatter, histogram, heatmap,
+  small multiples, combo, waterfall) validate strictly and draw as SVG
+  on both surfaces from one identical module,
+  `js/artifacts-render.js`; a dashboard names its grid (1–3 columns)
+  and each panel its span; the strip under a number wraps. The rules,
+  the heuristic table, every kind's encoding and how to add one:
+  [`docs/visualizations.md`](../visualizations.md).
 - **Clarify vs proceed** (Model Spec): interactive=true, so `ask`
   when the ask is markedly unclear, and the prompt says so
   explicitly because models "know but don't show".
@@ -219,7 +234,7 @@ path.
 
 ## 7 · Memory, bound to the person
 
-- Memory belongs to the user (Saheb Singh), lives under the account
+- Memory belongs to the user (John Doe), lives under the account
   block in the sidenav, on by default.
 - Three writers: the model when a preference or disambiguation is
   stated; a **post-turn memory pass** (a Flash-tier call, thinking
@@ -265,7 +280,7 @@ handoff, the eval suites.
    (`[hidden] { display: none !important }`) and the walk asserting
    visibility; the scripted test transport emits parts. Still owed
    from the threshold: the GMNS and ALIF asks completing in one
-   interaction against Vertex — the laptop paste decides.
+   interaction against Vertex — the laptop run decides.
 2. **Context.** Cached prefix, compaction under pressure, delegate.
    Threshold: a 30-turn session survives; cache hits and cost per
    turn visible in Operate.

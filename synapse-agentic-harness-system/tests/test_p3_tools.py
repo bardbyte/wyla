@@ -417,6 +417,105 @@ def test_sandbox_live_allowed_path_row_cap_and_ledger(build, tmp_path):
         "decision"] == "ok"
 
 
+def test_sandbox_live_as_the_person_dry_runs_on_the_runners_connection(
+        build, tmp_path, monkeypatch):
+    """BigQuery as the person (SAHS_BQ_AUTH_MODE=user): the runner
+    brings a token provider and no service-account key. The dry run
+    the sandbox makes first must ride the runner's connection and
+    token, never demand a key; and a token provider that has no
+    connection to mint from is the google_oauth_required refusal, by
+    name, with the hint — from the dry run and from the run alike."""
+    import json as _json
+    from sahs.tools.sandbox import BQJobRunner
+    from sahs.util.google_auth.oauth import GoogleOAuthTokenError
+    from sahs.util.auth import BQConnection
+    for name in ("GOOGLE_APPLICATION_CREDENTIALS", "SYNAPSE_BQ_SA_KEY",
+                 "SAHS_SECRETS_DIR", "BQ_DATA_PROJECT",
+                 "SYNAPSE_BQ_DATA_PROJECT", "SAHS_LIVE_MAX_BYTES"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("SAHS_BQ_AUTH_MODE", "user")
+    monkeypatch.setenv("BQ_PROJECT_ID", "person-project")
+    monkeypatch.setenv("BIGQUERY_API_BASE_URL", "https://bigquery.test")
+
+    class _Response:
+        def __init__(self, payload):
+            self._body = _json.dumps(payload).encode()
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+    class _Transport:
+        """BQConnection.opener(): records the bearer on every trip."""
+        calls: list[dict] = []
+
+        def open(self, request, timeout=None):
+            body = _json.loads(request.data.decode())
+            self.calls.append({"url": request.full_url, "body": body,
+                               "bearer": request.get_header("Authorization")})
+            if request.full_url.endswith("/jobs"):
+                return _Response({"statistics": {"query": {
+                    "totalBytesProcessed": "10",
+                    "schema": {"fields": [{"name": "country_cd",
+                                           "type": "STRING"}]}}}})
+            return _Response({"schema": {"fields": [
+                {"name": "country_cd", "type": "STRING"}]},
+                "rows": [{"f": [{"v": "CA"}]}], "totalBytesProcessed": "10"})
+
+    monkeypatch.setattr(BQConnection, "opener", lambda self: _Transport())
+    sql = f"SELECT country_cd FROM {GMS} {DATED}"
+    env = {"SAHS_ALLOW_LIVE": "1"}
+
+    # the person's token rides the dry run and the run
+    runner = BQJobRunner(token_provider=lambda: "ya29.the-person")
+    assert runner.connection.key_path is None
+    out = execute_sandboxed(build, sql, mode="live", runner=runner,
+                            ledger_path=tmp_path / "l.jsonl", env=env)
+    assert out["status"] == "ok", out
+    assert out["data"]["rows"] == [["CA"]]
+    assert [c["url"].rsplit("/", 1)[1] for c in _Transport.calls] == ["jobs", "queries"]
+    assert {c["bearer"] for c in _Transport.calls} == {"Bearer ya29.the-person"}
+    assert all("person-project" in c["url"] for c in _Transport.calls)
+
+    # no connection to mint from: refused by name before any trip
+    _Transport.calls.clear()
+
+    def no_connection():
+        raise GoogleOAuthTokenError("connect Google BigQuery before running live queries")
+
+    out = execute_sandboxed(build, sql, mode="live",
+                            runner=BQJobRunner(token_provider=no_connection),
+                            ledger_path=tmp_path / "l.jsonl", env=env)
+    assert out["status"] == "denied"
+    assert out["error"].startswith("google_oauth_required: connect Google")
+    assert out["meta"]["taught"]["kind"] == "access"
+    assert "connect Google BigQuery" in out["meta"]["taught"]["hint"]
+    assert _Transport.calls == []
+    # the same refusal when the provider fails only at run time
+    class _RefusesAtRun:
+        name = "refuses"
+        connection = runner.connection
+        token_provider = lambda self: "ya29.the-person"  # noqa: E731
+
+        def run(self, sql, limit):
+            raise GoogleOAuthTokenError("Google token refresh failed; reconnect Google BigQuery")
+
+    out = execute_sandboxed(build, sql, mode="live", runner=_RefusesAtRun(),
+                            ledger_path=tmp_path / "l.jsonl", env=env)
+    assert out["status"] == "denied" and "google_oauth_required" in out["error"]
+    assert "reconnect" in out["error"]
+    # and with no runner at all, the refusal the app relies on
+    out = execute_sandboxed(build, sql, mode="live",
+                            substrate=StaticSubstrate({}),
+                            ledger_path=tmp_path / "l.jsonl", env=env)
+    assert out["status"] == "denied" and "google_oauth_required" in out["error"]
+
+
 def test_sandbox_refuses_ddl(build, tmp_path):
     out = execute_sandboxed(build, f"DROP TABLE {GMS}", mode="snapshot",
                             substrate=_BoobyTrap(),

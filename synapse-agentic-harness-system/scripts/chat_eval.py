@@ -3,7 +3,7 @@
 
     python scripts/chat_eval.py --real                # Vertex (laptop)
     python scripts/chat_eval.py --real --kind playbook --limit 2
-    cat docs/evals/assistant_baseline_vertex.md       # then PASTE it
+    cat docs/evals/assistant_baseline_vertex.md       # then read it
 
 Drives the artifact / reasoning / playbook task sets through the
 REAL assistant loop, grades outcomes from the event record, and
@@ -19,8 +19,7 @@ nothing rather than a pretend number.
 
 The reasoning suite's calibrated judge is a fresh-context model
 call; with --no-judge the keyword floor grades alone (cheaper,
-stricter to read). The laptop cannot push — the report travels by
-PASTE.
+stricter to read). The report is the file; read it from there.
 """
 from __future__ import annotations
 
@@ -103,8 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     (out / "assistant_baseline_vertex.md").write_text(
         markdown, encoding="utf-8")
     print(markdown)
-    print("→ PASTE docs/evals/assistant_baseline_vertex.md back "
-          "into the session.")
+    print("→ the report is in docs/evals/assistant_baseline_vertex.md")
     return 0
 
 

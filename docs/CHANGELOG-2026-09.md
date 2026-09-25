@@ -177,6 +177,38 @@ Four workstreams integrated on `claude/production-ready`; both suites green
   accuracy loop from the analyst precedents, a fallback for every
   dependency.
 
+### After #151 · the laptop round two (branch `claude/production-ready`, PR #152)
+- **Charts and dashboards.** Number formatting follows the data (a
+  percent shows the decimals it carries, counts group thousands, big
+  columns go compact), one formatter in Python with a byte-equal JS twin;
+  a written selection heuristic the tools use and state (time → line,
+  category → sorted bar or horizontal bar, part-of-whole → stacked or
+  percent bar and never a pie, a grid → heatmap, many series → small
+  multiples, one number → KPI); twelve chart kinds hand-drawn as SVG;
+  dashboards with a grid; "Show all" on tables fixed (state on the
+  wrapper, not the button's words); the disclaimer strip wraps instead of
+  clipping. `docs/visualizations.md`.
+- **Chat UX.** The whole pane scrolls (the gutters and the chips no longer
+  dead or trapping the wheel); thinking folds by default into "Radix is
+  thinking… 4s" and "Thought for 12s", the person's choice remembered;
+  every turn shows elapsed time and tokens live and in a footer on the
+  message; `009_usage.sql` stores tokens, calls, elapsed and turns per
+  chat, shown on the shelf, in chat search and as a Tokens column per
+  person on the People page; the second surface's wordmark reads
+  "Systematic Intelligence by Lumi".
+- **Auth proven end to end on fakes, six bugs fixed.** Okta sign-in,
+  the Google consent hop, the encrypted connection, the refresh, and a
+  BigQuery query carrying the person's own token under the sandbox gates,
+  in both lanes and on both stores. Fixed: the chat lane had no per-person
+  runner; the dry run demanded a service-account key; a failed refresh was
+  a raw exception; a Google Bearer on a cookie session was refused; user
+  mode without a project was a 500; disconnect left a cached token alive.
+  `docs/reports/auth-e2e.md` names what still needs a laptop.
+- **Carry-back and sanitization.** `docs/enterprise-carry-back.md`: the
+  full procedure to a new branch of the enterprise repository with the
+  final `.env` per environment; `docs/reports/sanitization-scan.md` and the
+  edits it called for, so nothing in the code says where it came from.
+
 ## Still with the team (not code)
 
 Apply `005`, `006` and `007` to E1 (both sign-in hops need `AuthStates`);
@@ -188,8 +220,8 @@ inside the build bundle.
 
 | | PR #140 | PR #150 |
 |---|---|---|
-| app tests | 84 | 158 |
-| harness tests | 445 | 654 |
-| Spanner tables in the repo DDL | 34 | 44 (8 DDL files) |
+| app tests | 84 | 186 |
+| harness tests | 445 | 684 |
+| Spanner tables in the repo DDL | 34 | 44 (9 DDL files) |
 | persistence paths on Spanner under a store | identity only | identity, chats, events, files, skills, knowledge, reviews, builds |
 | CI | none | both suites plus the DDL lint on every PR |

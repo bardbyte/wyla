@@ -4,7 +4,7 @@
     python scripts/flash_check.py                 # probe the default list
     python scripts/flash_check.py --also-pro      # include the Pro control
     python scripts/flash_check.py --models gemini-3.5-flash,gemini-2.5-flash
-    cat docs/evals/flash_access.md                # then PASTE it
+    cat docs/evals/flash_access.md                # then read it
 
 Runs the SAME bootstrap as vertex_check.py (.env → key → endpoint →
 proxy → TLS → OAuth token), then asks two separate questions per
@@ -27,7 +27,7 @@ judge (design §7/§8). The recommendation line at the end names the
 fastest answering Flash as the value for VERTEX_FLASH_MODEL.
 
 Exit 0 = at least one Flash answers · 1 = none do · 3 = env/auth.
-The laptop cannot push — the report travels by PASTE.
+The report is the file; read it from there.
 """
 
 from __future__ import annotations
@@ -236,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(rows, indent=1), encoding="utf-8")
     (out / "flash_access.md").write_text(markdown, encoding="utf-8")
     print("\n" + markdown)
-    print("→ PASTE docs/evals/flash_access.md back into the session.")
+    print("→ the report is in docs/evals/flash_access.md")
     return 0 if any(r["verdict"] == "ok" and "flash" in r["model"]
                     for r in rows) else 1
 

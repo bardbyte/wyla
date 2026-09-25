@@ -179,8 +179,8 @@ erDiagram
 | column | holds |
 |---|---|
 | `UserId` | random UUID; the key every other table points at |
-| `Email`, `EmailNormalized` | the address as typed, and the case-folded trimmed form the database derives (`LOWER(TRIM(Email))`, stored) that the unique index `UsersByEmail` is on: `Saheb@…` and `saheb@…` are one person and the app never compares strings itself |
-| `Username`, `UsernameNormalized` | a handle (`^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$`, checked by the database), unique the same way (`UsersByUsername`). The rollout's sign-up form does not ask for one: the app derives it from the address's local part (`saheb.singh`), adds a numeric suffix on a collision, and the person may change it later. It exists so a surface can name a person without showing an address |
+| `Email`, `EmailNormalized` | the address as typed, and the case-folded trimmed form the database derives (`LOWER(TRIM(Email))`, stored) that the unique index `UsersByEmail` is on: `John@…` and `john@…` are one person and the app never compares strings itself |
+| `Username`, `UsernameNormalized` | a handle (`^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$`, checked by the database), unique the same way (`UsersByUsername`). The rollout's sign-up form does not ask for one: the app derives it from the address's local part (`john.doe`), adds a numeric suffix on a collision, and the person may change it later. It exists so a surface can name a person without showing an address |
 | `DisplayName` | what the account block shows |
 | `Status` | `pending_verification` \| `active` \| `locked` \| `disabled` \| `deleted`. The DDL default is `pending_verification` for the day email verification lands; the rollout writes `active` at sign-up, explicitly. `locked` is an admin's lock (the automatic lockout is a column, §3.5), `disabled` an admin's decision, `deleted` the tombstone |
 | `EmailVerifiedAt` | null in the rollout (no mail) |

@@ -127,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = reports[0] if len(reports) == 1 else {"models": reports}
         Path(args.json).write_text(json.dumps(payload, indent=1, default=str)
                                    + "\n", encoding="utf-8")
-        print(f"\nfull report written to {args.json} (paste it back)")
+        print(f"\nfull report written to {args.json}")
     return worst
 
 

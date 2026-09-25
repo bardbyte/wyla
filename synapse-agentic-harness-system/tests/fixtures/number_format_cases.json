@@ -1,0 +1,640 @@
+[
+ {
+  "name": "percent given as a fraction keeps the data's decimals after x100",
+  "values": [
+   0.125,
+   0.5,
+   0.075
+  ],
+  "hint": {
+   "name": "conversion_rate"
+  },
+  "expect": {
+   "kind": "percent",
+   "decimals": 1,
+   "scale": 100,
+   "compact": false,
+   "unit": "%",
+   "grouping": true
+  },
+  "formatted": [
+   "12.5%",
+   "50.0%",
+   "7.5%",
+   "—"
+  ]
+ },
+ {
+  "name": "percent given in points keeps its own decimals",
+  "values": [
+   12.5,
+   13,
+   9.25
+  ],
+  "hint": {
+   "name": "share_pct"
+  },
+  "expect": {
+   "kind": "percent",
+   "decimals": 2,
+   "scale": 1,
+   "compact": false,
+   "unit": "%",
+   "grouping": true
+  },
+  "formatted": [
+   "12.50%",
+   "13.00%",
+   "9.25%",
+   "—"
+  ]
+ },
+ {
+  "name": "a percent column that reaches past 1 is already in points",
+  "values": [
+   0.5,
+   1.5,
+   98
+  ],
+  "hint": {
+   "unit": "%"
+  },
+  "expect": {
+   "kind": "percent",
+   "decimals": 1,
+   "scale": 1,
+   "compact": false,
+   "unit": "%",
+   "grouping": true
+  },
+  "formatted": [
+   "0.5%",
+   "1.5%",
+   "98.0%",
+   "—"
+  ]
+ },
+ {
+  "name": "a whole-number percent shows no decimals",
+  "values": [
+   12,
+   45,
+   100
+  ],
+  "hint": {
+   "name": "approval_rate"
+  },
+  "expect": {
+   "kind": "percent",
+   "decimals": 0,
+   "scale": 1,
+   "compact": false,
+   "unit": "%",
+   "grouping": true
+  },
+  "formatted": [
+   "12%",
+   "45%",
+   "100%",
+   "—"
+  ]
+ },
+ {
+  "name": "currency by unit: two decimals at most, compact past a 100k median",
+  "values": [
+   1234567.891,
+   2345678,
+   987654
+  ],
+  "hint": {
+   "name": "net_spend",
+   "unit": "USD"
+  },
+  "expect": {
+   "kind": "currency",
+   "decimals": 2,
+   "scale": 1,
+   "compact": true,
+   "unit": "USD",
+   "grouping": true
+  },
+  "formatted": [
+   "$1.2M",
+   "$2.3M",
+   "$988K",
+   "—"
+  ]
+ },
+ {
+  "name": "currency by name, small values, cents as given",
+  "values": [
+   12.5,
+   8,
+   3.25
+  ],
+  "hint": {
+   "name": "avg_price"
+  },
+  "expect": {
+   "kind": "currency",
+   "decimals": 2,
+   "scale": 1,
+   "compact": false,
+   "unit": "",
+   "grouping": true
+  },
+  "formatted": [
+   "12.50",
+   "8.00",
+   "3.25",
+   "—"
+  ]
+ },
+ {
+  "name": "currency in a code without a symbol rides as a suffix",
+  "values": [
+   1500,
+   2250.5
+  ],
+  "hint": {
+   "unit": "EUR"
+  },
+  "expect": {
+   "kind": "currency",
+   "decimals": 1,
+   "scale": 1,
+   "compact": false,
+   "unit": "EUR",
+   "grouping": true
+  },
+  "formatted": [
+   "€1,500.0",
+   "€2,250.5",
+   "—"
+  ]
+ },
+ {
+  "name": "counts group thousands and never show decimals",
+  "values": [
+   1200,
+   1350,
+   1500
+  ],
+  "hint": {
+   "name": "transaction_count"
+  },
+  "expect": {
+   "kind": "count",
+   "decimals": 0,
+   "scale": 1,
+   "compact": false,
+   "unit": "",
+   "grouping": true
+  },
+  "formatted": [
+   "1,200",
+   "1,350",
+   "1,500",
+   "—"
+  ]
+ },
+ {
+  "name": "a count past a 100k median compacts",
+  "values": [
+   1200000,
+   850000,
+   2400000
+  ],
+  "hint": {
+   "name": "orders"
+  },
+  "expect": {
+   "kind": "count",
+   "decimals": 0,
+   "scale": 1,
+   "compact": true,
+   "unit": "",
+   "grouping": true
+  },
+  "formatted": [
+   "1.2M",
+   "850K",
+   "2.4M",
+   "—"
+  ]
+ },
+ {
+  "name": "a ratio keeps the data's decimals, capped at four",
+  "values": [
+   1.5,
+   2.25,
+   0.125,
+   3.123456
+  ],
+  "hint": {
+   "name": "spend_per_user_ratio"
+  },
+  "expect": {
+   "kind": "ratio",
+   "decimals": 4,
+   "scale": 1,
+   "compact": false,
+   "unit": "",
+   "grouping": true
+  },
+  "formatted": [
+   "1.5000",
+   "2.2500",
+   "0.1250",
+   "3.1235",
+   "—"
+  ]
+ },
+ {
+  "name": "a duration takes its unit from the name",
+  "values": [
+   120.5,
+   300,
+   45
+  ],
+  "hint": {
+   "name": "latency_ms"
+  },
+  "expect": {
+   "kind": "duration",
+   "decimals": 1,
+   "scale": 1,
+   "compact": false,
+   "unit": "ms",
+   "grouping": true
+  },
+  "formatted": [
+   "120.5 ms",
+   "300.0 ms",
+   "45.0 ms",
+   "—"
+  ]
+ },
+ {
+  "name": "a duration by unit",
+  "values": [
+   1.5,
+   2
+  ],
+  "hint": {
+   "name": "wait",
+   "unit": "hours"
+  },
+  "expect": {
+   "kind": "duration",
+   "decimals": 1,
+   "scale": 1,
+   "compact": false,
+   "unit": "h",
+   "grouping": true
+  },
+  "formatted": [
+   "1.5 h",
+   "2.0 h",
+   "—"
+  ]
+ },
+ {
+  "name": "dates pass through as given",
+  "values": [
+   "2026-01-01",
+   "2026-01-02"
+  ],
+  "hint": {
+   "name": "day"
+  },
+  "expect": {
+   "kind": "date",
+   "decimals": 0,
+   "scale": 1,
+   "compact": false,
+   "unit": "",
+   "grouping": false
+  },
+  "formatted": [
+   "2026-01-01",
+   "2026-01-02",
+   "—"
+  ]
+ },
+ {
+  "name": "identifiers never group or compact",
+  "values": [
+   1001,
+   1002,
+   123456789
+  ],
+  "hint": {
+   "name": "merchant_id"
+  },
+  "expect": {
+   "kind": "identifier",
+   "decimals": 0,
+   "scale": 1,
+   "compact": false,
+   "unit": "",
+   "grouping": false
+  },
+  "formatted": [
+   "1001",
+   "1002",
+   "123456789",
+   "—"
+  ]
+ },
+ {
+  "name": "a plain number: float noise does not become false precision",
+  "values": [
+   0.30000000000000004,
+   1.23456789
+  ],
+  "hint": {
+   "name": "x"
+  },
+  "expect": {
+   "kind": "number",
+   "decimals": 4,
+   "scale": 1,
+   "compact": false,
+   "unit": "",
+   "grouping": true
+  },
+  "formatted": [
+   "0.3000",
+   "1.2346",
+   "—"
+  ]
+ },
+ {
+  "name": "a plain number with a unit from the spec",
+  "values": [
+   12.5,
+   7
+  ],
+  "hint": {
+   "unit": "kg"
+  },
+  "expect": {
+   "kind": "number",
+   "decimals": 1,
+   "scale": 1,
+   "compact": false,
+   "unit": "kg",
+   "grouping": true
+  },
+  "formatted": [
+   "12.5 kg",
+   "7.0 kg",
+   "—"
+  ]
+ },
+ {
+  "name": "the explicit format wins: sign always, percent points, one decimal",
+  "values": [
+   -12.5,
+   0,
+   3
+  ],
+  "hint": {
+   "name": "delta",
+   "format": {
+    "sign": "always",
+    "kind": "percent",
+    "decimals": 1
+   }
+  },
+  "expect": {
+   "kind": "percent",
+   "decimals": 1,
+   "scale": 1,
+   "compact": false,
+   "unit": "%",
+   "grouping": true
+  },
+  "formatted": [
+   "-12.5%",
+   "0.0%",
+   "+3.0%",
+   "—"
+  ]
+ },
+ {
+  "name": "the explicit format as a kind word",
+  "values": [
+   0.25,
+   0.5
+  ],
+  "hint": {
+   "name": "value",
+   "format": "percent"
+  },
+  "expect": {
+   "kind": "percent",
+   "decimals": 0,
+   "scale": 100,
+   "compact": false,
+   "unit": "%",
+   "grouping": true
+  },
+  "formatted": [
+   "25%",
+   "50%",
+   "—"
+  ]
+ },
+ {
+  "name": "a text column is text",
+  "values": [
+   "US",
+   "CA",
+   12
+  ],
+  "hint": {
+   "name": "country"
+  },
+  "expect": {
+   "kind": "text",
+   "decimals": 0,
+   "scale": 1,
+   "compact": false,
+   "unit": "",
+   "grouping": false
+  },
+  "formatted": [
+   "US",
+   "CA",
+   "12",
+   "—"
+  ]
+ },
+ {
+  "name": "numeric strings count as numbers",
+  "values": [
+   "1,200",
+   "1,350.5"
+  ],
+  "hint": {
+   "name": "spend"
+  },
+  "expect": {
+   "kind": "currency",
+   "decimals": 1,
+   "scale": 1,
+   "compact": false,
+   "unit": "",
+   "grouping": true
+  },
+  "formatted": [
+   "1,200.0",
+   "1,350.5",
+   "—"
+  ]
+ },
+ {
+  "name": "negatives keep their sign and grouping",
+  "values": [
+   -1234.5,
+   1234.5
+  ],
+  "hint": {
+   "name": "net_change"
+  },
+  "expect": {
+   "kind": "number",
+   "decimals": 1,
+   "scale": 1,
+   "compact": false,
+   "unit": "",
+   "grouping": true
+  },
+  "formatted": [
+   "-1,234.5",
+   "1,234.5",
+   "—"
+  ]
+ },
+ {
+  "name": "a year named like a date but numeric is a plain number without grouping",
+  "values": [
+   2024,
+   2025
+  ],
+  "hint": {
+   "name": "year"
+  },
+  "expect": {
+   "kind": "number",
+   "decimals": 0,
+   "scale": 1,
+   "compact": false,
+   "unit": "",
+   "grouping": false
+  },
+  "formatted": [
+   "2024",
+   "2025",
+   "—"
+  ]
+ },
+ {
+  "name": "a day named like a date but holding labels is text",
+  "values": [
+   "Mon",
+   "Tue"
+  ],
+  "hint": {
+   "name": "day"
+  },
+  "expect": {
+   "kind": "text",
+   "decimals": 0,
+   "scale": 1,
+   "compact": false,
+   "unit": "",
+   "grouping": false
+  },
+  "formatted": [
+   "Mon",
+   "Tue",
+   "—"
+  ]
+ },
+ {
+  "name": "compact off by explicit format keeps the full number",
+  "values": [
+   1234567,
+   2345678
+  ],
+  "hint": {
+   "name": "spend",
+   "unit": "USD",
+   "format": {
+    "compact": false
+   }
+  },
+  "expect": {
+   "kind": "currency",
+   "decimals": 0,
+   "scale": 1,
+   "compact": false,
+   "unit": "USD",
+   "grouping": true
+  },
+  "formatted": [
+   "$1,234,567",
+   "$2,345,678",
+   "—"
+  ]
+ },
+ {
+  "name": "big values in billions compact to B with one decimal",
+  "values": [
+   1500000000,
+   2250000000
+  ],
+  "hint": {
+   "name": "gmv"
+  },
+  "expect": {
+   "kind": "currency",
+   "decimals": 0,
+   "scale": 1,
+   "compact": true,
+   "unit": "",
+   "grouping": true
+  },
+  "formatted": [
+   "1.5B",
+   "2.3B",
+   "—"
+  ]
+ },
+ {
+  "name": "empty values give the null text and a text kind",
+  "values": [
+   null,
+   null
+  ],
+  "hint": {
+   "name": "anything"
+  },
+  "expect": {
+   "kind": "text",
+   "decimals": 0,
+   "scale": 1,
+   "compact": false,
+   "unit": "",
+   "grouping": false
+  },
+  "formatted": [
+   "—",
+   "—",
+   "—"
+  ]
+ }
+]

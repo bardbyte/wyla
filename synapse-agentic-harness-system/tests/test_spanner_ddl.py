@@ -30,7 +30,7 @@ def test_identity_holds_nothing_recoverable_and_roles_are_rows():
     assert "CREATE UNIQUE INDEX UsersByEmail ON Users (EmailNormalized)" in ddl
     assert "AS (LOWER(TRIM(Email))) STORED" in ddl
     # the column's type and nullability, not its alignment: the file is
-    # the enterprise branch's, whose editor pads columns differently
+    # hand-aligned, and a second copy may pad columns differently
     assert re.search(r"PasswordHash\s+STRING\(512\)\s+NOT NULL", ddl)
     assert "PepperVersion" in ddl and "argon2id" in ddl
     assert re.search(r"TokenHash\s+BYTES\(32\)\s+NOT NULL", ddl)
@@ -117,9 +117,9 @@ def test_008_widens_the_model_choice_and_lists_every_artifact_type(tmp_path):
                    for text in after["ChatSessions"].constraints.values())
     assert lint.check_list_in(after["ChatArtifacts"], "ck_artifacts_type") == set(TYPES)
     assert "kpi" in set(TYPES)
-    # the lint sees every table, the widened column included, and 8 files
+    # the lint sees every table, the widened column included, and 9 files
     tables, _ = lint.load(lint.ddl_files())
-    assert len(tables) == 44 and len(lint.ddl_files()) == 8
+    assert len(tables) == 44 and len(lint.ddl_files()) == 9
     assert tables["ChatSessions"].columns["Model"] == "STRING(64)"
     # what it refuses: a constraint that is not there, a column that is
     # not there, a form it does not read, a name added twice
@@ -137,6 +137,38 @@ def test_008_widens_the_model_choice_and_lists_every_artifact_type(tmp_path):
         "ADD CONSTRAINT ck_artifacts_type: ChatAr",
         "an ALTER form this check does not read (",
         "ALTER on unknown table Ghost"[:40]]
+
+
+def test_009_adds_the_usage_columns_the_store_adds_to(tmp_path):
+    """009: five ADD COLUMN statements on ChatSessions — the usage totals
+    the runtime adds to when a turn ends — INT64, NOT NULL with a
+    DEFAULT so a table with rows takes them; the lint applies the form,
+    holds the schema to the store's own column list, and refuses a
+    column added twice or a NOT NULL one with no default."""
+    from sahs.assistant.spanner_store import USAGE_COLUMNS
+    ddl = _text("009_usage.sql")
+    for column in USAGE_COLUMNS:
+        assert (f"ALTER TABLE ChatSessions ADD COLUMN {column} INT64 NOT NULL "
+                "DEFAULT (0);") in ddl, column
+    base = [DDL / "001_identity.sql", DDL / "002_chat.sql", DDL / "008_chat_model.sql"]
+    before, _ = lint.load(base)
+    assert not any(c in before["ChatSessions"].columns for c in USAGE_COLUMNS)
+    after, findings = lint.load(base + [DDL / "009_usage.sql"])
+    assert findings == []
+    for column in USAGE_COLUMNS:
+        assert after["ChatSessions"].columns[column] == "INT64", column
+    assert after["ChatSessions"].columns["MessageCount"] == "INT64"
+    assert lint.check() == []                      # the registry check passes
+    bad = tmp_path / "099_bad.sql"
+    bad.write_text(
+        "ALTER TABLE ChatSessions ADD COLUMN TokensIn INT64 NOT NULL DEFAULT (0);\n"
+        "ALTER TABLE ChatSessions ADD COLUMN Spent INT64 NOT NULL;\n"
+        "ALTER TABLE ChatSessions ADD COLUMN Select INT64;\n", encoding="utf-8")
+    _t, findings = lint.load(base + [DDL / "009_usage.sql", bad])
+    assert [f.split(": ", 2)[-1][:34] for f in findings] == [
+        "ADD COLUMN TokensIn: ChatSessions ",
+        "ADD COLUMN Spent: NOT NULL with no",
+        "ADD COLUMN Select: a reserved word"]
 
 
 def test_the_content_tables_hold_the_bytes_and_the_board():

@@ -1,6 +1,6 @@
 """Observability as a MIRROR of the record (docs/runbooks/langfuse.md).
 
-Every Langfuse object is derived from something Wyla already writes:
+Every Langfuse object is derived from something Synapse already writes:
 the assistant's event stream becomes traces, the eval harness's
 verdicts become dataset-run scores, the task files become datasets.
 Nothing in the product or the suite reads Langfuse back — if it is

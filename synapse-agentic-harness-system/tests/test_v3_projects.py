@@ -165,8 +165,8 @@ def test_prompt_discloses_memory_bound_to_the_person(compiled):
                   {"text": "prefers quarters", "scope": "project:p"}],
         project={"id": "p", "name": "CFO pack",
                  "instructions": "Certified numbers only; USD."},
-        user_name="Saheb Singh")
-    assert "What you remember about Saheb Singh" in told
+        user_name="John Doe")
+    assert "What you remember about John Doe" in told
     assert "by Canada they mean merchant country" in told
     assert "prefers quarters [this project]" in told
     assert "Project: CFO pack" in told
@@ -229,7 +229,7 @@ def test_notes_persist_and_handoff_says_where(compiled, tmp_path):
         # ── turn 2 ──
         [{"text": "Picking up the comparison."}])
     runtime = _runtime(compiled, model, tmp_path,
-                       user_name="Saheb Singh")
+                       user_name="John Doe")
     session = runtime.create_session()
     runtime.start_turn(session["id"], "spend is our net metric")
     assert runtime.wait(session["id"], 60)
@@ -247,7 +247,7 @@ def test_notes_persist_and_handoff_says_where(compiled, tmp_path):
     assert "comparing Q1 vs Q2 next" in system     # <session> notes
     assert "Your working notes" in system
     assert "acquirer net spend" in system           # <memory>
-    assert "What you remember about Saheb Singh" in system
+    assert "What you remember about John Doe" in system
     events = runtime.runtime(session["id"]).bus.since(0)
     started = [e for e in events if e["ev"] == "turn_started"][-1]
     assert started["memories"] == 1

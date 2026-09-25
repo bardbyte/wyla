@@ -109,7 +109,7 @@ async function brandLogo() {
   }
   const img = new Image();
   img.className = "brand-logo";
-  img.alt = "Synapse by Lumi";
+  img.alt = "Systematic Intelligence by Lumi";
   img.onerror = () => console.warn(
     "SYNAPSE_LOGO: the browser could not decode the image the server "
     + "sent; open /api/synapse/brand for what the file's bytes are");
@@ -117,7 +117,7 @@ async function brandLogo() {
     const link = document.createElement("a");
     link.className = "brand-link";
     link.href = "#/chat";
-    link.title = "Synapse by Lumi";
+    link.title = "Systematic Intelligence by Lumi";
     link.appendChild(img);
     brand.replaceChildren(link);
     brand.classList.add("has-logo");

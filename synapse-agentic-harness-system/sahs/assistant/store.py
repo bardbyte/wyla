@@ -69,7 +69,56 @@ _SESSION_COLUMNS = (
     ("model", "TEXT NOT NULL DEFAULT ''"),     # the plane this chat
                                                # rides: vertex | gateway |
                                                # '' (the .env default)
+    # the chat's usage, added to by the runtime when a turn ends
+    # (009_usage.sql on Spanner): tokens in and out, model calls, the
+    # wall time, the turns — the sidebar's "8.2K tokens · 3 turns"
+    ("tokens_in", "INTEGER NOT NULL DEFAULT 0"),
+    ("tokens_out", "INTEGER NOT NULL DEFAULT 0"),
+    ("model_calls", "INTEGER NOT NULL DEFAULT 0"),
+    ("elapsed_ms", "INTEGER NOT NULL DEFAULT 0"),
+    ("turns", "INTEGER NOT NULL DEFAULT 0"),
 )
+
+# what a session carries of its usage, in the shape both stores hand
+# the page (the Spanner store's columns are the same names in
+# CamelCase); ``tokens`` is the sum, computed on read
+USAGE_FIELDS = ("tokens_in", "tokens_out", "model_calls", "elapsed_ms",
+                "turns")
+
+
+def usage_shape(row: dict[str, Any]) -> dict[str, int]:
+    """The usage fields of a session row, as integers, ``tokens``
+    summed; a row from before the columns reads as zero."""
+    out = {}
+    for name in USAGE_FIELDS:
+        try:
+            out[name] = int(row.get(name) or 0)
+        except (TypeError, ValueError):
+            out[name] = 0
+    out["tokens"] = out["tokens_in"] + out["tokens_out"]
+    return out
+
+
+def usage_of(record: dict[str, Any]) -> dict[str, Any]:
+    """A turn's usage from its ``turn_done`` record: the turn's own
+    token split (``Budget.tick``), the loop's ``model_calls`` (the
+    budget's ``turn_calls`` when the record has none), the wall time,
+    and the cost only when a rate is configured. The same shape rides
+    the final assistant message's payload as ``usage``."""
+    def num(key: str, default: int = 0) -> int:
+        try:
+            return int(float(record.get(key) or default))
+        except (TypeError, ValueError):
+            return default
+    calls = num("model_calls") if record.get("model_calls") is not None \
+        else num("turn_calls")
+    cost = record.get("turn_cost_usd")
+    return {"tokens_in": num("turn_tokens_in"),
+            "tokens_out": num("turn_tokens_out"),
+            "tokens": num("turn_tokens_in") + num("turn_tokens_out"),
+            "calls": calls, "elapsed_ms": num("elapsed_ms"),
+            "cost_usd": (float(cost) if isinstance(cost, (int, float))
+                         else None)}
 
 
 class AssistantStore(SessionStore):
@@ -107,6 +156,64 @@ class AssistantStore(SessionStore):
         out["starred"] = bool(out.get("starred"))
         out["archived"] = bool(out.get("archived"))
         out["model"] = str(out.get("model") or "").strip().lower()
+        out.update(usage_shape(out))
+        return out
+
+    # ── usage: what a turn cost, added to the chat's row ─────
+    def add_usage(self, session_id: str, tokens_in: int = 0,
+                  tokens_out: int = 0, calls: int = 0,
+                  elapsed_ms: int | float = 0) -> None:
+        """One finished turn onto the chat's totals: tokens in and
+        out, model calls, wall time, and one more turn. Sub-turns of
+        a multi-task turn never call this — the parent's turn_done
+        carries their sum, so they count once."""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE sessions SET tokens_in = tokens_in + ?, "
+                "tokens_out = tokens_out + ?, model_calls = model_calls + ?, "
+                "elapsed_ms = elapsed_ms + ?, turns = turns + 1 WHERE id=?",
+                (max(0, int(tokens_in)), max(0, int(tokens_out)),
+                 max(0, int(calls)), max(0, int(round(float(elapsed_ms)))),
+                 session_id))
+
+    def set_message_usage(self, session_id: str, turn_id: str,
+                          usage: dict[str, Any]) -> bool:
+        """The turn's usage onto the payload of its final assistant
+        message (the last one of that turn), so the transcript replays
+        the footer the stream drew. False when the turn stored no
+        assistant message (an error before anything was said)."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT id, payload FROM messages WHERE session_id=? AND "
+                "turn_id=? AND role='assistant' ORDER BY created_at DESC, "
+                "rowid DESC LIMIT 1", (session_id, turn_id)).fetchone()
+            if row is None:
+                return False
+            try:
+                payload = json.loads(row["payload"]) if row["payload"] \
+                    else {}
+            except ValueError:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {"payload": payload}
+            payload["usage"] = dict(usage)
+            conn.execute("UPDATE messages SET payload=? WHERE id=?",
+                         (json.dumps(payload), row["id"]))
+        return True
+
+    def usage_totals(self) -> dict[str, int]:
+        """Every chat's usage summed: the one person's totals under
+        the single-developer store (the People page's row)."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(tokens_in), 0) AS tokens_in, "
+                "COALESCE(SUM(tokens_out), 0) AS tokens_out, "
+                "COALESCE(SUM(model_calls), 0) AS model_calls, "
+                "COALESCE(SUM(elapsed_ms), 0) AS elapsed_ms, "
+                "COALESCE(SUM(turns), 0) AS turns, COUNT(*) AS chats "
+                "FROM sessions").fetchone()
+        out = usage_shape(dict(row))
+        out["chats"] = int(row["chats"] or 0)
         return out
 
     def set_flag(self, session_id: str, flag: str, on: bool) -> None:

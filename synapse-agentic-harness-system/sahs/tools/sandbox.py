@@ -159,6 +159,27 @@ class BQJobRunner:
                     payload.get("totalBytesProcessed", 0) or 0)}
 
 
+def _google_oauth_errors() -> tuple[type[Exception], ...]:
+    """The error a person's Google token provider raises: no connection,
+    a revoked one, or a refresh Google refused (imported late: the
+    module needs the settings package only when a person runs)."""
+    from sahs.util.google_auth.oauth import GoogleOAuthTokenError
+    return (GoogleOAuthTokenError,)
+
+
+def _google_oauth_required(detail: str) -> dict[str, Any]:
+    """The one refusal for BigQuery-as-the-person without a usable
+    connection: the same words whether the runner was never built or
+    its token provider failed on the trip."""
+    return {
+        "error": f"google_oauth_required: {detail}",
+        "taught": {
+            "kind": "access", "yours_to_fix": False,
+            "hint": "this workspace requires a connected Google account "
+                    "for live BigQuery. Open Account, connect Google "
+                    "BigQuery, and retry.", "source": "oauth"}}
+
+
 def _ledger_write(path: Path | None, entry: dict[str, Any]) -> None:
     if path is None:
         return
@@ -282,7 +303,10 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
     if substrate is None:
         from sahs.evals.substrate import BQDryRun
         token_provider = getattr(runner, "token_provider", None)
-        substrate = (BQDryRun(token_provider=token_provider)
+        # the runner's own connection rides along: a user-scoped runner
+        # has no service-account key, and the dry run must not demand one
+        substrate = (BQDryRun(connection=getattr(runner, "connection", None),
+                              token_provider=token_provider)
                      if token_provider is not None else BQDryRun())
 
     # the project that HOSTS the tables may not be the one that runs
@@ -307,7 +331,12 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
                                      data_project=data_project,
                                      location=location)
 
-    outcome = substrate.dry_run(sent)
+    try:
+        outcome = substrate.dry_run(sent)
+    except _google_oauth_errors() as e:
+        # the person's Google connection is gone or refused a token:
+        # the same refusal the missing-runner case gives, by name
+        return _finish("denied", **_google_oauth_required(str(e)))
     if not outcome.valid:
         prefix = "bigquery_authorization" if is_bigquery_auth_error(
             outcome.error or "") else "invalid_sql"
@@ -370,19 +399,15 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
         except AuthError:
             user_scoped = False
         if user_scoped:
-            return _finish(
-                "denied",
-                error="google_oauth_required: live BigQuery execution requires "
-                      "a stored Google OAuth connection",
-                taught={
-                    "kind": "access", "yours_to_fix": False,
-                    "hint": "this workspace requires a connected Google account "
-                            "for live BigQuery. Open Account, connect Google "
-                            "BigQuery, and retry.", "source": "oauth"})
+            return _finish("denied", **_google_oauth_required(
+                "live BigQuery execution requires a stored Google OAuth "
+                "connection"))
         runner = BQJobRunner()
     capped = _cap_limit(sent, limit)
     try:
         data = runner.run(capped, limit)
+    except _google_oauth_errors() as e:
+        return _finish("denied", **_google_oauth_required(str(e)))
     except Exception as e:                              # noqa: BLE001
         return _finish("error", error=f"execution_failed: {e}",
                        taught=_taught(str(e)))

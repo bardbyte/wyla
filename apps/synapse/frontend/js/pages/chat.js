@@ -14,6 +14,7 @@ import { api } from "../api.js";
 import { mountDepthKnob, mountModelPicker } from "../knobs.js";
 import { renderMarkdown } from "../md.js";
 import { esc, prose, statusLabel } from "../ui.js";
+import { createArtifactRenderer } from "../artifacts-render.js";
 
 // the italic line under every number, artifact and proposal: who
 // prepared it and how far to trust it. The definition line the graph
@@ -25,13 +26,12 @@ const disclaimer = (prov) => (prov && prov.status === "certified")
     + "verify before you rely on it.";
 
 const SESSION_KEY = "synapse-chat-session";
-const PALETTE = ["#2f6feb", "#e8710a", "#1a9850", "#9970ab",
-                 "#d6604d", "#35978f"];
 
 export async function renderChat(outlet, wanted = "") {
   outlet.innerHTML = `
     <div class="chatv2 empty" id="chatv2">
       <div class="chat-main">
+        <div class="chat-scroll" id="chat-scroll">
         <div class="chat-masthead">
           <button class="chat-title-btn" id="chat-title"
             title="Rename this chat">
@@ -51,8 +51,6 @@ export async function renderChat(outlet, wanted = "") {
           <h1 class="chat-greet" id="chat-greet"></h1>
         </div>
         <div class="chat-thread" id="chat-thread"></div>
-        <button class="chat-jump" id="chat-jump" type="button" hidden
-          title="Jump to the latest">↓ Latest</button>
         <div class="chat-chiprow" id="chat-chiprow"></div>
         <div class="chat-composer">
           <div class="chat-box">
@@ -102,6 +100,9 @@ export async function renderChat(outlet, wanted = "") {
           <div class="chat-foot">Radix is AI and can make mistakes.
             Check the receipts before you act on a number.</div>
         </div>
+        </div>
+        <button class="chat-jump" id="chat-jump" type="button" hidden
+          title="Jump to the latest">↓ Latest</button>
       </div>
     </div>`;
 
@@ -111,31 +112,36 @@ export async function renderChat(outlet, wanted = "") {
   const state = { session: null, source: null, turns: new Map(),
                   running: false, seq: 0, artifacts: new Map() };
 
-  // ── the thread follows new content only while the reader is at the
-  //    bottom. Scrolling up to reread unsticks it, so a thinking delta,
-  //    an answer token or the one-second heartbeat never yanks the
-  //    view back down; sending a message re-sticks it; while new
-  //    content lands out of view a "Latest" pill offers the way back ──
+  // ── the whole main pane is the scroll surface (#chat-scroll): the
+  //    thread scrolls under the masthead and past the chips, the
+  //    composer stays docked at the bottom of the pane, and the wheel
+  //    works in the gutters beside the column too — nothing between
+  //    the masthead and the composer traps it. The thread follows new
+  //    content only while the reader is at the bottom. Scrolling up to
+  //    reread unsticks it, so a thinking delta, an answer token or the
+  //    one-second heartbeat never yanks the view back down; sending a
+  //    message re-sticks it; while new content lands out of view a
+  //    "Latest" pill offers the way back ──
   const NEAR_BOTTOM = 48;
+  const scroller = el("chat-scroll");
+  const composer = outlet.querySelector(".chat-composer");
   const jump = el("chat-jump");
-  const atBottom = () => thread.scrollHeight - thread.scrollTop
-    - thread.clientHeight <= NEAR_BOTTOM;
+  const atBottom = () => scroller.scrollHeight - scroller.scrollTop
+    - scroller.clientHeight <= NEAR_BOTTOM;
   let stuck = true;
   const scroll = (force = false) => {
     if (force) stuck = true;
     if (stuck) {
-      thread.scrollTop = thread.scrollHeight;
+      scroller.scrollTop = scroller.scrollHeight;
       jump.hidden = true;
       return;
     }
-    // the pill sits just above the thread's bottom edge, whatever the
-    // composer's height is at the moment
-    const main = thread.parentElement;
-    jump.style.bottom = `${Math.max(0, main.clientHeight - thread.offsetTop
-      - thread.offsetHeight) + 12}px`;
+    // the pill sits just above the docked composer, whatever its
+    // height is at the moment
+    jump.style.bottom = `${composer.offsetHeight + 12}px`;
     jump.hidden = false;
   };
-  thread.addEventListener("scroll", () => {
+  scroller.addEventListener("scroll", () => {
     stuck = atBottom();
     if (stuck) jump.hidden = true;
   }, { passive: true });
@@ -614,490 +620,19 @@ export async function renderChat(outlet, wanted = "") {
   // the Skills tab in the nav is where people browse them
 
   // ── the artifact panel ───────────────────────────────────
-  function statusChip(prov) {
-    if (!prov || !prov.status) return "";
-    return `<span class="status-chip s-${esc(prov.status)}">${
-      esc(statusLabel(prov.status))}</span>`;
-  }
-
-  function chartSVG(spec, width = 520, height = 280) {
-    // one x axis for every series: the union of their labels in order
-    // of first appearance (chronological when they are dates), each
-    // point placed by its label — a forecast over Jul–Dec lands on
-    // Jul–Dec, never over the actuals; a null, or a label a series
-    // lacks, is a gap in the line
-    const cats = [];
-    for (const s of spec.series || []) {
-      for (const p of s.points || []) {
-        const label = String(p[0]);
-        if (!cats.includes(label)) cats.push(label);
-      }
-    }
-    if (cats.length > 1 && cats.every(isDate)) cats.sort();
-    const series = (spec.series || []).map((s) => {
-      const by = new Map((s.points || []).map((p) => [String(p[0]),
-        p[1] === null || p[1] === undefined ? NaN : Number(p[1])]));
-      return { name: s.name,
-               // a forecast, a projection or a target reads dashed
-               dashed: !!s.dashed || /forecast|projection|projected|estimate|target|\bplan\b/i
-                 .test(String(s.name || "")),
-               values: cats.map((c) => (by.has(c) ? by.get(c) : NaN)) };
-    });
-    const all = series.flatMap((s) => s.values).filter(Number.isFinite);
-    if (!all.length) return "<svg></svg>";
-    const yMin = Math.min(0, ...all);
-    const yMax = Math.max(...all) || 1;
-    // numbers read as numbers on the axis: compact past ten thousand,
-    // separators below, never a raw 4000000 hanging off the left edge
-    const tickFmt = (v) => Math.abs(v) >= 1e4
-      ? new Intl.NumberFormat(undefined, { notation: "compact",
-          maximumFractionDigits: 1 }).format(v)
-      : new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
-          .format(Number(v.toPrecision(3)));
-    const ticks = [0, 1, 2, 3, 4].map((g) => yMin + ((yMax - yMin) * g) / 4);
-    const textW = (s) => String(s).length * 6.2;     // 10.5px, roughly
-    const many = series.length > 1;
-    const isBar = spec.kind === "bar";
-    const n = cats.length;
-    // the frame fits its labels: the left margin from the widest tick,
-    // the bottom from the category labels — rotated when a bar chart's
-    // names would collide, thinned when even that would
-    const padL = Math.ceil(Math.max(...ticks.map((t) => textW(tickFmt(t)))) + 14);
-    const plotW = width - padL - 12;
-    const widest = Math.max(8, ...cats.map(textW));
-    const slot = plotW / Math.max(1, n);
-    const rotate = isBar && widest > slot - 6 && n <= 30;
-    const step = rotate ? Math.max(1, Math.ceil(14 / slot))
-      : Math.max(1, Math.ceil((widest + 10) / slot));
-    const pad = { l: padL, r: 12, t: many ? 30 : 16,
-                  b: rotate ? Math.min(96, 24 + Math.ceil(widest * 0.7)) : 34 };
-    const px = (i) => isBar
-      ? pad.l + ((i + 0.5) * plotW) / Math.max(1, n)
-      : pad.l + (n < 2 ? 0 : (i * plotW) / (n - 1));
-    const py = (v) => pad.t + (height - pad.t - pad.b)
-      * (1 - (v - yMin) / (yMax - yMin || 1));
-    // the runs of consecutive values a line is drawn through: a gap
-    // ends one run and starts the next
-    const runs = (values) => {
-      const out = [];
-      let cur = [];
-      values.forEach((v, i) => {
-        if (Number.isFinite(v)) cur.push(i);
-        else if (cur.length) { out.push(cur); cur = []; }
-      });
-      if (cur.length) out.push(cur);
-      return out;
-    };
-    let body = "";
-    for (const v of ticks) {
-      const y = py(v);
-      body += `<line x1="${pad.l}" y1="${y}" x2="${width - pad.r}"
-        y2="${y}" class="grid"/>
-        <text x="${pad.l - 6}" y="${y + 4}" class="tick"
-        text-anchor="end">${esc(tickFmt(v))}</text>`;
-    }
-    series.forEach((s, si) => {
-      const color = PALETTE[si % PALETTE.length];
-      const dash = s.dashed ? ' stroke-dasharray="6 4"' : "";
-      if (isBar) {
-        const group = slot * 0.72;
-        const bw = Math.max(3, group / series.length - 2);
-        s.values.forEach((v, i) => {
-          if (!Number.isFinite(v)) return;
-          const x = px(i) - group / 2 + si * (group / series.length) + 1;
-          body += `<rect class="chart-bar" x="${x}" y="${
-            Math.min(py(v), py(0))}"
-            width="${bw}" height="${Math.max(0.5, Math.abs(py(v) - py(0)))}"
-            fill="${color}" opacity="${s.dashed ? 0.55 : 0.85}"
-            style="animation-delay:${i * 12}ms"><title>${esc(cats[i])}: ${
-            esc(fmtNum(v))}</title></rect>`;
-        });
-      } else {
-        for (const run of runs(s.values)) {
-          const path = run.map((i, k) =>
-            `${k ? "L" : "M"}${px(i)},${py(s.values[i])}`).join(" ");
-          if (spec.kind === "area" && run.length > 1) {
-            body += `<path class="fill" d="${path} L${
-              px(run[run.length - 1])},${py(yMin)} L${px(run[0])},${
-              py(yMin)} Z" fill="${color}"/>`;
-          }
-          if (spec.kind !== "scatter" && run.length > 1) {
-            body += `<path class="line" d="${path}" fill="none"
-              stroke="${color}" stroke-width="2"${dash}/>`;
-          }
-        }
-        s.values.forEach((v, i) => {
-          if (!Number.isFinite(v)) return;
-          body += `<circle class="dot" cx="${px(i)}" cy="${py(v)}"
-            r="2.6" fill="${color}"><title>${esc(cats[i])}: ${
-            esc(fmtNum(v))}</title></circle>`;
-        });
-      }
-    });
-    // the category labels: every one when they fit, every k-th when
-    // not, the last always on a line chart so the range reads
-    cats.forEach((label, i) => {
-      // the last label of a line chart always, and none within a step
-      // of it, so the range reads without two labels colliding
-      const drawn = isBar ? i % step === 0
-        : (i === n - 1 || (i % step === 0 && n - 1 - i >= step));
-      if (!drawn) return;
-      const x = px(i);
-      if (rotate) {
-        body += `<text x="${x}" y="${height - pad.b + 14}" class="tick"
-          text-anchor="end" transform="rotate(-35 ${x} ${height - pad.b + 14})"
-          >${esc(label)}</text>`;
-      } else {
-        const anchor = isBar ? "middle" : (i === 0 ? "start"
-          : i === n - 1 ? "end" : "middle");
-        body += `<text x="${x}" y="${height - 12}" class="tick"
-          text-anchor="${anchor}">${esc(label)}</text>`;
-      }
-    });
-    // the legend only when there is something to tell apart, above the
-    // plot where it covers nothing; the unit top-right either way
-    if (many) {
-      let lx = pad.l;
-      series.forEach((s, si) => {
-        body += `<text x="${lx}" y="${12}" class="tick"><tspan fill="${
-          PALETTE[si % PALETTE.length]}">${s.dashed ? "┄" : "■"}</tspan> ${
-          esc(s.name)}</text>`;
-        lx += textW(s.name) + 22;
-      });
-    }
-    if (spec.unit) {
-      body += `<text x="${width - pad.r}" y="${12}" class="tick"
-        text-anchor="end">${esc(spec.unit)}</text>`;
-    }
-    if (spec.watermark) {
-      body += `<text x="${width / 2}" y="${height / 2}"
-        class="watermark" text-anchor="middle"
-        transform="rotate(-18 ${width / 2} ${height / 2})">${
-        esc(spec.watermark)}</text>`;
-    }
-    return `<svg viewBox="0 0 ${width} ${height}"
-      class="chartv2" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
-  }
-
-  // numbers read as numbers: separators, two decimals at most, and a
-  // compact form for the big ones with the exact value on hover
-  const fmtNum = (n) => new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 2 }).format(n);
-  const compact = (n) => Math.abs(n) >= 1e5
-    ? new Intl.NumberFormat(undefined, { notation: "compact",
-        maximumFractionDigits: 1 }).format(n)
-    : fmtNum(n);
-  const isNum = (v) => v !== null && v !== undefined && v !== ""
-    && typeof v !== "boolean" && Number.isFinite(Number(v));
-  const isDate = (v) => typeof v === "string"
-    && /^\d{4}-\d{2}(-\d{2})?([T ].*)?$/.test(v);
-
-  function columnKinds(cols, rows) {
-    return cols.map((c) => {
-      const vals = rows.map((r) => r[c.key])
-        .filter((v) => v !== null && v !== undefined && v !== "");
-      const nums = vals.filter(isNum).length;
-      const dates = vals.filter(isDate).length;
-      const kind = vals.length && nums / vals.length >= 0.8 ? "num"
-        : vals.length && dates / vals.length >= 0.8 ? "date" : "text";
-      return { key: c.key, label: c.label, kind };
-    });
-  }
-
-  function sparkline(values, w = 140, h = 28) {
-    const nums = values.map(Number).filter(Number.isFinite);
-    if (nums.length < 2) return "";
-    const min = Math.min(...nums);
-    const span = (Math.max(...nums) - min) || 1;
-    const pts = nums.map((v, i) => [
-      (i / (nums.length - 1)) * w,
-      h - 2 - ((v - min) / span) * (h - 4)]);
-    const line = pts.map((pt) => pt.map((n) => n.toFixed(1)).join(","))
-      .join(" ");
-    return `<svg class="stat-spark" viewBox="0 0 ${w} ${h}"
-      preserveAspectRatio="none" aria-hidden="true">
-      <polygon class="area" points="0,${h} ${line} ${w},${h}"/>
-      <polyline points="${line}"/></svg>`;
-  }
-
-  // the summary strip: the rows and their span, then each numeric
-  // column's total, range and mean with its shape — every value
-  // computed from the artifact's own rows, nothing estimated
-  function reportStrip(spec, kinds) {
-    const rows = spec.rows || [];
-    const cols = spec.columns || [];
-    const stats = [];
-    const first = { label: "rows", value: fmtNum(rows.length),
-      sub: `${cols.length} column${cols.length === 1 ? "" : "s"}` };
-    const dateCol = kinds.find((k) => k.kind === "date");
-    if (dateCol) {
-      const ds = rows.map((r) => String(r[dateCol.key] || ""))
-        .filter(Boolean).sort();
-      const today = new Date().toISOString().slice(0, 10);
-      const future = ds.filter((d) => d.slice(0, 10) > today).length;
-      if (ds.length) first.sub += ` · ${ds[0]} → ${ds[ds.length - 1]}`;
-      if (future) {
-        first.warn = true;
-        first.sub += ` · ${future} dated after today`;
-      }
-    }
-    if (spec.watermark) first.sub += ` · ${spec.watermark}`;
-    stats.push(first);
-    for (const k of kinds.filter((x) => x.kind === "num").slice(0, 4)) {
-      const nums = rows.map((r) => Number(r[k.key]))
-        .filter(Number.isFinite);
-      if (!nums.length) continue;
-      const total = nums.reduce((a, b) => a + b, 0);
-      stats.push({ label: k.label, value: compact(total), exact: total,
-        sub: `min ${compact(Math.min(...nums))} · max ${
-          compact(Math.max(...nums))} · avg ${
-          compact(total / nums.length)}`,
-        spark: sparkline(nums) });
-    }
-    return `<div class="report-strip">${stats.map((st, i) => `
-      <div class="stat${st.warn ? " warn" : ""}" style="--i:${i}">
-        <div class="stat-label" title="${esc(st.label)}">${
-          esc(st.label)}</div>
-        <div class="stat-value"${typeof st.exact === "number"
-          ? ` data-n="${st.exact}" data-fmt="compact" title="${
-              esc(fmtNum(st.exact))}"` : ""}>${esc(st.value)}</div>
-        <div class="stat-sub">${esc(st.sub)}</div>
-        ${st.spark || ""}
-      </div>`).join("")}</div>`;
-  }
-
-  function tableReport(spec, opts = {}) {
-    const { summary = true, limit = 50 } = opts;
-    const cols = spec.columns || [];
-    const rows = spec.rows || [];
-    const kinds = columnKinds(cols, rows);
-    const strip = summary && rows.length ? reportStrip(spec, kinds) : "";
-    const head = kinds.map((k) =>
-      `<th class="${k.kind}" data-key="${esc(k.key)}">${esc(k.label)}${
-        (cols.find((c) => c.key === k.key) || {}).status
-          ? ` <span class="muted">(${esc(cols.find((c) =>
-              c.key === k.key).status)})</span>` : ""}</th>`).join("");
-    const cell = (k, v) => k.kind === "num" && isNum(v)
-      ? `<td class="num">${esc(fmtNum(Number(v)))}</td>`
-      : `<td class="${k.kind}">${esc(String(v ?? ""))}</td>`;
-    const body = rows.map((r, i) =>
-      `<tr${i >= limit ? " hidden" : ""}>${
-        kinds.map((k) => cell(k, r[k.key])).join("")}</tr>`).join("");
-    const more = rows.length > limit ? `<div class="table-more">
-        <span>Showing the first ${limit} of ${fmtNum(rows.length)} rows</span>
-        <button class="btn table-all" data-limit="${limit}">Show all</button>
-      </div>` : "";
-    return `${strip}<div class="tablev3"><table class="sortable">
-      <thead><tr>${head}</tr></thead>
-      <tbody>${body}</tbody></table></div>${more}`;
-  }
-
-  function tableHTML(spec) {
-    return tableReport(spec, { summary: false, limit: 20 });
-  }
-
-  function bindTable(container) {
-    for (const btn of container.querySelectorAll(".table-all")) {
-      btn.addEventListener("click", () => {
-        const wrap = btn.closest(".table-more").previousElementSibling;
-        const all = btn.textContent === "Show all";
-        wrap.querySelectorAll("tbody tr").forEach((tr, i) => {
-          tr.hidden = !all && i >= Number(btn.dataset.limit);
-        });
-        btn.textContent = all ? "Show fewer" : "Show all";
-      });
-    }
-  }
-
-  // numbers count up to their value once, never past it; reduced
-  // motion shows the value at once
-  function animateNumbers(container) {
-    const reduce = window.matchMedia
-      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    for (const node of container.querySelectorAll("[data-n]")) {
-      const target = Number(node.dataset.n);
-      const final = node.textContent;
-      if (!Number.isFinite(target) || reduce) continue;
-      const fmt = node.dataset.fmt === "compact" ? compact : fmtNum;
-      const start = performance.now();
-      const step = (now) => {
-        const t = Math.min(1, (now - start) / 700);
-        const eased = 1 - Math.pow(1 - t, 3);
-        node.textContent = t < 1 ? fmt(target * eased) : final;
-        if (t < 1) requestAnimationFrame(step);
-      };
-      requestAnimationFrame(step);
-    }
-  }
-
-  function kpiTile(spec) {
-    const delta = typeof spec.delta === "number"
-      ? `<span class="kpi-delta ${spec.delta >= 0 ? "up" : "down"}">${
-          spec.delta >= 0 ? "▲" : "▼"} ${
-          esc(String(Math.abs(spec.delta)))}</span>` : "";
-    const numeric = typeof spec.value === "number"
-      && Number.isFinite(spec.value);
-    return `<div class="kpi-tile">
-      ${spec.label ? `<div class="kpi-label">${esc(spec.label)}</div>`
-                   : ""}
-      <div class="kpi-value"${numeric
-        ? ` data-n="${spec.value}" data-fmt="plain"` : ""}>${
-        numeric ? esc(fmtNum(spec.value))
-                : esc(String(spec.value ?? "—"))}${
-        spec.unit ? `<span class="kpi-unit">${esc(spec.unit)}</span>`
-                  : ""}${delta}</div>
-    </div>`;
-  }
-
-  function tileFooter(spec) {
-    const prov = spec.provenance;
-    return `<div class="tile-footer">
-      ${statusChip(prov)}
-      ${spec.watermark ? `<span class="status-chip s-exploratory">${
-        esc(spec.watermark)}</span>` : ""}
-      ${prov ? `<span class="meridian"
-        title="${esc(prov.meridian_line || "")}">${
-        esc(disclaimer(prov))}</span>` : ""}
-    </div>`;
-  }
-
-  const TIER_STROKE = { certified: ["#2e7d32", ""],
-                        witnessed: ["#8a6d1a", "6 3"] };
-
-  function diagramSVG(spec, width = 640) {
-    const nodes = spec.nodes || [];
-    const lanes = { metric: [], concept: [], table: [] };
-    for (const n of nodes) {
-      (lanes[n.kind] || lanes.concept).push(n);
-    }
-    const cols = [lanes.metric, lanes.concept, lanes.table]
-      .filter((lane) => lane.length);
-    const rowH = 54;
-    const height = Math.max(...cols.map((c) => c.length), 1)
-      * rowH + 30;
-    const pos = new Map();
-    cols.forEach((lane, ci) => {
-      const x = 90 + ci * ((width - 180) / Math.max(cols.length - 1,
-                                                    1));
-      lane.forEach((n, ri) => {
-        const y = 30 + ri * rowH
-          + (height - 40 - lane.length * rowH) / 2;
-        pos.set(n.id, [cols.length === 1 ? width / 2 : x, y]);
-      });
-    });
-    let body = "";
-    for (const e of spec.edges || []) {
-      const a = pos.get(e.a); const b = pos.get(e.b);
-      if (!a || !b) continue;
-      const [stroke, dash] = TIER_STROKE[e.tier]
-        || ["#9a938a", "2 4"];
-      body += `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}"
-        y2="${b[1]}" stroke="${stroke}" stroke-width="1.6"
-        ${dash ? `stroke-dasharray="${dash}"` : ""}>
-        <title>${esc(e.rel || "")}${e.tier ? ` (${esc(e.tier)})`
-                                           : ""}</title></line>`;
-    }
-    const DOT = { certified: "#2e7d32", pending: "#b07d1e" };
-    for (const n of nodes) {
-      const p = pos.get(n.id);
-      if (!p) continue;
-      const label = n.label.length > 26
-        ? n.label.slice(0, 25) + "…" : n.label;
-      body += `<g class="dg-node dg-${esc(n.kind || "other")}">
-        <rect x="${p[0] - 78}" y="${p[1] - 15}" width="156"
-          height="30" rx="8"/>
-        ${n.status ? `<circle cx="${p[0] - 66}" cy="${p[1]}" r="4"
-          fill="${DOT[n.status] || "#9a938a"}"><title>${
-          esc(statusLabel(n.status))}</title></circle>` : ""}
-        <text x="${p[0] + (n.status ? 6 : 0)}" y="${p[1] + 4}"
-          text-anchor="middle"><title>${esc(n.id)}</title>${
-          esc(label)}</text></g>`;
-    }
-    return `<svg viewBox="0 0 ${width} ${height}" class="diagramv2"
-      xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
-  }
-
-  function panelBody(type, spec) {
-    const mark = spec.watermark
-      ? `<div class="watermark-band">${esc(spec.watermark)}</div>`
-      : "";
-    if (type === "chart") return mark + chartSVG(spec, 460, 230);
-    if (type === "table") return mark + tableHTML(spec);
-    if (type === "kpi") return mark + kpiTile(spec);
-    if (type === "document") {
-      return mark + `<div class="md docview">${
-        renderMarkdown(spec.markdown || "", "md")}</div>`;
-    }
-    return "";
-  }
-
-  function renderArtifactBody(row) {
-    const spec = row.spec || {};
-    const prov = spec.provenance;
-    const footer = `
-      <div class="artifact-footer">
-        ${statusChip(prov)}
-        ${spec.watermark && !prov
-          ? `<span class="status-chip s-exploratory">${
-              esc(spec.watermark)}</span>` : ""}
-        ${prov ? `<span class="meridian"
-          title="${esc(prov.meridian_line || "")}">${
-          esc(disclaimer(prov))}</span>` : ""}
-        <span class="muted">build ${esc(spec.build_id || "?")}
-          · v${row.version}</span>
-      </div>`;
-    if (row.type === "chart") {
-      return chartSVG(spec) + footer;
-    }
-    if (row.type === "table") {
-      const mark = spec.watermark
-        ? `<div class="watermark-band">${esc(spec.watermark)}</div>`
-        : "";
-      return mark + tableReport(spec, { summary: true, limit: 50 })
-        + footer;
-    }
-    if (row.type === "document") {
-      const mark = spec.watermark
-        ? `<div class="watermark-band">${esc(spec.watermark)}</div>`
-        : "";
-      return mark + `<div class="md docview">${
-        renderMarkdown(spec.markdown || "", "md")}</div>` + footer;
-    }
-    if (row.type === "kpi") {
-      return kpiTile(spec) + footer;
-    }
-    if (row.type === "dashboard") {
-      const filters = (spec.filters || []).map((f) => `
-        <span class="dash-filter" data-slot="${esc(f.slot)}">
-          <span class="muted">${esc(f.label || f.slot)}:</span>
-          ${f.options.map((o) => `<button class="filter-opt${
-            o === f.active ? " active" : ""}" data-slot="${
-            esc(f.slot)}" data-value="${esc(o)}">${esc(o)}</button>`)
-            .join("")}
-        </span>`).join("");
-      const panels = (spec.panels || []).map((p, i) => `
-        <div class="dash-panel dash-${esc(p.type)}" style="--i:${i}">
-          ${p.title ? `<div class="dash-panel-title">${
-            esc(p.title)}</div>` : ""}
-          ${panelBody(p.type, p.spec || {})}
-          ${tileFooter(p.spec || {})}
-        </div>`).join("");
-      return `${filters ? `<div class="dash-filters">${filters}
-        </div>` : ""}
-        <div class="dash-grid">${panels}</div>
-        ${spec.notes ? `<div class="dash-notes md">${
-          renderMarkdown(spec.notes, "md")}</div>` : ""}${footer}`;
-    }
-    if (row.type === "diagram") {
-      if (spec.kind === "mermaid") {
-        return `<pre class="mermaid-src">${esc(spec.source || "")
-          }</pre><div class="muted" style="font-size:12px">mermaid
-          source — export .mmd to render elsewhere</div>` + footer;
-      }
-      return diagramSVG(spec) + footer;
-    }
-    return `<pre>${esc(JSON.stringify(spec, null, 1))}</pre>`;
-  }
+  // the rendering — charts, tables, tiles, dashboards, diagrams and
+  // the strip under every number — is js/artifacts-render.js, one
+  // module identical on both surfaces; what differs per surface
+  // (the words under a number) arrives as a hook
+  const { statusChip, renderArtifactBody, bindTable, animateNumbers }
+    = createArtifactRenderer({
+    esc, prose, statusLabel, renderMarkdown,
+    // the italic line under every number: Radix's disclaimer, the
+    // definition line one hover away
+    meridian: (prov) => (prov ? `<span class="meridian"
+      title="${esc(prov.meridian_line || "")}">${
+      esc(disclaimer(prov))}</span>` : ""),
+  });
 
   function bindDashboardFilters(container, row) {
     for (const btn of container.querySelectorAll(".filter-opt")) {
@@ -1255,35 +790,114 @@ export async function renderChat(outlet, wanted = "") {
     if (turn) return turn;
     const div = document.createElement("div");
     div.className = "chat-turn";
-    div.innerHTML = `
-      <details class="tool-activity" hidden open>
-        <summary>
-          <span class="tri">▸</span>
-          <span class="thinking-line">
-            <span class="think-orb">✳</span>
-            <span class="think-text">Thinking…</span></span>
-          <span class="tool-title" hidden></span>
-        </summary>
-        <div class="tool-steps"></div>
-      </details>
+    div.innerHTML = `${activityHTML()}
       <div class="chat-prose md"></div>
       <div class="chat-extras"></div>`;
     thread.appendChild(div);
-    turn = { el: div,
-             activity: div.querySelector(".tool-activity"),
-             toolTitle: div.querySelector(".tool-title"),
-             toolSteps: div.querySelector(".tool-steps"),
-             thinking: div.querySelector(".thinking-line"),
-             thinkText: div.querySelector(".think-text"),
-             prose: div.querySelector(".chat-prose"),
-             extras: div.querySelector(".chat-extras"),
-             buffer: "", steps: 0, rows: new Map(), verbs: [],
-             thoughts: "", done: false, tick: null, tickLabel: "",
-             tickStart: 0, seg: null, segText: "", thought: false,
-             settled: false, startedAt: 0 };
+    turn = { el: div, ...activityParts(div) };
+    rememberThinking(turn.activity);
     state.turns.set(turnId, turn);
     scroll();
     return turn;
+  }
+
+  // ── the thinking block, the way a chat assistant shows it: closed
+  //    by default — one compact line ("Radix is thinking… 12s") while
+  //    the model works; a click on it, or Enter on the summary, opens
+  //    the streamed thoughts and the steps; that choice is kept per
+  //    browser, so the next turn (and the next chat) opens the way the
+  //    person left it; the answer folds it to "Thought for 12s" unless
+  //    they had it open ──
+  const THINK_KEY = "synapse-thinking-open";
+  const thinkOpen = () => {
+    try { return localStorage.getItem(THINK_KEY) === "1"; } catch { return false; }
+  };
+  function rememberThinking(details) {
+    // the click lands before the toggle, so the state after it is the
+    // opposite of the one now; Enter and Space on the summary click too
+    details.querySelector("summary").addEventListener("click", () => {
+      try { localStorage.setItem(THINK_KEY, details.open ? "0" : "1"); } catch {}
+    });
+  }
+  // the block's markup, the same on a turn and on a task row: the
+  // compact line, the folded title, the tokens so far beside them
+  const activityHTML = () => `
+      <details class="tool-activity" hidden>
+        <summary title="">
+          <span class="tri">▸</span>
+          <span class="thinking-line">
+            <span class="think-orb">✳</span>
+            <span class="think-text">Radix is thinking…</span></span>
+          <span class="tool-title" hidden></span>
+          <span class="think-usage" hidden></span>
+        </summary>
+        <div class="tool-steps"></div>
+      </details>`;
+  const activityParts = (root) => ({
+    activity: root.querySelector(".tool-activity"),
+    toolTitle: root.querySelector(".tool-title"),
+    toolSteps: root.querySelector(".tool-steps"),
+    thinking: root.querySelector(".thinking-line"),
+    thinkText: root.querySelector(".think-text"),
+    liveUsage: root.querySelector(".think-usage"),
+    prose: root.querySelector(".chat-prose"),
+    extras: root.querySelector(".chat-extras"),
+    buffer: "", steps: 0, rows: new Map(), verbs: [],
+    thoughts: "", done: false, tick: null, tickLabel: "",
+    tickStart: 0, seg: null, segText: "", thought: false,
+    settled: false, startedAt: 0 });
+
+  // ── usage: what a turn spent, live beside the thinking line (from
+  //    budget_tick: the turn's tokens in and out so far) and as a
+  //    footer under the answer (from turn_done, replayed from the
+  //    stored message's payload); a cost only when a rate is set ──
+  const fmtInt = (n) => new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 0 }).format(Math.max(0, Number(n) || 0));
+  const usageOf = (event) => {
+    // a stream record (the turn's own split, turn_*) or a stored
+    // message's usage (the same numbers, plain names)
+    const num = (...keys) => {
+      for (const k of keys) {
+        const v = Number(event[k]);
+        if (event[k] !== null && event[k] !== undefined && Number.isFinite(v)) return v;
+      }
+      return 0;
+    };
+    const cost = event.turn_cost_usd ?? event.cost_usd;
+    return { tokensIn: num("turn_tokens_in", "tokens_in"),
+             tokensOut: num("turn_tokens_out", "tokens_out"),
+             tokens: num("turn_tokens", "tokens"),
+             calls: num("model_calls", "calls", "turn_calls"),
+             secs: num("elapsed_ms") / 1000,
+             cost: typeof cost === "number" && Number.isFinite(cost) ? cost : null };
+  };
+  const tokensText = (u) => `${fmtInt(u.tokens)} tokens (${fmtInt(u.tokensIn)} in · ${
+    fmtInt(u.tokensOut)} out)`;
+  const costText = (u) => u.cost === null ? ""
+    : ` · $${u.cost.toFixed(u.cost < 0.01 ? 4 : 2)}`;
+  const secsText = (s) => `${s >= 10 ? s.toFixed(0) : s.toFixed(1)}s`;
+  function liveUsage(turn, event) {
+    const u = usageOf(event);
+    if (!turn.liveUsage || turn.done) return;
+    turn.liveUsage.textContent = `· ${tokensText(u)}${costText(u)}`;
+    turn.liveUsage.hidden = false;
+  }
+  // the footer: "12.4s · 8,210 tokens (7,900 in · 310 out) · 2 model calls"
+  function usageFooter(container, u) {
+    if (!u) return;
+    let foot = container.querySelector(":scope > .turn-usage");
+    if (!foot) {
+      foot = document.createElement("div");
+      foot.className = "turn-usage";
+      container.appendChild(foot);
+    }
+    const calls = `${fmtInt(u.calls)} model call${u.calls === 1 ? "" : "s"}`;
+    foot.textContent = u.tokens > 0 || u.calls > 0
+      ? `${secsText(u.secs)} · ${tokensText(u)} · ${calls}${costText(u)}`
+      : `${secsText(u.secs)} · no model call`;
+    foot.title = "What this turn cost: wall time, tokens in and out, model calls"
+      + (u.cost === null ? " (no rate configured: SYNAPSE_COST_IN and SYNAPSE_COST_OUT)"
+                         : ", and the estimate at the configured rate");
   }
 
   // what Radix is doing, in the user's words: the model's own
@@ -1412,30 +1026,37 @@ export async function renderChat(outlet, wanted = "") {
     if (turn.tick) { clearInterval(turn.tick); turn.tick = null; }
   }
 
+  // the live line's words: the assistant by name while it thinks, the
+  // plain verb while a tool runs, "Stopping…" on the stop; the seconds
+  // count from the first one, and past twenty the line says "still"
+  const wording = (label) => label === "Thinking…" ? "Radix is thinking…" : label;
+  const still = (base) => base.startsWith("Radix is ")
+    ? `Radix is still ${base.slice(9)}`
+    : `Still ${base.charAt(0).toLowerCase()}${base.slice(1)}`;
   function pulse(turn, label, sinceIso = "") {
     stopPulse(turn);
-    turn.tickLabel = label;
+    turn.tickLabel = wording(label);
     // the clock starts when the event happened, not when it was
     // seen — a replayed turn shows its true seconds
     const since = Date.parse(sinceIso || "");
     turn.tickStart = Number.isFinite(since)
       ? Math.min(since, Date.now()) : Date.now();
-    showThinking(turn, label);
+    showThinking(turn, turn.tickLabel);
     turn.tick = setInterval(() => {
       if (turn.done) { stopPulse(turn); return; }
       const secs = Math.round((Date.now() - turn.tickStart) / 1000);
-      if (secs < 4) return;
+      if (secs < 1) return;
       const base = turn.tickLabel.replace(/…$/, "");
       showThinking(turn, secs >= 20
-        ? `Still ${base.charAt(0).toLowerCase()}${base.slice(1)} · ${secs}s`
+        ? `${still(base)} · ${secs}s`
         : `${base}… ${secs}s`);
     }, 1000);
   }
 
-  // ── the thinking block, the way a chat assistant shows it: the model's own
-  // thought summaries in the order they happen, interleaved with the
-  // steps — open while it works, "Thought for 34s" when the answer
-  // lands, yours to expand; new work reopens it
+  // ── the block's contents: the model's own thought summaries in the
+  // order they happen, interleaved with the steps — folded behind the
+  // compact line while it works, "Thought for 34s" when the answer
+  // lands, yours to expand; new work brings the live line back
   function doneLabel(thought, elapsedMs, verbs) {
     const secs = Math.max(0, (elapsedMs || 0) / 1000);
     const head = `${thought ? "Thought" : "Worked"} for ${
@@ -1445,7 +1066,7 @@ export async function renderChat(outlet, wanted = "") {
 
   function openBlock(turn) {
     turn.activity.hidden = false;
-    turn.activity.open = true;
+    turn.activity.open = thinkOpen();       // closed unless they keep it open
     turn.settled = false;
     turn.toolTitle.hidden = true;
     turn.thinking.hidden = false;
@@ -1475,13 +1096,15 @@ export async function renderChat(outlet, wanted = "") {
       elapsedMs ?? (turn.startedAt ? Date.now() - turn.startedAt : 0),
       [...new Set(turn.verbs)]);
     turn.toolTitle.hidden = false;
-    turn.activity.open = false;
+    // the answer folds the block — unless the person keeps it open
+    turn.activity.open = thinkOpen();
     turn.settled = true;
   }
 
   function doneThinking(turn, elapsedMs) {
     turn.done = true;
     settleBlock(turn, elapsedMs);
+    if (turn.liveUsage) turn.liveUsage.hidden = true;   // the footer takes over
   }
 
   // one row per call: announced when the call starts, settled when
@@ -1580,6 +1203,7 @@ export async function renderChat(outlet, wanted = "") {
         <b>${esc(c.label)}</b>
         ${c.hint ? `<span class="muted">${prose(c.hint)}</span>` : ""}
       </button>`).join("");
+    scroll();        // the chips sit in the scroll flow, under the answer
     for (const b of box.querySelectorAll(".chip-choice")) {
       b.addEventListener("click", async () => {
         const item = items[Number(b.dataset.i)];
@@ -1770,16 +1394,7 @@ export async function renderChat(outlet, wanted = "") {
         <span class="task-cost"></span>
       </summary>
       <div class="task-body">
-        <details class="tool-activity" hidden open>
-          <summary>
-            <span class="tri">▸</span>
-            <span class="thinking-line">
-              <span class="think-orb">✳</span>
-              <span class="think-text">Thinking…</span></span>
-            <span class="tool-title" hidden></span>
-          </summary>
-          <div class="tool-steps"></div>
-        </details>
+        ${activityHTML()}
         <div class="chat-prose md"></div>
         <div class="chat-extras"></div>
         <div class="task-note muted" hidden></div>
@@ -1794,17 +1409,8 @@ export async function renderChat(outlet, wanted = "") {
              statusEl: row.querySelector(".task-status"),
              costEl: row.querySelector(".task-cost"),
              noteEl: row.querySelector(".task-note"),
-             activity: row.querySelector(".tool-activity"),
-             toolTitle: row.querySelector(".tool-title"),
-             toolSteps: row.querySelector(".tool-steps"),
-             thinking: row.querySelector(".thinking-line"),
-             thinkText: row.querySelector(".think-text"),
-             prose: row.querySelector(".chat-prose"),
-             extras: row.querySelector(".chat-extras"),
-             buffer: "", steps: 0, rows: new Map(), verbs: [],
-             thoughts: "", done: false, tick: null, tickLabel: "",
-             tickStart: 0, seg: null, segText: "", thought: false,
-             settled: false, startedAt: 0 };
+             ...activityParts(row) };
+    rememberThinking(task.activity);
     board.tasks.set(id, task);
     scroll();
     return task;
@@ -1910,8 +1516,10 @@ export async function renderChat(outlet, wanted = "") {
         const seg = thoughtSegment(turn);
         turn.segText += event.delta || "";
         seg.innerHTML = renderMarkdown(turn.segText, "md");
+        // the latest line of the thought rides the compact line's
+        // hover; the line itself stays "Radix is thinking… 12s"
         const line = lastLine(turn.segText);
-        if (line) { turn.tickLabel = line; showThinking(turn, line); }
+        if (line) turn.activity.querySelector("summary").title = line;
         scroll();
         break;
       }
@@ -1959,6 +1567,9 @@ export async function renderChat(outlet, wanted = "") {
       case "budget_tick":
         el("chat-meter").textContent =
           `${event.tokens ?? 0} tokens · ${event.calls ?? 0} calls`;
+        // the turn's tokens so far, on the line of the turn that
+        // spends them: a task's tick counts on the parent's line
+        liveUsage(turn.task ? turn.parent : turn, event);
         break;
       case "turn_done":
         if (turn.task) {              // a task's own end: its row settles
@@ -1967,6 +1578,7 @@ export async function renderChat(outlet, wanted = "") {
         }
         setRunning(false);
         doneThinking(turn, event.elapsed_ms);
+        usageFooter(turn.el, usageOf(event));      // what the turn cost
         if (!state.session.title) refreshTitle();
         if (event.status === "partial"
             || event.status === "stopped") {
@@ -2022,6 +1634,7 @@ export async function renderChat(outlet, wanted = "") {
     details.innerHTML = `<summary><span class="tri">▸</span>
       <span class="tool-title">${esc(doneLabel(thought, elapsedMs, verbs))
       }</span></summary><div class="tool-steps"></div>`;
+    rememberThinking(details);          // folded; a click is a choice too
     const steps = details.querySelector(".tool-steps");
     for (const t of entries) {
       const el = document.createElement("div");
@@ -2094,6 +1707,7 @@ export async function renderChat(outlet, wanted = "") {
       if (row) artifactCard(turn.extras, row, false);
     }
     if (p.chips?.length && last) chipRow(p.chips);
+    if (p.usage) usageFooter(turn.el, usageOf(p.usage));
   }
 
   // ── history replay from the store ────────────────────────
@@ -2136,6 +1750,10 @@ export async function renderChat(outlet, wanted = "") {
       if (chips?.length
           && message === boot.messages[boot.messages.length - 1]) {
         chipRow(chips);
+      }
+      // the footer the stream drew, from the stored usage
+      if (message.payload?.usage) {
+        usageFooter(div, usageOf(message.payload.usage));
       }
     }
   }

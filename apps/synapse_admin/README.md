@@ -226,13 +226,14 @@ python scripts/skills_check.py --skills-dir /path/to/skills --model gemini-3.7-f
 python -m pytest apps/synapse_admin/tests/ -q
 ```
 
-## Synapse by Lumi, the second surface (apps/synapse)
+## Systematic Intelligence by Lumi, the second surface (apps/synapse)
 
 The same server also serves a second frontend at
 `http://localhost:8400/synapse/` from `apps/synapse/frontend`: a copy
 of this one, stripped for the people who ask questions rather than
-steward the graph. The left header reads Synapse Semantic
-Intelligence; New chat and Search chats sit at the top, the recent
+steward the graph. The left header reads Systematic Intelligence, by
+Lumi (the console keeps Synapse by Lumi; the assistant is Radix on
+both); New chat and Search chats sit at the top, the recent
 chats under them, and Data Products, Metrics Explorer and Artifacts in
 their own section at the bottom above the account. Home, Skills,
 Cosmos and Operate are not there. Search chats is a page of its own
@@ -275,6 +276,23 @@ remembered per chat (`POST /api/chat/sessions/{id}/model`), and the
 "?" beside the dials explains Chat/Autopilot, Quick/Standard/Deep and
 both models from `GET /api/chat/dials`.
 
+What a turn costs is shown and kept, on both surfaces. While a turn
+runs the thinking line (closed by default: one compact "Radix is
+thinking… 12s" line, a click opens the streamed thoughts, the choice
+kept per browser) carries the tokens so far from `budget_tick`; when
+it ends the answer carries a footer — "12.4s · 8,210 tokens (7,900 in
+· 310 out) · 2 model calls", a cost only when `SYNAPSE_COST_IN` and
+`SYNAPSE_COST_OUT` are set — from `turn_done`, replayed from the
+message's stored `usage`. Each chat's totals (tokens in and out, model
+calls, turns, wall time) live on its session row (`db/spanner/009_usage.sql`
+on Spanner, the same columns in the sqlite stores), ride
+`GET /api/chat/sessions` and `/api/chat/search`, and show on the shelf
+and the search rows as "8.2K tokens · 3 turns". The People page's
+Tokens column is each person's sum across their chats, with the
+breakdown on hover, from `GET /api/admin/users` (one aggregate query
+per store; under `SAHS_STORE=local`, the one developer's totals from
+the local store).
+
 A message that reads like several jobs ("compare churn across the
 regions, then explain which definitions differ, and build a
 dashboard") becomes a task run on both surfaces: the harness splits it
@@ -287,4 +305,16 @@ The events (`plan_made`, `task_started`, `task_done`, and a `task` field
 on every record a task's sub-turn emits) ride the same stream; there is
 no new route. The mental model, the gate, the budget split and the
 report are in `synapse-agentic-harness-system/docs/multi-task-turns.md`.
+
+Charts, tables, KPI tiles and dashboards render on both surfaces from
+one identical module, `js/artifacts-render.js` (a surface test pins the
+two copies equal): numbers format themselves from the data (the
+decimals the column carries, thousands grouped, K/M/B past a hundred
+thousand, the unit from the column's metadata or name), a chart spec
+with no kind gets one from the harness's written heuristic with a
+one-sentence reason shown on the card, and twelve chart kinds draw as
+hand-drawn SVG in light and dark with reduced-motion parity. The
+formatting rules, the heuristic table, every kind's encoding, the
+override keys and how to add a kind:
+`synapse-agentic-harness-system/docs/visualizations.md`.
 

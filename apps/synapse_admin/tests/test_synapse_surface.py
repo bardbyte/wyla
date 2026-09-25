@@ -59,15 +59,22 @@ def client(compiled) -> TestClient:
 
 
 def test_shell_is_stripped_and_renamed():
-    """The left header says Synapse, by Lumi; Home, Cosmos and Operate
-    are gone; New chat and Search chats sit at the top, the chats under
-    them, and Skills and Memory under Customize, at the bottom above the
-    account (the knowledge files live on the Skills page, the way a
-    settings page lists them). The Explore shelf — Data Products and
-    Semantics Explorer — is off this surface for now: the pages still
-    answer by URL, and the admin console keeps its own entries."""
-    assert "<title>Synapse by Lumi</title>" in INDEX
-    assert ">Synapse</a>" in INDEX and ">by Lumi<" in INDEX
+    """The left header says Systematic Intelligence, by Lumi (the pair
+    reads "Systematic Intelligence by Lumi"; the admin console keeps
+    "Synapse by Lumi"; the assistant stays Radix); Home, Cosmos and
+    Operate are gone; New chat and Search chats sit at the top, the
+    chats under them, and Skills and Memory under Customize, at the
+    bottom above the account (the knowledge files live on the Skills
+    page, the way a settings page lists them). The Explore shelf — Data
+    Products and Semantics Explorer — is off this surface for now: the
+    pages still answer by URL, and the admin console keeps its own
+    entries."""
+    assert "<title>Systematic Intelligence by Lumi</title>" in INDEX
+    assert ">Systematic Intelligence</a>" in INDEX and ">by Lumi<" in INDEX
+    assert ">Synapse</a>" not in INDEX and "<title>Synapse by Lumi</title>" not in INDEX
+    # the logo, when one is configured, carries the same name
+    assert MAIN.count('"Systematic Intelligence by Lumi"') == 2
+    assert '"Synapse by Lumi"' not in MAIN
     for gone in ("#/home", "#/cosmos", "#/operate", "#/ask", "#/artifacts",
                  "powered by Lumi", "Semantic Intelligence", "Metrics Explorer",
                  ">Tables<", ">Home<", ">Artifacts<", "chats-search",
@@ -152,7 +159,7 @@ def test_library_pages_are_cards():
 def test_second_surface_is_served_beside_the_first(client):
     page = client.get("/synapse/")
     assert page.status_code == 200
-    assert "Synapse by Lumi" in page.text
+    assert "Systematic Intelligence by Lumi" in page.text
     assert client.get("/synapse/js/main.js").status_code == 200
     assert client.get("/synapse/styles/synapse.css").status_code == 200
     home = client.get("/")
@@ -617,9 +624,9 @@ def test_the_thread_follows_only_while_you_read_at_the_bottom():
     takes another step, "trying another way" — never a raw error. The
     italic line under a number is Radix's disclaimer, with the graph's
     definition line one hover away. The two behavior fixes ride both chat
-    pages; the assistant is Radix on both (the owner's call after PR
-    #145, which had named it only here); the disclaimer stays on this
-    surface, the admin console keeps its definition line in the open."""
+    pages; the assistant is Radix on both (a naming decision: the admin
+    console had said Synapse); the disclaimer stays on this surface,
+    the admin console keeps its definition line in the open."""
     admin = (REPO_ROOT / "apps" / "synapse_admin" / "frontend" / "js"
              / "pages" / "chat.js").read_text(encoding="utf-8")
     for src in (CHAT, admin):
@@ -692,3 +699,44 @@ def test_a_compound_ask_draws_a_task_board_here_too():
     # the copy names nobody: the board reads the same on both surfaces
     board = CHAT.split("const TASK_MARKS")[1].split("function handle")[0]
     assert "Radix" not in board and "Synapse" not in board
+
+
+def test_the_pane_scrolls_the_thinking_folds_and_the_usage_shows_here_too():
+    """The owner's laptop test, on the second surface: the whole main
+    pane is the scroll surface (the thread scrolls under the masthead
+    and past the chips; the composer docks; the wheel works in the
+    gutters), the thinking block is closed by default with one compact
+    "Radix is thinking… 12s" line and the choice kept per browser, and
+    the usage shows live, as a footer, in the sidebar and on the search
+    rows. The same pins as the admin console's, on this page's own
+    files and stylesheet."""
+    app_css = (FRONT / "styles" / "app.css").read_text(encoding="utf-8")
+    chats_js = (FRONT / "js" / "chats.js").read_text(encoding="utf-8")
+    search_js = (FRONT / "js" / "pages" / "search.js").read_text(encoding="utf-8")
+    for piece in ('id="chat-scroll"', 'const scroller = el("chat-scroll")',
+                  "scroller.scrollTop = scroller.scrollHeight",
+                  'scroller.addEventListener("scroll"', "composer.offsetHeight",
+                  "let stuck = true", "stuck = atBottom()", "scroll(true)",
+                  # the thinking block: closed, remembered, one line
+                  '<details class="tool-activity" hidden>', "synapse-thinking-open",
+                  "thinkOpen()", "rememberThinking", "Radix is thinking…",
+                  "Radix is still", 'pulse(turn, "Thinking…", event.ts)',
+                  "<summary title=", "activityHTML()", "activityParts(",
+                  # the usage: live, the footer, replayed
+                  "think-usage", "liveUsage(turn.task ? turn.parent : turn, event)",
+                  "usageFooter(turn.el, usageOf(event))", "payload.usage",
+                  "turn-usage", "model call", "turn_tokens_in", "turn_cost_usd",
+                  "SYNAPSE_COST_IN"):
+        assert piece in CHAT, piece
+    assert 'hidden open>' not in CHAT
+    assert "chat-jump" in CHAT.split("</button>\n      </div>")[0]   # the pill outside the scroller
+    for cls in (".chat-scroll {", ".chat-scroll .chat-composer {", "position: sticky",
+                ".outlet.chatv2page {", ".think-usage {", ".turn-usage {",
+                ".chat-row .chat-usage {", ".tool-activity summary { flex-wrap: wrap;"):
+        assert cls in app_css, cls
+    for piece in ("usageLine", "usageTitle", 'class="chat-usage"', "tokens · ", "turn"):
+        assert piece in chats_js, piece
+    for piece in ("usageLine(row)", "usageTitle(row)", 'class="search-usage"'):
+        assert piece in search_js, piece
+    # the wordmark set for two words, on one line
+    assert ".brand .wordmark {" in CSS and "white-space: nowrap" in CSS

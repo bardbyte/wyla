@@ -54,9 +54,9 @@ def permissions_for_roles(roles: list[str] | tuple[str, ...]) -> list[str]:
 
 
 # ── added here, for the identity store this repository runs ──────────
-# (the block above is the enterprise branch's file as written; the
-# store needs the surfaces a set of roles opens and a way to tell a
-# known role from a typo, so these live under the same names)
+# (the block above is the authorization module as the identity service
+# defines it; the store needs the surfaces a set of roles opens and a
+# way to tell a known role from a typo, so these live under the same names)
 
 ROLES: tuple[str, ...] = tuple(ROLE_PERMISSIONS)
 

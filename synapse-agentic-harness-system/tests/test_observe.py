@@ -194,11 +194,13 @@ def test_runtime_attaches_its_observer_to_every_new_session(tmp_path):
                                graph_root=tmp_path / "graph",
                                store_path=tmp_path / "chat.sqlite3",
                                model_factory=lambda budget: None)
-    assert runtime.runtime("before").bus.sinks == []
+    # every bus carries the usage settler (the turn's cost onto the chat
+    # row); the observer joins it only once it is set
+    assert len(runtime.runtime("before").bus.sinks) == 1
     seen = []
     runtime.observer = seen.append
     rt = runtime.runtime("after")
-    assert rt.bus.sinks == [seen.append]
+    assert len(rt.bus.sinks) == 2 and rt.bus.sinks[-1] == seen.append
     rt.bus.emit("turn_started", turn_id="t1", text="x")
     assert seen and seen[0]["ev"] == "turn_started"
 
@@ -293,9 +295,9 @@ def test_task_items_keep_the_whole_task_in_metadata():
 
 def test_dataset_names_and_versions_are_stable(tmp_path):
     from sahs.observe.experiments import dataset_name, tasks_version
-    assert dataset_name(TASKS / "curated" / "curated.jsonl") == "wyla-curated"
+    assert dataset_name(TASKS / "curated" / "curated.jsonl") == "synapse-curated"
     assert dataset_name(TASKS / "capability" / "matrix.jsonl") == \
-        "wyla-capability-matrix"
+        "synapse-capability-matrix"
     a = tasks_version([TASKS / "curated" / "curated.jsonl"])
     assert a == tasks_version([TASKS / "curated" / "curated.jsonl"])
     other = tmp_path / "curated.jsonl"
@@ -376,8 +378,8 @@ def test_experiment_recorder_scores_every_trial_on_its_item():
     recorder = experiment_recorder(client, [path], sut="oracle",
                                    canon_version="c1", run_name="run-1",
                                    queue=False)
-    assert set(client.datasets) == {"wyla-curated"}
-    assert len(client.items["wyla-curated"]) == len(tasks)
+    assert set(client.datasets) == {"synapse-curated"}
+    assert len(client.items["synapse-curated"]) == len(tasks)
 
     report = run_suite(tasks, recorder.sut(oracle), on_trial=recorder.on_trial)
     assert report["overall"]["pass@1"] == 1.0
@@ -458,8 +460,8 @@ def test_prompt_templates_carry_the_static_prose_and_variables():
     assert "{{graph}}" in text and "{{session}}" in text
     assert "{{digest}}" in loop_template()
     names = {(r["name"], r["version"]) for r in registry()}
-    assert ("wyla-assistant-system", ASSISTANT_VERSION) in names
-    assert ("wyla-loop-system", PROMPT_VERSION) in names
+    assert ("synapse-assistant-system", ASSISTANT_VERSION) in names
+    assert ("synapse-loop-system", PROMPT_VERSION) in names
     assert label_for("assistant/3") == "assistant-3"
 
 
@@ -472,7 +474,7 @@ def test_register_prompts_is_idempotent_and_flags_drift(tmp_path,
     assert all(r["created"] for r in first)
     assert not any(r["drift"] for r in first)
     links = P.load_links(out)
-    assert links["wyla-assistant-system"] == {first[0]["version"]: 1}
+    assert links["synapse-assistant-system"] == {first[0]["version"]: 1}
 
     second = P.register_prompts(client, out, root=None)
     assert not any(r["created"] for r in second)      # same text: no-op
@@ -481,38 +483,38 @@ def test_register_prompts_is_idempotent_and_flags_drift(tmp_path,
     # version under the same label, and the drift is reported
     monkeypatch.setattr(P, "assistant_template", lambda: "changed words")
     third = P.register_prompts(client, out, root=None)
-    row = next(r for r in third if r["name"] == "wyla-assistant-system")
+    row = next(r for r in third if r["name"] == "synapse-assistant-system")
     assert row["created"] and row["drift"]
-    assert P.load_links(out)["wyla-assistant-system"][row["version"]] == 2
+    assert P.load_links(out)["synapse-assistant-system"][row["version"]] == 2
     # the reader follows the file as it changes
     link = P.PromptLinks(out)
-    assert link(row["version"]) == ("wyla-assistant-system", 2)
+    assert link(row["version"]) == ("synapse-assistant-system", 2)
     assert link("never-registered") is None
 
 
 def test_generations_carry_the_registered_prompt_link(tmp_path):
     rec = Recorder()
-    tracer = TurnTracer(rec, prompt_of=lambda v: ("wyla-assistant-system", 7)
+    tracer = TurnTracer(rec, prompt_of=lambda v: ("synapse-assistant-system", 7)
                         if v == "assistant/3" else None)
     bus = EventBus("s1", None, events=ASSISTANT_EVENTS)
     bus.sinks.append(tracer)
     _emit_turn(bus)
     assert [g["prompt"] for g in rec.of("generation_open")] == \
-        [("wyla-assistant-system", 7)] * 2
+        [("synapse-assistant-system", 7)] * 2
 
 
 def test_langfuse_emitter_links_the_generation_to_the_prompt(sdk_client):
     from sahs.observe.langfuse_emitter import LangfuseEmitter
     client, exporter, _posted = sdk_client
     tracer = TurnTracer(LangfuseEmitter(client),
-                        prompt_of=lambda v: ("wyla-assistant-system", 7))
+                        prompt_of=lambda v: ("synapse-assistant-system", 7))
     bus = EventBus("s1", None, events=ASSISTANT_EVENTS)
     bus.sinks.append(tracer)
     _emit_turn(bus)
     tracer.flush()
     gen = {s.name: s for s in exporter.get_finished_spans()}["model call 1"]
     assert gen.attributes["langfuse.observation.prompt.name"] == \
-        "wyla-assistant-system"
+        "synapse-assistant-system"
     assert gen.attributes["langfuse.observation.prompt.version"] == 7
 
 

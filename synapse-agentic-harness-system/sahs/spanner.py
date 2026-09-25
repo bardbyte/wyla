@@ -1,10 +1,9 @@
 """Settings for the identity service and the Google connection.
 
-The enterprise branch's module, ``sahs/util/spanner/settings.py``, is
-the base and lands in this repository as written. This facade is what
-the app imports (``from sahs.spanner import …``): the same names, their
-validation, plus what this repository runs that the branch does not
-yet know:
+The settings module, ``sahs/util/spanner/settings.py``, is the base
+and is never edited here. This facade is what the app imports
+(``from sahs.spanner import …``): the same names, their validation,
+plus what the app runs that the settings module does not know:
 
     SAHS_STORE=sqlite       a local file with the same tables, for a
                             laptop and the tests (their switch knows
@@ -15,18 +14,20 @@ yet know:
                             the front door is Okta
     defaults on every field, so a test names only what it cares about
 
-Their rules hold where a store runs: a pepper of eight characters or
-more, the cookie flag one of auto | true | false, the direct-reset and
-localhost-callback refusals in a deployed environment. Under
+The settings module's rules hold where a store runs: a pepper of
+eight characters or more, the cookie flag one of auto | true | false,
+the direct-reset and localhost-callback refusals in a deployed
+environment. Under
 ``SAHS_STORE=local`` no store runs and nothing here guards anything,
 so ``AuthSettings.from_env`` reads leniently and the routes that only
 ask "is the local form open here" can answer on a laptop with nothing
 configured.
 
-One deviation, deliberate: their loader re-reads the silo ``.env`` with
-``override=True`` (the file beats the shell). The harness convention is
-the opposite, so this facade resolves the environment once, shell
-first, and hands their readers the resolved mapping.
+One deviation, deliberate: the settings module's loader re-reads the
+silo ``.env`` with ``override=True`` (the file beats the shell). The
+harness convention is the opposite, so this facade resolves the
+environment once, shell first, and hands the settings readers the
+resolved mapping.
 """
 
 from __future__ import annotations
@@ -107,7 +108,7 @@ def spanner_is_enabled(environ: Mapping[str, str] | None = None) -> bool:
 
 def grpc_endpoint(endpoint: str) -> str:
     """``https://host[:port]/…`` → ``host:port`` for the SDK's api_endpoint;
-    a bare ``host:port`` (the emulator) passes through unchanged. Theirs
+    a bare ``host:port`` (the emulator) passes through unchanged. ``settings.py``'s
     returns the host alone; the SDK accepts both, the tests pin this one."""
     value = (endpoint or "").strip()
     if not value:

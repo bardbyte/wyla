@@ -1,11 +1,9 @@
 # Report: Langfuse insight — the mirror rebuilt from Spanner
 
-Branch `worktree-agent-a23cc6b840cde6438`, worktree
-`/home/user/wyla/.claude/worktrees/agent-a23cc6b840cde6438`, fast-forwarded
-onto `claude/production-ready` (`33fade0`) before the first change, since the
-worktree had been cut 18 commits behind it (the store's `add_event`,
-`events`, `last_turn` and `docs/spanner-wiring.md` only exist there).
-Commits: `14e7af6`, `f97fba5`, plus this report. Nothing pushed, no PR.
+Based on the integration branch at `33fade0` (the store's `add_event`,
+`events`, `last_turn` and `docs/spanner-wiring.md` exist from there).
+Commits: `14e7af6` (the mirror change), `f97fba5` (the insight change),
+plus this report.
 
 The guide is `docs/runbooks/langfuse-insight.md`; it is linked from
 `docs/runbooks/langfuse.md` (step two) and from `apps/synapse_admin/README.md`.
@@ -22,7 +20,7 @@ The guide is `docs/runbooks/langfuse-insight.md`; it is linked from
 | `sahs/observe/record.py` | new: `RecordReader(database)` — `sessions(since, session_id, owner)`, `events` (paged through `SpannerAssistantStore.events`), `messages`, `feedback`, `turns`, `counts`; `turns_of()` groups records + message payloads + votes into turns (question, status, skills loaded and modes, refused, checks, prompt version, answer, proposal SQL from the message payload first, artifacts, plan, task_done rows, feedback, tokens); `backfill(reader, tracer, since, session_id, owner)` replays each session under its owner and scores its votes; `parse_since`. |
 | `sahs/observe/datasets.py` | new: `PRECEDENT_SCHEMA`/`SILVER_SCHEMA`/`SCENARIO_SCHEMA`, `read_precedents` (the documented JSONL shape), `precedent_items`, `is_silver`, `silver_items`, `scenario_items`, `write_jsonl`, `read_items`, `is_item_file`, `push_items`, `items_to_tasks` (precedent/silver → `nl2sql` tasks with the canonical fingerprint accepted and `skill=` tag; scenario → `decompose`). |
 | `sahs/observe/coverage.py` | new: `CONCEPTS`, `coverage(reader)`, `format_coverage`, `format_coverage_markdown`. |
-| `sahs/observe/experiments.py` | `dataset_name()` names an item file by its schema (`wyla-precedents`, `wyla-silver`, `wyla-scenarios`); `task_item()` passes items through; `read_any_tasks()`; the recorder scores `skill_hit` when the item names a skill and the answer carries `skills`. |
+| `sahs/observe/experiments.py` | `dataset_name()` names an item file by its schema (`synapse-precedents`, `synapse-silver`, `synapse-scenarios`); `task_item()` passes items through; `read_any_tasks()`; the recorder scores `skill_hit` when the item names a skill and the answer carries `skills`. |
 | `sahs/observe/prompts.py` | `part_registry()`: identity, chain, mode blurbs, style per engine family, `PLAN_SYSTEM`, `JUDGE_SYSTEM`, `REVIEW_SYSTEM`; `content_version()` (a text hash as the version string for one-shots with no constant); `registry(parts=True)`; entries carry `labels` (`production`, the family) which `register_prompts` applies; the assembled template gains the `{{style}}` section the real prompt has. |
 | `sahs/evals/schema.py` | `TaskKind` + `decompose`; `TaskGold.expected_tasks`, `synthesis`. |
 | `sahs/evals/grading.py` | `SutAnswer.kind` + `plan`, `tasks`, `skills`; `grade_decompose` (count → fail; kinds or wave depth → ambiguous; else pass); dispatch. |
@@ -38,7 +36,7 @@ The guide is `docs/runbooks/langfuse-insight.md`; it is linked from
 | `apps/synapse_admin/README.md` | one paragraph linking the guide. |
 | `apps/synapse_admin/backend/chat.py` | `user_id=runtime.owner_user_id or runtime.user_name`: live traces file under the same id (`ChatSessions.OwnerUserId`) the backfill uses. |
 
-No new environment variable; `.env.example` untouched. No model identifier in code or commits. The enterprise baseline files were not touched. `sahs/loop/skills.py`, `sahs/assistant/skills_loader.py`, `sahs/assistant/kit.py` and the skills block of `loop.py` were not touched — the one `loop.py` edit is the fingerprint on the system `model_prompt` emit, after `system_prompt()` returns.
+No new environment variable; `.env.example` untouched. No model identifier in code or commits. `sahs/loop/skills.py`, `sahs/assistant/skills_loader.py`, `sahs/assistant/kit.py` and the skills block of `loop.py` were not touched — the one `loop.py` edit is the fingerprint on the system `model_prompt` emit, after `system_prompt()` returns.
 
 ## Tests
 

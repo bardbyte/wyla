@@ -1,6 +1,6 @@
 # Production-ready: the consolidated report
 
-Branch `claude/production-ready`, PR #150. Four workstreams ran in parallel
+The integration branch, PR #150. Four workstreams ran in parallel
 worktrees off `main` at PR #149 and were merged in this order: storage
 foundation, content to Spanner, multi-task turns, skill retrieval. Each has
 its own report; this page is the map.
@@ -13,6 +13,10 @@ its own report; this page is the map.
 | Langfuse insight | [`../../synapse-agentic-harness-system/docs/reports/langfuse-insight.md`](../../synapse-agentic-harness-system/docs/reports/langfuse-insight.md) | backfill from `ChatEvents` with deterministic ids, prompt fingerprints and registered parts, dataset builders (precedents, silver, scenarios), `run_evals.py --sut assistant`, a coverage table, the guide `docs/runbooks/langfuse-insight.md` |
 | UI fixes | [`ui-fixes-stop-radix.md`](ui-fixes-stop-radix.md) | one-line composer pills, the chosen stop on the pill, an icon stop that stops the model mid-stream, Radix on both surfaces, persona-facing model and effort copy |
 | backend fixes | [`backend-fixes-sensitive-model-skills.md`](backend-fixes-sensitive-model-skills.md) | `SAHS_SENSITIVE_COLUMNS` (allow by default), the model choice at 64 with `008_chat_model.sql`, one skills tree for both shelves, `scripts/skills_check.py` |
+| visualizations | [`visualizations.md`](visualizations.md) | formatting from the data, the selection heuristic, twelve kinds, Show all and the strip |
+| chat UX and usage | [`chat-ux-usage.md`](chat-ux-usage.md) | the pane scrolls, thinking folds, per-turn and per-person usage stored and shown (`009_usage.sql`), the second surface's wordmark |
+| auth end to end | [`auth-e2e.md`](auth-e2e.md) | Okta to Google to BigQuery as the person on fakes; six bugs fixed; what needs a laptop |
+| carry-back | [`../enterprise-carry-back.md`](../enterprise-carry-back.md), [`sanitization-scan.md`](sanitization-scan.md) | the procedure to the enterprise repository; the provenance scan and its edits |
 | research | [`../research/resilience-accuracy-latency.md`](../research/resilience-accuracy-latency.md) | the decisions on caches, memory, resilience and the accuracy loop, with sources |
 | skill retrieval | [`../../synapse-agentic-harness-system/docs/reports/skill-retrieval.md`](../../synapse-agentic-harness-system/docs/reports/skill-retrieval.md) | `skill_index.py` (chunker, FTS5 index, BM25), per-engine whole-load budgets, frontmatter as a preference, never a refusal (whole when it fits, a library when it does not), `skill_toc` / `skill_search` / `skill_read`, the `skills_loaded` record, the routing hint |
 
@@ -52,9 +56,9 @@ and sandbox scratch.
 
 | suite | result | exit |
 |---|---|---|
-| `apps/synapse_admin/tests` | 158 passed, 2 skipped | 0 |
-| `synapse-agentic-harness-system/tests` | 654 passed | 0 |
-| `scripts/spanner_ddl_check.py` | 44 tables across 8 files, the ALTERs applied, ok | 0 |
+| `apps/synapse_admin/tests` | 186 passed, 2 skipped | 0 |
+| `synapse-agentic-harness-system/tests` | 684 passed | 0 |
+| `scripts/spanner_ddl_check.py` | 44 tables across 9 files, the ALTERs applied, ok | 0 |
 | CI `tests` job on PR #150 | success on the last head it ran on; the job is gated off draft pushes and runs once when the PR is marked ready | |
 
 Retrieval accuracy on the synthetic 2.5 MB pack (577 sections, 1,022

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""state_report.py — everything the session needs to know about THIS
-laptop in one paste: the graph, the promoted build, the enrichment
+"""state_report.py — everything worth knowing about THIS laptop in
+one report: the graph, the promoted build, the enrichment
 history, and what the Vertex SVC-ID can actually do.
 
     python scripts/state_report.py                # full report
     python scripts/state_report.py --no-vertex    # offline sections only
     python scripts/state_report.py --graph graph --builds builds
-    cat docs/evals/state_report.md                # then PASTE it
+    cat docs/evals/state_report.md                # then read it
 
 Sections (each best-effort: a failing section prints why and the
 report continues):
@@ -29,7 +29,7 @@ report continues):
 
 Writes docs/evals/state_report.{md,json}. Exit 0 when the offline
 sections load; 3 when Vertex was requested and cannot even bootstrap.
-The laptop cannot push — the report travels by PASTE.
+The report is the file; read it from there.
 """
 
 from __future__ import annotations
@@ -488,7 +488,7 @@ def main(argv: list[str] | None = None) -> int:
     markdown = render_markdown(report)
     (out / "state_report.md").write_text(markdown, encoding="utf-8")
     print("\n" + markdown)
-    print("→ PASTE docs/evals/state_report.md back into the session.")
+    print("→ the report is in docs/evals/state_report.md")
     vertex_failed = (not args.no_vertex
                      and bool(report.get("vertex", {}).get("error")))
     return 3 if vertex_failed and "token" in str(

@@ -93,7 +93,7 @@ record stays in git, the bulk artifacts do not.
 ## Setup (once)
 
 ```bash
-git clone <repo> && cd wyla
+git clone <repo> && cd <repo>
 git checkout main
 cd synapse-agentic-harness-system
 python3 --version                      # needs >= 3.11
@@ -185,12 +185,12 @@ uvicorn apps.synapse_admin.backend.app:app --port 8400   # from the repo root
 # the two asks that decide Stage 1 (docs/specs/synapse_v3_harness.md §10):
 #   "give me all GMNS metrics"     — one interaction, the area's metrics
 #   the ALIF ask with SQL in it    — a long answer that survives whole
-# then PASTE the transcript back: the chat page as you see it, plus
+# then keep the transcript: the chat page as you see it, plus
 #   graph/runs/chat/events/<session>.jsonl   (the record, whole)
 
 # the assistant baseline:
 python scripts/chat_eval.py --real              # Vertex creds in the silo .env
-# → PASTE docs/evals/assistant_baseline_vertex.md back into the session
+# → the report lands in docs/evals/assistant_baseline_vertex.md
 # short/cheap variants: --limit 4 · --kind playbook · --no-judge
 # --kind recovery injects warehouse failures (a missing partition
 # filter, a type mismatch, a wrong data project) and grades whether
@@ -367,7 +367,7 @@ python scripts/planes_check.py     # a dry run, then one model call,
 
 The client gives up on a model stream after 120 s of silence, retries
 once if nothing had arrived, and the turn then closes in plain language
-with what was already said. Paste the doctor's output with the transcript.
+with what was already said. Keep the doctor's output with the transcript.
 
 **Gemini through the gateway (the production model plane).** The
 guide's path is an identity-service bearer token minted from `APP_ID` and
@@ -416,8 +416,8 @@ tokens count against `maxOutputTokens`, and a tight cap yields an
 empty answer). With `--probe-ttl` it keeps
 sending a deliberately invalid request every 20 s until the gateway
 answers 401: that is the token's real lifetime, which the client will
-have to keep itself. Secrets never print; paste the block (and the
-JSON) back.
+have to keep itself. Secrets never print; the block (and the JSON)
+is the record to keep.
 
 **The chat on the gateway (Gemini 3.7 Flash by default).** With `APP_ID` and `APP_SECRET`
 in the silo `.env` the chat's model calls ride the gateway (`SAHS_MODEL_PLANE`

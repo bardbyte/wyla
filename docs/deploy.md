@@ -122,7 +122,9 @@ one). Until a decision needs them, both stay `''`.
 3. Create the Spanner database; apply `001` … `008` in order (on a database that already has `001` … `004`: `005`, `006`, `007`, `008`; on one that has `001` … `007`: `008` alone; run `python scripts/spanner_check.py` first to see which tables are missing — `008` adds no table, so check `ChatSessions.Model`'s width in the console for that one).
 4. `make ddl-check`.
 5. `make check ENV=e1` — fix every row that is not `ok` or an allowed `skipped`.
-6. Publish a build: `python scripts/pipeline.py publish-build` from a host that compiled one (the `spanner` row stays `ok`; the app's `/api/synapse/planes` will name the build).
+6. Publish a build from a host that compiled one (there is no `pipeline.py` subcommand for it yet; the store's own call is the way), from inside the silo with the environment's `.env` loaded:
+   `python -c "from pathlib import Path; from sahs.builds.spanner_store import SpannerBuildStore; print(SpannerBuildStore.from_env().publish(Path('<builds-dir>/<build-id>'), actor='<your-email>'))"`
+   (the `spanner` row stays `ok`; the app's `/api/synapse/planes` will name the build).
 7. `make run ENV=e1` on a laptop pointed at the environment (the ingress must send `X-Forwarded-Proto: https`, or set `AUTH_COOKIE_SECURE=true`).
 8. Sign in once through Okta; confirm `AUTH_GROUP_ROLE_MAP` puts you in `admin` (without it nobody opens the console).
 9. Open a chat, send one message, reload the page: the transcript and the turn's events come back from `ChatMessages` and `ChatEvents`, not from the pod's memory.
