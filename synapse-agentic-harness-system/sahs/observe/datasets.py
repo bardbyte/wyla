@@ -8,7 +8,7 @@ runs against any of them.
 
 The item shape (one JSON object per line)::
 
-    {"schema": "wyla.precedent/1" | "wyla.silver/1" | "wyla.scenario/1",
+    {"schema": "synapse.precedent/1" | "synapse.silver/1" | "synapse.scenario/1",
      "id": ..., "input": {"prompt": ...}, "expected_output": {...},
      "metadata": {...}}
 
@@ -35,13 +35,13 @@ from sahs.canon.canonical import try_canon
 
 from .record import DONE_STATUSES
 
-PRECEDENT_SCHEMA = "wyla.precedent/1"
-SILVER_SCHEMA = "wyla.silver/1"
-SCENARIO_SCHEMA = "wyla.scenario/1"
+PRECEDENT_SCHEMA = "synapse.precedent/1"
+SILVER_SCHEMA = "synapse.silver/1"
+SCENARIO_SCHEMA = "synapse.scenario/1"
 ITEM_SCHEMAS = (PRECEDENT_SCHEMA, SILVER_SCHEMA, SCENARIO_SCHEMA)
-DATASET_NAMES = {PRECEDENT_SCHEMA: "wyla-precedents",
-                 SILVER_SCHEMA: "wyla-silver",
-                 SCENARIO_SCHEMA: "wyla-scenarios"}
+DATASET_NAMES = {PRECEDENT_SCHEMA: "synapse-precedents",
+                 SILVER_SCHEMA: "synapse-silver",
+                 SCENARIO_SCHEMA: "synapse-scenarios"}
 BUILDERS = ("precedents", "silver", "scenarios")
 
 
@@ -207,7 +207,7 @@ def push_items(client: Any, items: list[dict[str, Any]], *,
     with the items keyed by id: a re-push updates in place."""
     if not items:
         return name, 0
-    name = name or DATASET_NAMES.get(str(items[0].get("schema")), "wyla-items")
+    name = name or DATASET_NAMES.get(str(items[0].get("schema")), "synapse-items")
     client.create_dataset(name=name, description=description or name,
                           metadata={"schema": items[0].get("schema"),
                                     **(metadata or {})})

@@ -93,7 +93,7 @@ record stays in git, the bulk artifacts do not.
 ## Setup (once)
 
 ```bash
-git clone <repo> && cd wyla
+git clone <repo> && cd <repo>
 git checkout main
 cd synapse-agentic-harness-system
 python3 --version                      # needs >= 3.11

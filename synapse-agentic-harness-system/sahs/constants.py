@@ -1,8 +1,8 @@
 """Per-environment endpoints for the Google-facing planes.
 
-The enterprise build keeps its private endpoints in this module as
-literals. This repository is public, so the same three maps are filled
-from the environment instead, one variable per plane and environment:
+The private endpoints are not literals in this module: the three
+maps are filled from the environment, one variable per plane and
+environment:
 
     SAHS_VERTEX_ENDPOINT_E1 / _E2 / _E3
     SAHS_OAUTH_TOKEN_ENDPOINT_E1 / _E2 / _E3

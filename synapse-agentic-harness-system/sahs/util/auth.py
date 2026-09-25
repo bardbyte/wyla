@@ -104,7 +104,7 @@ def load_dotenv(path: Path | None = None, override: bool = False) -> list[str]:
     """Read a ``.env`` file into ``os.environ`` (the laptop keeps its
     three BQ variables there — same flow as the proven bq_connect.py).
     NEVER overrides variables already exported in the shell unless the
-    caller says ``override=True`` (the enterprise settings loader does,
+    caller says ``override=True`` (``sahs/util/spanner/settings.py`` does,
     so its ``.env`` wins over a stale shell). Search order: explicit
     path → $SAHS_ENV_FILE → <silo root>/.env → ./.env.
     Returns the variable names that were loaded.
@@ -370,8 +370,8 @@ def _service_account_tempfile(value: str, *, label: str) -> Path | None:
 
 def _secret_mount_candidates(*names: str) -> list[Path]:
     """Files under the deployment's secret mount, when one is named by
-    SAHS_SECRETS_DIR. The enterprise build hard-codes its mount path;
-    this repository is public and does not."""
+    SAHS_SECRETS_DIR, the secret mount holding key.json and ca-bundle.crt;
+    unset means no mount is consulted."""
     directory = (os.environ.get("SAHS_SECRETS_DIR") or "").strip()
     return [Path(directory) / name for name in names] if directory else []
 

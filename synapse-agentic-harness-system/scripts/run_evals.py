@@ -7,8 +7,8 @@
         [--json] [--plain] [--langfuse] [--run-name <name>]
 
 --tasks takes a task file (meridian.task/1) or an item file the
-dataset builders wrote (wyla.precedent/1, wyla.silver/1,
-wyla.scenario/1: langfuse_sync.py datasets --build ...). The assistant
+dataset builders wrote (synapse.precedent/1, synapse.silver/1,
+synapse.scenario/1: langfuse_sync.py datasets --build ...). The assistant
 SUT runs each prompt as a real turn on the engine the .env names and
 reads the SQL and the skills loaded off the record; the planner SUT
 splits each compound ask. With --langfuse every verdict lands on the

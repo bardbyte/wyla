@@ -459,14 +459,14 @@ def test_run_on_an_item_file_scores_verdict_and_skill_on_each_item(tmp_path):
                                           read_any_tasks)
     items = D.precedent_items(D.read_precedents(PRECEDENTS))
     path = D.write_jsonl(items, tmp_path / "precedents.jsonl")
-    assert dataset_name(path) == "wyla-precedents"
+    assert dataset_name(path) == "synapse-precedents"
     tasks = read_any_tasks(path)
     client = _FakeClient()
     recorder = experiment_recorder(client, [path], sut="scripted",
                                    canon_version="c1", run_name="run-p",
                                    queue=False)
-    assert set(client.datasets) == {"wyla-precedents"}
-    assert client.items["wyla-precedents"]["prec_declines_per_day"][
+    assert set(client.datasets) == {"synapse-precedents"}
+    assert client.items["synapse-precedents"]["prec_declines_per_day"][
         "expected_output"]["skill"] == "authorizations"
 
     def scripted(task):         # right SQL, the skill only on the first
@@ -568,19 +568,19 @@ def test_coverage_is_computed_from_the_live_rows(record):
 def test_prompt_parts_register_once_with_production_and_family_labels(tmp_path):
     from sahs.observe import prompts as P
     names = {r["name"]: r for r in P.registry()}
-    assert {"wyla-assistant-identity", "wyla-assistant-chain",
-            "wyla-assistant-mode-chat", "wyla-assistant-mode-autopilot",
-            "wyla-assistant-style-gemini-3", "wyla-planner-system",
-            "wyla-judge-system", "wyla-review-system"} <= set(names)
-    assert names["wyla-assistant-style-gemini-3"]["labels"] == \
+    assert {"synapse-assistant-identity", "synapse-assistant-chain",
+            "synapse-assistant-mode-chat", "synapse-assistant-mode-autopilot",
+            "synapse-assistant-style-gemini-3", "synapse-planner-system",
+            "synapse-judge-system", "synapse-review-system"} <= set(names)
+    assert names["synapse-assistant-style-gemini-3"]["labels"] == \
         ["production", "gemini-3"]
-    assert names["wyla-planner-system"]["version"].startswith("text-")
-    assert "{{style}}" in names["wyla-assistant-system"]["prompt"]
+    assert names["synapse-planner-system"]["version"].startswith("text-")
+    assert "{{style}}" in names["synapse-assistant-system"]["prompt"]
     client = _PromptClient()
     out = tmp_path / "prompts.json"
     first = P.register_prompts(client, out, root=None)
     assert all(r["created"] for r in first) and len(first) == len(names)
-    stored = client.store["wyla-assistant-style-gemini-3"][0]["labels"]
+    stored = client.store["synapse-assistant-style-gemini-3"][0]["labels"]
     assert {"assistant-3", "production", "gemini-3"} <= set(stored)
     second = P.register_prompts(client, out, root=None)
     assert not any(r["created"] or r["drift"] for r in second)

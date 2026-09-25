@@ -19,6 +19,8 @@ from apps.synapse_admin.backend.app import create_app
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SILO = REPO_ROOT / "synapse-agentic-harness-system"
 FX = SILO / "tests" / "fixtures"
+# the example SYNAPSE_USER_NAME from .env.example: the shell must not ship it
+EXAMPLE_NAME = "John Doe"
 
 
 @pytest.fixture(scope="module")
@@ -61,7 +63,7 @@ def test_shell_and_planes(client):
     # the account row is drawn from /api/auth/me by js/session.js: the
     # shell ships no name of its own, and no build chip
     assert 'id="account-name"' in page.text and 'href="#/account"' in page.text
-    assert "Saheb Singh" not in page.text
+    assert EXAMPLE_NAME not in page.text
     assert client.get("/health").json()["app"] == "synapse-by-lumi"
     planes = client.get("/api/synapse/planes").json()
     # three planes as booleans, and which model plane the chat rides

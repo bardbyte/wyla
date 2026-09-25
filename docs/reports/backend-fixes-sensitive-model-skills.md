@@ -1,9 +1,7 @@
 # Backend fixes from the laptop test: sensitive columns, the model choice, the skills tree
 
-Branch `worktree-agent-a8f40679367274121`, worktree
-`/home/user/wyla/.claude/worktrees/agent-a8f40679367274121`. The
-worktree was created at `c62cfc6` (PR #149) while the local
-`claude/production-ready` ref was 25 commits ahead at `a33db96` and held
+The branch was created at `c62cfc6` (PR #149) while the local
+integration branch ref was 25 commits ahead at `a33db96` and held
 every file the brief names (`env/*.env.example`, `docs/deploy.md`,
 `docs/skill-retrieval.md`, `007_content.sql`); the branch was
 fast-forwarded onto `a33db96` first (`git merge --ff-only`, no merge
@@ -278,6 +276,6 @@ Runs, from the worktree (absolute paths, `set -o pipefail`,
 None edited. `docs/wiki/07-serving.md` and `docs/wiki/13-configuration.md`
 (documentation, not named in the brief) got a paragraph and a table row
 so the wiki's violation table stops saying the two codes always refuse.
-The fast-forward of the worktree branch onto the local
-`claude/production-ready` ref (`a33db96`) is the one thing done to the
+The fast-forward of the branch onto the local
+integration branch ref (`a33db96`) is the one thing done to the
 branch beyond the two commits; it brought no change of this agent's.

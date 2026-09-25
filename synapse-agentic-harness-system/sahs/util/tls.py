@@ -1,7 +1,7 @@
 """Corporate TLS trust helpers for outbound Google and gateway calls.
 
-The enterprise build knows its certificate package and secret mount by
-name. This repository is public, so both are named by the environment:
+The certificate package and the secret mount are named by the
+environment, and neither is consulted when unset:
 
     SAHS_CA_PACKAGE   an importable package exposing ``certificate_path()``
     SAHS_SECRETS_DIR  a directory holding ``ca-bundle.crt``,

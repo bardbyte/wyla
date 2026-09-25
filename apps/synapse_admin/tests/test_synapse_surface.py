@@ -624,9 +624,9 @@ def test_the_thread_follows_only_while_you_read_at_the_bottom():
     takes another step, "trying another way" — never a raw error. The
     italic line under a number is Radix's disclaimer, with the graph's
     definition line one hover away. The two behavior fixes ride both chat
-    pages; the assistant is Radix on both (the owner's call after PR
-    #145, which had named it only here); the disclaimer stays on this
-    surface, the admin console keeps its definition line in the open."""
+    pages; the assistant is Radix on both (a naming decision: the admin
+    console had said Synapse); the disclaimer stays on this surface,
+    the admin console keeps its definition line in the open."""
     admin = (REPO_ROOT / "apps" / "synapse_admin" / "frontend" / "js"
              / "pages" / "chat.js").read_text(encoding="utf-8")
     for src in (CHAT, admin):

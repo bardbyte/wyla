@@ -1,8 +1,6 @@
 # Report — the charting and dashboarding uplift
 
-Branch `worktree-agent-a37d389ee34042805`, worktree
-`/home/user/wyla/.claude/worktrees/agent-a37d389ee34042805`, started
-from `origin/claude/production-ready` at `e3524b6` (the report
+Started from the integration branch at `e3524b6` (the report
 `docs/reports/backend-fixes-sensitive-model-skills.md` was in place).
 One commit, not pushed, no PR.
 

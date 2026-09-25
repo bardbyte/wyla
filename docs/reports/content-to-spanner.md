@@ -1,8 +1,6 @@
 # Content to Spanner: the report
 
-Branch `worktree-agent-a7384f21b8a951f30`, worktree
-`/home/user/wyla/.claude/worktrees/agent-a7384f21b8a951f30`, on top of
-`c62cfc6` (PR #149). One commit, not pushed, no PR.
+On top of `c62cfc6` (PR #149). One commit, not pushed, no PR.
 
 The task: everything the app still persisted on the filesystem beside
 the chat — a chat's files, a person's own skills, the review board, the

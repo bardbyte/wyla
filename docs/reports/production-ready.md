@@ -1,6 +1,6 @@
 # Production-ready: the consolidated report
 
-Branch `claude/production-ready`, PR #150. Four workstreams ran in parallel
+The integration branch, PR #150. Four workstreams ran in parallel
 worktrees off `main` at PR #149 and were merged in this order: storage
 foundation, content to Spanner, multi-task turns, skill retrieval. Each has
 its own report; this page is the map.

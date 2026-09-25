@@ -1,7 +1,6 @@
 # UI fixes: composer pills, a stop that stops, Radix on both surfaces, model lines for the people who pick
 
-Branch `worktree-agent-aacde09ee370a32de` (branched from `claude/production-ready`),
-worktree `/home/user/wyla/.claude/worktrees/agent-aacde09ee370a32de`.
+Branched from the integration branch.
 Work commit `762ac2b`; this report is the commit after it. Nothing pushed, no PR opened.
 
 ## What the owner reported, and what changed

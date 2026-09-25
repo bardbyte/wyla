@@ -107,7 +107,7 @@ plane and the model label) plus `prompt_version`, `prompt_parts`,
 ```
 assistant.turn                       tags: assistant plane:vertex mode:chat skill:authorizations [compound] env:laptop
 ├─ skills_loaded  (event)            loaded, modes per skill, aggregate chars, the whole-load limit
-├─ model call 1   (generation)       input: system (once) + contents · usage: the budget-tick delta · prompt: wyla-assistant-system vN
+├─ model call 1   (generation)       input: system (once) + contents · usage: the budget-tick delta · prompt: synapse-assistant-system vN
 ├─ search         (tool)             args, the compact summary; the rows only with SAHS_LANGFUSE_FULL_RESULTS=1
 ├─ model call 2   (generation)
 ├─ artifact:chart (event)            artifact_id, version, title
@@ -268,7 +268,7 @@ exercised with no model host.
    sample of what production believed was right, not a gold set.
 2. **Reviewed.** Run the assistant SUT on the silver file with
    `--langfuse`. Every fingerprint mismatch with a matching shape is
-   `ambiguous` and lands on the `wyla-ambiguous` annotation queue
+   `ambiguous` and lands on the `synapse-ambiguous` annotation queue
    (`annotations.py`), where a steward scores `resolution` accept or
    fail in the Langfuse UI. `pull-annotations` writes each accept into
    the task file's `accepted_fps`; a person commits the diff. A silver

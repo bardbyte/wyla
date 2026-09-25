@@ -234,7 +234,7 @@ path.
 
 ## 7 · Memory, bound to the person
 
-- Memory belongs to the user (Saheb Singh), lives under the account
+- Memory belongs to the user (John Doe), lives under the account
   block in the sidenav, on by default.
 - Three writers: the model when a preference or disambiguation is
   stated; a **post-turn memory pass** (a Flash-tier call, thinking

@@ -1,8 +1,7 @@
 # Workstream report: storage foundation
 
-Branch `worktree-agent-add880644dfcbd273`, worktree
-`/home/user/wyla/.claude/worktrees/agent-add880644dfcbd273`. Nothing pushed,
-no PR opened. Nothing here was run with real credentials, hosts, tokens or
+Nothing pushed, no PR opened. Nothing here was run with real credentials,
+hosts, tokens or
 certificates; every check in the tests runs on canned exit codes or the fake
 SDK database.
 

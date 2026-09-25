@@ -23,12 +23,12 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-ASSISTANT_PROMPT = "wyla-assistant-system"
-LOOP_PROMPT = "wyla-loop-system"
+ASSISTANT_PROMPT = "synapse-assistant-system"
+LOOP_PROMPT = "synapse-loop-system"
 # the static parts the assembled prompt is made of, each its own
 # registered prompt so a part can be diffed on its own; the assembled
 # template above is what a generation links to
-PART_PREFIX = "wyla-assistant"
+PART_PREFIX = "synapse-assistant"
 PRODUCTION_LABEL = "production"
 
 
@@ -86,9 +86,9 @@ def part_registry() -> list[dict[str, Any]]:
         rows.append({"name": f"{PART_PREFIX}-style-{label_for(family)}",
                      "version": ASSISTANT_VERSION, "prompt": style,
                      "labels": [PRODUCTION_LABEL, label_for(family)]})
-    for name, text in (("wyla-planner-system", PLAN_SYSTEM),
-                       ("wyla-judge-system", JUDGE_SYSTEM),
-                       ("wyla-review-system", REVIEW_SYSTEM)):
+    for name, text in (("synapse-planner-system", PLAN_SYSTEM),
+                       ("synapse-judge-system", JUDGE_SYSTEM),
+                       ("synapse-review-system", REVIEW_SYSTEM)):
         rows.append({"name": name, "version": content_version(text),
                      "prompt": text, "labels": [PRODUCTION_LABEL]})
     return rows
