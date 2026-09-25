@@ -256,3 +256,129 @@ All paths relative to `synapse-agentic-harness-system/` unless noted.
 - `apps/synapse_admin/README.md` (the skills paragraph link) and
   `.env.example` were named in the brief.
 - `sahs/assistant/runtime.py` was not touched.
+
+## No refusals
+
+Branch: `worktree-agent-a67c6daaf6a665657`
+Worktree: `/home/user/wyla/.claude/worktrees/agent-a67c6daaf6a665657`
+(branched from `claude/production-ready` at `44a268e`; nothing pushed,
+no PR). Commits: `e500e74` — the change; this section as a second
+commit.
+
+The repo owner's decision: there is no refusal anywhere in skill
+loading. Every verbatim of every skill is always usable by the
+harness. "Never silently truncate" stays true; the answer to "it does
+not fit whole" is "load it as a library and say so", never "refuse
+the turn". What that meant, file by file (paths relative to
+`synapse-agentic-harness-system/` unless noted):
+
+- **`sahs/loop/skills.py`.** `SkillTooLarge`, `SkillRefused` and
+  `check_size` deleted. `Skill` gains `error: str = ""`; `_parse`
+  turns an unreadable or non-UTF-8 file into a listed skill with an
+  empty text and the reason (never decoded with substitutions), and
+  `SkillUnreadable` / `check_readable` are the one refusal left —
+  broken input, never size. `load_skills` returns every named skill
+  whole (no size check; the prompt builder splits at the limit).
+  `SearchableSkill` gains `preferred` and `reason`;
+  `PREFERRED_WHOLE` / `PREFERRED_SECTIONED`; `library_reason(skill,
+  limit, model_name, why)` states the sizes and names the limit that
+  bound (the ceiling when `SAHS_MAX_SKILL_CHARS` is it, else "this
+  model's (name) whole-load limit", "unnamed engine" under a scripted
+  model). `render_searchable_skills` writes `mode: library ·
+  preferred: <whole|sectioned> — <reason>` under every pack heading
+  and takes `tools=False` for the navigator (same block, no lookup
+  tool named). Docstring pin rewritten.
+- **`sahs/assistant/skills_loader.py`.** `load_packs` returns every
+  pack whole and raises only `SkillUnreadable`; `_packs` carries
+  `error` into `Pack`. `split_by_policy` is a plain size split;
+  `preference_of(pack)` → (preferred, why); `MODE_WHOLE` /
+  `MODE_LIBRARY`; `loader_record` gains `preferred`, `reason`, and
+  takes `limit` / `model_name`; `SkillContext.event()` lists every
+  record in `skills_loaded`; `skill_context` has no try/except,
+  attaches the preference and the reason to every library view and
+  record, and takes `tools`.
+- **`sahs/assistant/kit.py`.** `load_skill` never refuses: a broken
+  file returns an error by name; an oversized pack (whatever its
+  frontmatter) returns the contents with `mode: library`,
+  `preferred`, `reason`, and a note that says when the frontmatter
+  preferred the whole file. `_library_pack` is size only;
+  `_in_library` lost its full-file branch; the three tools serve
+  every oversized pack.
+- **`sahs/assistant/loop.py`.** The `SkillRefused` branch in
+  `run_assistant_turn` is gone (no `error` / `skill_refused` ending);
+  the import too.
+- **`sahs/assistant/runtime.py`** `set_skills` and
+  **`apps/synapse_admin/backend/chat.py`** `post_message` catch
+  `SkillUnreadable` instead of `SkillTooLarge`. Audit of what can
+  still raise at pin time: only `_parse` on a file that cannot be
+  read or decoded; a large-but-valid pack cannot reach the catch.
+- **`sahs/ask/runtime.py`.** `set_skills` catches `SkillUnreadable`;
+  `start_turn` builds the static library with
+  `skill_context(graph_root, loaded, text, self.model_name, "medium",
+  tools=False)` and stores the whole skills, the block, the library
+  names and the record on the session dict; `model_name` property
+  (the `.env`'s `VERTEX_MODEL`; '' under a scripted factory).
+- **`sahs/ask/loop.py`, `sahs/loop/loop.py`, `sahs/loop/prompt.py`.**
+  `navigate_loop(skill_library=…, skills_library=…)` renders the
+  block after the whole skills (`system_prompt(..., skill_library)`;
+  byte-identical when empty) and `loop_started` lists the library
+  packs in `skills` and `skills_library`.
+- **`sahs/loop/skill_index.py`.** A module logger and a warn-once
+  set. `SkillIndex.__init__` falls back to the process's in-memory
+  index for the path (`_shared_memory_db`, one per path, never closed
+  by `close()`) when the file cannot be opened; `ensure` and
+  `ensure_routing` do the same when a write fails and re-run over
+  every source in memory; `_chunk` wraps `chunk_markdown` and, when it
+  throws, indexes the pack as one section and one exact chunk with
+  `FALLBACK_CHUNKER_VERSION = 0` so the next load re-tries.
+  `fallback` and `single_chunk` say which happened.
+- **`tests/test_v3_skills.py`.** The size-ceiling refusal test is now
+  its no-refusal twin (the bundle loads whole in the list and splits
+  to the library side at the ceiling; whole again when the env raises
+  it); the full-file fail-closed test is now "loads as a library and
+  says so" (`mode: library`, `preferred: whole`, the reason with the
+  sizes and the limit that bound, `truncation_allowed: false` the
+  same, a sectioned pack recorded as `preferred: sectioned`); the
+  pickers-and-tool refusal test is now the pin-and-run twin (a
+  full-file pack over the global ceiling pins, `load_skill` returns
+  the contents with the preference, `skill_read` serves a section,
+  and the turn on the 262,144-character scripted engine runs to
+  completion with the block, the three tools and the record). Added:
+  the broken-file test (listed with the reason; refused by name in
+  the v1 loader, `load_packs`, both pickers and the tool). The library
+  pin test asserts the `mode: library · preferred: sectioned` line;
+  the loop and the 650K tests read `mode == "library"` and
+  `preferred`. The byte-identical whole-load pin and the prefix pins
+  are untouched and green.
+- **`tests/test_loop_prompt.py`.** The v1 navigator turn: a pinned
+  150,000-character pack beside a small one renders the contents and
+  the right passage first within the medium budget, names no lookup
+  tool, pastes the small skill whole, reports both on `loop_started`,
+  and the turn completes with no error.
+- **`tests/test_skill_index.py`.** The two fallbacks: a corrupt file,
+  an uncreatable path and a file that stops taking writes each fall
+  to the in-memory index (one warning per path, the pack still
+  found, the file left alone); a pack the chunker cannot read is
+  indexed as one exact chunk, logged once, and re-chunked properly on
+  the next load.
+- **Docs.** `docs/skill-retrieval.md` (the policy section is "whole
+  when it fits, a library when it does not, never a refusal"; the v1
+  static-retrieval paragraph; the loader record's `mode` /
+  `preferred` / `reason`; index resilience; "how to verify on the
+  real packs" with `scripts/skill_index_check.py` against
+  `MERIDIAN_SKILLS_DIR`; what the tests prove), `docs/model-playbook.md`
+  (the budgets paragraph and the knob row), `.env.example` (the
+  ceiling comment). No new environment variable.
+
+Tests and exit codes (on the final code):
+
+- `cd synapse-agentic-harness-system && set -o pipefail; python -m
+  pytest -q tests -p no:cacheprovider 2>&1 | tail -20; echo
+  exit=${PIPESTATUS[0]}` → all green, `exit=0` (the accuracy line
+  still prints `hits@1 20/20 … 432/432`).
+- `set -o pipefail; PYTHONPATH=synapse-agentic-harness-system python
+  -m pytest -q apps/synapse_admin/tests -p no:cacheprovider 2>&1 |
+  tail -20; echo exit=${PIPESTATUS[0]}` from the repo root → 153
+  passed, 2 skipped, `exit=0`.
+- Focused: `tests/test_v3_skills.py` + `tests/test_skill_index.py` +
+  `tests/test_loop_prompt.py` → 44 passed, `exit=0`.
