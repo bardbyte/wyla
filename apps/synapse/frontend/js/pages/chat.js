@@ -14,6 +14,15 @@ import { api } from "../api.js";
 import { renderMarkdown } from "../md.js";
 import { esc, prose, statusLabel } from "../ui.js";
 
+// the italic line under every number, artifact and proposal: who
+// prepared it and how far to trust it. The definition line the graph
+// gave stays one hover away (the title) and in the receipts.
+const disclaimer = (prov) => (prov && prov.status === "certified")
+  ? "Prepared by Radix from a certified definition. Check the receipts "
+    + "before you act on a number."
+  : "Prepared by Radix. Exploratory until a check stands behind it: "
+    + "verify before you rely on it.";
+
 const SESSION_KEY = "synapse-chat-session";
 const PALETTE = ["#2f6feb", "#e8710a", "#1a9850", "#9970ab",
                  "#d6604d", "#35978f"];
@@ -41,6 +50,8 @@ export async function renderChat(outlet, wanted = "") {
           <h1 class="chat-greet" id="chat-greet"></h1>
         </div>
         <div class="chat-thread" id="chat-thread"></div>
+        <button class="chat-jump" id="chat-jump" type="button" hidden
+          title="Jump to the latest">↓ Latest</button>
         <div class="chat-chiprow" id="chat-chiprow"></div>
         <div class="chat-composer">
           <div class="chat-box">
@@ -57,7 +68,7 @@ export async function renderChat(outlet, wanted = "") {
                 aria-label="Skills on this chat"></div>
               <span class="spacer"></span>
               <select id="chat-depth" class="chat-depth"
-                title="How deeply Synapse thinks on this ask">
+                title="How deeply Radix thinks on this ask">
                 <option value="quick">Quick</option>
                 <option value="standard" selected>Standard</option>
                 <option value="deep">Deep</option>
@@ -71,7 +82,7 @@ export async function renderChat(outlet, wanted = "") {
                 title="Send · Enter">↑</button>
             </div>
           </div>
-          <div class="chat-foot">Synapse is AI and can make mistakes.
+          <div class="chat-foot">Radix is AI and can make mistakes.
             Check the receipts before you act on a number.</div>
         </div>
       </div>
@@ -83,7 +94,35 @@ export async function renderChat(outlet, wanted = "") {
   const state = { session: null, source: null, turns: new Map(),
                   running: false, seq: 0, artifacts: new Map() };
 
-  const scroll = () => { thread.scrollTop = thread.scrollHeight; };
+  // ── the thread follows new content only while the reader is at the
+  //    bottom. Scrolling up to reread unsticks it, so a thinking delta,
+  //    an answer token or the one-second heartbeat never yanks the
+  //    view back down; sending a message re-sticks it; while new
+  //    content lands out of view a "Latest" pill offers the way back ──
+  const NEAR_BOTTOM = 48;
+  const jump = el("chat-jump");
+  const atBottom = () => thread.scrollHeight - thread.scrollTop
+    - thread.clientHeight <= NEAR_BOTTOM;
+  let stuck = true;
+  const scroll = (force = false) => {
+    if (force) stuck = true;
+    if (stuck) {
+      thread.scrollTop = thread.scrollHeight;
+      jump.hidden = true;
+      return;
+    }
+    // the pill sits just above the thread's bottom edge, whatever the
+    // composer's height is at the moment
+    const main = thread.parentElement;
+    jump.style.bottom = `${Math.max(0, main.clientHeight - thread.offsetTop
+      - thread.offsetHeight) + 12}px`;
+    jump.hidden = false;
+  };
+  thread.addEventListener("scroll", () => {
+    stuck = atBottom();
+    if (stuck) jump.hidden = true;
+  }, { passive: true });
+  jump.addEventListener("click", () => scroll(true));
   const say = (html, cls = "") => {
     const div = document.createElement("div");
     div.className = `ask-note ${cls}`;
@@ -157,7 +196,7 @@ export async function renderChat(outlet, wanted = "") {
     // the "?" explains the depth alone
     helpPop.innerHTML = `
       <div class="help-group">
-        <div class="help-head">Depth <span>how much Synapse thinks before each step</span></div>
+        <div class="help-head">Depth <span>how much Radix thinks before each step</span></div>
         ${(dials.depths || []).map((d) => helpRow(d.label, d.means)).join("")}
       </div>`;
   }
@@ -494,7 +533,7 @@ export async function renderChat(outlet, wanted = "") {
       </div>`).join("")
       : `<div class="muted" style="padding:6px">Nothing remembered
          yet. Memory is on: when you settle a preference in chat
-         ("by spend I mean acquirer net spend"), Synapse keeps it,
+         ("by spend I mean acquirer net spend"), Radix keeps it,
          says so inline with an undo, and lists it here — never a
          metric definition.</div>`;
     for (const btn of memPop.querySelectorAll("[data-mem]")) {
@@ -860,9 +899,9 @@ export async function renderChat(outlet, wanted = "") {
       ${statusChip(prov)}
       ${spec.watermark ? `<span class="status-chip s-exploratory">${
         esc(spec.watermark)}</span>` : ""}
-      ${prov && prov.meridian_line ? `<span class="meridian"
-        title="${esc(prov.meridian_line)}">${
-        prose(prov.meridian_line)}</span>` : ""}
+      ${prov ? `<span class="meridian"
+        title="${esc(prov.meridian_line || "")}">${
+        esc(disclaimer(prov))}</span>` : ""}
     </div>`;
   }
 
@@ -945,8 +984,9 @@ export async function renderChat(outlet, wanted = "") {
         ${spec.watermark && !prov
           ? `<span class="status-chip s-exploratory">${
               esc(spec.watermark)}</span>` : ""}
-        ${prov ? `<span class="meridian">${
-          prose(prov.meridian_line)}</span>` : ""}
+        ${prov ? `<span class="meridian"
+          title="${esc(prov.meridian_line || "")}">${
+          esc(disclaimer(prov))}</span>` : ""}
         <span class="muted">build ${esc(spec.build_id || "?")}
           · v${row.version}</span>
       </div>`;
@@ -1254,6 +1294,47 @@ export async function renderChat(outlet, wanted = "") {
     return verb ? verb(event) : "Working";
   }
 
+  // a step that did not go through reads as a snag, never a stack
+  // trace: what was being tried, a plain reason, and — once the model
+  // takes its next step — that it moved on. The raw error stays one
+  // hover away, on the row.
+  const SNAGS = [
+    [/configuration, not the query/i,
+     "a setup problem on the server side, not the question"],
+    [/timed? ?out|deadline/i, "the warehouse took too long to answer"],
+    [/permission|access denied|forbidden|\b403\b|not authori[sz]ed/i,
+     "no access to that data"],
+    [/ceiling|too (much|large|many)|over the|exceed/i,
+     "it would have read too much data"],
+    [/not found|no such|unknown (table|column|metric|tool)|does not exist|missing/i,
+     "nothing by that name in the graph"],
+    [/syntax|invalid|unrecognized|could not (run|parse|compile)|\b400\b|bad request/i,
+     "the query was not accepted as written"],
+    [/truncat/i, "the result was too large to bring back whole"],
+  ];
+  function snagReason(summary) {
+    const raw = String(summary).replace(/^ERROR:\s*/, "");
+    for (const [re, words] of SNAGS) if (re.test(raw)) return words;
+    const first = raw.split(/[—;\n]/)[0].replace(/[.:\s]+$/, "").trim();
+    return first ? first.charAt(0).toLowerCase() + first.slice(1, 90)
+      : "it did not go through";
+  }
+  function snagRow(row, event, summary, secs = "") {
+    row.classList.add("failed");
+    row.querySelector(".mark").textContent = "!";
+    row.title = String(summary).replace(/^ERROR:\s*/, "").slice(0, 400);
+    row.querySelector(".step-text").innerHTML =
+      `${prose(friendly(event))} <span class="snag">hit a snag</span>
+       <span class="muted">— ${esc(snagReason(summary))}${secs}</span>
+       <span class="muted snag-next" hidden> · trying another way</span>`;
+  }
+  function movedOn(turn, another) {
+    const row = turn.snagged;
+    if (!row) return;
+    if (another) row.querySelector(".snag-next").hidden = false;
+    turn.snagged = null;
+  }
+
   function lastLine(text) {
     const lines = String(text).replace(/\*\*/g, "").split("\n")
       .map((l) => l.trim()).filter((l) => l && !/^#+\s*$/.test(l));
@@ -1390,16 +1471,18 @@ export async function renderChat(outlet, wanted = "") {
     }
     row.classList.remove("pending");
     attachInput(row, event.input);
-    const outcome = String(event.summary || "").split("\n")[0]
-      .slice(0, 120);
-    const failed = outcome.startsWith("ERROR");
+    const summary = String(event.summary || "");
+    const outcome = summary.split("\n")[0].slice(0, 120);
     const secs = event.elapsed_ms >= 1000
       ? ` · ${(event.elapsed_ms / 1000).toFixed(1)}s` : "";
-    row.querySelector(".step-text").innerHTML =
-      `${prose(friendly(event))}${outcome
-        ? ` <span class="muted">— ${prose(failed
-            ? outcome.replace(/^ERROR:\s*/, "did not work: ")
-            : outcome)}${secs}</span>` : ""}`;
+    if (outcome.startsWith("ERROR")) {
+      snagRow(row, event, summary, secs);
+      turn.snagged = row;
+    } else {
+      row.querySelector(".step-text").innerHTML =
+        `${prose(friendly(event))}${outcome
+          ? ` <span class="muted">— ${prose(outcome)}${secs}</span>` : ""}`;
+    }
     scroll();
   }
 
@@ -1522,9 +1605,8 @@ export async function renderChat(outlet, wanted = "") {
         esc(bytes(proposal.bytes_processed))}${schema.length
           ? ` · ${schema.length} columns: ${
               esc(schema.slice(0, 6).join(", "))}` : ""}${
-        proposal.meridian_line
-          ? ` · <span class="meridian">${esc(proposal.meridian_line)}</span>`
-          : ""}</div>
+        ` · <span class="meridian" title="${esc(proposal.meridian_line || "")
+          }">${esc(disclaimer(proposal))}</span>`}</div>
       ${proposal.over_ceiling
         ? `<div class="proposal-warn">⚠ over the ${
             esc(bytes(proposal.scan_ceiling_bytes))} ceiling for live
@@ -1633,6 +1715,7 @@ export async function renderChat(outlet, wanted = "") {
       }
       case "tool_call":
         if (turn.settled) openBlock(turn);
+        movedOn(turn, true);             // after a snag: the next step
         pulse(turn, `${friendly(event)}…`, event.ts);
         toolStart(turn, event);
         break;
@@ -1650,6 +1733,7 @@ export async function renderChat(outlet, wanted = "") {
         }
         break;
       case "say_token":
+        movedOn(turn, false);            // the answer is the next step
         if (!turn.settled) settleBlock(turn);   // the answer: fold it
         turn.buffer += event.delta || "";
         turn.prose.innerHTML = renderMarkdown(turn.buffer, "md");
@@ -1738,14 +1822,21 @@ export async function renderChat(outlet, wanted = "") {
         el.innerHTML = renderMarkdown(t.text || "", "md");
       } else {
         el.className = "theater-step";
-        const outcome = String(t.summary || "").split("\n")[0]
-          .slice(0, 120);
+        const summary = String(t.summary || "");
+        const outcome = summary.split("\n")[0].slice(0, 120);
         el.innerHTML = `<span class="mark">·</span>
           <span class="step-body"><span class="step-text">${
             prose(friendly(t))}${outcome
-            ? ` <span class="muted">— ${prose(outcome.replace(
-                /^ERROR:\s*/, "did not work: "))}</span>` : ""}</span>
+            ? ` <span class="muted">— ${prose(outcome)}</span>` : ""}</span>
           </span>`;
+        if (outcome.startsWith("ERROR")) {
+          snagRow(el, t, summary);
+          // a past turn already knows whether another step followed
+          if (entries.slice(entries.indexOf(t) + 1)
+                .some((n) => n.kind === "tool")) {
+            el.querySelector(".snag-next").hidden = false;
+          }
+        }
         attachInput(el, t.input);
       }
       steps.appendChild(el);
@@ -1812,6 +1903,7 @@ export async function renderChat(outlet, wanted = "") {
     setEmpty(false);
     const files = state.files.slice();
     userBubble(text, null, files);
+    scroll(true);                        // sending re-sticks the thread
     input.value = "";
     const accepted = await api.chatSend(state.session.id, text,
                                         el("chat-depth").value,

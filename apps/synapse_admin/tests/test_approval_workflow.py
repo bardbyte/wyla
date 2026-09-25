@@ -1,6 +1,6 @@
 """The approval workflow on the second surface (the PRD): a file a
 person brings in goes to their manager, shows as pending with
-Synapse's read, reaches the agent only when approved, comes back with
+Radix's read, reaches the agent only when approved, comes back with
 comments when rejected, and is resubmitted as a new version; the
 notices and the nav badge say so. And the composer around it: the
 mode as a select, the "?" on the depth alone, a picked skill as a
@@ -153,14 +153,14 @@ def test_the_skills_page_and_the_popup_carry_the_workflow():
                   "api.chatReviewFileUrl(", "api.chatReviewsSeen()",
                   'id="sk-queue"', 'id="sk-notices"', "Awaiting review",
                   "Pending approval", "Published", "Rejected", "Built in",
-                  "reviewHtml(", "Synapse's read", "advisory: the manager decides",
+                  "reviewHtml(", "Radix's read", "advisory: the manager decides",
                   "Approve and publish", 'data-decision="reject"',
                   "Resubmit for approval", "Download the file", "Withdraw",
                   "Executive summary", "Key business topics", "Intended purpose",
                   "Suggested audience", "Needs attention", "Confidence",
                   "Ready for approval", "Needs minor updates",
                   "Requires significant revision", "band ", "synapse:reviews",
-                  "Synapse is reading it", 'id="rv-read"', "afterSubmit"):
+                  "Radix is reading it", 'id="rv-read"', "afterSubmit"):
         assert piece in SKILLS, piece
     for piece in ("Submit for approval", "api.chatSubmitReview(",
                   'data-kind="skill"', 'data-kind="knowledge"',
@@ -191,8 +191,9 @@ def test_the_composer_reads_as_asked():
     """The mode is fixed on the page — no select, no pill — and the
     model is the chat's own, no picker; the "?" explains the depth
     alone; a picked skill is a chip where the pill was, pinned on the
-    chat and removable; the nav is wider with Customize above Explore
-    and the hover tools apart from the name."""
+    chat and removable; the nav is wider with Customize at the bottom
+    (the Explore shelf is off this surface for now) and the hover tools
+    apart from the name."""
     for piece in ('const MODE = "chat"', 'state.mode, ""',
                   'id="chat-skills"', "skill-chip", "skill-x", "paintSkills()",
                   "pinSkills(", "api.chatSetSkills(", "boot.session.skills",
@@ -223,7 +224,7 @@ def test_the_composer_reads_as_asked():
     assert "width: 264px" in CSS and ".main-col { margin-left: 264px; }" in CSS
     assert ".chat-row .row-tools { margin-left: auto" in CSS
     assert ".chat-row:hover .chat-when { display: none; }" in CSS
-    assert INDEX.index('aria-label="Customize"') < INDEX.index('aria-label="Explore"')
+    assert 'aria-label="Explore"' not in INDEX     # off this surface for now
     assert "New ask" not in CHATS and "New chat starts one" in CHATS
 
 

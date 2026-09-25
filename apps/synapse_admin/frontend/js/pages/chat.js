@@ -41,6 +41,8 @@ export async function renderChat(outlet, wanted = "") {
           <h1 class="chat-greet" id="chat-greet"></h1>
         </div>
         <div class="chat-thread" id="chat-thread"></div>
+        <button class="chat-jump" id="chat-jump" type="button" hidden
+          title="Jump to the latest">↓ Latest</button>
         <div class="chat-chiprow" id="chat-chiprow"></div>
         <div class="chat-composer">
           <div class="chat-box">
@@ -102,7 +104,35 @@ export async function renderChat(outlet, wanted = "") {
                   running: false, seq: 0, artifacts: new Map(),
                   panelId: "" };
 
-  const scroll = () => { thread.scrollTop = thread.scrollHeight; };
+  // ── the thread follows new content only while the reader is at the
+  //    bottom. Scrolling up to reread unsticks it, so a thinking delta,
+  //    an answer token or the one-second heartbeat never yanks the
+  //    view back down; sending a message re-sticks it; while new
+  //    content lands out of view a "Latest" pill offers the way back ──
+  const NEAR_BOTTOM = 48;
+  const jump = el("chat-jump");
+  const atBottom = () => thread.scrollHeight - thread.scrollTop
+    - thread.clientHeight <= NEAR_BOTTOM;
+  let stuck = true;
+  const scroll = (force = false) => {
+    if (force) stuck = true;
+    if (stuck) {
+      thread.scrollTop = thread.scrollHeight;
+      jump.hidden = true;
+      return;
+    }
+    // the pill sits just above the thread's bottom edge, whatever the
+    // composer's height is at the moment
+    const main = thread.parentElement;
+    jump.style.bottom = `${Math.max(0, main.clientHeight - thread.offsetTop
+      - thread.offsetHeight) + 12}px`;
+    jump.hidden = false;
+  };
+  thread.addEventListener("scroll", () => {
+    stuck = atBottom();
+    if (stuck) jump.hidden = true;
+  }, { passive: true });
+  jump.addEventListener("click", () => scroll(true));
   const say = (html, cls = "") => {
     const div = document.createElement("div");
     div.className = `ask-note ${cls}`;
@@ -1177,6 +1207,47 @@ export async function renderChat(outlet, wanted = "") {
     return verb ? verb(event) : "Working";
   }
 
+  // a step that did not go through reads as a snag, never a stack
+  // trace: what was being tried, a plain reason, and — once the model
+  // takes its next step — that it moved on. The raw error stays one
+  // hover away, on the row.
+  const SNAGS = [
+    [/configuration, not the query/i,
+     "a setup problem on the server side, not the question"],
+    [/timed? ?out|deadline/i, "the warehouse took too long to answer"],
+    [/permission|access denied|forbidden|\b403\b|not authori[sz]ed/i,
+     "no access to that data"],
+    [/ceiling|too (much|large|many)|over the|exceed/i,
+     "it would have read too much data"],
+    [/not found|no such|unknown (table|column|metric|tool)|does not exist|missing/i,
+     "nothing by that name in the graph"],
+    [/syntax|invalid|unrecognized|could not (run|parse|compile)|\b400\b|bad request/i,
+     "the query was not accepted as written"],
+    [/truncat/i, "the result was too large to bring back whole"],
+  ];
+  function snagReason(summary) {
+    const raw = String(summary).replace(/^ERROR:\s*/, "");
+    for (const [re, words] of SNAGS) if (re.test(raw)) return words;
+    const first = raw.split(/[—;\n]/)[0].replace(/[.:\s]+$/, "").trim();
+    return first ? first.charAt(0).toLowerCase() + first.slice(1, 90)
+      : "it did not go through";
+  }
+  function snagRow(row, event, summary, secs = "") {
+    row.classList.add("failed");
+    row.querySelector(".mark").textContent = "!";
+    row.title = String(summary).replace(/^ERROR:\s*/, "").slice(0, 400);
+    row.querySelector(".step-text").innerHTML =
+      `${prose(friendly(event))} <span class="snag">hit a snag</span>
+       <span class="muted">— ${esc(snagReason(summary))}${secs}</span>
+       <span class="muted snag-next" hidden> · trying another way</span>`;
+  }
+  function movedOn(turn, another) {
+    const row = turn.snagged;
+    if (!row) return;
+    if (another) row.querySelector(".snag-next").hidden = false;
+    turn.snagged = null;
+  }
+
   function lastLine(text) {
     const lines = String(text).replace(/\*\*/g, "").split("\n")
       .map((l) => l.trim()).filter((l) => l && !/^#+\s*$/.test(l));
@@ -1313,16 +1384,18 @@ export async function renderChat(outlet, wanted = "") {
     }
     row.classList.remove("pending");
     attachInput(row, event.input);
-    const outcome = String(event.summary || "").split("\n")[0]
-      .slice(0, 120);
-    const failed = outcome.startsWith("ERROR");
+    const summary = String(event.summary || "");
+    const outcome = summary.split("\n")[0].slice(0, 120);
     const secs = event.elapsed_ms >= 1000
       ? ` · ${(event.elapsed_ms / 1000).toFixed(1)}s` : "";
-    row.querySelector(".step-text").innerHTML =
-      `${prose(friendly(event))}${outcome
-        ? ` <span class="muted">— ${prose(failed
-            ? outcome.replace(/^ERROR:\s*/, "did not work: ")
-            : outcome)}${secs}</span>` : ""}`;
+    if (outcome.startsWith("ERROR")) {
+      snagRow(row, event, summary, secs);
+      turn.snagged = row;
+    } else {
+      row.querySelector(".step-text").innerHTML =
+        `${prose(friendly(event))}${outcome
+          ? ` <span class="muted">— ${prose(outcome)}${secs}</span>` : ""}`;
+    }
     scroll();
   }
 
@@ -1543,6 +1616,7 @@ export async function renderChat(outlet, wanted = "") {
       }
       case "tool_call":
         if (turn.settled) openBlock(turn);
+        movedOn(turn, true);             // after a snag: the next step
         pulse(turn, `${friendly(event)}…`, event.ts);
         toolStart(turn, event);
         break;
@@ -1560,6 +1634,7 @@ export async function renderChat(outlet, wanted = "") {
         }
         break;
       case "say_token":
+        movedOn(turn, false);            // the answer is the next step
         if (!turn.settled) settleBlock(turn);   // the answer: fold it
         turn.buffer += event.delta || "";
         turn.prose.innerHTML = renderMarkdown(turn.buffer, "md");
@@ -1648,14 +1723,21 @@ export async function renderChat(outlet, wanted = "") {
         el.innerHTML = renderMarkdown(t.text || "", "md");
       } else {
         el.className = "theater-step";
-        const outcome = String(t.summary || "").split("\n")[0]
-          .slice(0, 120);
+        const summary = String(t.summary || "");
+        const outcome = summary.split("\n")[0].slice(0, 120);
         el.innerHTML = `<span class="mark">·</span>
           <span class="step-body"><span class="step-text">${
             prose(friendly(t))}${outcome
-            ? ` <span class="muted">— ${prose(outcome.replace(
-                /^ERROR:\s*/, "did not work: "))}</span>` : ""}</span>
+            ? ` <span class="muted">— ${prose(outcome)}</span>` : ""}</span>
           </span>`;
+        if (outcome.startsWith("ERROR")) {
+          snagRow(el, t, summary);
+          // a past turn already knows whether another step followed
+          if (entries.slice(entries.indexOf(t) + 1)
+                .some((n) => n.kind === "tool")) {
+            el.querySelector(".snag-next").hidden = false;
+          }
+        }
         attachInput(el, t.input);
       }
       steps.appendChild(el);
@@ -1719,6 +1801,7 @@ export async function renderChat(outlet, wanted = "") {
     slash.hidden = true;
     setEmpty(false);
     userBubble(text);
+    scroll(true);                        // sending re-sticks the thread
     input.value = "";
     const accepted = await api.chatSend(state.session.id, text,
                                         el("chat-depth").value,

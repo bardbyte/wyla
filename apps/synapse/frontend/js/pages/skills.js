@@ -1,11 +1,11 @@
 /** Skills: the shelf, the way a settings page lists it, with the
- * approval workflow on top. One list of what Synapse knows how to do
+ * approval workflow on top. One list of what Radix knows how to do
  * (the doctrine packs: built in, yours, shared) and what it knows
  * about (the knowledge files the graph is built from), each with its
  * status, when it was last written and who wrote it. A file a person
  * brings in — Bring a file, Write a skill, Draft with Synapse — is a
  * submission: it goes to the submitter's manager, shows here as
- * Pending manager approval with Synapse's read beside it, and reaches
+ * Pending manager approval with Radix's read beside it, and reaches
  * the agent only once the manager approves (Published); a rejection
  * carries the manager's comments and the person updates and
  * resubmits. The notices the PRD names land at the top of the page
@@ -121,7 +121,7 @@ function reviewHtml(s, board) {
   const approver = s.approver || board.approver || {};
   const canDecide = (approver.band ?? 0) >= (board.min_band || 40);
   const r = s.ai_review;
-  const read = !r ? `<p class="muted">Synapse has not read it yet.</p>` : `
+  const read = !r ? `<p class="muted">Radix has not read it yet.</p>` : `
     <div class="review-rec r-${esc(r.recommendation)}">
       <b>${esc(REC[r.recommendation] || r.recommendation)}</b>
       ${r.reason ? `<span>${esc(r.reason)}</span>` : ""}
@@ -143,7 +143,7 @@ function reviewHtml(s, board) {
         </tbody></table>`
       : `<p class="muted">Nothing to point at.</p>`}`;
   const readNote = s.ai_status === "running"
-    ? `<span class="think-orb">✳</span> Synapse is reading it; these are the checks so far`
+    ? `<span class="think-orb">✳</span> Radix is reading it; these are the checks so far`
     : s.ai_status === "failed"
       ? `the model was not available (${esc(s.ai_reason || "no read")}); these are the checks`
       : r ? `by ${esc(r.by)} · advisory: the manager decides` : "";
@@ -176,7 +176,7 @@ function reviewHtml(s, board) {
         </dl>
       </section>
       <section class="review-block" id="rv-read">
-        <h4>Synapse's read <span class="muted">${readNote}</span></h4>
+        <h4>Radix's read <span class="muted">${readNote}</span></h4>
         ${read}
       </section>
       ${s.status === "pending" ? `
@@ -227,13 +227,13 @@ export async function renderSkills(outlet) {
           title="bring a markdown file of your own: it goes to your manager for approval">Browse</button>
         <button class="btn primary" id="sk-add">Add</button>
       </div>
-      <p class="muted shelf-intro">What Synapse knows how to do, and what
+      <p class="muted shelf-intro">What Radix knows how to do, and what
         it knows about. A <b>skill</b> is doctrine: the moves for a kind
         of ask, loaded by itself when a question calls for it (type
         <code>/</code> in the chat to pin one on a conversation); yours
         load for you alone. A <b>knowledge</b> file is reference the graph
         is built from. Anything you add goes to your manager first: it
-        shows here as <b>Pending approval</b> with Synapse's read beside
+        shows here as <b>Pending approval</b> with Radix's read beside
         it, and reaches the agent once it is <b>Published</b>.</p>
       <div class="notices" id="sk-notices" hidden></div>
       <table class="shelf-table">
@@ -499,7 +499,7 @@ export async function renderSkills(outlet) {
     const to = submission.approver?.name || "your manager";
     note.textContent = submission.resubmitted
       ? `resubmitted as v${submission.version}: pending ${to}'s approval`
-      : `submitted to ${to} for approval: Synapse is reading it`;
+      : `submitted to ${to} for approval: Radix is reading it`;
     await load();
     pingBadge();
     const row = rows.find((r) => r.submission && r.submission.id === submission.id);

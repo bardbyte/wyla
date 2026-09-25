@@ -1381,3 +1381,27 @@ table.result tr:last-child td { border-bottom: none; }
   .chartv2 .fill { animation: none; opacity: 1; stroke-dashoffset: 0;
     transform: none; fill-opacity: 0.15; }
 }
+
+/* ── the thread follows new content only while the reader is at the
+   bottom; scrolled up, a pill offers the way back to the latest ── */
+.chat-main { position: relative; }
+.chat-jump {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: 96px; z-index: 3;
+  border: 1px solid var(--line, #d5d2ca); border-radius: 999px;
+  background: var(--surface, #fff); color: var(--accent, #2f6feb);
+  box-shadow: var(--shadow, 0 1px 3px rgba(0, 23, 90, 0.12));
+  font: inherit; font-size: var(--fs-12, 0.75rem); font-weight: 600;
+  padding: 5px 12px; cursor: pointer;
+}
+.chat-jump:hover { background: var(--accent-soft, #eaf2fb); }
+/* a step that did not go through: a snag, its plain reason, and the
+   fact that the model moved on — the raw error rides the hover */
+.theater-step.failed .mark { color: var(--tier-mid, #b07908); font-weight: 700; }
+.theater-step .snag {
+  color: var(--tier-mid, #b07908); font-weight: 600;
+  font-size: var(--fs-12, 0.75rem);
+}
+/* the italic line under every number: who prepared it, how far to
+   trust it; the definition line rides the hover */
+.meridian { font-style: italic; }
