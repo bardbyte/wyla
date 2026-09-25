@@ -102,7 +102,7 @@ one). Until a decision needs them, both stay `''`.
 
 1. `cp synapse-agentic-harness-system/env/e1.env.example synapse-agentic-harness-system/env/e1.env` and fill every `<placeholder>`; secrets come from the secret store, never from a file in the repository.
 2. Register `https://<host>/callback` as a Login redirect URI on the environment's Okta client (and on the Google client if BigQuery runs as the person).
-3. Create the Spanner database; apply `001` … `006` in order.
+3. Create the Spanner database; apply `001` … `007` in order (on a database that already has `001` … `004`: `005`, `006`, `007`; run `python scripts/spanner_check.py` first to see which are missing).
 4. `make ddl-check`.
 5. `make check ENV=e1` — fix every row that is not `ok` or an allowed `skipped`.
 6. Publish a build: `python scripts/pipeline.py publish-build` from a host that compiled one (the `spanner` row stays `ok`; the app's `/api/synapse/planes` will name the build).
