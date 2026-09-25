@@ -126,15 +126,26 @@ pod restarts.
 
 ## Schema notes for the first rollout
 
-Two `CHECK` constraints in `002_chat.sql` are narrower than what the code
-can write today; the database, not the app, refuses the row:
+Two `CHECK` constraints in `002_chat.sql` were narrower than what the code
+writes, and the database, not the app, refused the row. Both are closed
+by `008_chat_model.sql`, applied after `002` (and after `007` where it
+is): a fresh database and the live E1 database with `008` on top end up
+the same.
 
-* `ChatArtifacts.Type` allows `chart | table | document | dashboard |
-  diagram | query`; `sahs/assistant/artifacts.py` also knows `kpi`.
-* `ChatSessions.Model` allows `'' | vertex | gateway` (16 characters); the
-  composer's model picker may record a longer choice.
+* `ChatArtifacts.Type` allowed `chart | table | document | dashboard |
+  diagram | query`; `sahs/assistant/artifacts.py` also knows `kpi`. `008`
+  replaces the constraint with that registry's list, and
+  `scripts/spanner_ddl_check.py` holds the two equal from here on.
+* `ChatSessions.Model` allowed `'' | vertex | gateway` in 16 characters;
+  the composer records a catalog choice — a plane, or `plane:model`
+  such as `gateway:gemini-3.7-flash` (24 characters). `008` widens the
+  column to `STRING(64)` and drops the plane `CHECK`: the runtime
+  validates a choice against the catalog (`choice_for`) before
+  `SpannerAssistantStore.set_model` writes it whole (no truncation; a
+  choice over 64 is refused by name), and the chat API's `model` fields
+  (`NewMessage`, `SessionModel`, `DraftRequest`) take 64 characters.
+  The sqlite stand-in carries the same width as a `CHECK`.
 
-Widen both `CHECK` lists in the DDL before the chat lane goes live on E1.
 `get_artifact` reaches an artifact by its id alone (an interleaved table
 keyed by chat): add an index on `ChatArtifacts (ArtifactId)` when the
 tables grow past a laptop's worth.

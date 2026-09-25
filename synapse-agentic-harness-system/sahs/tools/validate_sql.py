@@ -20,11 +20,23 @@ unknown_metric · metric_expression_missing · dim_not_approved
 Warning catalog: policy_unknown · restricted_table · select_star ·
 no_where_filter · dims_unchecked · sensitive_column_in_filter ·
 group_by_at_metric_grain · qualification_partial
+
+The sensitive-column policy (``SAHS_SENSITIVE_COLUMNS``): under
+``deny`` the two codes ``sensitive_column`` and
+``select_star_over_sensitive`` are violations, as above; under
+``allow`` — the default for the first launch, where the harness may
+read every column the build knows — the same two codes come back as
+WARNINGS with the same detail and ``policy: allow``, so the record
+still says a sensitive column was read, and nothing is refused for
+it. The switch is read here, where the verdict is made; the sandbox's
+gates (tables, cost, live) are untouched by it.
 """
 
 from __future__ import annotations
 
 import difflib
+import os
+from collections.abc import Mapping
 from typing import Any
 
 from sahs.canon.canonical import try_canon
@@ -39,6 +51,38 @@ _QUERY_KINDS = {"select", "union"}
 _TIME_TOKENS = {"dt", "date", "day", "week", "month", "quarter", "year",
                 "time"}
 _TIME_DIMS = {"time", "period", "date"}
+
+# ── the sensitive-column policy ──
+SENSITIVE_SWITCH = "SAHS_SENSITIVE_COLUMNS"
+SENSITIVE_ALLOW = "allow"
+SENSITIVE_DENY = "deny"
+SENSITIVE_POLICIES = (SENSITIVE_ALLOW, SENSITIVE_DENY)
+SENSITIVE_CODES = ("sensitive_column", "select_star_over_sensitive")
+
+
+def sensitive_policy(env: Mapping[str, str] | None = None) -> str:
+    """``allow`` (the default) or ``deny``: whether a query may
+    project a column the build flags sensitive. Only the word ``deny``
+    denies; anything else — unset included — allows, and the read is
+    noted on the check result either way."""
+    source: Mapping[str, str] = os.environ if env is None else env
+    value = str(source.get(SENSITIVE_SWITCH, "")).strip().lower()
+    return SENSITIVE_DENY if value == SENSITIVE_DENY else SENSITIVE_ALLOW
+
+
+def sensitive_policy_note(env: Mapping[str, str] | None = None) -> str:
+    """One line on the policy for the doctor and the reports."""
+    source: Mapping[str, str] = os.environ if env is None else env
+    policy = sensitive_policy(source)
+    raw = str(source.get(SENSITIVE_SWITCH, "")).strip()
+    if policy == SENSITIVE_DENY:
+        return (f"sensitive columns denied ({SENSITIVE_SWITCH}=deny): a "
+                "query that projects one is refused")
+    if raw and raw.lower() != SENSITIVE_ALLOW:
+        return (f"sensitive columns allowed: {SENSITIVE_SWITCH}={raw!r} is "
+                "not deny, so it reads as allow; every read is noted")
+    return (f"sensitive columns allowed ({SENSITIVE_SWITCH}="
+            f"{raw or 'unset'}): every read is noted on the check result")
 
 
 def _entry(code: str, detail: str, hint: str) -> dict[str, str]:
@@ -61,12 +105,21 @@ def _column_matches_dim(column: str, dims: list[str]) -> bool:
     return False
 
 
-def validate_sql(build: Build, sql: str, metric_id: str = "") -> dict:
+def validate_sql(build: Build, sql: str, metric_id: str = "", *,
+                 env: Mapping[str, str] | None = None) -> dict:
     """Pre-flight a query against the compiled build. Pass ``metric_id``
     (metric:fp, bare fp, or mgroup id) to additionally check the query
-    honors that metric's contract."""
+    honors that metric's contract. ``env`` is where the sensitive-column
+    policy is read (``SAHS_SENSITIVE_COLUMNS``; the process environment
+    when None)."""
     violations: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
+    policy = sensitive_policy(env)
+    deny_sensitive = policy == SENSITIVE_DENY
+    # under allow the two sensitive codes are notes, never refusals
+    sensitive_out = violations if deny_sensitive else warnings
+    allowed_note = (f" — read allowed ({SENSITIVE_SWITCH}={policy}), "
+                    "noted on the record")
 
     result, err = try_canon(sql)
     if err is not None:
@@ -158,12 +211,15 @@ def validate_sql(build: Build, sql: str, metric_id: str = "") -> dict:
         starred_pii = sorted({c for p in physicals
                               for c in pii_by_table.get(p, ())})
         if starred_pii:
-            violations.append(_entry(
+            sensitive_out.append({**_entry(
                 "select_star_over_sensitive",
                 "SELECT * would project sensitive columns: "
-                + ", ".join(starred_pii),
+                + ", ".join(starred_pii)
+                + ("" if deny_sensitive else allowed_note),
                 "name the columns you need and leave the sensitive "
-                "ones out"))
+                "ones out" if deny_sensitive else
+                "name the columns you need; the sensitive ones are on "
+                "the record either way"), "policy": policy})
         else:
             warnings.append(_entry(
                 "select_star", "SELECT * projects every column",
@@ -233,13 +289,16 @@ def validate_sql(build: Build, sql: str, metric_id: str = "") -> dict:
         seen.add(key)
         if physical and name in pii_by_table.get(physical, ()):
             if id(column) in in_projection:
-                violations.append(_entry(
+                sensitive_out.append({**_entry(
                     "sensitive_column",
                     f"{physical}.{name} is sensitive "
-                    "(union_most_restrictive)",
+                    "(union_most_restrictive)"
+                    + ("" if deny_sensitive else allowed_note),
                     "drop it from the SELECT list, or route through the "
                     "governed access process — this tool cannot grant "
-                    "it"))
+                    "it" if deny_sensitive else
+                    "the column is read as asked; the read is on the "
+                    "record"), "policy": policy})
             elif id(column) in in_where:
                 warnings.append(_entry(
                     "sensitive_column_in_filter",

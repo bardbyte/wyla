@@ -150,6 +150,7 @@ Status, per the README: *a validated candidate, not the default.*
 |---|---|---|
 | `SAHS_ALLOW_LIVE` | **off** | whether the chat may execute at all |
 | `SAHS_LIVE_MAX_BYTES` | 1 GB | the scan ceiling the model cannot lift |
+| `SAHS_SENSITIVE_COLUMNS` | **allow** | whether a query may project a column the build flags sensitive: `allow` notes the read on the check result (`sensitive_column`, `select_star_over_sensitive` as warnings), `deny` refuses it |
 | `ASK_EXECUTE` | — | live execution in the Ask lane |
 | `SAHS_STORE` | — | the session store path |
 | `SAHS_FILES_DIR` | — | where attachments land |

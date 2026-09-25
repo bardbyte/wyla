@@ -45,7 +45,8 @@ CREATE INDEX IF NOT EXISTS ChatProjectsByOwner ON ChatProjects (OwnerUserId, Arc
 CREATE TABLE IF NOT EXISTS ChatSessions (
   SessionId TEXT PRIMARY KEY, OwnerUserId TEXT NOT NULL,
   Kind TEXT NOT NULL DEFAULT 'assistant', Title TEXT NOT NULL DEFAULT '',
-  BuildId TEXT NOT NULL DEFAULT '', ProjectId TEXT, Model TEXT NOT NULL DEFAULT '',
+  BuildId TEXT NOT NULL DEFAULT '', ProjectId TEXT,
+  Model TEXT NOT NULL DEFAULT '' CHECK (length(Model) <= 64),
   Skills TEXT NOT NULL DEFAULT '[]', Starred INTEGER NOT NULL DEFAULT 0,
   Archived INTEGER NOT NULL DEFAULT 0, Handoff TEXT, Notes TEXT,
   MessageCount INTEGER NOT NULL DEFAULT 0, CreatedAt TEXT NOT NULL, UpdatedAt TEXT NOT NULL);
@@ -82,6 +83,8 @@ CREATE TABLE IF NOT EXISTS ChatEvents (
 """
 
 SESSION_KINDS = ("analyst", "steward", "assistant")
+# ChatSessions.Model after 008_chat_model.sql: STRING(64), no plane CHECK
+MODEL_CHOICE_CHARS = 64
 _SESSION_COLUMNS = ("SessionId, OwnerUserId, Kind, Title, BuildId, ProjectId, Model, "
                     "Skills, Starred, Archived, Handoff, Notes, MessageCount, "
                     "CreatedAt, UpdatedAt")
@@ -285,8 +288,18 @@ class SpannerAssistantStore:
         self._update_session(session_id, (flag.capitalize(),), (bool(on),))
 
     def set_model(self, session_id: str, plane: str) -> None:
-        self._update_session(session_id, ("Model",),
-                             ((plane or "").strip().lower()[:16],))
+        """The model choice the chat rides — a plane, or plane:model as
+        the catalog spells it (the runtime validates it against the
+        catalog before calling here). Stored whole, up to the column's
+        64 characters (008_chat_model.sql); longer is refused by name,
+        never cut to a different choice in silence."""
+        choice = (plane or "").strip().lower()
+        if len(choice) > MODEL_CHOICE_CHARS:
+            raise ValueError(
+                f"model choice {choice[:MODEL_CHOICE_CHARS]!r}… is "
+                f"{len(choice)} characters; the column holds "
+                f"{MODEL_CHOICE_CHARS}")
+        self._update_session(session_id, ("Model",), (choice,))
 
     def set_project(self, session_id: str, project_id: str) -> None:
         self._update_session(session_id, ("ProjectId",), (project_id or None,))

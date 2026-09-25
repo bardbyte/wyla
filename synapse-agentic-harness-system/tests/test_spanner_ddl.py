@@ -82,6 +82,63 @@ def test_the_chat_store_is_the_sqlite_store_with_a_person():
     assert "IngestedRun" in ddl
 
 
+def test_008_widens_the_model_choice_and_lists_every_artifact_type(tmp_path):
+    """002 then 008 applied to the lint's model: ChatSessions.Model is
+    STRING(64) with no plane CHECK left (the catalog owns the choices),
+    and ChatArtifacts' type list is exactly sahs.assistant.artifacts.TYPES
+    (kpi included) — so a fresh database and the live one with 008 on
+    top end up the same. The lint reads the three ALTER forms, applies
+    them in file order, and refuses what it cannot read."""
+    from sahs.assistant.artifacts import TYPES
+    from sahs.assistant.spanner_store import MODEL_CHOICE_CHARS
+    ddl = _text("008_chat_model.sql")
+    assert "ALTER TABLE ChatSessions DROP CONSTRAINT ck_sessions_model;" in ddl
+    assert ("ALTER TABLE ChatSessions ALTER COLUMN Model STRING(64) "
+            "NOT NULL DEFAULT ('');") in ddl
+    assert "ALTER TABLE ChatArtifacts DROP CONSTRAINT ck_artifacts_type;" in ddl
+    assert "ALTER TABLE ChatArtifacts ADD CONSTRAINT ck_artifacts_type CHECK" in ddl
+    for kind in TYPES:
+        assert f"'{kind}'" in ddl, kind
+    assert MODEL_CHOICE_CHARS == 64
+    # before 008: the first rollout's narrow column and lists
+    before, findings = lint.load([DDL / "001_identity.sql", DDL / "002_chat.sql"])
+    assert findings == []
+    assert before["ChatSessions"].columns["Model"] == "STRING(16)"
+    assert "ck_sessions_model" in before["ChatSessions"].constraints
+    assert lint.check_list_in(before["ChatArtifacts"], "ck_artifacts_type") == {
+        "chart", "table", "document", "dashboard", "diagram", "query"}
+    # after 008: 64 wide, no plane CHECK, the registry's types
+    after, findings = lint.load([DDL / "001_identity.sql", DDL / "002_chat.sql",
+                                 DDL / "008_chat_model.sql"])
+    assert findings == []
+    assert after["ChatSessions"].columns["Model"] == "STRING(64)"
+    assert "ck_sessions_model" not in after["ChatSessions"].constraints
+    assert not any("Model IN" in text
+                   for text in after["ChatSessions"].constraints.values())
+    assert lint.check_list_in(after["ChatArtifacts"], "ck_artifacts_type") == set(TYPES)
+    assert "kpi" in set(TYPES)
+    # the lint sees every table, the widened column included, and 8 files
+    tables, _ = lint.load(lint.ddl_files())
+    assert len(tables) == 44 and len(lint.ddl_files()) == 8
+    assert tables["ChatSessions"].columns["Model"] == "STRING(64)"
+    # what it refuses: a constraint that is not there, a column that is
+    # not there, a form it does not read, a name added twice
+    bad = tmp_path / "099_bad.sql"
+    bad.write_text(
+        "ALTER TABLE ChatSessions DROP CONSTRAINT ck_nothing;\n"
+        "ALTER TABLE ChatSessions ALTER COLUMN Nope STRING(64);\n"
+        "ALTER TABLE ChatArtifacts ADD CONSTRAINT ck_artifacts_type CHECK (Type IN ('x'));\n"
+        "ALTER TABLE ChatSessions RENAME TO Chats;\n"
+        "ALTER TABLE Ghost DROP CONSTRAINT ck_x;\n", encoding="utf-8")
+    _t, findings = lint.load([DDL / "001_identity.sql", DDL / "002_chat.sql", bad])
+    assert [f.split(": ", 2)[-1][:40] for f in findings] == [
+        "DROP CONSTRAINT ck_nothing: ChatSessions",
+        "ALTER COLUMN Nope: ChatSessions has no s",
+        "ADD CONSTRAINT ck_artifacts_type: ChatAr",
+        "an ALTER form this check does not read (",
+        "ALTER on unknown table Ghost"[:40]]
+
+
 def test_the_content_tables_hold_the_bytes_and_the_board():
     """007: a file's bytes in chunks under its ChatFiles row, and the
     review ledger as a head row, its versions, its events and each
