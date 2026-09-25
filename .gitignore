@@ -117,3 +117,10 @@ meridian-data/
 
 # the sanitizer's own scan state: local only, it names what it scrubbed
 .mystify/
+
+# the per-environment .env files (make run ENV=<env>, docs/deploy.md):
+# only the placeholder examples are tracked, never a filled-in one
+!synapse-agentic-harness-system/env/
+synapse-agentic-harness-system/env/*
+!synapse-agentic-harness-system/env/*.env.example
+!synapse-agentic-harness-system/env/README.md

@@ -1,20 +1,28 @@
 # Synapse on Spanner
 
 The schema the laptop's stores become when Synapse leaves the laptop:
-three GoogleSQL DDL files, applied in order, one database.
+GoogleSQL DDL files, applied in file order (001, 002, 003, 004, 005,
+006, then any later number), one database per environment.
 
 | file | holds | replaces |
 |---|---|---|
 | `001_identity.sql` | users, credentials, roles and permissions, login sessions, refresh tokens, MFA, one-shot tokens, invitations, preferences, the audit | nothing yet: the laptop has one configured person (`SYNAPSE_USER_NAME`) |
 | `002_chat.sql` | chats, messages, artifacts, plans, feedback, files, events, memory, a person's own skills, staged knowledge files | `graph/runs/chat/sessions.sqlite3`, the events JSONL, the files under each workspace, `graph/skills/users/`, `sources/artifacts/` |
 | `003_graph.sql` | the graph's nodes and edges with their provenance, as append-only assertions plus the folded current state, the crosswalk, the clerk's transitions, the builds, and a property graph over the fold | `graph/nodes/*.jsonl`, `graph/edges/*.jsonl`, `graph/identity/crosswalk.jsonl`, `graph/runs/` |
+| `004_google_oauth.sql` | a person's connected Google account (the encrypted refresh token) for user-delegated BigQuery | nothing: the laptop runs BigQuery as the service account |
+| `005_build_bundles.sql` | the promoted build's bytes: one bundle row per build and its chunks, interleaved under `Builds` (`sahs/builds/spanner_store.py`, `MERIDIAN_BUILDS_SOURCE=spanner`) | `builds/<id>/` on a shared disk |
+| `006_external_identities.sql` | identity-provider links (Okta) and the one-time authorization states both sign-in hops park | nothing: the laptop has no sign-in |
+
+A gap in the numbers is deliberate: `007_*.sql` is reserved for the
+review board and the content store (another change), so numbers are
+never reused.
 
 The reasoning behind every table is in `docs/spanner_schema.md`.
 This file is the how.
 
 ## The first rollout
 
-All three files are applied; the first rollout writes to the identity
+Every file is applied; the first rollout writes to the identity
 tables that email-and-password sign-in needs (`Users`,
 `UserCredentials`, `Roles`, `Permissions`, `RolePermissions`,
 `UserRoles`, `AuthSessions`, `LoginAttempts`, `UserPreferences`,

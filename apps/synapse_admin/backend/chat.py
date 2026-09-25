@@ -750,7 +750,7 @@ async def stream(session_id: str, request: Request, after: int = 0,
             iter([f"event: error\ndata: "
                   f'{{"reason": "no session {session_id}"}}\n\n']),
             media_type="text/event-stream")
-    rt = runtime.runtime(session_id)
+    runtime.runtime(session_id)
     start = int(last_event_id) if (last_event_id or "").isdigit() \
         else after
 
@@ -760,7 +760,9 @@ async def stream(session_id: str, request: Request, after: int = 0,
         while True:
             if await request.is_disconnected():
                 return
-            batch = rt.bus.since(seq)
+            # the bus, and the store's ChatEvents when the bus has
+            # nothing after seq (a pod restart): replay survives
+            batch = runtime.events_since(session_id, seq)
             if batch:
                 idle = 0.0
                 for record in batch:

@@ -124,6 +124,13 @@ class EventBus:
         with self._lock:
             return [e for e in self._events if e["seq"] > seq]
 
+    def resume(self, seq: int) -> None:
+        """Continue numbering after ``seq``: a bus rebuilt on a pod that
+        restarted picks up where the stored record ends, so its seqs
+        never collide with rows already in the store."""
+        with self._lock:
+            self._seq = max(self._seq, int(seq))
+
     def head(self) -> int:
         with self._lock:
             return self._seq

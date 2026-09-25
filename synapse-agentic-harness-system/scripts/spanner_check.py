@@ -6,6 +6,8 @@ wiring the chat store to it.
     python scripts/spanner_check.py --counts       # with row counts
     python scripts/spanner_check.py --sql "SELECT 1"
     python scripts/spanner_check.py --json --out docs/evals/spanner_state.json
+    python scripts/spanner_check.py --emit-ddl   # CREATE TABLE for every live
+                                                 # table the repo's DDL lacks
 
 Runs the same bootstrap the store will: .env → validate the contract
 → resolve the endpoint → the route (direct, pinned on the connection)
@@ -28,7 +30,71 @@ sys.path.insert(0, str(SILO))
 from sahs.util.auth import AuthError                       # noqa: E402
 from sahs.util.console import EXIT_ENV_AUTH, EXIT_GATE_FAILURE, EXIT_OK  # noqa: E402
 from sahs.util.spanner import (SpannerClient, SpannerConnection,   # noqa: E402
-                               SpannerError, format_report, inspect)
+                               SpannerError, designed_tables, format_report,
+                               inspect)
+
+_KEYS_SQL = ("SELECT TABLE_NAME, COLUMN_NAME FROM "
+             "INFORMATION_SCHEMA.INDEX_COLUMNS WHERE TABLE_SCHEMA = '' "
+             "AND INDEX_TYPE = 'PRIMARY_KEY' ORDER BY TABLE_NAME, "
+             "ORDINAL_POSITION")
+_NULLABLE_SQL = ("SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE FROM "
+                 "INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ''")
+
+
+def emit_ddl(report: dict, *, designed: set[str] | None = None,
+             keys: dict[str, list[str]] | None = None,
+             nullable: dict[tuple[str, str], bool] | None = None) -> str:
+    """CREATE TABLE statements for the live tables the repo's DDL lacks,
+    from the schema listing ``inspect`` fetched: each column with the
+    type INFORMATION_SCHEMA reports (already GoogleSQL: STRING(64),
+    BYTES(MAX), ARRAY<STRING(64)>), NOT NULL where the catalog says so,
+    the primary key when ``keys`` carries it (a ``?`` to fill in when it
+    does not), and the interleave when the table has a parent. Parents
+    come before children so the text applies as one batch. It is a
+    starting point to check in under db/spanner, not a substitute for
+    reading it: defaults, constraints, indexes and commit-timestamp
+    options are not in the listing."""
+    live = {t["name"]: t for t in report.get("tables", [])}
+    if designed is None:
+        known = report.get("designed") or {}
+        designed = set(known.get("present", [])) | set(known.get("missing", []))
+    missing = [name for name in live if name not in designed]
+    if not missing:
+        return "-- every live table is in db/spanner\n"
+    # parents first: a child interleaves in a table defined earlier
+    ordered: list[str] = []
+
+    def add(name: str) -> None:
+        if name in ordered or name not in live:
+            return
+        parent = live[name].get("parent")
+        if parent and parent in missing:
+            add(parent)
+        ordered.append(name)
+
+    for name in missing:
+        add(name)
+    out: list[str] = []
+    for name in ordered:
+        table = live[name]
+        columns = table.get("columns") or []
+        width = max((len(str(c[0])) for c in columns), default=0)
+        lines = [f"-- {name}: in the live database, not in db/spanner",
+                 f"CREATE TABLE {name} ("]
+        for column in columns:
+            cname = str(column[0])
+            ctype = str(column[1]) if len(column) > 1 and column[1] else "STRING(MAX)"
+            required = (nullable or {}).get((name, cname), True) is False
+            lines.append(f"  {cname:<{width}}  {ctype}"
+                         + ("  NOT NULL" if required else "") + ",")
+        key = (keys or {}).get(name) or []
+        tail = f") PRIMARY KEY ({', '.join(key) if key else '?'})"
+        parent = table.get("parent")
+        if parent:
+            tail += f",\n  INTERLEAVE IN PARENT {parent} ON DELETE CASCADE"
+        lines.append(tail + ";")
+        out.append("\n".join(lines))
+    return "\n\n".join(out) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -42,6 +108,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", dest="json_out")
     parser.add_argument("--out", default="",
                         help="write the report as JSON to this path")
+    parser.add_argument("--emit-ddl", action="store_true",
+                        help="print CREATE TABLE statements for the live "
+                             "tables db/spanner lacks, and nothing else")
     args = parser.parse_args(argv)
 
     try:
@@ -76,6 +145,18 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_OK
         report = inspect(client, ddl_dir=None if args.no_design
                          else SILO / "db" / "spanner", counts=args.counts)
+        if args.emit_ddl:
+            _, key_rows = client.query(_KEYS_SQL)
+            keys: dict[str, list[str]] = {}
+            for table, column in key_rows:
+                keys.setdefault(str(table), []).append(str(column))
+            _, null_rows = client.query(_NULLABLE_SQL)
+            nullable = {(str(t), str(c)): str(n).upper() == "YES"
+                        for t, c, n in null_rows}
+            print(emit_ddl(report, designed=set(designed_tables(
+                SILO / "db" / "spanner")), keys=keys, nullable=nullable),
+                end="")
+            return EXIT_OK
     except SpannerError as e:
         print(f"✗ {e}", file=sys.stderr)
         return EXIT_GATE_FAILURE

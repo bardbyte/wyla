@@ -77,7 +77,7 @@ class AskRuntime:
                  store_path: Path, events_dir: Path | None = None,
                  model_factory: Callable[[Budget], Any] | None = None,
                  snapshot_runner: Any = None, runner: Any = None,
-                 owner_user_id: str = "") -> None:
+                 owner_user_id: str = "", store: Any = None) -> None:
         self.builds_root = Path(builds_root)
         self.graph_root = Path(graph_root)
         # a signed-in person's runtime keeps its own store and event log
@@ -94,7 +94,13 @@ class AskRuntime:
         self.events_dir = Path(events_dir) if events_dir else None
         if self.events_dir:
             self.events_dir.mkdir(parents=True, exist_ok=True)
-        self.store = SessionStore(Path(store_path))
+        # the store: the per-person sqlite file by default; under an
+        # identity store the app hands in SpannerAssistantStore (the
+        # chat tables, bound to the owner), here or by assigning
+        # ``runtime.store`` afterwards. Every verb the lane uses
+        # (sessions, messages, plan versions, feedback) is on both.
+        self.store = store if store is not None \
+            else SessionStore(Path(store_path))
         self._model_factory = model_factory
         self._runtimes: dict[str, _SessionRuntime] = {}
         self._lock = threading.Lock()
@@ -182,7 +188,10 @@ class AskRuntime:
         return {"ok": True, "skills": [s.name for s in loaded]}
 
     def sessions(self, limit: int = 50) -> list[dict]:
-        rows = self.store.list_sessions(limit)
+        # the chat tables hold the v2 chats too (kind assistant); this
+        # lane's shelf is the two hats
+        rows = [r for r in self.store.list_sessions(limit * 2)
+                if r.get("kind") in ("analyst", "steward")][:limit]
         for row in rows:
             rt = self._runtimes.get(row["id"])
             row["running"] = bool(rt and rt.running)
