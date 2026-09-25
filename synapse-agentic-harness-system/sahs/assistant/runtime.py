@@ -27,9 +27,10 @@ from sahs.util.paths import owner_paths
 
 from .events import ASSISTANT_EVENTS, EventBus
 from .loop import (DEFAULT_MODE, DEFAULT_THINKING, DEPTHS, MAX_CALLS,
-                   MODE_MEANS, MODES,
+                   MODE_MEANS, MODES, TASK_POOL,
                    THINKING_LEVELS, chart_rows_turn, run_assistant_turn,
-                   run_proposal_turn)
+                   run_proposal_turn, run_task_turn)
+from .planner import should_plan
 from .skills_loader import all_skills, load_packs
 from .store import AssistantStore
 
@@ -774,25 +775,32 @@ class AssistantRuntime:
             project_id=(project or {}).get("id", ""))
         level = self.thinking_level(depth)
         chosen = self.mode_for(mode)
+        common = dict(
+            build=build, store=self.store, bus=rt.bus,
+            budget=rt.budget, abort=rt.abort, model=model,
+            session=session, turn_id=turn_id, text=prompt_text,
+            workspace=self.workspace(session_id),
+            skills=loaded, graph_root=self.graph_root,
+            memories=memories, project=project,
+            snapshot_runner=self.snapshot_runner,
+            runner=self.runner,
+            substrate=self.substrate,
+            thinking_level=level, user_name=self.user_name,
+            mode=chosen, plane=plane, model_label=model_label,
+            model_name=model_name,
+            attachments=attachments or [],
+            file_names=file_names or [],
+            owner=self.owner)
+        # a message that reads like several jobs goes to the planner
+        # (one JSON one-shot, then tasks); anything else is the turn
+        # exactly as before — same call, same events, same prompt
+        body = (self._task_turn(common) if should_plan(prompt_text, chosen,
+                                                       level)
+                else (lambda: run_assistant_turn(**common)))
 
         def worker() -> None:
             try:
-                run_assistant_turn(
-                    build=build, store=self.store, bus=rt.bus,
-                    budget=rt.budget, abort=rt.abort, model=model,
-                    session=session, turn_id=turn_id, text=prompt_text,
-                    workspace=self.workspace(session_id),
-                    skills=loaded, graph_root=self.graph_root,
-                    memories=memories, project=project,
-                    snapshot_runner=self.snapshot_runner,
-                    runner=self.runner,
-                    substrate=self.substrate,
-                    thinking_level=level, user_name=self.user_name,
-                    mode=chosen, plane=plane, model_label=model_label,
-                    model_name=model_name,
-                    attachments=attachments or [],
-                    file_names=file_names or [],
-                    owner=self.owner)
+                body()
             except ModelUnavailable as e:
                 rt.bus.emit("error", turn_id=turn_id,
                             code="model_unavailable",
@@ -824,6 +832,14 @@ class AssistantRuntime:
                             status="error", **rt.budget.tick())
 
         return worker
+
+    def _task_turn(self, common: dict[str, Any]) -> Callable[[], Any]:
+        """The planned path (docs/multi-task-turns.md): the turn is
+        announced, the planner is asked once, and the tasks run as
+        sub-turns of this session on this bus, budget and abort flag —
+        or, with no plan, the turn runs as one. The same worker guard
+        as any model turn wraps it (_model_turn)."""
+        return lambda: run_task_turn(**common, pool_size=TASK_POOL)
 
     def start_turn(self, session_id: str, text: str,
                    depth: str = "", mode: str = "",

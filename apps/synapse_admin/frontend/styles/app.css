@@ -1635,3 +1635,48 @@ table.result tr:last-child td { border-bottom: none; }
 .model-text b { font-weight: 600; font-size: var(--fs-13, 0.8125rem); }
 .model-text small { color: var(--ink-3, #5b6b8f); font-size: var(--fs-11, 0.6875rem); }
 .knob-note { margin: 6px 10px; color: var(--ink-3, #5b6b8f); }
+
+/* ── a compound ask: the task board under the person's message
+   (docs/multi-task-turns.md) — one row per task, its status and
+   cost on the row, the task's own steps and answer folded under it;
+   the running row is open ── */
+.task-board {
+  border: 1px solid var(--line, #d5d2ca); border-radius: 10px;
+  padding: 8px 10px; margin-bottom: 8px;
+}
+.task-board-head {
+  font-size: 12px; color: var(--muted, #7a756a); margin-bottom: 2px;
+}
+.task-row { border-top: 1px solid var(--line, #d5d2ca); }
+.task-row:first-child { border-top: 0; }
+.task-row > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: baseline;
+  gap: 8px; padding: 6px 0; font-size: 13px; min-width: 0;
+}
+.task-row > summary::-webkit-details-marker { display: none; }
+.task-mark { width: 14px; flex: none; color: var(--muted, #7a756a); }
+.task-goal { flex: 1 1 auto; min-width: 0; }
+.task-after, .task-cost {
+  font-size: 11.5px; color: var(--muted, #7a756a); white-space: nowrap;
+  flex: none;
+}
+.task-status {
+  flex: none; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.04em; border-radius: 999px; padding: 1px 8px;
+  border: 1px solid var(--line, #d5d2ca); color: var(--muted, #7a756a);
+}
+.task-row.running .task-status { color: var(--accent, #2f6feb); border-color: currentColor; }
+.task-row.running .task-mark {
+  color: var(--accent, #2f6feb); animation: think-orb 1.2s ease-in-out infinite;
+}
+.task-row.done .task-status { color: #1a7840; background: #1a985022; }
+.task-row.partial .task-status { color: #b25708; background: #e8710a22; }
+.task-row.failed .task-status { color: #b3261e; background: #d93b2f22; }
+.task-row.stopped .task-status { color: var(--muted, #7a756a); opacity: 0.8; }
+.task-row.stopped .task-goal, .task-row.failed .task-goal { opacity: 0.85; }
+.task-body { padding: 2px 0 8px 22px; }
+.task-body .chat-prose { font-size: 13.5px; }
+.task-note { font-size: 12px; margin-top: 4px; }
+@media (prefers-reduced-motion: reduce) {
+  .task-row.running .task-mark { animation: none; }
+}

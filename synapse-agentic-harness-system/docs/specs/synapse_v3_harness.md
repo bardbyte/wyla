@@ -513,6 +513,24 @@ handoff, the eval suites.
    second by position; the fix is in the renderer, and the doctrine
    keeps the model from asking for it.
 
+26. A compound ask is several turns of the same session
+   (2026-09-25), `docs/multi-task-turns.md`: a deterministic gate
+   (length, joining words, enumerations, several questions) sends a
+   message to one JSON one-shot that splits it into at most six tasks
+   with dependencies, validated and repaired, never trusted blindly;
+   the tasks run as sub-turns on the same bus, budget and stop button
+   — independent ones side by side on a pool of two, dependent ones
+   after their inputs with the finished tasks' findings as context,
+   each under a share of the call ceiling — then a synthesis sub-turn
+   with no tools composes the answer and a "What was done" document
+   records every task's status, checks, refusals, artifacts and cost.
+   Every sub-turn record carries its task id; the page draws a task
+   board under the ask and replays it from the transcript. A simple
+   ask runs byte-identical to before. Reason: one pass gave a list of
+   asks one context and one budget; a colleague hands the jobs out,
+   collects them, and reports what was checked — the same governance
+   inside every job.
+
 ## 12 · The laptop, measured (state report of 2026-09-02)
 
 What v3 is actually built against — not the fixture.

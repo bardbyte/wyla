@@ -1721,10 +1721,149 @@ export async function renderChat(outlet, wanted = "") {
     paintMemories();
   }
 
+  // ── a compound ask: the task board (docs/multi-task-turns.md). The
+  //    plan draws one row per task under the person's message; every
+  //    event a task's sub-turn emits carries the task id and lands
+  //    under its row, which has the same shape as a turn so the
+  //    helpers above (steps, thoughts, cards, the pulse) work on it
+  //    unchanged. The running row is open, a finished one folds, and
+  //    the transcript replays the same board from the stored plan ──
+  const TASK_MARKS = { planned: "·", running: "◐", done: "✓",
+                       partial: "◔", failed: "✕", stopped: "■" };
+  function boardFor(turn) {
+    if (turn.board) return turn.board;
+    const div = document.createElement("div");
+    div.className = "task-board";
+    div.innerHTML = `<div class="task-board-head"></div>
+      <div class="task-rows"></div>`;
+    turn.el.insertBefore(div, turn.el.firstChild);
+    turn.board = { el: div, head: div.querySelector(".task-board-head"),
+                   rows: div.querySelector(".task-rows"),
+                   tasks: new Map() };
+    return turn.board;
+  }
+  function boardHead(turn, count, pool, stopped) {
+    const board = boardFor(turn);
+    board.head.textContent = `Split into ${count} task${count === 1 ? "" : "s"}`
+      + (pool > 1 ? ` · up to ${pool} side by side` : "")
+      + (stopped ? " · stopped" : "");
+  }
+  function taskTurnFor(turn, id, goal = "", deps = []) {
+    const board = boardFor(turn);
+    let task = board.tasks.get(id);
+    if (task) {
+      if (goal && task.goalEl.textContent === id) task.goalEl.textContent = goal;
+      return task;
+    }
+    const row = document.createElement("details");
+    row.className = "task-row planned";
+    row.dataset.task = id;
+    row.innerHTML = `
+      <summary>
+        <span class="task-mark">·</span>
+        <span class="task-goal"></span>
+        <span class="task-after"></span>
+        <span class="task-status">planned</span>
+        <span class="task-cost"></span>
+      </summary>
+      <div class="task-body">
+        <details class="tool-activity" hidden open>
+          <summary>
+            <span class="tri">▸</span>
+            <span class="thinking-line">
+              <span class="think-orb">✳</span>
+              <span class="think-text">Thinking…</span></span>
+            <span class="tool-title" hidden></span>
+          </summary>
+          <div class="tool-steps"></div>
+        </details>
+        <div class="chat-prose md"></div>
+        <div class="chat-extras"></div>
+        <div class="task-note muted" hidden></div>
+      </div>`;
+    row.querySelector(".task-goal").textContent = goal || id;
+    if (deps && deps.length) {
+      row.querySelector(".task-after").textContent = `after ${deps.join(", ")}`;
+    }
+    board.rows.appendChild(row);
+    task = { task: id, parent: turn, el: row,
+             goalEl: row.querySelector(".task-goal"),
+             statusEl: row.querySelector(".task-status"),
+             costEl: row.querySelector(".task-cost"),
+             noteEl: row.querySelector(".task-note"),
+             activity: row.querySelector(".tool-activity"),
+             toolTitle: row.querySelector(".tool-title"),
+             toolSteps: row.querySelector(".tool-steps"),
+             thinking: row.querySelector(".thinking-line"),
+             thinkText: row.querySelector(".think-text"),
+             prose: row.querySelector(".chat-prose"),
+             extras: row.querySelector(".chat-extras"),
+             buffer: "", steps: 0, rows: new Map(), verbs: [],
+             thoughts: "", done: false, tick: null, tickLabel: "",
+             tickStart: 0, seg: null, segText: "", thought: false,
+             settled: false, startedAt: 0 };
+    board.tasks.set(id, task);
+    scroll();
+    return task;
+  }
+  function taskStatus(task, status, cost, reason = "") {
+    task.el.className = `task-row ${status || "planned"}`;
+    task.statusEl.textContent = status || "planned";
+    task.el.querySelector(".task-mark").textContent =
+      TASK_MARKS[status] || "·";
+    if (cost) {
+      const secs = (cost.elapsed_ms || 0) / 1000;
+      task.costEl.textContent = `${cost.model_calls ?? 0} call${
+        cost.model_calls === 1 ? "" : "s"} · ${
+        secs >= 10 ? secs.toFixed(0) : secs.toFixed(1)}s`;
+    }
+    if (reason) {
+      task.noteEl.textContent = reason;
+      task.noteEl.hidden = false;
+    }
+    // the running row is open; a finished one folds until tapped
+    task.el.open = status === "running";
+  }
+  // where an event lands: a tagged record under its task's row on the
+  // parent turn's board (<parent>.<task>), everything else on the turn
+  function homeOf(event) {
+    if (!event.task) return turnFor(event.turn_id || "loose");
+    const parent = String(event.turn_id || "").split(".")[0] || "loose";
+    return taskTurnFor(turnFor(parent), event.task);
+  }
+
   function handle(event) {
-    const turn = turnFor(event.turn_id || "loose");
+    const turn = homeOf(event);
     switch (event.ev) {
+      case "plan_made": {
+        boardHead(turn, (event.tasks || []).length, event.pool || 1, false);
+        for (const t of event.tasks || []) {
+          taskTurnFor(turn, t.id, t.goal, t.depends_on || []);
+        }
+        pulse(turn, `Working through ${(event.tasks || []).length} tasks…`,
+              event.ts);
+        break;
+      }
+      case "task_started": {
+        const task = taskTurnFor(turn, event.task, event.goal,
+                                 event.depends_on || []);
+        task.startedAt = Date.parse(event.ts || "") || Date.now();
+        taskStatus(task, "running");
+        break;
+      }
+      case "task_done": {
+        const task = taskTurnFor(turn, event.task);
+        taskStatus(task, event.status, event.cost, event.reason || "");
+        doneThinking(task, (event.cost || {}).elapsed_ms);
+        break;
+      }
       case "turn_started": {
+        if (turn.task) {            // a task's own start: its row only
+          turn.startedAt = Date.parse(event.ts || "") || Date.now();
+          openBlock(turn);
+          pulse(turn, "Thinking…", event.ts);
+          break;
+        }
         setRunning(true);
         setEmpty(false);
         // a turn this page did not send — the build chained after a
@@ -1740,7 +1879,8 @@ export async function renderChat(outlet, wanted = "") {
         }
         turn.startedAt = Date.parse(event.ts || "") || Date.now();
         openBlock(turn);
-        pulse(turn, "Thinking…", event.ts);
+        pulse(turn, event.planning ? "Sorting out the asks…" : "Thinking…",
+              event.ts);
         pingShelf();                       // the shelf marks it working
         break;
       }
@@ -1803,6 +1943,7 @@ export async function renderChat(outlet, wanted = "") {
                      { message_id: event.message_id || "" });
         break;
       case "chips":
+        if (turn.task) break;         // a task's follow-ups stay with it
         if (event.clarify) chipRow(null, event.clarify);
         else chipRow(event.suggestions || []);
         break;
@@ -1811,6 +1952,10 @@ export async function renderChat(outlet, wanted = "") {
           `${event.tokens ?? 0} tokens · ${event.calls ?? 0} calls`;
         break;
       case "turn_done":
+        if (turn.task) {              // a task's own end: its row settles
+          doneThinking(turn, event.elapsed_ms);
+          break;
+        }
         setRunning(false);
         doneThinking(turn, event.elapsed_ms);
         if (!state.session.title) refreshTitle();
@@ -1840,7 +1985,8 @@ export async function renderChat(outlet, wanted = "") {
     const source = new EventSource(
       api.chatStreamUrl(state.session.id, state.seq));
     for (const name of [
-      "turn_started", "model_prompt", "thinking", "tool_call",
+      "turn_started", "plan_made", "task_started", "task_done",
+      "model_prompt", "thinking", "tool_call",
       "tool_step", "tool_result", "say_token", "artifact", "proposal",
       "chips", "budget_tick", "turn_done", "error"]) {
       source.addEventListener(name, (message) => {
@@ -1897,6 +2043,50 @@ export async function renderChat(outlet, wanted = "") {
     container.prepend(details);
   }
 
+  // a task run's messages: one per task (payload.task) under the
+  // board, then the synthesis (payload.plan) as the turn's answer
+  // with every row's status and cost — the same board as live
+  function replayTaskMessage(message, last) {
+    const p = message.payload || {};
+    const parentId = String(message.turn_id || "").split(".")[0] || "loose";
+    const turn = turnFor(parentId);
+    turn.done = true;
+    turn.activity.hidden = true;
+    if (p.task) {
+      const task = taskTurnFor(turn, p.task.id, p.task.goal,
+                               p.task.depends_on || []);
+      task.done = true;
+      task.activity.hidden = true;
+      task.prose.innerHTML = renderMarkdown(message.text || "", "md");
+      traceBlock(task.el.querySelector(".task-body"), p.trace, p.elapsed_ms);
+      for (const id of p.artifacts || []) {
+        const row = state.artifacts.get(id);
+        if (row) artifactCard(task.extras, row, false);
+      }
+      if (p.proposal) {
+        proposalCard(task.extras, p.proposal, { message_id: message.id });
+      }
+      return;
+    }
+    const plan = p.plan || {};
+    const tasks = plan.tasks || [];
+    boardHead(turn, tasks.length, plan.pool || 1, !!plan.stopped);
+    for (const t of tasks) {
+      const task = taskTurnFor(turn, t.id, t.goal, t.depends_on || []);
+      task.done = true;
+      taskStatus(task, t.status, t.cost, t.reason || "");
+    }
+    turn.prose.innerHTML = renderMarkdown(message.text || "", "md");
+    const box = document.createElement("div");
+    traceBlock(box, p.trace, p.elapsed_ms);
+    turn.el.insertBefore(box, turn.prose);
+    for (const id of p.artifacts || []) {
+      const row = state.artifacts.get(id);
+      if (row) artifactCard(turn.extras, row, false);
+    }
+    if (p.chips?.length && last) chipRow(p.chips);
+  }
+
   // ── history replay from the store ────────────────────────
   for (const row of boot.artifacts || []) {
     state.artifacts.set(row.artifact_id, row);
@@ -1904,6 +2094,15 @@ export async function renderChat(outlet, wanted = "") {
   for (const message of boot.messages || []) {
     if (message.role === "user") {
       userBubble(message.text, null, (message.payload || {}).files || []);
+    }
+    else if (boot.running && boot.turn_id
+             && String(message.turn_id || "").split(".")[0] === boot.turn_id) {
+      // the in-flight turn's own messages (a task run's finished
+      // tasks): the event replay below draws them
+    }
+    else if (message.payload?.task || message.payload?.plan) {
+      replayTaskMessage(message,
+                        message === boot.messages[boot.messages.length - 1]);
     }
     else {
       const div = document.createElement("div");
