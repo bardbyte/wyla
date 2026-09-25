@@ -310,7 +310,7 @@ def test_the_composer_switches_models_and_explains_every_dial():
                   "api.chatDials()", "api.chatSetModel(",
                   "state.mode, state.plane", "model not switched",
                   "help-row", "help-group", "not configured",
-                  "Depth <span>", "Model <span>",
+                  "Thinking effort <span>", "Model <span>",
                   "from the next message on"):
         assert piece in CHAT_JS, piece
     for cls in (".chat-plane", ".chat-help", ".chat-help-pop",

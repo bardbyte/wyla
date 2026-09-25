@@ -104,6 +104,9 @@ export const api = {
   },
   // the dials explained — this surface reads the depth entries alone
   chatDials: () => get("/api/chat/dials"),
+  // the model switch, remembered on the chat
+  chatSetModel: (id, model) =>
+    post(`/api/chat/sessions/${encodeURIComponent(id)}/model`, { model }),
   // the person pressed Run on a proposed query: no model call
   chatRun: (id, body) =>
     post(`/api/chat/sessions/${encodeURIComponent(id)}/run`, body),

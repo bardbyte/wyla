@@ -64,7 +64,11 @@ DEFAULT_SCOPES = [
 
 THINKING_KINDS = ("budget", "level", "none")
 DEFAULT_OUTPUT_CAP = 65536
-DEFAULT_THINKING_LEVELS = {"low": "low", "medium": "medium", "high": "high"}
+# the dial's five levels as a level model spells them: the ends fold
+# onto the nearest level every 3.x model accepts (Flash knows minimal;
+# Pro knows low and high; GATEWAY_THINKING_LEVELS says so per deployment)
+DEFAULT_THINKING_LEVELS = {"minimal": "low", "low": "low", "medium": "medium",
+                           "high": "high", "max": "high"}
 
 
 def _split_list(raw: str) -> list[str]:
@@ -134,7 +138,8 @@ def thinking_kind(model: str, env: dict[str, str] | None = None) -> str:
 
 def thinking_levels(env: dict[str, str] | None = None) -> dict[str, str]:
     """The depth dial's levels as the API spells them for a level model:
-    GATEWAY_THINKING_LEVELS=low:low,medium:medium,high:high (the default)."""
+    GATEWAY_THINKING_LEVELS=minimal:low,low:low,medium:medium,high:high,max:high
+    (the default)."""
     env = dict(os.environ if env is None else env)
     out = dict(DEFAULT_THINKING_LEVELS)
     for key, value in _pairs(env.get("GATEWAY_THINKING_LEVELS") or "").items():
@@ -1202,8 +1207,8 @@ def plane_note(env: dict[str, str] | None = None) -> str:
 # the depth dial's three levels as token budgets; 2.5 Pro counts the
 # thinking against maxOutputTokens, so the client raises the cap by
 # the budget. Override with GATEWAY_THINKING_BUDGETS=low:512,medium:2048,…
-THINKING_BUDGETS = {"low": 1024, "medium": 4096, "high": 16384,
-                    "json": 512}
+THINKING_BUDGETS = {"minimal": 256, "low": 1024, "medium": 4096, "high": 16384,
+                    "max": 32768, "json": 512}
 
 
 def thinking_budgets(env: dict[str, str] | None = None) -> dict[str, int]:

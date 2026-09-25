@@ -11,6 +11,7 @@
  */
 
 import { api } from "../api.js";
+import { mountDepthKnob, mountModelPicker } from "../knobs.js";
 import { renderMarkdown } from "../md.js";
 import { esc, prose, statusLabel } from "../ui.js";
 
@@ -67,15 +68,29 @@ export async function renderChat(outlet, wanted = "") {
               <div class="chat-skills" id="chat-skills" hidden
                 aria-label="Skills on this chat"></div>
               <span class="spacer"></span>
-              <select id="chat-depth" class="chat-depth"
+              <select id="chat-model" class="chat-depth chat-plane" hidden
+                title="Which model answers this chat"></select>
+              <select id="chat-depth" class="chat-depth" hidden
                 title="How deeply Radix thinks on this ask">
+                <option value="minimal">Minimal</option>
                 <option value="quick">Quick</option>
                 <option value="standard" selected>Standard</option>
                 <option value="deep">Deep</option>
+                <option value="max">Extra deep</option>
               </select>
+              <button class="chat-pill" id="chat-model-btn" type="button"
+                aria-haspopup="listbox" aria-expanded="false"
+                title="Which model answers this chat"><span class="pill-label">Model</span><span class="chev">⌄</span></button>
+              <div class="knob-pop model-pop" id="chat-model-pop" hidden role="listbox"
+                aria-label="Model"></div>
+              <button class="chat-pill" id="chat-depth-btn" type="button"
+                aria-haspopup="dialog" aria-expanded="false"
+                title="How deeply Radix thinks on this ask"><span class="pill-label">Thinking effort</span><span class="chev">⌄</span></button>
+              <div class="knob-pop depth-pop" id="chat-depth-pop" hidden role="dialog"
+                aria-label="Thinking effort"></div>
               <button class="icon-btn chat-help" id="chat-help"
-                title="What Quick, Standard and Deep mean"
-                aria-label="Explain the depth dial" aria-expanded="false">?</button>
+                title="What the thinking levels and the models mean"
+                aria-label="Explain the dials" aria-expanded="false">?</button>
               <div class="chat-help-pop" id="chat-help-pop" hidden></div>
               <button class="btn" id="chat-stop" hidden>stop</button>
               <button class="btn primary chat-send" id="chat-send"
@@ -175,11 +190,21 @@ export async function renderChat(outlet, wanted = "") {
   const first = String(boot.user_name || "").trim().split(/\s+/)[0];
   el("chat-greet").textContent = first
     ? `${dayPart}, ${first}.` : `${dayPart}, how are things?`;
-  // ── the dial, explained: one catalog from the backend fills the
-  //    depth options' titles and the "?" popover — the same source the
-  //    admin console reads. This surface carries no model switch and
-  //    no chat/autopilot switch: the chat rides the plane it has, in
-  //    the one mode (below)
+  // ── the dials, explained: one catalog from the backend fills the
+  //    model knob, the thinking knob and the "?" popover — the same
+  //    source the admin console reads. This surface carries no
+  //    chat/autopilot switch: the one mode (below). state.plane holds
+  //    the model choice: a plane (its default model) or plane:model
+  const planeSel = el("chat-model");
+  state.plane = boot.choice || boot.plane || "";
+  planeSel.innerHTML = `<option value="${esc(state.plane)}" selected>${
+    esc(boot.model || "")}</option>`;
+  const modelKnob = mountModelPicker({
+    button: el("chat-model-btn"), pop: el("chat-model-pop"), select: planeSel,
+    below: () => shell.classList.contains("empty") });
+  const depthKnob = mountDepthKnob({
+    button: el("chat-depth-btn"), pop: el("chat-depth-pop"), select: el("chat-depth"),
+    below: () => shell.classList.contains("empty") });
   const helpPop = el("chat-help-pop");
   const helpRow = (label, text, fact = "") => `
     <div class="help-row"><b>${esc(label)}</b><span>${esc(text)}${
@@ -188,19 +213,47 @@ export async function renderChat(outlet, wanted = "") {
     let dials = null;
     try { dials = await api.chatDials(); } catch { dials = null; }
     if (!dials || !dials.available) return;
-    if (!el("chat-depth")) return;                              // page left
-    for (const o of el("chat-depth").options) {
-      const d = (dials.depths || []).find((x) => x.id === o.value);
-      if (d) o.title = d.means;
-    }
-    // the "?" explains the depth alone
+    if (!el("chat-depth") || !planeSel.isConnected) return;    // page left
+    const models = (dials.models || []).length ? dials.models
+      : (dials.planes || []).map((p) => ({ ...p, plane: p.id }));
+    modelKnob.setModels(models);
+    depthKnob.setDepths(dials.depths || []);
+    const notes = dials.notes || {};
+    // the "?" explains the thinking levels and the models
     helpPop.innerHTML = `
       <div class="help-group">
-        <div class="help-head">Depth <span>how much Radix thinks before each step</span></div>
+        <div class="help-head">Thinking effort <span>how much Radix thinks before each step</span></div>
         ${(dials.depths || []).map((d) => helpRow(d.label, d.means)).join("")}
+      </div>
+      <div class="help-group">
+        <div class="help-head">Model <span>${esc(notes.plane || "")}</span></div>
+        ${models.map((m) => helpRow(m.label, m.means, m.available
+          ? (m.default ? "available · where a new chat starts" : "available")
+          : `not available here: ${m.reason}`)).join("")}
       </div>`;
   }
   loadDials();
+  // the model switch is remembered on the chat and rides the next
+  // message; a model this machine cannot ride is refused with the
+  // reason and the knob goes back to the one that works
+  planeSel.addEventListener("change", async () => {
+    const wanted = planeSel.value;
+    if (!state.session || !state.session.id) return;
+    const got = await api.chatSetModel(state.session.id, wanted);
+    if (!got.available) {
+      setEmpty(false);                 // the refusal must be seen
+      say(`<b>model not switched.</b> ${esc(got.reason || "")}`, "error");
+      planeSel.value = state.plane;
+      modelKnob.refresh();
+      return;
+    }
+    state.plane = got.choice || got.plane || wanted;
+    modelKnob.refresh();
+    if (!shell.classList.contains("empty")) {
+      const shown = planeSel.selectedOptions[0]?.textContent || got.model || wanted;
+      say(`Switched to <b>${esc(shown)}</b> from the next message on.`);
+    }
+  });
   // above the composer when it is docked at the bottom, below it while
   // the chat is empty and the composer sits mid-screen; never past the
   // edge of the window — it scrolls inside instead

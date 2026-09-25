@@ -56,9 +56,11 @@ def test_thinking_style_and_cap_by_family_with_overrides():
     assert thinking_kind("gemini-3.1-flash-lite") == "level"
     assert thinking_kind("gemini-3.1-flash-lite", {"GATEWAY_MODEL_THINKING": "gemini-3.1-flash-lite:none"}) == "none"
     assert thinking_kind("gemini-3.5-flash", {"GATEWAY_MODEL_THINKING": "gemini-3.5-flash:sideways"}) == "level"
-    assert thinking_levels({}) == {"low": "low", "medium": "medium", "high": "high"}
-    assert thinking_levels({"GATEWAY_THINKING_LEVELS": "medium:high,bogus:x"}) == {
-        "low": "low", "medium": "high", "high": "high"}
+    # five stops; the ends fold onto the nearest level every 3.x model knows
+    assert thinking_levels({}) == {"minimal": "low", "low": "low", "medium": "medium",
+                                   "high": "high", "max": "high"}
+    assert thinking_levels({"GATEWAY_THINKING_LEVELS": "medium:high,minimal:minimal,bogus:x"}) == {
+        "minimal": "minimal", "low": "low", "medium": "high", "high": "high", "max": "high"}
     assert output_cap("gemini-2.5-pro") == 65536
     assert output_cap("gemini-3.1-flash-lite", {"GATEWAY_MODEL_CAPS": "gemini-3.1-flash-lite:8192"}) == 8192
     assert output_cap("gemini-3.1-flash-lite", {"GATEWAY_MODEL_CAPS": "gemini-3.1-flash-lite:lots"}) == 65536

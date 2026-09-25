@@ -232,7 +232,8 @@ def test_the_plane_switch_and_the_budgets():
     assert thinking_budgets({})["medium"] == 4096
     assert thinking_budgets({"GATEWAY_THINKING_BUDGETS": "low:512, high:8192",
                              "GATEWAY_JSON_THINKING_BUDGET": "256"}) == {
-        "low": 512, "medium": 4096, "high": 8192, "json": 256}
+        "minimal": 256, "low": 512, "medium": 4096, "high": 8192, "max": 32768,
+        "json": 256}
 
 
 def test_the_agent_factory_picks_the_plane_and_teaches_when_unconfigured(
@@ -423,11 +424,12 @@ def test_a_chat_switches_planes_from_the_composer(compiled, monkeypatch,
     assert session["model"] == ""                  # the .env default
     assert runtime.plane_for(session) == "gateway"     # auto → the gateway here
     dials = runtime.dials()
-    assert [d["id"] for d in dials["depths"]] == ["quick", "standard",
-                                                  "deep"]
-    assert dials["depths"][2]["on"] == {"vertex": "thinking level high",
+    assert [d["id"] for d in dials["depths"]] == ["minimal", "quick", "standard",
+                                                  "deep", "max"]
+    assert dials["depths"][3]["on"] == {"vertex": "thinking level high",
                                         "gateway": "16,384 thinking tokens "
                                                "per call"}
+    assert dials["depths"][4]["on"]["gateway"] == "32,768 thinking tokens per call"
     assert [m["id"] for m in dials["modes"]] == ["chat", "autopilot"]
     assert [p["id"] for p in dials["planes"]] == ["vertex", "gateway"]
     # the first message names Vertex for itself: remembered

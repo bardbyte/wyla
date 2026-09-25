@@ -11,6 +11,7 @@
  */
 
 import { api } from "../api.js";
+import { mountDepthKnob, mountModelPicker } from "../knobs.js";
 import { renderMarkdown } from "../md.js";
 import { esc, prose, statusLabel } from "../ui.js";
 
@@ -63,16 +64,28 @@ export async function renderChat(outlet, wanted = "") {
                   title="Synapse runs the query under the limits and builds the deliverable">Autopilot</button>
               </div>
               <span class="spacer"></span>
-              <select id="chat-model" class="chat-depth chat-plane"
+              <select id="chat-model" class="chat-depth chat-plane" hidden
                 title="Which model answers this chat"></select>
-              <select id="chat-depth" class="chat-depth"
+              <select id="chat-depth" class="chat-depth" hidden
                 title="How deeply Synapse thinks on this ask">
+                <option value="minimal">Minimal</option>
                 <option value="quick">Quick</option>
                 <option value="standard" selected>Standard</option>
                 <option value="deep">Deep</option>
+                <option value="max">Extra deep</option>
               </select>
+              <button class="chat-pill" id="chat-model-btn" type="button"
+                aria-haspopup="listbox" aria-expanded="false"
+                title="Which model answers this chat"><span class="pill-label">Model</span><span class="chev">⌄</span></button>
+              <div class="knob-pop model-pop" id="chat-model-pop" hidden role="listbox"
+                aria-label="Model"></div>
+              <button class="chat-pill" id="chat-depth-btn" type="button"
+                aria-haspopup="dialog" aria-expanded="false"
+                title="How deeply Synapse thinks on this ask"><span class="pill-label">Thinking effort</span><span class="chev">⌄</span></button>
+              <div class="knob-pop depth-pop" id="chat-depth-pop" hidden role="dialog"
+                aria-label="Thinking effort"></div>
               <button class="icon-btn chat-help" id="chat-help"
-                title="What Chat, Autopilot, Quick, Standard, Deep and the models mean"
+                title="What Chat, Autopilot, the thinking levels and the models mean"
                 aria-label="Explain the dials" aria-expanded="false">?</button>
               <div class="chat-help-pop" id="chat-help-pop" hidden></div>
               <button class="btn" id="chat-stop" hidden>stop</button>
@@ -185,6 +198,14 @@ export async function renderChat(outlet, wanted = "") {
   state.plane = boot.choice || boot.plane || "";
   planeSel.innerHTML = `<option value="${esc(state.plane)}" selected>${
     esc(boot.model || "")}</option>`;
+  // the two knobs: pills over the hidden selects; the dials catalog
+  // fills them below, the selects' own options stand in until then
+  const modelKnob = mountModelPicker({
+    button: el("chat-model-btn"), pop: el("chat-model-pop"), select: planeSel,
+    below: () => shell.classList.contains("empty") });
+  const depthKnob = mountDepthKnob({
+    button: el("chat-depth-btn"), pop: el("chat-depth-pop"), select: el("chat-depth"),
+    below: () => shell.classList.contains("empty") });
   const helpPop = el("chat-help-pop");
   const helpRow = (label, text, fact = "") => `
     <div class="help-row"><b>${esc(label)}</b><span>${esc(text)}${
@@ -212,10 +233,8 @@ export async function renderChat(outlet, wanted = "") {
     planeSel.innerHTML = groups.map((g) => g.rows.length > 1
       ? `<optgroup label="${esc(g.name)}">${g.rows.map(option).join("")}</optgroup>`
       : g.rows.map(option).join("")).join("");
-    for (const o of el("chat-depth").options) {
-      const d = (dials.depths || []).find((x) => x.id === o.value);
-      if (d) o.title = d.means;
-    }
+    modelKnob.setModels(models);
+    depthKnob.setDepths(dials.depths || []);
     for (const b of document.querySelectorAll(".chat-mode")) {
       const m = (dials.modes || []).find((x) => x.id === b.dataset.mode);
       if (m) b.title = m.means;
@@ -223,7 +242,7 @@ export async function renderChat(outlet, wanted = "") {
     const notes = dials.notes || {};
     helpPop.innerHTML = `
       <div class="help-group">
-        <div class="help-head">Depth <span>how much Synapse thinks before each step</span></div>
+        <div class="help-head">Thinking effort <span>how much Synapse thinks before each step</span></div>
         ${(dials.depths || []).map((d) => helpRow(d.label, d.means)).join("")}
       </div>
       <div class="help-group">
@@ -261,9 +280,11 @@ export async function renderChat(outlet, wanted = "") {
       setEmpty(false);                 // the refusal must be seen
       say(`<b>model not switched.</b> ${esc(got.reason || "")}`, "error");
       planeSel.value = state.plane;
+      modelKnob.refresh();
       return;
     }
     state.plane = got.choice || got.plane || wanted;
+    modelKnob.refresh();
     // before the first message the select itself is the confirmation;
     // mid-conversation the thread says so, where the person is looking
     if (!shell.classList.contains("empty")) {
