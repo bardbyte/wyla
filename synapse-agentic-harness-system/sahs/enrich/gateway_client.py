@@ -22,13 +22,15 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterator
 
 from sahs.enrich.client import _BACKOFFS, _RETRY_STATUSES, EnrichTransportError
 from sahs.util.gateway import (THINKING_BUDGETS, Config, GatewayError, Http,
                            RouteChooser, TokenManager, _error_text, _json,
-                           candidate_routes, parts_of, thinking_budgets)
+                           candidate_routes, parts_of, thinking_budgets,
+                               DEFAULT_THINKING_LEVELS, output_cap,
+                               thinking_kind, thinking_levels)
 
 CALL_TIMEOUT = 180.0        # one whole answer, thinking included
 MAX_CAP = 65536             # 2.5 Pro's output ceiling
@@ -48,16 +50,32 @@ class GatewayClient:
         "thought_tokens": 0})
     thinking_ok: bool = True
     plane: str = "gateway"
+    # how this model takes its depth (budget | level | none) and its
+    # output ceiling: by family, or as GATEWAY_MODEL_THINKING /
+    # GATEWAY_MODEL_CAPS say for the model
+    thinking: str = "budget"
+    levels: dict[str, str] = field(
+        default_factory=lambda: dict(DEFAULT_THINKING_LEVELS))
+    cap: int = MAX_CAP
 
     @property
     def model(self) -> str:
         return self.cfg.model
 
     @classmethod
-    def from_env(cls, log: Callable[[str], None] | None = None
-                 ) -> "GatewayClient":
+    def from_env(cls, log: Callable[[str], None] | None = None,
+                 model: str = "") -> "GatewayClient":
+        """The client on the plane's default model, or on one of the
+        models GATEWAY_MODELS names; another name is a typed refusal."""
         env = dict(os.environ)
         cfg = Config.from_env(env)
+        wanted = (model or "").strip()
+        if wanted and wanted != cfg.model:
+            if wanted not in cfg.models:
+                raise GatewayError(
+                    f"no gateway model called {wanted!r}: GATEWAY_MODELS names "
+                    + ", ".join(cfg.models))
+            cfg = replace(cfg, model=wanted)
         if cfg.auth_mode != "env" and not (cfg.app_id and cfg.secret):
             raise GatewayError("the gateway plane needs APP_ID and APP_SECRET in "
                            "the silo .env (or AUTH_MODE=env with "
@@ -71,11 +89,28 @@ class GatewayClient:
                            + " in the silo .env: the enterprise hosts are not in this repository")
         chooser = RouteChooser(candidate_routes(env))
         return cls(cfg=cfg, tokens=TokenManager(cfg, chooser.http),
-                   http=chooser.http, log=log, budgets=thinking_budgets(env))
+                   http=chooser.http, log=log, budgets=thinking_budgets(env),
+                   thinking=thinking_kind(cfg.model, env),
+                   levels=thinking_levels(env), cap=output_cap(cfg.model, env))
+
+    def for_model(self, model: str) -> "GatewayClient":
+        """The same plane, token and route on another of its models:
+        fresh usage counters, the model's own thinking style and cap."""
+        env = dict(os.environ)
+        if model not in self.cfg.models and model != self.cfg.model:
+            raise GatewayError(
+                f"no gateway model called {model!r}: GATEWAY_MODELS names "
+                + ", ".join(self.cfg.models))
+        return replace(self, cfg=replace(self.cfg, model=model),
+                       thinking=thinking_kind(model, env),
+                       levels=thinking_levels(env), cap=output_cap(model, env),
+                       thinking_ok=True,
+                       usage={"calls": 0, "prompt_tokens": 0, "output_tokens": 0,
+                              "thought_tokens": 0})
 
     def describe(self) -> str:
         return (f"{self.cfg.model} · {self.cfg.base_url} · "
-                f"{self.tokens.describe()}")
+                f"thinking {self.thinking} · {self.tokens.describe()}")
 
     # ── one call ─────────────────────────────────────────────
     def _note(self, message: str) -> None:
@@ -148,15 +183,24 @@ class GatewayClient:
     def _config(self, level: str, max_output_tokens: int,
                 include_thoughts: bool = True, **extra: Any
                 ) -> dict[str, Any]:
-        budget = (self.budgets.get(level, self.budgets["medium"])
-                  if self.thinking_ok else 0)
-        # 2.5 counts the thinking against the cap: leave room
-        config: dict[str, Any] = {
-            "maxOutputTokens": min(max_output_tokens + budget, MAX_CAP),
-            **extra}
-        if budget:
-            config["thinkingConfig"] = {"includeThoughts": bool(include_thoughts),
-                                        "thinkingBudget": budget}
+        """The generationConfig for one call at one depth, in the
+        model's own thinking style: a budget (2.5, counted against the
+        cap, so the cap grows by it), a level (3.x), or nothing."""
+        kind = self.thinking if self.thinking_ok else "none"
+        if kind == "budget":
+            budget = self.budgets.get(level, self.budgets["medium"])
+            config: dict[str, Any] = {
+                "maxOutputTokens": min(max_output_tokens + budget, self.cap),
+                **extra}
+            if budget:
+                config["thinkingConfig"] = {"includeThoughts": bool(include_thoughts),
+                                            "thinkingBudget": budget}
+            return config
+        config = {"maxOutputTokens": min(max_output_tokens, self.cap), **extra}
+        if kind == "level":
+            config["thinkingConfig"] = {
+                "includeThoughts": bool(include_thoughts),
+                "thinkingLevel": self.levels.get(level, level or "medium")}
         return config
 
     @staticmethod
@@ -203,7 +247,7 @@ class GatewayClient:
         if finish == "MAX_TOKENS" and not self._usable(parts):
             # the budget went to thinking: grow the cap once and retry
             cap = body["generationConfig"]["maxOutputTokens"]
-            body["generationConfig"]["maxOutputTokens"] = min(cap * 2, MAX_CAP)
+            body["generationConfig"]["maxOutputTokens"] = min(cap * 2, self.cap)
             self._note("empty answer at MAX_TOKENS — growing the cap to "
                        f"{body['generationConfig']['maxOutputTokens']}")
             payload = self._post(body, timeout=timeout)
@@ -251,7 +295,7 @@ class GatewayClient:
             if finish != "MAX_TOKENS":
                 break
             cap = body["generationConfig"]["maxOutputTokens"]
-            body["generationConfig"]["maxOutputTokens"] = min(cap * 4, MAX_CAP)
+            body["generationConfig"]["maxOutputTokens"] = min(cap * 4, self.cap)
             self._note("empty JSON answer at MAX_TOKENS — growing the cap")
         raise EnrichTransportError(
             "the gateway returned no text (the model spent the budget thinking; "

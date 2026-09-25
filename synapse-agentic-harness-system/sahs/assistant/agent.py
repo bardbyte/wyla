@@ -98,11 +98,11 @@ class GatewayAgent(VertexAgent):
 
     @staticmethod
     def from_env(budget: Budget | None = None,
-                 log: Any = None) -> "GatewayAgent":
+                 log: Any = None, model: str = "") -> "GatewayAgent":
         from sahs.enrich.gateway_client import GatewayClient
         from sahs.util.gateway import GatewayError
         try:
-            client = GatewayClient.from_env(log=log)
+            client = GatewayClient.from_env(log=log, model=model)
         except GatewayError as e:
             raise ModelUnavailable(
                 f"{e}: the gateway plane needs APP_ID and APP_SECRET (or "
@@ -113,6 +113,21 @@ class GatewayAgent(VertexAgent):
 
 # ── the planes as the composer lists them ─────────────────────
 PLANE_IDS = ("vertex", "gateway")
+# a model choice as the composer sends it: a plane alone (its default
+# model) or plane:model, e.g. gateway:gemini-3.5-flash
+CHOICE_SEP = ":"
+
+
+def split_choice(choice: str) -> tuple[str, str]:
+    """"gateway:gemini-3.5-flash" → ("gateway", "gemini-3.5-flash");
+    "gateway" → ("gateway", ""); "" → ("", "")."""
+    text = (choice or "").strip().lower()
+    plane, _, model = text.partition(CHOICE_SEP)
+    return plane.strip(), model.strip()
+
+
+def join_choice(plane: str, model: str = "") -> str:
+    return f"{plane}{CHOICE_SEP}{model}" if model else plane
 
 
 def pretty_model(raw: str) -> str:
@@ -169,16 +184,45 @@ def plane_catalog() -> list[dict[str, Any]]:
     ]
 
 
+def model_catalog() -> list[dict[str, Any]]:
+    """Every model the composer can pick, one row per plane × model:
+    the choice id (plane, or plane:model), the plane, the model, the
+    label, availability with the reason, what choosing it means, how it
+    takes its depth (budget | level | none), and which one a new chat
+    starts on. Vertex serves its one model; the gateway serves
+    GATEWAY_MODELS, the default first."""
+    from sahs.util.gateway import gateway_models, thinking_kind
+    rows: list[dict[str, Any]] = []
+    planes = {p["id"]: p for p in plane_catalog()}
+    vertex = planes["vertex"]
+    rows.append({"id": "vertex", "plane": "vertex", "plane_name": "Vertex",
+                 "model": vertex["model"], "label": vertex["label"],
+                 "available": vertex["available"], "reason": vertex["reason"],
+                 "means": vertex["means"], "feel": vertex["feel"],
+                 "thinking": "budget", "default": vertex["default"]})
+    gateway = planes["gateway"]
+    for index, model in enumerate(gateway_models()):
+        rows.append({"id": "gateway" if index == 0 else join_choice("gateway", model),
+                     "plane": "gateway", "plane_name": "Gateway", "model": model,
+                     "label": pretty_model(model),
+                     "available": gateway["available"], "reason": gateway["reason"],
+                     "means": gateway["means"], "feel": gateway["feel"],
+                     "thinking": thinking_kind(model),
+                     "default": gateway["default"] and index == 0})
+    return rows
+
+
 def agent_for(plane: str = "", budget: Budget | None = None,
-              log: Any = None) -> VertexAgent:
+              log: Any = None, model: str = "") -> VertexAgent:
     """The chat's model on a named plane — ``vertex`` or ``gateway`` — or
-    on the environment's default when the name is empty. An unknown
-    name is a typed error, not a silent fallback: the composer only
-    ever sends the two ids."""
+    on the environment's default when the name is empty; on the gateway,
+    ``model`` picks one of GATEWAY_MODELS (empty: the default). An
+    unknown name is a typed error, not a silent fallback: the composer
+    only ever sends catalog ids."""
     from sahs.util.gateway import model_plane
     plane = (plane or "").strip().lower() or model_plane()
     if plane == "gateway":
-        return GatewayAgent.from_env(budget, log)
+        return GatewayAgent.from_env(budget, log, model)
     if plane == "vertex":
         return VertexAgent.from_env(budget, log)
     raise ModelUnavailable(f"no model plane called {plane!r}: the "

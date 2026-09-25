@@ -518,7 +518,8 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                        plane: str = "",
                        attachments: list[dict[str, Any]] | None = None,
                        file_names: list[str] | None = None,
-                       owner: str = "") -> str:
+                       owner: str = "",
+                       model_label: str = "") -> str:
     session_id = session["id"]
     started = time.perf_counter()
     mode = mode if mode in MODES else DEFAULT_MODE
@@ -528,6 +529,7 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
              memories=len(memories or []),
              project=(project or {}).get("name", ""),
              thinking_level=thinking_level, mode=mode, plane=plane,
+             model=model_label,
              files=list(file_names or []))
     budget.start_turn()
     prepare_workspace(workspace, build.root)

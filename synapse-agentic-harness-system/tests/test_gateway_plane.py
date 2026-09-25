@@ -445,7 +445,7 @@ def test_a_chat_switches_planes_from_the_composer(compiled, monkeypatch,
     assert heard == ["vertex", "vertex"]
     # the switch from the composer, then a message on the new plane
     assert runtime.set_session_model(session["id"], "gateway") == {
-        "ok": True, "plane": "gateway", "model": "scripted"}
+        "ok": True, "plane": "gateway", "choice": "gateway", "model": "scripted"}
     runtime.start_turn(session["id"], "and now")
     assert runtime.wait(session["id"], 30)
     assert heard[-1] == "gateway"

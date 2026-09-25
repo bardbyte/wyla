@@ -294,6 +294,15 @@ def test_the_dials_catalog_and_the_model_switch(client):
         assert p["means"] and isinstance(p["available"], bool)
         assert p["available"] or p["reason"]
     assert sum(p["default"] for p in dials["planes"]) == 1
+    # the models: one row per plane x model, the choice id a plane or
+    # plane:model; with one model per plane the ids are the planes
+    models = dials["models"]
+    assert [m["id"] for m in models][:2] == ["vertex", "gateway"]
+    for m in models:
+        assert m["plane"] in ("vertex", "gateway") and m["model"] and m["label"]
+        assert m["thinking"] in ("budget", "level", "none")
+        assert (":" in m["id"]) == (m["id"] not in ("vertex", "gateway"))
+    assert sum(m["default"] for m in models) == 1
     assert "nothing else" in dials["notes"]["depth"]
     assert "next message" in dials["notes"]["plane"]
     # the chat opens on a plane, configured here or not, with its label

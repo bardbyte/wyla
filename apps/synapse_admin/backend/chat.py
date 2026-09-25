@@ -252,7 +252,8 @@ def get_session(session_id: str) -> dict:
             # the composer's greeting, and the plane this chat rides
             # with its label
             "user_name": runtime.user_name,
-            "plane": plane, "model": runtime.label_for(plane),
+            "plane": plane, "choice": runtime.choice_of(session),
+            "model": runtime.label_for(runtime.choice_of(session)),
             # the files on this chat: the composer shows the pending ones
             "files": runtime.files(session_id)}
 

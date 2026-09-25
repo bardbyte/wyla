@@ -176,11 +176,13 @@ export async function renderChat(outlet, wanted = "") {
   const first = String(boot.user_name || "").trim().split(/\s+/)[0];
   el("chat-greet").textContent = first
     ? `${dayPart}, ${first}.` : `${dayPart}, how are things?`;
-  // ── the dials, explained: the model switch shows the chat's plane
-  //    now; one catalog from the backend then fills the switch, the
-  //    option titles and the "?" popover — one source for both surfaces
+  // ── the dials, explained: the model switch shows the chat's model
+  //    now; one catalog from the backend then fills the switch (every
+  //    model on every plane, grouped by plane), the option titles and
+  //    the "?" popover — one source for both surfaces. state.plane holds
+  //    the choice id: a plane (its default model) or plane:model
   const planeSel = el("chat-model");
-  state.plane = boot.plane || "";
+  state.plane = boot.choice || boot.plane || "";
   planeSel.innerHTML = `<option value="${esc(state.plane)}" selected>${
     esc(boot.model || "")}</option>`;
   const helpPop = el("chat-help-pop");
@@ -193,11 +195,23 @@ export async function renderChat(outlet, wanted = "") {
     if (!dials || !dials.available) return;
     if (!planeSel.isConnected || !el("chat-depth")) return;   // page left
     const planes = dials.planes || [];
-    planeSel.innerHTML = planes.map((p) => `
-      <option value="${esc(p.id)}"${p.id === state.plane ? " selected" : ""}${
-        p.available ? "" : " disabled"} title="${
-        esc(p.available ? p.means : p.reason)}">${esc(p.label)}${
-        p.available ? "" : " · not configured"}</option>`).join("");
+    // the models, grouped by plane; a plane with one model is one option
+    const models = (dials.models || []).length ? dials.models
+      : planes.map((p) => ({ ...p, plane: p.id, plane_name: p.plane_name }));
+    const groups = [];
+    for (const m of models) {
+      let g = groups.find((x) => x.plane === m.plane);
+      if (!g) { g = { plane: m.plane, name: m.plane_name || m.plane, rows: [] }; groups.push(g); }
+      g.rows.push(m);
+    }
+    const option = (m) => `
+      <option value="${esc(m.id)}"${m.id === state.plane ? " selected" : ""}${
+        m.available ? "" : " disabled"} title="${
+        esc(m.available ? m.means : m.reason)}">${esc(m.label)}${
+        m.available ? "" : " · not configured"}</option>`;
+    planeSel.innerHTML = groups.map((g) => g.rows.length > 1
+      ? `<optgroup label="${esc(g.name)}">${g.rows.map(option).join("")}</optgroup>`
+      : g.rows.map(option).join("")).join("");
     for (const o of el("chat-depth").options) {
       const d = (dials.depths || []).find((x) => x.id === o.value);
       if (d) o.title = d.means;
@@ -214,9 +228,9 @@ export async function renderChat(outlet, wanted = "") {
       </div>
       <div class="help-group">
         <div class="help-head">Model <span>${esc(notes.plane || "")}</span></div>
-        ${planes.map((p) => helpRow(p.label, p.means, p.available
-          ? (p.default ? "available · where a new chat starts" : "available")
-          : `not available here: ${p.reason}`)).join("")}
+        ${models.map((m) => helpRow(m.label, m.means, m.available
+          ? (m.default ? "available · where a new chat starts" : "available")
+          : `not available here: ${m.reason}`)).join("")}
       </div>`;
   }
   loadDials();
@@ -249,7 +263,7 @@ export async function renderChat(outlet, wanted = "") {
       planeSel.value = state.plane;
       return;
     }
-    state.plane = got.plane || wanted;
+    state.plane = got.choice || got.plane || wanted;
     // before the first message the select itself is the confirmation;
     // mid-conversation the thread says so, where the person is looking
     if (!shell.classList.contains("empty")) {

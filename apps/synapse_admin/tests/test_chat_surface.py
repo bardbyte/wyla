@@ -241,7 +241,7 @@ def test_the_ask_starts_like_a_chat_assistant_and_hands_queries_over():
     assert "chatRun" in API_JS and "{ text, depth, mode, model }" in API_JS
     for piece in ("/run\"", "run_proposal", "RunProposal",
                   "mode=req.mode", "dashboard", '"user_name"',
-                  '"model": runtime.label_for(plane)'):
+                  '"choice": runtime.choice_of(session)'):
         assert piece in BACKEND, piece
     # the mode and the slash command are the runtime's, not the page's
     runtime_py = (SILO / "sahs" / "assistant" / "runtime.py").read_text(
