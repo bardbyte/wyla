@@ -1123,7 +1123,7 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
     return report
 
 
-# ── the paste block ────────────────────────────────────────────
+# ── the .env block ─────────────────────────────────────────────
 
 
 def env_warnings(env: dict[str, str]) -> list[str]:

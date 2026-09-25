@@ -3,7 +3,7 @@
 
     python scripts/nav_eval.py --real                # Vertex (laptop)
     python scripts/nav_eval.py --real --limit 5      # a short pull
-    cat docs/evals/navigation_baseline_vertex.md     # then PASTE it
+    cat docs/evals/navigation_baseline_vertex.md     # then read it
 
 Drives all 30 navigation tasks through the real turn engine with the
 navigation lane on, grades outcomes (found / wrong-when-found /
@@ -16,7 +16,7 @@ system. The harness math is pinned by tests/test_navigation_eval.py
 instead. Without --real this prints the task list and exits: an
 honest nothing rather than a pretend number.
 
-The laptop cannot push — the report travels by PASTE.
+The report is the file; read it from there.
 """
 from __future__ import annotations
 
@@ -75,8 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     (out / "navigation_baseline_vertex.md").write_text(
         md, encoding="utf-8")
     print(md)
-    print("wrote docs/evals/navigation_baseline_vertex.{md,json} — "
-          "the laptop cannot push, so paste the .md back.")
+    print("wrote docs/evals/navigation_baseline_vertex.{md,json}")
     return 0
 
 

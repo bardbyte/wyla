@@ -4,7 +4,7 @@ laptop: can OUR REST client carry a full native-tool round trip on
 Gemini 3.1 Pro, or do we need the SDK and the Interactions API?
 
     python scripts/transport_check.py             # the four probes
-    cat docs/evals/transport_access.md            # then PASTE it
+    cat docs/evals/transport_access.md            # then read it
 
 Probes, each one request with no retry ladder:
 
@@ -28,7 +28,7 @@ Probes, each one request with no retry ladder:
 Verdict at the end: round_trip ok → decision 1 = the REST client
 (recommended); otherwise the detail says what failed. Exit 0 when the
 round trip works, 1 when it does not, 3 for env/auth.
-The laptop cannot push — the report travels by PASTE.
+The report is the file; read it from there.
 """
 
 from __future__ import annotations
@@ -263,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     markdown = render_markdown(report, label=label)
     (out / "transport_access.md").write_text(markdown, encoding="utf-8")
     print("\n" + markdown)
-    print("→ PASTE docs/evals/transport_access.md back into the session.")
+    print("→ the report is in docs/evals/transport_access.md")
     return 0 if report["round_trip"].get("verdict") == "ok" else 1
 
 

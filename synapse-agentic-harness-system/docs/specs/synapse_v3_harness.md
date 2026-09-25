@@ -280,7 +280,7 @@ handoff, the eval suites.
    (`[hidden] { display: none !important }`) and the walk asserting
    visibility; the scripted test transport emits parts. Still owed
    from the threshold: the GMNS and ALIF asks completing in one
-   interaction against Vertex — the laptop paste decides.
+   interaction against Vertex — the laptop run decides.
 2. **Context.** Cached prefix, compaction under pressure, delegate.
    Threshold: a 30-turn session survives; cache hits and cost per
    turn visible in Operate.

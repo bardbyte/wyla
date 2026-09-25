@@ -30,9 +30,8 @@ python scripts/ask_demo.py "acquirer net spend by day" \
 cat graph/runs/vertex_r1/report.md
 ```
 
-The laptop cannot push, so the report travels by PASTE: run the
-`cat`, copy the output into the session. Same for the resolver trace
-when a bind looks wrong:
+The report is the file under `graph/runs/vertex_r1/`; the `cat` above
+reads it. The resolver trace, when a bind looks wrong:
 `grep resolve_result graph/runs/ask/events/<session>.jsonl | head -1`.
 
 `--report` wraps the model with a recorder OUTSIDE the product (the
@@ -40,7 +39,7 @@ same seam the tests use) and writes `report.json` + `report.md`:
 per-step timings, tokens in/out/thought per call, time-to-first-token
 for the streamed composition, and strict-JSON drift (a `json()` call
 whose text did not parse — the judge fails closed on it, and the
-report counts it). Paste the report back; whatever broke gets fixed
+report counts it). Whatever the report shows broken gets fixed
 before Step 1.
 
 If Vertex is not configured the conversation still runs its
@@ -93,7 +92,7 @@ boundary; the full graph is expected to differentiate).
 | 5 L3 checks | the plan's `checks` slot, written via `plan_set`, read by the verifier |
 | 6 exploratory lane | **landed** (§9.5): the loop with a frozen-extract runner attached (`AskRuntime(snapshot_runner=…)`); without one, `run_sql` snapshot says so honestly |
 | 7 constellation | unchanged, non-blocking, still driven by subgraph_used |
-| 8 flywheel | after the §9.4 real-model baseline (landed: 30 tasks + grader + `scripts/nav_eval.py --real`; the number arrives by paste) |
+| 8 flywheel | after the §9.4 real-model baseline (landed: 30 tasks + grader + `scripts/nav_eval.py --real`; the number comes from that run's report) |
 
 Standing pins: one PR per step with the E19 delta line in its body ·
 no worker beyond the scout · no live execution in L4 · no write to

@@ -356,7 +356,7 @@ git checkout wyla/main -- \
   synapse-agentic-harness-system/db/spanner/006_external_identities.sql \
   synapse-agentic-harness-system/.env.example \
   synapse-agentic-harness-system/pyproject.toml
-git commit -m "Identity store, database, facade and states from wyla"
+git commit -m "Identity store, database, facade and states"
 git cherry-pick 998aa24 561a0ef 1857044 16e69af 3e69d18
 # PR #147 (merge 6084ac6)
 git cherry-pick 0654971 2c7b41d ebf63d0 6404a84 124c776 4c6076e dec4683
@@ -392,6 +392,22 @@ To drop a path from a pick: `git rm --cached -q <path> && rm -f <path>`
 (or `git checkout HEAD -- <path>` for a file that existed before), then
 `git cherry-pick --continue`.
 
+**The commit messages never cross as written.** Every commit on this
+side ends in two trailer lines (`Co-Authored-By:` and `Claude-Session:`),
+and the subjects and bodies name this repository, its PR numbers and its
+branches. None of that belongs in their history. Take each pick without
+its message and write one from the subject:
+
+```sh
+git cherry-pick --no-commit <sha>       # the path drops above go here
+git commit -m "<the subject, reworded if it names a PR or a branch>"
+```
+
+or, after a plain `git cherry-pick`, `git commit --amend` and delete the
+trailers and the references before moving on. `git cherry-pick -x` is
+not used: the `(cherry picked from commit …)` line would name our
+hashes.
+
 The commits that touch a theirs-owned file, and therefore may conflict,
 are: `998aa24` (`sandbox.py`, `auth.py`), `561a0ef` (`auth.py`,
 `admin.py`, `app.py`), `16e69af` (`auth.py`, `sahs/util/auth.py`,
@@ -421,9 +437,17 @@ git diff --stat wyla/main -- \
   synapse-agentic-harness-system/tests
 ```
 
-must print nothing. Commit with a message that names `wyla/main` at
-`0edaa0b` as the source, then run section 6 before the branch is opened
-for review.
+must print nothing. On the checkout route, commit with a message that
+names the source commit by hash only (`0edaa0b`), not this repository or
+its branch; on the cherry-pick route every message was rewritten in 2.6.
+Before the branch is opened for review, check the range that crosses:
+
+```sh
+git log --format=%B <their-base>..HEAD | grep -i -E "claude|anthropic|session_|co-authored|generated with|wyla|bardbyte"
+```
+
+must print nothing (a `-i` hit on a word such as "included" is not one;
+read the line). Then run section 6.
 
 ## 3. The DDL
 

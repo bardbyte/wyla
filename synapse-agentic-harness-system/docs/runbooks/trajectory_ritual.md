@@ -64,6 +64,5 @@ or `clarify`, and for each ask five questions:
 laptop and writes `docs/evals/navigation_baseline_vertex.md` — found%
 / wrong-when-found% / precision violations, plus the soft hygiene
 line (steps per task, asks, literal-check rate, read-before-use rate,
-budget stops). The laptop cannot push: **paste the .md back into the
-session.** Hygiene never gates a PR; outcome numbers move the
+budget stops). That `.md` is the record. Hygiene never gates a PR; outcome numbers move the
 `SYNAPSE_NAVIGATE` default when they hold the bar.

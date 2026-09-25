@@ -8,8 +8,8 @@
 #
 # Read-only: never modifies data, never prints secrets (env vars are
 # reported set/unset only), never touches the network. Ends with a
-# "PASTE THIS BACK" JSON block — send that block back with the run report to confirm
-# readiness and lock the run-time estimate.
+# readiness JSON block that goes with the run report: it confirms
+# readiness and locks the run-time estimate.
 
 set -u
 ROOT="${1:-$HOME/meridian-data}"
@@ -250,7 +250,7 @@ printf '  %-28s ~%3s min   (resolver floor, no network)\n' "P3 floor" "$T_FLOOR"
 printf '  \033[1m%-28s ~%3s min machine time\033[0m\n' "TOTAL" "$T_TOTAL"
 echo "  human steps on top: empty-SQL triage ~20m · crosswalk ($N_TABLES rows) 30–60m · DIFF review ~20m · floor triage 0–60m"
 
-# ── verdict + paste-back block ──
+# ── verdict + report block ──
 hdr "verdict"
 [ "$PROBLEMS" = 0 ] && ok "READY ($WARNINGS warning(s))" \
   || bad "$PROBLEMS blocking problem(s), $WARNINGS warning(s) — fix ✗ items first"

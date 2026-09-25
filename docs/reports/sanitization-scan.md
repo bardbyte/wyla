@@ -462,20 +462,42 @@ file, not only the scan's diff): `enterprise` as an adjective 53 lines in
 "The repo owner's decision"); `laptop` 249 lines; `corp`/`corporate` 157
 lines; `Lumi` 69 lines. All left as the scan judged them.
 
-### Left for the owner
+### The second round: paste-back notes and the commit messages
 
 A scope addition arrived after the must-change list was applied: no
 "paste it back"-style notes and no AI or agent mention anywhere under the
 two trees, plus a paragraph in `docs/enterprise-carry-back.md` on how
-the commit-message trailers are kept from crossing. The permission
-system refused the edit, so none of it was applied. Its grep
-(`claude|anthropic|paste (it )?back|co-authored|generated with|session_0|worktrees?/agent|agent-[0-9a-f]{6,}|bardbyte|wyla|saheb|singh|zilla`)
-finds exactly one line after this pass:
-`synapse-agentic-harness-system/scripts/gateway_check.py:130`, the
-printed string `(paste it back)`. The same style, not matched by that
-grep, is in `docs/runbooks/e21_intelligence.md` (lines 33–36, 43, 96:
-"travels by PASTE", "copy the output into the session", "Paste the
-report back", "arrives by paste") and `docs/runbooks/pipeline_end_to_end.md`
-(lines 188, 193, 370: "PASTE the transcript back", "PASTE … back into
-the session", "Paste the doctor's output"). These, and the carry-back
-paragraph, are left for the owner to apply.
+the commit-message trailers are kept from crossing. Applied in the merge
+commit after this report's first round:
+
+| file | was | is |
+|---|---|---|
+| `synapse-agentic-harness-system/scripts/gateway_check.py` 130 | `full report written to … (paste it back)` | `full report written to …` |
+| `synapse-agentic-harness-system/scripts/nav_eval.py` 6, 19 | `# then PASTE it`; "The laptop cannot push — the report travels by PASTE." | `# then read it`; "The report is the file; read it from there." |
+| `synapse-agentic-harness-system/scripts/nav_eval.py` 79, `chat_eval.py` 6, 23, 106, `transport_check.py` 7, 31, 266, `state_report.py` 3, 9, 32, 491, `flash_check.py` 7, 30, 239 | the same three lines per script: `# then PASTE it`, "the report travels by PASTE", `→ PASTE … back into the session.` | `# then read it`, "The report is the file; read it from there.", `→ the report is in <path>` |
+| `synapse-agentic-harness-system/scripts/preflight.sh` 11, 253 | `"PASTE THIS BACK" JSON block — send that block back with the run report` | "readiness JSON block that goes with the run report" |
+| `synapse-agentic-harness-system/sahs/util/gateway.py` 1126 | `# ── the paste block ──` | `# ── the .env block ──` |
+| `synapse-agentic-harness-system/docs/runbooks/e21_intelligence.md` 33–36, 43, 96 | "travels by PASTE … copy the output into the session", "Paste the report back", "arrives by paste" | the report is the file under `graph/runs/vertex_r1/`; "Whatever the report shows broken gets fixed"; "comes from that run's report" |
+| `synapse-agentic-harness-system/docs/runbooks/pipeline_end_to_end.md` 188, 193, 370, 419 | "PASTE the transcript back", "PASTE … back into the session", "Paste the doctor's output", "paste the block (and the JSON) back" | "keep the transcript", "the report lands in …", "Keep the doctor's output", "the block (and the JSON) is the record to keep" |
+| `synapse-agentic-harness-system/docs/runbooks/trajectory_ritual.md` 67 | "The laptop cannot push: **paste the .md back into the session.**" | "That `.md` is the record." |
+| `synapse-agentic-harness-system/docs/specs/harness_tools_and_roadmap.md` 102, `synapse_v3_harness.md` 283 | "a laptop paste" | "a laptop run" |
+| `docs/enterprise-carry-back.md` 2.6, 2.7 | one checkout commit subject named this repository; nothing on the trailers | the subject reworded; a paragraph on taking every pick with `--no-commit` and a fresh message (no `-x`), and a `git log --format=%B` grep over the crossing range as the last check |
+
+Left as they are: "paste the line" and "paste the `GATEWAY_MODEL_LEVELS`
+line" in `docs/model-playbook.md` (a value pasted into the `.env`, not a
+report handed anywhere), "paste it, or add a text file" in
+`pipeline_end_to_end.md` 507 (the chat's own input), and "pastes the
+small skill whole" in the skill-retrieval pages (the prompt assembly).
+
+The searches after this round, over `apps/` and the silo, every file:
+
+| pattern | lines |
+|---|---|
+| `claude`, `anthropic` | 0 |
+| `paste (it )?back`, `co-authored`, `generated with`, `session_0` | 0 |
+| `worktrees?/agent`, `agent-<hex>` | 0 |
+| `bardbyte`, `wyla`, the example person's name | 0 |
+| `PASTE` (upper case, the runbook convention), `cannot push`, `back into the session` | 0 |
+
+`.claude/` never crosses (section 2.2 of the carry-back), so its skill
+files were not part of the scan.

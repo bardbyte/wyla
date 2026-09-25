@@ -99,7 +99,7 @@ the ten principles. Each item names its principle and its delete test.
 6. **A warehouse doctor in the chat.** `warehouse(action="doctor")` runs
    the read-only checks (`bq_check`, `transport_check`, the turn doctor)
    from the thread, so "the check query is not working" gets a diagnosis
-   in the chat instead of a laptop paste. Principle 8 (a truthful
+   in the chat instead of a laptop run. Principle 8 (a truthful
    environment before a clever model).
 7. **Feedback on every turn** (design doctrine §5): 👍/👎 and a note,
    stored as JSONL with build id, turn, artifact; each becomes an eval
