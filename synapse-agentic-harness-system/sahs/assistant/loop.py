@@ -40,6 +40,7 @@ from .artifacts import validate_artifact
 from .events import EventBus
 from .kit import RESULT_CAP, build_kit
 from .planner import plan_for, waves
+from .prompt_version import prompt_fingerprint
 from .sandbox import prepare_workspace
 from .skills_loader import all_skills, render_skill_index, skill_context
 from .state import AssistantState
@@ -652,7 +653,8 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
         retrieval=library.block, library=library.searchable_names,
         likely=library.likely)
     bus.emit("model_prompt", turn_id=turn_id, n=0, kind="system",
-             content=system[:12000])
+             content=system[:12000],
+             **prompt_fingerprint(system, ASSISTANT_VERSION))
     # a task's sub-turn (<parent>.<task>) leaves the parent's compound
     # ask out too: its goal is self-contained, and the whole ask would
     # invite it to do every job at once

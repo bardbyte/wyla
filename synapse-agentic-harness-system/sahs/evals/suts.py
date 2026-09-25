@@ -20,6 +20,8 @@ def oracle(task: Task) -> SutAnswer:
     if task.kind == "disambiguate":
         return SutAnswer(kind="disambiguate",
                          options=list(task.gold.expected_options))
+    if task.kind == "decompose":
+        return SutAnswer(kind="plan", tasks=list(task.gold.expected_tasks))
     return SutAnswer(kind="bindings",
                      bindings=dict(task.gold.expected_bindings))
 

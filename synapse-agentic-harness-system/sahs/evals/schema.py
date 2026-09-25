@@ -19,7 +19,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 SCHEMA = "meridian.task/1"
 
-TaskKind = Literal["nl2sql", "abstain", "disambiguate", "resolve_bind"]
+# decompose: a compound ask and the task list a planner should split
+# it into (the scenarios dataset, sahs/observe/datasets.py)
+TaskKind = Literal["nl2sql", "abstain", "disambiguate", "resolve_bind",
+                   "decompose"]
 
 
 class TaskContext(BaseModel):
@@ -34,6 +37,9 @@ class TaskGold(BaseModel):
     abstain_reason: str | None = None
     expected_options: list[str] = Field(default_factory=list)
     expected_bindings: dict[str, list[str]] = Field(default_factory=dict)
+    # decompose: the tasks (id, goal, kind, depends_on) and the synthesis
+    expected_tasks: list[dict[str, Any]] = Field(default_factory=list)
+    synthesis: str | None = None
 
 
 class TaskGrading(BaseModel):

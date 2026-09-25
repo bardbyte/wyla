@@ -36,7 +36,10 @@ def langfuse_client() -> Any:
         raise RuntimeError(
             "SAHS_LANGFUSE is on but the SDK is not installed: "
             "pip install langfuse") from e
-    return Langfuse()
+    # observation ids are pinned by the emitter (a hash of the trace
+    # id and the tracer's key) so a backfill updates in place
+    from .langfuse_emitter import PINNED
+    return Langfuse(id_generator=PINNED)
 
 
 def langfuse_observer(*, user_id: str = "",
