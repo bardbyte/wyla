@@ -15,6 +15,17 @@ from sahs.util.gateway import (Config, GatewayError, Route, RouteChooser,
                            fingerprint, hmac_signature, jwt_claims,
                            render_report, run_checks, token_headers)
 
+# the enterprise hosts are configuration, never source: the tests name
+# placeholders the fake gateway answers for
+TOKEN_URL = "https://identity.example/security/digital/v1/application/token"
+BASE_URL = "https://gateway.example/genai/google/v1"
+
+
+def _cfg(**kw):
+    kw.setdefault("token_url", TOKEN_URL)
+    kw.setdefault("base_url", BASE_URL)
+    return Config(**kw)
+
 SECRET = base64.b64encode(b"a-32-byte-secret-for-the-tests!!").decode()
 
 
@@ -184,7 +195,7 @@ class Gateway:
 
 def test_the_whole_check_against_a_scripted_gateway():
     gw = Gateway()
-    cfg = Config(app_id="app", secret=SECRET, timestamp_unit="ms")
+    cfg = _cfg(app_id="app", secret=SECRET, timestamp_unit="ms")
     report = run_checks(cfg, gw.http, gw.stream, now=gw.clock, clock=gw.clock,
                         sleep=gw.sleep, probe_minutes=8)
     by_name = {c["name"]: c for c in report["checks"]}
@@ -246,7 +257,7 @@ def test_the_whole_check_against_a_scripted_gateway():
 
 def test_missing_credentials_and_env_mode_are_reported_not_raised():
     gw = Gateway()
-    report = run_checks(Config(), gw.http, gw.stream, now=gw.clock,
+    report = run_checks(_cfg(), gw.http, gw.stream, now=gw.clock,
                         clock=gw.clock, sleep=gw.sleep)
     assert report["checks"] == [{"name": "token", "ok": False,
                                  "detail": "APP_ID and APP_SECRET are needed "
@@ -255,7 +266,7 @@ def test_missing_credentials_and_env_mode_are_reported_not_raised():
                                            "GEMINI_BEARER_TOKEN"}]
     gw = Gateway()
     gw.minted = gw.now
-    cfg = Config(auth_mode="env", bearer=_jwt({"iat": int(gw.now),
+    cfg = _cfg(auth_mode="env", bearer=_jwt({"iat": int(gw.now),
                                                 "exp": int(gw.now) + 240}))
     report = run_checks(cfg, gw.http, gw.stream, now=gw.clock,
                         clock=gw.clock, sleep=gw.sleep, only={"token", "generate"})
@@ -273,7 +284,7 @@ def test_a_dead_gateway_is_a_recorded_failure_after_one_attempt():
     def down(*a, **k):
         calls.append(a)
         raise GatewayError("unreachable via proxy.corp:8080")
-    report = run_checks(Config(app_id="app", secret=SECRET), down, down)
+    report = run_checks(_cfg(app_id="app", secret=SECRET), down, down)
     assert report["checks"][0]["ok"] is False
     assert report["checks"][0]["detail"].startswith(
         "The identity service could not be reached: ms: unreachable")
@@ -284,7 +295,7 @@ def test_the_seconds_fallback_only_runs_when_the_gateway_refuses():
     """A gateway that wants seconds refuses the ms signature with 403:
     then, and only then, the seconds one is sent."""
     gw = Gateway(unit="s")
-    report = run_checks(Config(app_id="app", secret=SECRET), gw.http,
+    report = run_checks(_cfg(app_id="app", secret=SECRET), gw.http,
                         gw.stream, now=gw.clock, clock=gw.clock,
                         sleep=gw.sleep, only={"token"})
     assert report["checks"][0]["ok"] is True
@@ -309,7 +320,7 @@ def test_a_200_with_an_unreadable_token_is_our_fault_and_says_so():
             return status, h, json.dumps(payload).encode()
         return status, h, raw
 
-    report = run_checks(Config(app_id="app", secret=SECRET), http, gw.stream,
+    report = run_checks(_cfg(app_id="app", secret=SECRET), http, gw.stream,
                         now=gw.clock, clock=gw.clock, sleep=gw.sleep)
     token = report["checks"][0]
     assert token["ok"] is False
@@ -387,7 +398,7 @@ def test_a_gateway_that_wants_the_colon_form_is_found_and_the_refusal_explained(
     the colon, and the path row says what the slash got — the
     reason read from the WWW-Authenticate header, not an empty body."""
     gw = Gateway(path_form="colon")
-    report = run_checks(Config(app_id="app", secret=SECRET), gw.http,
+    report = run_checks(_cfg(app_id="app", secret=SECRET), gw.http,
                         gw.stream, now=gw.clock, clock=gw.clock,
                         sleep=gw.sleep, only={"token", "generate", "stream"})
     by_name = {c["name"]: c for c in report["checks"]}
@@ -410,7 +421,7 @@ def test_a_pinned_path_form_is_not_second_guessed():
     """GATEWAY_PATH_FORM=colon against a slash-only gateway: one form, one
     refusal, reported as the gateway's answer, no fallback."""
     gw = Gateway(path_form="slash")
-    report = run_checks(Config(app_id="app", secret=SECRET, path_form="colon"),
+    report = run_checks(_cfg(app_id="app", secret=SECRET, path_form="colon"),
                         gw.http, gw.stream, now=gw.clock, clock=gw.clock,
                         sleep=gw.sleep, only={"token", "generate"})
     by_name = {c["name"]: c for c in report["checks"]}
@@ -446,7 +457,7 @@ def test_a_jwt_with_exp_but_no_iat_gets_its_lifetime_from_the_minting():
                 {"exp": int(gw.now) + 900})}).encode()
         return status, h, raw
 
-    report = run_checks(Config(app_id="app", secret=SECRET), http, gw.stream,
+    report = run_checks(_cfg(app_id="app", secret=SECRET), http, gw.stream,
                         now=gw.clock, clock=gw.clock, sleep=gw.sleep,
                         probe_minutes=1, only={"token", "probe"})
     by_name = {c["name"]: c for c in report["checks"]}

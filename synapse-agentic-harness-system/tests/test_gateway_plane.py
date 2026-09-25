@@ -347,8 +347,11 @@ def test_the_plane_catalog_names_both_planes_and_why_one_cannot_be_ridden(
     assert rows["vertex"]["feel"] == "streams"
     assert rows["gateway"]["feel"] == "whole calls"
     # the gateway configured: available, and the default for a new chat
+    # (the enterprise hosts are configuration: the .env names them)
     monkeypatch.setenv("APP_ID", "app")
     monkeypatch.setenv("APP_SECRET", SECRET)
+    monkeypatch.setenv("IDP_TOKEN_URL", "https://identity.example/security/digital/v1/application/token")
+    monkeypatch.setenv("GATEWAY_BASE_URL", "https://gateway.example/genai/google/v1")
     rows = {r["id"]: r for r in plane_catalog()}
     assert rows["gateway"]["available"] and rows["gateway"]["default"]
     assert not rows["vertex"]["default"]

@@ -35,9 +35,11 @@ from typing import Any, Callable, Iterator
 from sahs.util.auth import (_first_env, describe_route, env_proxies,
                             plane_opener, redact_url)
 
-IDP_TOKEN_URL = ("https://oneidentityapi-dev.aexp.com/security/digital"
-                   "/v1/application/token")
-GATEWAY_BASE_URL = "https://eag-dev.aexp.com/genai/google/v1"
+# the two enterprise hosts are configuration, never source: the token
+# service that mints the bearer (IDP_TOKEN_URL) and the gateway's Gemini
+# root (GATEWAY_BASE_URL, …/genai/google/v1). Empty here; the .env names them
+IDP_TOKEN_URL = ""
+GATEWAY_BASE_URL = ""
 DEFAULT_MODEL = "gemini-2.5-pro"
 DEFAULT_SCOPES = [
     "/genai/google/v1/models/gemini-2.5-pro/**::post",

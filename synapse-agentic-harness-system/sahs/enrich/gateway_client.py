@@ -64,6 +64,11 @@ class GatewayClient:
                            "GEMINI_BEARER_TOKEN)")
         if cfg.auth_mode == "env" and not cfg.bearer:
             raise GatewayError("AUTH_MODE=env but GEMINI_BEARER_TOKEN is empty")
+        missing = [name for name, value in (("IDP_TOKEN_URL", cfg.token_url),
+                                            ("GATEWAY_BASE_URL", cfg.base_url)) if not value]
+        if missing:
+            raise GatewayError("the gateway plane needs " + " and ".join(missing)
+                           + " in the silo .env: the enterprise hosts are not in this repository")
         chooser = RouteChooser(candidate_routes(env))
         return cls(cfg=cfg, tokens=TokenManager(cfg, chooser.http),
                    http=chooser.http, log=log, budgets=thinking_budgets(env))
