@@ -92,16 +92,22 @@ def _audit(request: Request):
 @router.get("")
 def okta_status() -> dict:
     """What the sign-in page needs to draw itself."""
-    from sahs.spanner import AuthSettings, spanner_is_enabled
+    from sahs.spanner import AuthSettings, SpannerConfigurationError, spanner_is_enabled
     settings = _settings()
-    auth = AuthSettings.from_env()
+    try:
+        local_login = AuthSettings.from_env().local_login_enabled
+    except SpannerConfigurationError as exc:
+        # a store is on but misconfigured: the form cannot open; the
+        # sign-in page still draws, and the reason is in the log
+        logger.warning("auth settings unreadable: %s", exc)
+        local_login = False
     return {
         "available": True,
         "configured": bool(settings.configured and spanner_is_enabled()),
         "provider": settings.provider,
         "issuer_host": urlsplit(settings.issuer).hostname or "",
         "start": f"{router.prefix}/start",
-        "local_login": bool(auth.local_login_enabled and spanner_is_enabled()),
+        "local_login": bool(local_login and spanner_is_enabled()),
     }
 
 

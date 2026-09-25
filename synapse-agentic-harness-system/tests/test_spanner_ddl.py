@@ -29,9 +29,11 @@ def test_identity_holds_nothing_recoverable_and_roles_are_rows():
     ddl = _text("001_identity.sql")
     assert "CREATE UNIQUE INDEX UsersByEmail ON Users (EmailNormalized)" in ddl
     assert "AS (LOWER(TRIM(Email))) STORED" in ddl
-    assert "PasswordHash    STRING(512) NOT NULL" in ddl
+    # the column's type and nullability, not its alignment: the file is
+    # the enterprise branch's, whose editor pads columns differently
+    assert re.search(r"PasswordHash\s+STRING\(512\)\s+NOT NULL", ddl)
     assert "PepperVersion" in ddl and "argon2id" in ddl
-    assert "TokenHash         BYTES(32)   NOT NULL" in ddl
+    assert re.search(r"TokenHash\s+BYTES\(32\)\s+NOT NULL", ddl)
     assert "CREATE UNIQUE INDEX AuthSessionsByToken ON AuthSessions (TokenHash)" in ddl
     assert "ReuseDetectedAt" in ddl                         # refresh families
     assert "SecretCiphertext BYTES(1024)" in ddl and "KmsKeyVersion" in ddl
@@ -41,7 +43,7 @@ def test_identity_holds_nothing_recoverable_and_roles_are_rows():
                    "OLDER_THAN(OccurredAt, INTERVAL 400 DAY)",
                    "OLDER_THAN(ExpiresAt, INTERVAL 1 DAY)"):
         assert policy in ddl, policy
-    assert "Surfaces      ARRAY<STRING(16)>" in ddl
+    assert re.search(r"Surfaces\s+ARRAY<STRING\(16\)>", ddl)
     seed = ddl.split("INSERT INTO Roles", 1)[1]
     assert "('admin'" in seed and "['admin', 'synapse']" in seed
     assert "('analyst'" in seed and "('steward'" in seed

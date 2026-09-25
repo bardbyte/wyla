@@ -100,11 +100,13 @@ def dotenv_value(raw: str) -> str:
     return value.strip()
 
 
-def load_dotenv(path: Path | None = None) -> list[str]:
+def load_dotenv(path: Path | None = None, override: bool = False) -> list[str]:
     """Read a ``.env`` file into ``os.environ`` (the laptop keeps its
     three BQ variables there — same flow as the proven bq_connect.py).
-    NEVER overrides variables already exported in the shell. Search
-    order: explicit path → $SAHS_ENV_FILE → <silo root>/.env → ./.env.
+    NEVER overrides variables already exported in the shell unless the
+    caller says ``override=True`` (the enterprise settings loader does,
+    so its ``.env`` wins over a stale shell). Search order: explicit
+    path → $SAHS_ENV_FILE → <silo root>/.env → ./.env.
     Returns the variable names that were loaded."""
     loaded: list[str] = []
     candidate = dotenv_path(path)
@@ -117,7 +119,7 @@ def load_dotenv(path: Path | None = None) -> list[str]:
         key, _, value = line.partition("=")
         key = key.strip().removeprefix("export ").strip()
         value = dotenv_value(value)
-        if key and key not in os.environ:
+        if key and (override or key not in os.environ):
             os.environ[key] = value
             loaded.append(key)
     return loaded

@@ -249,8 +249,13 @@ def _require_local_login() -> None:
     unless AUTH_LOCAL_LOGIN=1."""
     from apps.synapse_admin.backend.meridian import _silo_import
     _silo_import()
-    from sahs.spanner import AuthSettings
-    if not AuthSettings.from_env().local_login_enabled:
+    from sahs.spanner import AuthSettings, SpannerConfigurationError
+    try:
+        enabled = AuthSettings.from_env().local_login_enabled
+    except SpannerConfigurationError as exc:
+        raise HTTPException(status_code=503,
+                            detail=f"identity service is unavailable: {exc}") from exc
+    if not enabled:
         raise HTTPException(status_code=403,
                             detail="email-and-password sign-in is off here; sign in with Okta")
 

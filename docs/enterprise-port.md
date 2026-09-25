@@ -37,6 +37,9 @@ the schema file `db/spanner/004_google_oauth.sql`; and their changes to
 | `backend/auth.py` `google_callback` | owned `GET /callback` | no route of its own; `backend/okta.py` serves `/callback` and hands any state that is not an Okta sign-in to `google_callback` unchanged | one registered callback URL for both providers |
 | `backend/auth.py` session cookie | `AUTH_COOKIE_SECURE=auto` always set `Secure` | `auto` follows the request: `Secure` over https or behind `x-forwarded-proto: https`, plain over http | a browser drops a `Secure` cookie set over `http://localhost`, so nobody could sign in on a laptop |
 | `backend/admin.py` `users()` | a hand-written SQL join that did not parse | `store.list_users(limit)` | the query had a syntax error; the store already knows how to list people |
+| `sahs/util/spanner/settings.py` | re-reads the silo `.env` with `override=True` on every `SpannerSettings.from_env()` (the file beats the shell) | the facade resolves the environment once, shell first, and hands their readers the mapping; `load_dotenv` gained the `override` flag their code calls | the harness convention is that the shell wins; their module stays as written |
+| `sahs/util/spanner/settings.py` `spanner_is_enabled` | `SAHS_STORE=spanner` only | the facade's answer is `SAHS_STORE != local`, so `sqlite` counts | the sqlite stand-in is how the sign-in runs on a laptop and in the tests |
+| `sahs/util/spanner/settings.py` `AuthSettings.from_env` | demands a pepper of eight characters always | the facade demands it whenever a store runs and reads leniently under `SAHS_STORE=local` | with no store nothing here guards anything, and `/api/auth/okta` must answer on a bare laptop |
 | `backend/okta.py` `/callback` | (new) | a refusal (expired state, bad token, no email, Okta's own error) redirects to the sign-in page of the surface the person was heading for, with the reason in the hash; the audit keeps the status | a browser is on that URL, not a script; a JSON error page is a dead end |
 
 ## Written here to their interfaces
@@ -47,9 +50,9 @@ either implementation can replace the other file for file:
 
 | module | interface it satisfies |
 |---|---|
-| `sahs/spanner.py` | `SpannerSettings`, `AuthSettings`, `GoogleOAuthSettings` with `from_env()`, both `*ConfigurationError` classes, `spanner_is_enabled()`, `grpc_endpoint()` |
+| `sahs/spanner.py` | now a facade over their `sahs/util/spanner/settings.py` (landed as written): the same names, their readers and rules, plus `SAHS_STORE=sqlite`, `store_mode()`, `AUTH_LOCK_AFTER`, `AUTH_LOCK_MINUTES`, `AUTH_LOCAL_LOGIN`, defaults on every field, and a lenient `AuthSettings.from_env` under `SAHS_STORE=local` where no store runs |
 | `sahs/identity/store.py`, `sahs/identity_store.py` | `IdentityStore(settings, auth)` with `session_user`, `signup` (both arities), `login`, `logout`, `logout_all`, `record_audit`, `update_user`, `delete_user`, `grant_role`, `revoke_role`, `direct_reset_password`, `google_connection`, `save_google_connection`, `revoke_google_connection`, `_query` |
-| `sahs/identity/authorization.py` | `ROLE_PERMISSIONS`, `permissions_for_roles` |
+| `sahs/identity/authorization.py` | their file as written (the steward holds `skills.share` too), with `ROLES`, `surfaces_for_roles` and `is_known_role` appended for the store |
 | `sahs/util/bigquery_errors.py` | `bigquery_http_error_message`, `is_bigquery_auth_error` |
 | `sahs/constants.py` | the three endpoint maps `network.py` imports |
 | `AskRuntime`, `AssistantRuntime` | `owner_user_id=`, `runner=`; `start_turn(runner=)`; `BQConnection.from_env(require_key=)` |
@@ -62,12 +65,17 @@ Additions with no counterpart on their side, all ours: `sahs/identity/database.p
 (one interface, Spanner and a sqlite stand-in selected by `SAHS_STORE=sqlite`),
 `db/spanner/006_external_identities.sql` (identity-provider links and
 one-time authorization states), `sahs/util/paths.py` (per-person runtime
-paths), the `FirstName`/`LastName` columns on `Users` that their admin
-queries read, and the `identity` dependency group in `pyproject.toml`.
+paths), and the `identity` dependency group in `pyproject.toml`. Their
+`db/spanner/001_identity.sql` replaced ours once it arrived (the same
+columns; theirs carries `FirstName`/`LastName` and the steward's seed).
 
-Their schema (`001_identity.sql`) and their settings loader were requested
-and, once received, decide whether the store reads their column names or
-ours. Until then the store targets the schema in this repository.
+Their schema, settings loader and authorization module arrived after the
+first landing and were reconciled the same way: `001_identity.sql` and
+`sahs/util/spanner/settings.py` verbatim, `sahs/identity/authorization.py`
+verbatim with our helpers appended, and the deltas in the `sahs.spanner`
+facade (table above). Their `settings.py` needs `sahs/util/spanner` to be a
+package, so the REST Spanner plane that lived in `sahs/util/spanner.py`
+became that package's `__init__.py`; every import of it reads as before.
 
 ## Carrying a change back
 
