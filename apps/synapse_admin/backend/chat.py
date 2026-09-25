@@ -106,6 +106,13 @@ def _make_runtime(owner: str, user: dict | None):
         # person's own skills, the knowledge files and the review
         # board (007_content.sql) — nothing of theirs on the filesystem
         runtime.content_store = SpannerContentStore(_identity().db, owner)
+        # live BigQuery as this person (SAHS_BQ_AUTH_MODE=user: their
+        # connected Google account) or as the service account, exactly
+        # as ask.py attaches it; None keeps live execution denied
+        from apps.synapse_admin.backend.auth import _google_runner
+        runner = _google_runner(owner)
+        if runner is not None:
+            runtime.runner = runner
     # approved knowledge files land where the shelf reads staged
     # ones; resolved at publish time, so the .env decides
     runtime.knowledge_dir = lambda: _sources_dir() / "artifacts"
