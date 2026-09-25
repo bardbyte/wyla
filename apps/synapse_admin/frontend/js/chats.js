@@ -23,10 +23,28 @@ const when = (iso) => {
   return `${Math.round(mins / 1440)}d`;
 };
 
+// what a chat cost, compactly: "8.2K tokens · 3 turns" — from the
+// session row's totals (the runtime adds every finished turn to them)
+const compactN = (n) => new Intl.NumberFormat(undefined, {
+  notation: "compact", maximumFractionDigits: 1 }).format(Number(n) || 0);
+export const usageLine = (row) => {
+  const tokens = Number(row.tokens) || 0;
+  const turns = Number(row.turns) || 0;
+  if (!tokens && !turns) return "";
+  return `${compactN(tokens)} tokens · ${turns} turn${turns === 1 ? "" : "s"}`;
+};
+export const usageTitle = (row) => `${
+  new Intl.NumberFormat().format(Number(row.tokens_in) || 0)} in · ${
+  new Intl.NumberFormat().format(Number(row.tokens_out) || 0)} out · ${
+  Number(row.model_calls) || 0} model calls · ${Number(row.turns) || 0} turns · ${
+  ((Number(row.elapsed_ms) || 0) / 1000).toFixed(1)}s`;
+
 function chatRow(row, current) {
+  const usage = usageLine(row);
   return `
     <a class="chat-row${row.id === current ? " on" : ""}"
-       href="#/chat/${esc(row.id)}" title="${esc(row.title || row.id)}">
+       href="#/chat/${esc(row.id)}" title="${esc(row.title || row.id)}${
+         usage ? ` · ${esc(usageTitle(row))}` : ""}">
       <span class="chat-title">${esc(row.title || "New chat")}</span>
       <span class="row-tools">
         <button class="row-btn star${row.starred ? " on" : ""}"
@@ -39,6 +57,7 @@ function chatRow(row, current) {
       ${row.running
         ? '<span class="chat-when working" title="working">●</span>'
         : `<span class="chat-when">${esc(when(row.updated_at))}</span>`}
+      ${usage ? `<span class="chat-usage">${esc(usage)}</span>` : ""}
     </a>`;
 }
 

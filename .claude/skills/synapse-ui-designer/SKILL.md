@@ -17,12 +17,16 @@ owner then extended them to the admin console): **Radix** = the assistant people
 surfaces ("Radix thinks", "Radix's read", "Draft with Radix", "Radix is AI and can make
 mistakes", the prompt's "You are Radix") · **Radix Graph** = what the prompt and the chat call the
 graph. The backend strings that reach the chat say Radix too: the memory document's heading
-("What Radix remembers about …"), the mode blurbs, the built-in packs' author label. What does
-NOT change: the wordmark stays "Synapse · by Lumi" (title, logo alt), the `MERIDIAN_*` variables,
-the `/api/meridian/*` routes and the backend module names, and the *meridian line* disclosure
-strip on the admin console. The second surface's italic line under a number, an artifact or a
-proposal is a disclaimer ("Prepared by Radix…") with the definition line on its hover title; the
-admin console shows the definition line itself.
+("What Radix remembers about …"), the mode blurbs, the built-in packs' author label. The
+wordmarks, by the owner's decision: the admin console's top-left stays "Synapse · by Lumi"
+(title, logo alt); the second surface's (`apps/synapse/frontend/index.html`, its `<title>`, the
+logo alt and link title in `js/main.js`) reads **"Systematic Intelligence"** with the tagline
+"by Lumi", so the pair reads "Systematic Intelligence by Lumi" — `SYNAPSE_LOGO` still replaces
+the words with the image on that surface. What does NOT change: the `MERIDIAN_*` variables, the
+`/api/meridian/*` routes and the backend module names, and the *meridian line* disclosure strip
+on the admin console. The second surface's italic line under a number, an artifact or a proposal
+is a disclaimer ("Prepared by Radix…") with the definition line on its hover title; the admin
+console shows the definition line itself.
 
 ## 0 · Ground-truth ritual (do this before ANY design or build work)
 

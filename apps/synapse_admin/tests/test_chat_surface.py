@@ -454,3 +454,158 @@ def test_the_stop_route_ends_a_running_turn(client, compiled, tmp_path):
         assert runtime.wait(sid, 10)
     finally:
         chat_module._RUNTIME = previous
+
+
+def test_the_pane_scrolls_the_thinking_folds_and_the_usage_shows():
+    """The owner's laptop test: the whole main pane is the scroll
+    surface (#chat-scroll — the thread scrolls under the sticky
+    masthead and past the chips, which sit in the flow; the composer
+    docks with position: sticky; the wheel works in the gutters because
+    the outlet loses its width cap on this page), the "Latest" pill
+    lives outside the scroller and sits above the composer; the
+    thinking block is closed by default — one compact "Radix is
+    thinking… 12s" line, a summary element (keyboard), the choice kept
+    per browser under synapse-thinking-open, the answer folds it to
+    "Thought for 12s" unless it was kept open, a replayed turn renders
+    the folded summary; the usage shows live beside the line (from
+    budget_tick's turn split), as a footer under the answer (from
+    turn_done, replayed from payload.usage), on the sidebar rows and on
+    the People page's Tokens column with the breakdown on hover."""
+    users_js = (FRONTEND / "js" / "pages" / "users.js").read_text(encoding="utf-8")
+    admin_py = (REPO_ROOT / "apps" / "synapse_admin" / "backend" / "admin.py").read_text(
+        encoding="utf-8")
+    for piece in ('id="chat-scroll"', 'const scroller = el("chat-scroll")',
+                  "scroller.scrollTop = scroller.scrollHeight",
+                  'scroller.addEventListener("scroll"', "composer.offsetHeight",
+                  "let stuck = true", "stuck = atBottom()", "scroll(true)",
+                  # the thinking block: closed, remembered, one line
+                  '<details class="tool-activity" hidden>', "synapse-thinking-open",
+                  "thinkOpen()", "rememberThinking", "Radix is thinking…",
+                  "Radix is still", 'pulse(turn, "Thinking…", event.ts)',
+                  "<summary title=", "activityHTML()", "activityParts(",
+                  "turn.activity.open = thinkOpen()",
+                  # the usage: live, the footer, replayed
+                  "think-usage", "liveUsage(turn.task ? turn.parent : turn, event)",
+                  "usageFooter(turn.el, usageOf(event))", "payload.usage",
+                  "usageFooter(turn.el, usageOf(p.usage))",
+                  "turn-usage", "model call", "turn_tokens_in", "turn_cost_usd",
+                  "SYNAPSE_COST_IN"):
+        assert piece in CHAT_JS, piece
+    assert "hidden open>" not in CHAT_JS
+    assert CHAT_JS.count('<details class="tool-activity" hidden>') == 1   # one template
+    # the pill is a child of the pane, not of the scroller
+    assert 'id="chat-jump"' in CHAT_JS.split("</button>\n      </div>")[0]
+    assert CHAT_JS.index('id="chat-scroll"') < CHAT_JS.index('id="chat-jump"')
+    for cls in (".chat-scroll {", ".chat-scroll .chat-composer {", "position: sticky",
+                ".chat-scroll .chat-masthead {", ".outlet.chatv2page {",
+                ".think-usage {", ".turn-usage {", ".chat-row .chat-usage {",
+                ".tool-activity summary { flex-wrap: wrap;", ".users-page td.tokens",
+                "overscroll-behavior: contain"):
+        assert cls in CSS, cls
+    for piece in ("usageLine", "usageTitle", 'class="chat-usage"', "tokens · ", "turn"):
+        assert piece in CHATS_JS, piece
+    # the People page: a Tokens column, the breakdown on hover
+    for piece in (">tokens</th>", 'class="tokens"', "usageTitle(u.usage)",
+                  "tokensCell(u.usage)", "model calls", "no chat turn yet"):
+        assert piece in users_js, piece
+    for piece in ("usage_by_owner", "EMPTY_USAGE", '"usage":', "usage_totals",
+                  "spanner_is_enabled"):
+        assert piece in admin_py, piece
+    # the harness side: the budget's turn split rides every tick and the
+    # turn_done, the runtime settles it into every store
+    budget_py = (SILO / "sahs" / "ask" / "budget.py").read_text(encoding="utf-8")
+    runtime_py = (SILO / "sahs" / "assistant" / "runtime.py").read_text(encoding="utf-8")
+    for piece in ('"turn_tokens_in"', '"turn_tokens_out"', '"turn_calls"', '"turn_cost_usd"'):
+        assert piece in budget_py, piece
+    for piece in ("def _settle_usage", "store.add_usage(", "store.set_message_usage(",
+                  'record.get("task")'):
+        assert piece in runtime_py, piece
+    for store in ("store.py", "spanner_store.py"):
+        text = (SILO / "sahs" / "assistant" / store).read_text(encoding="utf-8")
+        assert "def add_usage" in text and "def set_message_usage" in text, store
+    assert (SILO / "db" / "spanner" / "009_usage.sql").exists()
+
+
+def test_a_turns_usage_lands_on_the_message_the_row_and_the_routes(client, compiled, tmp_path):
+    """A turn through the app's local runtime with a scripted model that
+    charges the budget the way the Vertex agent does: turn_done carries
+    the turn's own split, the final assistant message's payload carries
+    ``usage`` (what the footer replays), the session row adds it and a
+    second turn adds again, and GET /api/chat/sessions, /sessions/{id}
+    and /search carry the totals; under SAHS_STORE=local the People
+    route gives the one developer their totals from this store."""
+    from apps.synapse_admin.backend import chat as chat_module
+    sys.path.insert(0, str(SILO))
+    from sahs.assistant import AssistantRuntime
+    from sahs.assistant.agent import ScriptedAgent
+
+    class Charging(ScriptedAgent):
+        def __init__(self, budget):
+            super().__init__(steps=[[{"text": "Churn is a rate, not a count."}]])
+            self.budget = budget
+
+        def converse(self, contents, **kw):
+            self.budget.charge(tokens_in=7900, tokens_out=310)
+            yield from super().converse(contents, **kw)
+
+    runtime = AssistantRuntime(
+        builds_root=compiled["builds"], graph_root=tmp_path / "graph",
+        store_path=tmp_path / "chat.sqlite3",
+        model_factory=lambda budget: Charging(budget))
+    previous = chat_module._RUNTIME
+    chat_module._RUNTIME = runtime
+    try:
+        sid = client.post("/api/chat/sessions").json()["session"]["id"]
+        turns = []
+        for text in ("what is churn", "and once more"):
+            accepted = client.post(f"/api/chat/sessions/{sid}/messages",
+                                   json={"text": text}).json()
+            assert accepted["available"], accepted
+            assert runtime.wait(sid, 60), "the turn did not end"
+            turns.append(accepted["turn_id"])
+        events = runtime.runtime(sid).bus.since(0)
+        done = [e for e in events if e["ev"] == "turn_done" and not e.get("task")]
+        assert [e["turn_id"] for e in done] == turns
+        for e in done:
+            assert e["turn_tokens_in"] > 0 and e["turn_tokens_in"] % 7900 == 0
+            assert e["turn_tokens"] == e["turn_tokens_in"] + e["turn_tokens_out"]
+            # no rate configured: no cost on the record (the bus drops
+            # a None field), so the page draws tokens alone
+            assert e["model_calls"] >= 1 and e.get("turn_cost_usd") is None
+        ticks = [e for e in events if e["ev"] == "budget_tick"]
+        assert ticks and all("turn_tokens_in" in t and "turn_tokens_out" in t
+                             and "turn_calls" in t for t in ticks)
+        detail = client.get(f"/api/chat/sessions/{sid}").json()
+        last = detail["messages"][-1]
+        assert last["role"] == "assistant" and last["turn_id"] == turns[-1]
+        usage = last["payload"]["usage"]
+        assert usage["tokens_in"] == done[1]["turn_tokens_in"]
+        assert usage["tokens_out"] == done[1]["turn_tokens_out"]
+        assert usage["calls"] == done[1]["model_calls"]
+        assert usage["tokens"] == usage["tokens_in"] + usage["tokens_out"]
+        assert usage["elapsed_ms"] >= 1 and usage["cost_usd"] is None
+        assert last["payload"]["chips"] is not None            # the rest kept
+        session = detail["session"]
+        assert session["turns"] == 2
+        assert session["tokens_in"] == sum(e["turn_tokens_in"] for e in done)
+        assert session["tokens_out"] == sum(e["turn_tokens_out"] for e in done)
+        assert session["model_calls"] == sum(e["model_calls"] for e in done)
+        assert session["tokens"] == session["tokens_in"] + session["tokens_out"]
+        assert session["elapsed_ms"] >= 2
+        listed = next(s for s in client.get("/api/chat/sessions").json()["sessions"]
+                      if s["id"] == sid)
+        assert listed["tokens"] == session["tokens"] and listed["turns"] == 2
+        found = next(s for s in client.get("/api/chat/search?q=churn").json()["sessions"]
+                     if s["id"] == sid)
+        assert found["tokens"] == session["tokens"] and found["turns"] == 2
+        assert found["tokens_in"] == session["tokens_in"]
+        # the People page under SAHS_STORE=local: the one developer, the
+        # totals of this store (this chat is its only one)
+        people = client.get("/api/admin/users").json()
+        assert people["available"] and len(people["users"]) == 1
+        me = people["users"][0]
+        assert me["user_id"] == "local" and "admin" in me["roles"]
+        assert me["usage"]["tokens"] == session["tokens"]
+        assert me["usage"]["turns"] == 2 and me["usage"]["chats"] == 1
+    finally:
+        chat_module._RUNTIME = previous

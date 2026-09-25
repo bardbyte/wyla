@@ -31,6 +31,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
+from sahs.assistant.store import usage_shape
 from sahs.identity.database import Database, JsonValue, utcnow
 
 # the same tables as 002_chat.sql, in sqlite's words, for the stand-in
@@ -49,7 +50,11 @@ CREATE TABLE IF NOT EXISTS ChatSessions (
   Model TEXT NOT NULL DEFAULT '' CHECK (length(Model) <= 64),
   Skills TEXT NOT NULL DEFAULT '[]', Starred INTEGER NOT NULL DEFAULT 0,
   Archived INTEGER NOT NULL DEFAULT 0, Handoff TEXT, Notes TEXT,
-  MessageCount INTEGER NOT NULL DEFAULT 0, CreatedAt TEXT NOT NULL, UpdatedAt TEXT NOT NULL);
+  MessageCount INTEGER NOT NULL DEFAULT 0,
+  TokensIn INTEGER NOT NULL DEFAULT 0, TokensOut INTEGER NOT NULL DEFAULT 0,
+  ModelCalls INTEGER NOT NULL DEFAULT 0, ElapsedMs INTEGER NOT NULL DEFAULT 0,
+  Turns INTEGER NOT NULL DEFAULT 0,
+  CreatedAt TEXT NOT NULL, UpdatedAt TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS ChatSessionsByOwner ON ChatSessions (OwnerUserId, Archived, UpdatedAt);
 CREATE TABLE IF NOT EXISTS ChatMessages (
   SessionId TEXT NOT NULL, MessageId TEXT NOT NULL, OwnerUserId TEXT NOT NULL,
@@ -85,9 +90,12 @@ CREATE TABLE IF NOT EXISTS ChatEvents (
 SESSION_KINDS = ("analyst", "steward", "assistant")
 # ChatSessions.Model after 008_chat_model.sql: STRING(64), no plane CHECK
 MODEL_CHOICE_CHARS = 64
+# ChatSessions' usage columns (009_usage.sql), in the order the DDL adds
+# them; ``scripts/spanner_ddl_check.py`` holds the schema to this list
+USAGE_COLUMNS = ("TokensIn", "TokensOut", "ModelCalls", "ElapsedMs", "Turns")
 _SESSION_COLUMNS = ("SessionId, OwnerUserId, Kind, Title, BuildId, ProjectId, Model, "
                     "Skills, Starred, Archived, Handoff, Notes, MessageCount, "
-                    "CreatedAt, UpdatedAt")
+                    + ", ".join(USAGE_COLUMNS) + ", CreatedAt, UpdatedAt")
 _MESSAGE_COLUMNS = "MessageId, SessionId, TurnId, Role, Text, Payload, CreatedAt"
 _ARTIFACT_COLUMNS = "SessionId, ArtifactId, Version, TurnId, Type, Title, Spec, CreatedAt"
 _PROJECT_COLUMNS = ("ProjectId, Name, Instructions, Skills, Archived, "
@@ -157,12 +165,27 @@ class SpannerAssistantStore:
         ensure = getattr(database, "ensure", None)
         if callable(ensure):
             ensure(CHAT_SQLITE_SCHEMA)
+            # a stand-in file from before 009_usage.sql: the same
+            # forward migration the sqlite AssistantStore makes, one
+            # ADD COLUMN per column the table lacks (Spanner gets them
+            # from the DDL file)
+            have = {str(r.get("name")) for r in
+                    database.query("PRAGMA table_info(ChatSessions)")}
+            for column in USAGE_COLUMNS:
+                if column not in have:
+                    ensure(f"ALTER TABLE ChatSessions ADD COLUMN {column} "
+                           "INTEGER NOT NULL DEFAULT 0;")
 
     # ── shapes: what the page and the loop read ───────────────
     def _session_out(self, row: dict[str, Any]) -> dict[str, Any]:
         handoff = _loads(row.get("Handoff"))
         notes = _loads(row.get("Notes"))
+        usage = usage_shape({
+            "tokens_in": row.get("TokensIn"), "tokens_out": row.get("TokensOut"),
+            "model_calls": row.get("ModelCalls"), "elapsed_ms": row.get("ElapsedMs"),
+            "turns": row.get("Turns")})
         return {
+            **usage,
             "id": str(row["SessionId"]),
             "kind": str(row.get("Kind") or "assistant"),
             "title": str(row.get("Title") or ""),
@@ -341,6 +364,47 @@ class SpannerAssistantStore:
                 "role": role, "text": text,
                 "payload": json.dumps(payload) if payload is not None else "",
                 "created_at": _iso(now)}
+
+    # ── usage: what a turn cost, added to the chat's row (009) ──
+    def add_usage(self, session_id: str, tokens_in: int = 0,
+                  tokens_out: int = 0, calls: int = 0,
+                  elapsed_ms: int | float = 0) -> None:
+        """One finished turn onto the chat's totals, in one DML
+        statement (atomic on Spanner and on the stand-in alike): tokens
+        in and out, model calls, wall time, one more turn. The owner
+        check rides the WHERE, so nobody adds to another person's chat."""
+        self.db.run(lambda tx: tx.execute_update(
+            "UPDATE ChatSessions SET TokensIn = TokensIn + @tin, "
+            "TokensOut = TokensOut + @tout, ModelCalls = ModelCalls + @calls, "
+            "ElapsedMs = ElapsedMs + @ms, Turns = Turns + 1 "
+            "WHERE SessionId = @id AND OwnerUserId = @owner",
+            {"tin": max(0, int(tokens_in)), "tout": max(0, int(tokens_out)),
+             "calls": max(0, int(calls)),
+             "ms": max(0, int(round(float(elapsed_ms)))),
+             "id": session_id, "owner": self.owner_user_id}))
+
+    def set_message_usage(self, session_id: str, turn_id: str,
+                          usage: dict[str, Any]) -> bool:
+        """The turn's usage onto the payload of its final assistant
+        message (the last one of that turn), so a reopened chat shows
+        the footer the stream drew. False when the turn stored none."""
+        def work(tx: Any) -> bool:
+            rows = tx.query(
+                "SELECT MessageId, Payload FROM ChatMessages WHERE SessionId = @id "
+                "AND TurnId = @turn AND Role = 'assistant' AND OwnerUserId = @owner "
+                "ORDER BY Seq DESC LIMIT 1",
+                {"id": session_id, "turn": turn_id[:24], "owner": self.owner_user_id})
+            if not rows:
+                return False
+            payload = _loads(rows[0].get("Payload"))
+            if not isinstance(payload, dict):
+                payload = {"payload": payload} if payload is not None else {}
+            payload["usage"] = dict(usage)
+            tx.update("ChatMessages", ("SessionId", "MessageId", "Payload"),
+                      [(session_id, str(rows[0]["MessageId"]), JsonValue(payload))])
+            return True
+
+        return bool(self.db.run(work))
 
     def messages(self, session_id: str) -> list[dict[str, Any]]:
         rows = self.db.query(
@@ -651,5 +715,25 @@ def open_assistant_store(settings: Any, owner_user_id: str, *,
                                  else open_database(settings), owner_user_id)
 
 
-__all__ = ["CHAT_SQLITE_SCHEMA", "SESSION_KINDS", "SpannerAssistantStore",
-           "open_assistant_store"]
+def usage_by_owner(database: Database) -> dict[str, dict[str, int]]:
+    """Every person's usage across their chats, one aggregate query
+    (``SUM`` grouped by ``OwnerUserId``): the People page's Tokens
+    column. Keyed by user id; a person with no chat is absent (zero)."""
+    rows = database.query(
+        "SELECT OwnerUserId, SUM(TokensIn) AS TokensIn, SUM(TokensOut) AS TokensOut, "
+        "SUM(ModelCalls) AS ModelCalls, SUM(ElapsedMs) AS ElapsedMs, "
+        "SUM(Turns) AS Turns, COUNT(*) AS Chats FROM ChatSessions "
+        "GROUP BY OwnerUserId")
+    out: dict[str, dict[str, int]] = {}
+    for r in rows:
+        usage = usage_shape({
+            "tokens_in": r.get("TokensIn"), "tokens_out": r.get("TokensOut"),
+            "model_calls": r.get("ModelCalls"), "elapsed_ms": r.get("ElapsedMs"),
+            "turns": r.get("Turns")})
+        usage["chats"] = int(r.get("Chats") or 0)
+        out[str(r.get("OwnerUserId") or "")] = usage
+    return out
+
+
+__all__ = ["CHAT_SQLITE_SCHEMA", "SESSION_KINDS", "USAGE_COLUMNS",
+           "SpannerAssistantStore", "open_assistant_store", "usage_by_owner"]

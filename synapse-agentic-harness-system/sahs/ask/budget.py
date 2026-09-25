@@ -66,6 +66,10 @@ class Budget:
     calls: int = 0
     turn_tokens_used: int = 0
     turn_calls_used: int = 0
+    # the turn's own split, for the usage line and the footer the chat
+    # shows per turn (the session counters above never reset)
+    turn_tokens_in: int = 0
+    turn_tokens_out: int = 0
     grace_sent: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock,
                                   repr=False)
@@ -74,6 +78,8 @@ class Budget:
         with self._lock:
             self.turn_tokens_used = 0
             self.turn_calls_used = 0
+            self.turn_tokens_in = 0
+            self.turn_tokens_out = 0
 
     def charge(self, tokens_in: int = 0, tokens_out: int = 0,
                calls: int = 1) -> None:
@@ -83,14 +89,17 @@ class Budget:
             self.calls += calls
             self.turn_tokens_used += max(0, tokens_in) + max(0, tokens_out)
             self.turn_calls_used += calls
+            self.turn_tokens_in += max(0, tokens_in)
+            self.turn_tokens_out += max(0, tokens_out)
 
     @property
     def tokens(self) -> int:
         return self.tokens_in + self.tokens_out
 
-    def cost(self) -> float | None:
-        """Dollars, or None when no rate is configured (we do not
-        invent prices; the meter then reports tokens)."""
+    @staticmethod
+    def price(tokens_in: int, tokens_out: int) -> float | None:
+        """Dollars for a count, or None when no rate is configured (we
+        do not invent prices; the meter then reports tokens)."""
         rate_in = os.environ.get("SYNAPSE_COST_IN")
         rate_out = os.environ.get("SYNAPSE_COST_OUT")
         if not rate_in and not rate_out:
@@ -100,7 +109,15 @@ class Budget:
             per_out = float(rate_out or 0) / 1_000_000
         except ValueError:
             return None
-        return round(self.tokens_in * per_in + self.tokens_out * per_out, 4)
+        return round(tokens_in * per_in + tokens_out * per_out, 4)
+
+    def cost(self) -> float | None:
+        """The session's dollars so far, or None (no rate)."""
+        return self.price(self.tokens_in, self.tokens_out)
+
+    def turn_cost(self) -> float | None:
+        """This turn's dollars so far, or None (no rate)."""
+        return self.price(self.turn_tokens_in, self.turn_tokens_out)
 
     def exceeded(self) -> str:
         """The breaker: '' when clear, else the cap that tripped."""
@@ -129,9 +146,14 @@ class Budget:
             "tokens_in": self.tokens_in, "tokens_out": self.tokens_out,
             "tokens": self.tokens, "calls": self.calls,
             "session_tokens_cap": self.session_tokens,
+            # this turn's own counts: the live line and the footer
             "turn_tokens": self.turn_tokens_used,
+            "turn_tokens_in": self.turn_tokens_in,
+            "turn_tokens_out": self.turn_tokens_out,
+            "turn_calls": self.turn_calls_used,
             "turn_tokens_cap": self.turn_tokens,
             "cost_usd": self.cost(),
+            "turn_cost_usd": self.turn_cost(),
             "cost_note": ("rate not configured: the meter reports tokens"
                           if self.cost() is None else ""),
         }

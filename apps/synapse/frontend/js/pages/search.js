@@ -6,6 +6,7 @@
  * (/api/chat/search); this page only renders. */
 
 import { api } from "../api.js";
+import { usageLine, usageTitle } from "../chats.js";
 import { esc } from "../ui.js";
 
 const when = (iso) => {
@@ -79,7 +80,9 @@ export async function renderSearch(outlet, initial = "") {
             query ? lit(title, row.title_hits) : esc(title)}</span>
           <span class="muted">${esc(when(row.updated_at))} · ${
             plural(row.messages, "message")}${
-            row.running ? " · working" : ""}</span>
+            row.running ? " · working" : ""}${usageLine(row)
+              ? ` · <span class="search-usage" title="${esc(usageTitle(row))}">${
+                  esc(usageLine(row))}</span>` : ""}</span>
         </div>
         ${snippets}${more}
       </a>`;

@@ -16,11 +16,13 @@ Checks:
   * no column is named with a GoogleSQL reserved word;
   * the property graph's node and edge tables exist and the keys are
     their primary keys;
-  * an ALTER TABLE (the three forms a later file uses: DROP CONSTRAINT,
-    ALTER COLUMN, ADD CONSTRAINT) names a table defined earlier, a
-    constraint or column that exists, and is applied to the model, so
-    every check below sees the schema as the database ends up with it;
-    any other ALTER form is a finding, never silently skipped;
+  * an ALTER TABLE (the four forms a later file uses: DROP CONSTRAINT,
+    ALTER COLUMN, ADD CONSTRAINT, ADD COLUMN) names a table defined
+    earlier, a constraint or column that exists (or, for ADD COLUMN,
+    one that does not yet, with a DEFAULT when NOT NULL), and is applied
+    to the model, so every check below sees the schema as the database
+    ends up with it; any other ALTER form is a finding, never silently
+    skipped;
   * the CHECK lists for node kinds, edge relations and witnesses are
     exactly the Python registries (sahs.graph.quads, sahs.graph.ids);
   * the chat half matches its code: ChatArtifacts' type list is
@@ -88,7 +90,7 @@ class Table:
 
 
 COLUMN_RE = re.compile(
-    r"^\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+(?P<type>ARRAY<[^>]+>|[A-Z]+(?:\([^)]*\))?)",
+    r"^\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+(?P<type>ARRAY<[^>]+>|[A-Z]+[0-9]*(?:\([^)]*\))?)",
     re.M)
 CONSTRAINT_RE = re.compile(r"^\s*CONSTRAINT\s+(?P<name>\w+)\s+(?P<rest>.+)$",
                            re.S | re.I)
@@ -103,6 +105,9 @@ ALTER_COLUMN_RE = re.compile(
 ALTER_ADD_RE = re.compile(
     r"^ALTER TABLE\s+(?P<table>\w+)\s+ADD CONSTRAINT\s+(?P<name>\w+)\s+"
     r"(?P<rest>.+)$", re.S)
+ALTER_ADD_COLUMN_RE = re.compile(
+    r"^ALTER TABLE\s+(?P<table>\w+)\s+ADD COLUMN\s+(?P<column>\w+)\s+"
+    r"(?P<spec>.+)$", re.S)
 
 
 def _split_top_level(text: str) -> list[str]:
@@ -196,7 +201,7 @@ def _check_foreign_keys(where: str, t: Table, text: str,
 
 def _apply_alter(where: str, stmt: str, tables: dict[str, Table],
                  findings: list[str]) -> None:
-    """One ALTER TABLE statement onto the model: the three forms the
+    """One ALTER TABLE statement onto the model: the four forms the
     migration files use; any other form is a finding."""
     flat = " ".join(stmt.split())
     m = ALTER_DROP_RE.match(flat)
@@ -247,9 +252,39 @@ def _apply_alter(where: str, stmt: str, tables: dict[str, Table],
         t.constraints[name] = rest
         _check_foreign_keys(where, t, rest, tables, findings)
         return
+    m = ALTER_ADD_COLUMN_RE.match(flat)
+    if m:
+        t = tables.get(m.group("table"))
+        if t is None:
+            findings.append(f"{where}: ALTER on unknown table "
+                            f"{m.group('table')}")
+            return
+        column = m.group("column")
+        if column in t.columns:
+            findings.append(f"{where}: ADD COLUMN {column}: {t.name} already "
+                            "has that column")
+            return
+        if column.upper() in RESERVED:
+            findings.append(f"{where}: ADD COLUMN {column}: a reserved word "
+                            "as a column name")
+            return
+        typed = COLUMN_RE.match(f"{column} {m.group('spec')}")
+        if not typed:
+            findings.append(f"{where}: ADD COLUMN {column}: unreadable "
+                            f"type in {m.group('spec')!r}")
+            return
+        spec = " ".join(m.group("spec").split())
+        # a column added to a table that has rows needs a default or
+        # NULLs: NOT NULL without DEFAULT is refused by Spanner
+        if "NOT NULL" in spec.upper() and "DEFAULT" not in spec.upper():
+            findings.append(f"{where}: ADD COLUMN {column}: NOT NULL with "
+                            "no DEFAULT cannot be added to a table with rows")
+            return
+        t.columns[column] = typed.group("type")
+        return
     findings.append(f"{where}: an ALTER form this check does not read "
                     "(it knows DROP CONSTRAINT, ALTER COLUMN, ADD "
-                    "CONSTRAINT)")
+                    "CONSTRAINT, ADD COLUMN)")
 
 
 def load(files: list[Path]) -> tuple[dict[str, Table], list[str]]:
@@ -379,7 +414,7 @@ def check() -> list[str]:
         check_list(nodes, "ck_nodes_kind", set(ID_PATTERNS), "node kinds")
     # ── the chat half must match its code (after every ALTER) ──
     from sahs.assistant.artifacts import TYPES
-    from sahs.assistant.spanner_store import MODEL_CHOICE_CHARS
+    from sahs.assistant.spanner_store import MODEL_CHOICE_CHARS, USAGE_COLUMNS
     artifacts = tables.get("ChatArtifacts")
     if artifacts is not None:
         check_list(artifacts, "ck_artifacts_type", set(TYPES),
@@ -397,6 +432,14 @@ def check() -> list[str]:
                 findings.append(f"ChatSessions.{name} still lists the model "
                                 "choices; the catalog owns them, the "
                                 "schema holds the width")
+        # the usage columns the store adds to (009_usage.sql), INT64
+        # every one, as the store's own list spells them
+        for column in USAGE_COLUMNS:
+            got = sessions.columns.get(column, "")
+            if got != "INT64":
+                findings.append(f"ChatSessions.{column} is {got or 'missing'}; "
+                                "the store's add_usage writes an INT64 "
+                                "(db/spanner/009_usage.sql)")
     return findings
 
 
