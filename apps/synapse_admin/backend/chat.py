@@ -5,9 +5,11 @@ key, never calls a model.
 
 With an identity store (SAHS_STORE=spanner|sqlite) every route below
 needs the session cookie and each signed-in person has their own
-runtime, its chats in the store's chat tables (docs/spanner-wiring.md);
-without one (SAHS_STORE=local) the one shared runtime and its sqlite
-file serve the local developer as before.
+runtime, its chats in the store's chat tables and its files, own
+skills, knowledge files and review board in the content tables
+(docs/spanner-wiring.md); without one (SAHS_STORE=local) the one
+shared runtime, its sqlite file and the graph's folders serve the
+local developer as before.
 
     POST /api/chat/sessions                        → session
     GET  /api/chat/sessions                        → the sidebar
@@ -97,17 +99,26 @@ def _make_runtime(owner: str, user: dict | None):
         # row carries this owner. The same database object the identity
         # store holds, so one connection serves both.
         from apps.synapse_admin.backend.auth import _identity
+        from sahs.assistant.content_store import SpannerContentStore
         from sahs.assistant.spanner_store import SpannerAssistantStore
         runtime.store = SpannerAssistantStore(_identity().db, owner)
+        # and beside it the content store: the files on a chat, the
+        # person's own skills, the knowledge files and the review
+        # board (007_content.sql) — nothing of theirs on the filesystem
+        runtime.content_store = SpannerContentStore(_identity().db, owner)
     # approved knowledge files land where the shelf reads staged
     # ones; resolved at publish time, so the .env decides
     runtime.knowledge_dir = lambda: _sources_dir() / "artifacts"
     # the Langfuse mirror of every turn's record: attached only
-    # when SAHS_LANGFUSE=1 (sahs.observe); off is the default
+    # when SAHS_LANGFUSE=1 (sahs.observe); off is the default. The
+    # user is the owner's id (ChatSessions.OwnerUserId), the same id a
+    # backfill from the chat tables files the trace under; the laptop
+    # with no store keeps its configured name
     from sahs.observe import langfuse_observer
     from sahs.observe.prompts import links_path
     runtime.observer = langfuse_observer(
-        user_id=runtime.user_name, model_of=runtime.label_for,
+        user_id=runtime.owner_user_id or runtime.user_name,
+        model_of=runtime.label_for,
         prompt_links=links_path(_graph_root()))
     return runtime
 
@@ -379,7 +390,7 @@ def post_message(session_id: str, req: NewMessage) -> dict:
     from sahs.ask.model import ModelUnavailable
     from sahs.ask.runtime import BuildUnavailable, TurnBusy
     from sahs.assistant.files import FileRefused
-    from sahs.loop.skills import SkillTooLarge
+    from sahs.loop.skills import SkillUnreadable
     try:
         return {"available": True,
                 **runtime.start_turn(session_id, req.text,
@@ -389,10 +400,11 @@ def post_message(session_id: str, req: NewMessage) -> dict:
         return _unavailable(f"no session {session_id}")
     except TurnBusy as e:
         return {"available": False, "reason": str(e), "busy": True}
-    # a pinned or slash-loaded skill over the size ceiling refuses the
-    # turn by name, the way a missing plane or a refused file does
+    # a pinned or slash-loaded skill whose file cannot be read refuses
+    # the turn by name, the way a missing plane or a refused file does
+    # (size never refuses: a pack over the ceiling loads as a library)
     except (BuildUnavailable, ModelUnavailable, FileRefused,
-            SkillTooLarge) as e:
+            SkillUnreadable) as e:
         return _unavailable(str(e))
 
 
@@ -750,7 +762,7 @@ async def stream(session_id: str, request: Request, after: int = 0,
             iter([f"event: error\ndata: "
                   f'{{"reason": "no session {session_id}"}}\n\n']),
             media_type="text/event-stream")
-    rt = runtime.runtime(session_id)
+    runtime.runtime(session_id)
     start = int(last_event_id) if (last_event_id or "").isdigit() \
         else after
 
@@ -760,7 +772,9 @@ async def stream(session_id: str, request: Request, after: int = 0,
         while True:
             if await request.is_disconnected():
                 return
-            batch = rt.bus.since(seq)
+            # the bus, and the store's ChatEvents when the bus has
+            # nothing after seq (a pod restart): replay survives
+            batch = runtime.events_since(session_id, seq)
             if batch:
                 idle = 0.0
                 for record in batch:

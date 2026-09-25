@@ -220,13 +220,19 @@ def navigate_loop(*, build: Build, store: Any, bus: Any, budget: Any,
                   clarify: dict[str, Any] | None = None,
                   resume: dict[str, Any] | None = None,
                   skills: list[Skill] | None = None,
+                  skill_library: str = "",
+                  skills_library: list[str] | None = None,
                   substrate: Any = None, snapshot_runner: Any = None,
                   ledger_path: Path | None = None,
                   max_steps: int = MAX_STEPS,
                   wall_seconds: float = WALL_SECONDS) -> str:
     """The model-driven middle of a turn. Returns the turn status:
     ``answered`` | ``clarify`` | ``partial``. ModelUnavailable and
-    Aborted propagate to ``run_turn``'s handlers unchanged."""
+    Aborted propagate to ``run_turn``'s handlers unchanged.
+    ``skills`` are the packs pasted whole; ``skill_library`` is the
+    rendered static-retrieval block for the packs over the whole-load
+    limit (``skills_library`` names them), built by the runtime for
+    this ask — this lane has no lookup tools."""
     from sahs.ask.resolve import resolve_plan   # late: avoids a cycle
 
     session_id = session["id"]
@@ -241,7 +247,8 @@ def navigate_loop(*, build: Build, store: Any, bus: Any, budget: Any,
                   snapshot_runner=snapshot_runner,
                   ledger_path=ledger_path, scout=scout)
     system = system_prompt(build, skills,
-                           tool_block=render_tool_block(kit))
+                           tool_block=render_tool_block(kit),
+                           skill_library=skill_library)
     loop_budget = LoopBudget(max_steps=max_steps,
                              wall_seconds=wall_seconds)
     opening = _opening_line(resolver, clarify, resume)
@@ -254,7 +261,9 @@ def navigate_loop(*, build: Build, store: Any, bus: Any, budget: Any,
     bus.emit("loop_started", turn_id=turn_id, reason=opening,
              steps_max=max_steps, build_id=build.version,
              prompt_version=PROMPT_VERSION,
-             skills=[s.name for s in (skills or [])])
+             skills=[s.name for s in (skills or [])]
+             + list(skills_library or []),
+             skills_library=list(skills_library or []))
     # the panel's ground truth: the system prompt the model will see,
     # emitted once (it is identical for every step of this loop)
     bus.emit("loop_prompt", turn_id=turn_id, n=0, kind="system",

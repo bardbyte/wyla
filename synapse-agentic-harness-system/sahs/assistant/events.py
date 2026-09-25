@@ -16,6 +16,12 @@ from sahs.ask.events import EventBus, now_iso, sse_frame  # noqa: F401
 # contract gate — the model drives; the harness streams and records.
 ASSISTANT_EVENTS: tuple[str, ...] = (
     "turn_started",
+    "skills_loaded",      # the loader record: per skill, how it loaded
+    # a compound ask (planner.py): the plan, then one task at a time —
+    # every event a task's sub-turn emits carries a ``task`` field
+    "plan_made",          # the task list a turn was split into
+    "task_started",       # a task's sub-turn begins (goal, deps, order)
+    "task_done",          # its status, cost, artifacts, what was checked
     "model_prompt",       # what the model saw: system once, then steps
     "thinking",           # a thought summary delta, the model's own
     "tool_call",          # a call announced, before it runs

@@ -102,6 +102,12 @@ file. The ones you will actually touch:
 `.env.example` documents the rest, including the optional model-gateway plane
 (`GATEWAY_*`, `IDP_*`) and its check script.
 
+Leaving the laptop: `SAHS_ENV_FILE` picks the `.env` (one per profile under
+`synapse-agentic-harness-system/env/`), `make run ENV=<local|e1|e2|e3>` runs
+on it, and `make check ENV=<env>` prints the readiness table. The mental
+model, the checks, the DDL order and the tenancy decision are one page:
+[`docs/deploy.md`](docs/deploy.md).
+
 ## tests
 
 ```bash

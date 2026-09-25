@@ -22,6 +22,8 @@ import datetime as _dt
 import json
 import re
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -34,10 +36,13 @@ from sahs.tools.api import Build
 from sahs.util.profiles import prompt_style
 
 from .agent import ROUTING_KEY, declarations
+from .artifacts import validate_artifact
 from .events import EventBus
 from .kit import RESULT_CAP, build_kit
+from .planner import plan_for, waves
+from .prompt_version import prompt_fingerprint
 from .sandbox import prepare_workspace
-from .skills_loader import all_skills, render_skill_index
+from .skills_loader import all_skills, render_skill_index, skill_context
 from .state import AssistantState
 from .store import AssistantStore
 
@@ -46,6 +51,16 @@ MAX_CALLS = 40             # model calls in one turn: a ceiling, not a plan
 WALL_SECONDS = 600.0
 MAX_OUTPUT_TOKENS = 16384
 HISTORY_MESSAGES = 30      # stored messages replayed into the interaction
+# a compound ask (docs/multi-task-turns.md): the tasks of one turn run
+# as sub-turns of the same session, independent ones side by side on a
+# small pool, each under a share of the turn's call ceiling so the
+# total never exceeds it; the synthesis keeps a couple of calls back
+TASK_POOL = 2              # tasks running side by side
+SYNTHESIS_CALLS = 2        # model calls kept for the final composition
+MIN_TASK_CALLS = 4         # no task gets fewer than this
+QUERY_STRIDE = 20          # q<N> names per task: t1 saves q1…, t2 q21…
+FINDINGS_CAP = 3000        # chars of a task's prose handed to the next
+REPORT_TITLE = "What was done"
 THINKING_LEVELS = {"minimal": "minimal", "quick": "low", "standard": "medium",
                    "deep": "high", "max": "max"}
 # the depth dial as the composer explains it (§5): five stops on one
@@ -274,12 +289,17 @@ def system_prompt(build: Build, skills: list[Skill] | None = None,
                   artifacts: list[dict[str, Any]] | None = None,
                   notes: list[str] | None = None,
                   user_name: str = "", mode: str = DEFAULT_MODE,
-                  today: _dt.date | None = None, style: str = "") -> str:
+                  today: _dt.date | None = None, style: str = "",
+                  retrieval: str = "",
+                  library: list[str] | None = None,
+                  likely: tuple[str, ...] = ()) -> str:
     """Identity → chain → mode → style (the model family's, when it has
-    one) → the graph digest (business map + skills (loaded whole, the
-    rest by name) → memory → this session (today's date first, then the
-    artifacts and notes). Stable parts first so the prefix caches; the
-    tools are declared to the transport, never pasted here."""
+    one) → the graph digest (business map + skills (loaded whole, then
+    the library packs' contents and matched passages (``retrieval``,
+    per turn), the rest by name) → memory → this session (today's date
+    first, then the artifacts and notes). Stable parts first so the
+    prefix caches; the tools are declared to the transport, never
+    pasted here."""
     digest = _DIGEST_CACHE.get(build.version)
     if digest is None:
         digest = synapse_digest(build,
@@ -293,10 +313,11 @@ def system_prompt(build: Build, skills: list[Skill] | None = None,
     skill_text = render_skills(skills or [])
     shelf = render_skill_index(
         skill_index or [],
-        exclude=frozenset(s.name for s in (skills or [])))
-    if skill_text or shelf:
+        exclude=frozenset(s.name for s in (skills or []))
+        | frozenset(library or []), likely=tuple(likely or ()))
+    if skill_text or retrieval or shelf:
         parts.append(_section("skills", "\n\n".join(
-            p for p in (skill_text, shelf) if p)))
+            p for p in (skill_text, retrieval, shelf) if p)))
     memory = "\n\n".join(p for p in (_project_block(project),
                                      _memory_block(memories, user_name))
                          if p)
@@ -317,6 +338,11 @@ def _history(store: AssistantStore, session_id: str, turn_id: str,
             continue                         # this turn's ask goes last
         text = (row.get("text") or "").strip()
         payload = row.get("payload") or {}
+        if row["role"] != "user" and isinstance(payload, dict) \
+                and payload.get("task"):
+            # a task's own message: the turn's synthesis carries what
+            # it found, so the history stays one answer per ask
+            continue
         if row["role"] == "user" and isinstance(payload, dict) \
                 and payload.get("files"):
             # the bytes rode their own turn; later turns know a file
@@ -390,6 +416,8 @@ def tool_input(name: str, args: dict[str, Any]) -> str:
     keys = {"run_sql": "sql", "python": "code", "search": "query",
             "read": "id", "artifact": "title", "check": "kind",
             "sample_values": "column", "load_skill": "name",
+            "skill_toc": "name", "skill_search": "query",
+            "skill_read": "section",
             "remember": "text", "note": "text", "ask": "question",
             "propose_sql": "sql"}
     key = keys.get(name)
@@ -479,8 +507,22 @@ def summarize(tool: str, result: Any) -> str:
         return "asked: " + _short(
             (result.get("clarify") or {}).get("question", ""), 140)
     if tool == "load_skill":
+        if result.get("searchable"):
+            return (f"skill {result.get('name')} loaded as a library · "
+                    f"{result.get('sections')} sections")
         return (f"skill {result.get('name')} loaded"
                 if result.get("text") else str(result.get("note", "")))
+    if tool == "skill_toc":
+        return (f"{result.get('name')} · {result.get('sections')} sections, "
+                f"{len(result.get('toc') or [])} listed")
+    if tool == "skill_search":
+        heads = "; ".join(_short(h.get("heading_path", ""), 50)
+                          for h in (result.get("hits") or [])[:3])
+        return f"{result.get('count', 0)} passages: {heads}"
+    if tool == "skill_read":
+        return (f"{result.get('skill')} · {result.get('heading_path')} · "
+                f"chars {result.get('start')}–{result.get('end')}"
+                + (" (more)" if result.get("truncated") else ""))
     if tool == "remember":
         return "remembered"
     if tool == "note":
@@ -513,6 +555,24 @@ def _closing(reason: str, said: bool) -> str:
     return f"I stopped before I could answer: {reason}"
 
 
+@dataclass
+class SubTurn:
+    """How a turn runs inside another (a task, the synthesis, or the
+    plain turn a planner declined). The parent owns the turn budget,
+    the workspace and the title; the sub-turn tags nothing itself —
+    the bus it is handed does (a ``task`` field on every record)."""
+
+    task: str = ""                  # the task id, "" for the synthesis
+    label: str = ""                 # what the events call this turn
+    announced: bool = True          # the parent emitted turn_started
+    finish: bool = False            # emit turn_done (else the parent)
+    title: bool = False             # may set the session title
+    query_offset: int = 0           # q<N> starts after this
+    tools: frozenset[str] | None = None   # None: the whole kit
+    payload: dict[str, Any] = field(default_factory=dict)
+    artifacts: list[str] = field(default_factory=list)
+
+
 # ─── the turn ────────────────────────────────────────────────
 
 
@@ -536,38 +596,69 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                        file_names: list[str] | None = None,
                        owner: str = "",
                        model_label: str = "",
-                       model_name: str = "") -> str:
+                       model_name: str = "",
+                       sub_turn: SubTurn | None = None) -> str:
     session_id = session["id"]
     started = time.perf_counter()
     mode = mode if mode in MODES else DEFAULT_MODE
-    bus.emit("turn_started", turn_id=turn_id, text=text,
-             build_id=build.version, version=ASSISTANT_VERSION,
-             skills=[s.name for s in (skills or [])],
-             memories=len(memories or []),
-             project=(project or {}).get("name", ""),
-             thinking_level=thinking_level, mode=mode, plane=plane,
-             model=model_label,
-             files=list(file_names or []))
-    budget.start_turn()
-    prepare_workspace(workspace, build.root)
+    sub = sub_turn
+    if sub is None or not sub.announced:
+        bus.emit("turn_started", turn_id=turn_id,
+                 text=(sub.label if sub and sub.label else text),
+                 build_id=build.version, version=ASSISTANT_VERSION,
+                 skills=[s.name for s in (skills or [])],
+                 memories=len(memories or []),
+                 project=(project or {}).get("name", ""),
+                 thinking_level=thinking_level, mode=mode, plane=plane,
+                 model=model_label,
+                 files=list(file_names or []))
+    if sub is None:
+        # a sub-turn spends its parent's turn budget and workspace
+        budget.start_turn()
+        prepare_workspace(workspace, build.root)
+    extra_payload = dict(sub.payload) if sub else {}
+    prior_artifacts = list(sub.artifacts) if sub else []
 
     state = AssistantState()
     state.notes = list(session.get("notes") or [])
+    if sub and sub.query_offset:
+        state.queries_saved = int(sub.query_offset)
+    # the skills, split at this engine's whole-load limit: whole ones
+    # paste verbatim; a pack over it is a library — its contents and
+    # the passages that match this ask, under the engine's budget at
+    # this depth — never a refusal, never a partial load; a pack whose
+    # frontmatter asked for the whole file is disclosed as preferring
+    # it (the block and the loader record both say so)
+    shelf = all_skills(graph_root, owner)
+    library = skill_context(graph_root, list(skills or []), text,
+                            model_name, thinking_level, shelf=shelf)
+    bus.emit("skills_loaded", turn_id=turn_id, **library.event())
     kit = build_kit(build, state, store=store, session_id=session_id,
                     turn_id=turn_id, workspace=workspace, model=model,
                     substrate=substrate, snapshot_runner=snapshot_runner,
                     runner=runner, graph_root=graph_root,
                     project_id=(project or {}).get("id", ""),
-                    owner=owner)
+                    owner=owner, retriever=library.index,
+                    searchable=library.searchable_names,
+                    skill_limit=library.limit, model_name=model_name)
+    if sub and sub.tools is not None:
+        kit = {name: spec for name, spec in kit.items()
+               if name in sub.tools}
     tools = declarations(kit)
     system = system_prompt(
-        build, skills, skill_index=all_skills(graph_root, owner),
+        build, library.whole, skill_index=shelf,
         memories=memories, project=project,
         artifacts=store.list_artifacts(session_id), notes=state.notes,
-        user_name=user_name, mode=mode, style=prompt_style(model_name))
+        user_name=user_name, mode=mode, style=prompt_style(model_name),
+        retrieval=library.block, library=library.searchable_names,
+        likely=library.likely)
     bus.emit("model_prompt", turn_id=turn_id, n=0, kind="system",
-             content=system[:12000])
-    contents = _history(store, session_id, turn_id)
+             content=system[:12000],
+             **prompt_fingerprint(system, ASSISTANT_VERSION))
+    # a task's sub-turn (<parent>.<task>) leaves the parent's compound
+    # ask out too: its goal is self-contained, and the whole ask would
+    # invite it to do every job at once
+    contents = _history(store, session_id, turn_id.split(".", 1)[0])
     # the files ride this ask, before the words: the model reads them
     # as part of the same turn
     contents.append({"role": "user",
@@ -734,21 +825,23 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                     prose or clarify["question"], turn_id=turn_id,
                     payload={"clarify": clarify,
                              "artifacts": list(dict.fromkeys(
-                                 state.artifacts_touched)),
+                                 prior_artifacts
+                                 + state.artifacts_touched)),
                              "trace": _trim_trace(trace),
                              "elapsed_ms": round(
                                  (time.perf_counter() - started) * 1000,
-                                 1)})
+                                 1), **extra_payload})
                 bus.emit("chips", turn_id=turn_id, clarify=clarify)
                 _persist(store, session_id, state, "clarify",
                          clarify["question"],
                          [str(o.get("label", o))
                           if isinstance(o, dict) else str(o)
                           for o in clarify.get("options", [])])
-                _finish(bus, budget, turn_id, "clarify", started,
-                        model_calls=calls, steps=steps,
-                        thinking_level=thinking_level,
-                        skills_loaded=list(state.skills_loaded))
+                if sub is None or sub.finish:
+                    _finish(bus, budget, turn_id, "clarify", started,
+                            model_calls=calls, steps=steps,
+                            thinking_level=thinking_level,
+                            skills_loaded=list(state.skills_loaded))
                 return "clarify"
 
             if proposal is not None:
@@ -766,25 +859,28 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
                     session_id, "assistant", prose, turn_id=turn_id,
                     payload={"proposal": proposal, "chips": chips,
                              "artifacts": list(dict.fromkeys(
-                                 state.artifacts_touched)),
+                                 prior_artifacts
+                                 + state.artifacts_touched)),
                              "trace": _trim_trace(trace),
                              "elapsed_ms": round(
                                  (time.perf_counter() - started) * 1000,
-                                 1)})
+                                 1), **extra_payload})
                 bus.emit("proposal", turn_id=turn_id,
                          message_id=row["id"], proposal=proposal)
                 if chips:
                     bus.emit("chips", turn_id=turn_id, suggestions=chips)
-                if not (session.get("title") or "").strip():
+                if (sub is None or sub.title) \
+                        and not (session.get("title") or "").strip():
                     title = text.strip()[:60]
                     session["title"] = title
                     store.set_title(session_id, title)
                 _persist(store, session_id, state, "proposed", prose,
                          chips)
-                _finish(bus, budget, turn_id, "proposed", started,
-                        model_calls=calls, steps=steps,
-                        thinking_level=thinking_level,
-                        skills_loaded=list(state.skills_loaded))
+                if sub is None or sub.finish:
+                    _finish(bus, budget, turn_id, "proposed", started,
+                            model_calls=calls, steps=steps,
+                            thinking_level=thinking_level,
+                            skills_loaded=list(state.skills_loaded))
                 return "proposed"
 
             if offered:
@@ -813,27 +909,537 @@ def run_assistant_turn(*, build: Build, store: AssistantStore,
 
     prose = "\n\n".join(s for s in said if s.strip())
     chips = list(state.chips)
-    if prose or state.artifacts_touched:
+    if prose or state.artifacts_touched or extra_payload:
         store.add_message(
             session_id, "assistant", prose, turn_id=turn_id,
             payload={"chips": chips,
                      "artifacts": list(dict.fromkeys(
-                         state.artifacts_touched)),
+                         prior_artifacts + state.artifacts_touched)),
                      "trace": _trim_trace(trace),
                      "elapsed_ms": round(
-                         (time.perf_counter() - started) * 1000, 1)})
+                         (time.perf_counter() - started) * 1000, 1),
+                     **extra_payload})
     if chips:
         bus.emit("chips", turn_id=turn_id, suggestions=chips)
-    if not (session.get("title") or "").strip() and prose:
+    if (sub is None or sub.title) \
+            and not (session.get("title") or "").strip() and prose:
         title = text.strip()[:60]
         session["title"] = title
         store.set_title(session_id, title)
     _persist(store, session_id, state, status, prose, chips)
-    _finish(bus, budget, turn_id, status, started, model_calls=calls,
-            steps=steps, thinking_level=thinking_level,
-            subgraph_used=state.subgraph,
-            skills_loaded=list(state.skills_loaded))
+    if sub is None or sub.finish:
+        _finish(bus, budget, turn_id, status, started, model_calls=calls,
+                steps=steps, thinking_level=thinking_level,
+                subgraph_used=state.subgraph,
+                skills_loaded=list(state.skills_loaded))
     return status
+
+
+# ─── a compound ask: the tasks of one turn ───────────────────
+
+
+class _TaggedBus:
+    """The bus a task's sub-turn writes to: every record carries the
+    task id, so the page groups it under the task, and a collector
+    sees each record so the task's own receipts (artifacts, saved
+    rows, checks, refusals, prose, its turn_done) are read off the
+    record rather than kept separately."""
+
+    def __init__(self, bus: EventBus, task: str,
+                 record: "TaskRecord") -> None:
+        self._bus = bus
+        self._task = task
+        self._record = record
+
+    def emit(self, ev: str, *, turn_id: str = "",
+             **fields: Any) -> dict[str, Any]:
+        got = self._bus.emit(ev, turn_id=turn_id,
+                             task=self._task or None, **fields)
+        self._record.observe(got)
+        return got
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._bus, name)
+
+
+_SAVED_AS = re.compile(r"saved as (q\d+)")
+
+
+@dataclass
+class TaskRecord:
+    """One task's row in the record: what it was asked, how it went,
+    and what it left behind — read off the events its sub-turn emitted."""
+
+    id: str
+    goal: str
+    kind: str = "answer"
+    depends_on: list[str] = field(default_factory=list)
+    sub_turn: str = ""
+    status: str = "planned"       # planned · running · done · partial · failed · stopped
+    reason: str = ""
+    elapsed_ms: float = 0.0
+    model_calls: int = 0
+    steps: int = 0
+    artifacts: list[dict[str, Any]] = field(default_factory=list)
+    saved: list[str] = field(default_factory=list)
+    checked: list[str] = field(default_factory=list)
+    refused: list[str] = field(default_factory=list)
+    say: str = ""
+    started_at: str = ""
+    done_at: str = ""
+
+    def observe(self, record: dict[str, Any]) -> None:
+        ev = record.get("ev")
+        if ev == "say_token":
+            if len(self.say) < FINDINGS_CAP * 2:
+                self.say += str(record.get("delta") or "")
+        elif ev == "artifact":
+            self.artifacts.append({
+                "artifact_id": record.get("artifact_id"),
+                "type": record.get("type"), "title": record.get("title"),
+                "version": record.get("version")})
+        elif ev == "tool_step":
+            summary = str(record.get("summary") or "")
+            tool = str(record.get("tool") or "")
+            if tool == "check":
+                self.checked.append(summary[:200])
+            if summary.startswith("ERROR"):
+                self.refused.append(f"{tool}: {summary[7:].strip()}"[:240])
+            for name in _SAVED_AS.findall(summary):
+                if name not in self.saved:
+                    self.saved.append(name)
+        elif ev == "model_prompt" and record.get("kind") == "call":
+            self.model_calls += 1
+        elif ev == "turn_done":
+            self.elapsed_ms = float(record.get("elapsed_ms") or 0)
+        if ev == "tool_step":
+            self.steps += 1
+
+    def cost(self) -> dict[str, Any]:
+        return {"model_calls": self.model_calls, "steps": self.steps,
+                "elapsed_ms": round(self.elapsed_ms, 1)}
+
+    def row(self) -> dict[str, Any]:
+        """What the events and the transcript carry for this task."""
+        return {"id": self.id, "goal": self.goal, "kind": self.kind,
+                "depends_on": list(self.depends_on),
+                "sub_turn": self.sub_turn, "status": self.status,
+                "reason": self.reason, "cost": self.cost(),
+                "artifacts": [dict(a) for a in self.artifacts],
+                "saved": list(self.saved), "checked": list(self.checked),
+                "refused": list(self.refused),
+                "say": self.say.strip()[:300]}
+
+
+_STATUS_OF = {"answered": "done", "proposed": "done", "clarify": "done",
+              "partial": "partial", "stopped": "stopped"}
+
+
+def _findings(rec: TaskRecord) -> str:
+    """One task's output as the next task (or the synthesis) reads
+    it: the status, the prose, the artifacts and saved rows by id."""
+    head = f"### {rec.id} — {rec.goal} ({rec.status}"
+    if rec.reason:
+        head += f": {rec.reason}"
+    head += ")"
+    lines = [head]
+    prose = rec.say.strip()
+    if prose:
+        if len(prose) > FINDINGS_CAP:
+            prose = prose[:FINDINGS_CAP] + " …[cut]"
+        lines.append(prose)
+    else:
+        lines.append("(nothing was written)")
+    if rec.artifacts:
+        lines.append("Artifacts already in the panel: " + "; ".join(
+            f"{a['artifact_id']} ({a['type']} \"{a['title']}\" "
+            f"v{a['version']})" for a in rec.artifacts))
+    if rec.saved:
+        lines.append("Saved rows: " + ", ".join(rec.saved)
+                     + " (python reads them as meridian.rows('<name>'); "
+                     "check compares them by name)")
+    if rec.checked:
+        lines.append("Checks: " + "; ".join(rec.checked))
+    if rec.refused:
+        lines.append("Refused: " + "; ".join(rec.refused))
+    return "\n".join(lines)
+
+
+def _task_text(task: dict[str, Any],
+               inputs: list[TaskRecord]) -> str:
+    text = str(task["goal"]).strip()
+    if not inputs:
+        return text
+    return (text + "\n\nThis is one task of a larger ask; the tasks it "
+            "builds on are done. Their findings, to build on rather "
+            "than redo:\n\n" + "\n\n".join(_findings(r) for r in inputs))
+
+
+def _synthesis_text(text: str, plan: dict[str, Any],
+                    records: list[TaskRecord]) -> str:
+    hint = str(plan.get("synthesis") or "").strip()
+    lines = [
+        "The person asked:",
+        f"\"\"\"{text.strip()}\"\"\"",
+        "",
+        f"I split it into {len(records)} tasks and ran them; what each "
+        "found is below. Compose the final answer to the whole ask from "
+        "these findings only: do not run queries or tools, do not redo "
+        "the work, and never write a number that is not in the findings. "
+        "Every number keeps the status and meridian line the task gave "
+        "it. Where a task failed, was stopped or came back partial, say "
+        "so plainly rather than filling the gap. The artifacts named are "
+        "already in the panel: refer to them by title, do not rebuild "
+        "them. Answer in the person's words, in markdown, leading with "
+        "what they asked for first."]
+    if hint:
+        lines.append(f"How to put it together: {hint}")
+    lines.append("")
+    lines.extend(_findings(r) for r in records)
+    return "\n".join(lines)
+
+
+def _secs(ms: float) -> str:
+    s = max(0.0, float(ms or 0)) / 1000
+    return f"{s:.0f}s" if s >= 10 else f"{s:.1f}s"
+
+
+def report_markdown(text: str, plan: dict[str, Any],
+                    records: list[TaskRecord], *, pool: int,
+                    total_calls: int, total_steps: int,
+                    elapsed_ms: float, stopped: bool = False,
+                    budget_tick: dict[str, Any] | None = None) -> str:
+    """The "What was done" document: one row per task — the goal,
+    how it ended, what was checked, what it left behind, what it
+    cost — honest about refusals, limits, stops and partial results."""
+    order = waves([{"id": r.id, "depends_on": r.depends_on}
+                   for r in records])
+    side = sum(1 for w in order if len(w) > 1 for _ in w)
+    lines = [f"# {REPORT_TITLE}", "",
+             f"Asked: \"{text.strip()[:300]}\"", "",
+             f"Split into {len(records)} tasks in {len(order)} "
+             f"{'wave' if len(order) == 1 else 'waves'}: "
+             + "; then ".join(", ".join(w) for w in order)
+             + f". Up to {pool} tasks ran side by side"
+             + (f" ({side} did)" if side else "") + "."]
+    if plan.get("repairs"):
+        lines.append("Plan repairs: " + "; ".join(
+            str(r) for r in plan["repairs"][:6]) + ".")
+    if stopped:
+        lines.append("**Stopped by you before every task finished.**")
+    lines += ["", "| # | Task | Status | Checked | Left behind | Cost |",
+              "|---|---|---|---|---|---|"]
+    for r in records:
+        status = r.status
+        if r.reason:
+            status += f" — {r.reason}"
+        checked = "; ".join(r.checked) if r.checked else "—"
+        if r.refused:
+            checked += (" · refused: " if r.checked else "refused: ") \
+                + "; ".join(r.refused)
+        left = "; ".join(
+            f"{a['title']} ({a['type']} v{a['version']})"
+            for a in r.artifacts)
+        if r.saved:
+            left += (", " if left else "") + "rows " + ", ".join(r.saved)
+        after = f" (after {', '.join(r.depends_on)})" if r.depends_on \
+            else ""
+        cost = (f"{r.model_calls} calls · {r.steps} steps · "
+                f"{_secs(r.elapsed_ms)}")
+        cell = lambda s: str(s).replace("|", "\\|").replace("\n", " ")  # noqa: E731
+        lines.append(f"| {r.id} | {cell(r.goal)}{after} | {cell(status)} | "
+                     f"{cell(checked)} | {cell(left or '—')} | {cost} |")
+    unfinished = [r for r in records if r.status != "done"]
+    lines.append("")
+    if unfinished:
+        lines.append("Not finished: " + "; ".join(
+            f"{r.id} {r.status}" + (f" ({r.reason})" if r.reason else "")
+            for r in unfinished) + ". The answer above says what that "
+            "leaves open.")
+    else:
+        lines.append("Every task finished.")
+    tick = budget_tick or {}
+    lines.append(
+        f"Totals: {total_calls} model calls, {total_steps} tool steps, "
+        f"{_secs(elapsed_ms)} on the clock"
+        + (f", {tick.get('tokens', 0):,} tokens this session"
+           if tick.get("tokens") is not None else "") + ". The same "
+        "checks, gates and limits applied inside every task as in any "
+        "turn; each number above traces to the task that produced it.")
+    return "\n".join(lines)
+
+
+def run_task_turn(*, build: Build, store: AssistantStore,
+                  bus: EventBus, budget: Any, abort: Any,
+                  model: Any, session: dict[str, Any],
+                  turn_id: str, text: str, workspace: Path,
+                  skills: list[Skill] | None = None,
+                  substrate: Any = None,
+                  snapshot_runner: Any = None, runner: Any = None,
+                  graph_root: Path | None = None,
+                  memories: list[dict[str, Any]] | None = None,
+                  project: dict[str, Any] | None = None,
+                  thinking_level: str = DEFAULT_THINKING,
+                  user_name: str = "",
+                  max_calls: int = MAX_CALLS,
+                  wall_seconds: float = WALL_SECONDS,
+                  mode: str = DEFAULT_MODE,
+                  plane: str = "",
+                  attachments: list[dict[str, Any]] | None = None,
+                  file_names: list[str] | None = None,
+                  owner: str = "",
+                  model_label: str = "",
+                  model_name: str = "",
+                  plan: dict[str, Any] | None = None,
+                  pool_size: int = TASK_POOL) -> str:
+    """A turn that may be several jobs (docs/multi-task-turns.md).
+
+    The turn is announced, the planner is asked once; with no plan the
+    turn runs as one, exactly as ``run_assistant_turn`` would. With a
+    plan, each task is a sub-turn of the same session on the same bus,
+    budget and abort flag: independent tasks side by side on a small
+    pool, dependent ones after their inputs with the finished tasks'
+    findings as context, each under a share of the call ceiling. Then
+    the "What was done" document is published and a synthesis sub-turn
+    composes the final answer from the findings alone. One user
+    message, one assistant message per task, the synthesis last."""
+    session_id = session["id"]
+    started = time.perf_counter()
+    mode = mode if mode in MODES else DEFAULT_MODE
+    bus.emit("turn_started", turn_id=turn_id, text=text,
+             build_id=build.version, version=ASSISTANT_VERSION,
+             skills=[s.name for s in (skills or [])],
+             memories=len(memories or []),
+             project=(project or {}).get("name", ""),
+             thinking_level=thinking_level, mode=mode, plane=plane,
+             model=model_label, files=list(file_names or []),
+             planning=True)
+    budget.start_turn()
+    prepare_workspace(workspace, build.root)
+    common: dict[str, Any] = dict(
+        build=build, store=store, budget=budget, abort=abort, model=model,
+        session=session, workspace=workspace, skills=skills,
+        substrate=substrate, snapshot_runner=snapshot_runner,
+        runner=runner, graph_root=graph_root, memories=memories,
+        project=project, thinking_level=thinking_level,
+        user_name=user_name, mode=mode, plane=plane, owner=owner,
+        model_label=model_label, model_name=model_name)
+
+    if plan is None:
+        plan = plan_for(model, text, mode=mode, depth=thinking_level)
+    bus.emit("budget_tick", turn_id=turn_id, **budget.tick())
+    if plan is None:
+        # one job after all: the ordinary turn, already announced
+        return run_assistant_turn(
+            bus=bus, turn_id=turn_id, text=text,
+            attachments=attachments, file_names=file_names,
+            max_calls=max_calls, wall_seconds=wall_seconds,
+            sub_turn=SubTurn(announced=True, finish=True, title=True),
+            **common)
+
+    tasks = list(plan["tasks"])
+    records = {t["id"]: TaskRecord(
+        id=t["id"], goal=t["goal"], kind=t.get("kind", "answer"),
+        depends_on=list(t.get("depends_on") or []),
+        sub_turn=f"{turn_id}.{t['id']}") for t in tasks}
+    bus.emit("plan_made", turn_id=turn_id,
+             tasks=[{"id": t["id"], "goal": t["goal"],
+                     "kind": t.get("kind", "answer"),
+                     "depends_on": list(t.get("depends_on") or [])}
+                    for t in tasks],
+             synthesis=plan.get("synthesis", ""),
+             repairs=list(plan.get("repairs") or []),
+             pool=pool_size, waves=waves(tasks))
+    if not (session.get("title") or "").strip():
+        title = text.strip()[:60]
+        session["title"] = title
+        store.set_title(session_id, title)
+
+    share = max(MIN_TASK_CALLS,
+                (max_calls - SYNTHESIS_CALLS) // max(1, len(tasks)))
+    share = min(share, max(1, max_calls - SYNTHESIS_CALLS))
+
+    def remaining_wall() -> float:
+        return max(5.0, wall_seconds - (time.perf_counter() - started))
+
+    def run_one(task: dict[str, Any], index: int) -> TaskRecord:
+        rec = records[task["id"]]
+        inputs = [records[d] for d in rec.depends_on if d in records]
+        tagged = _TaggedBus(bus, rec.id, rec)
+        t0 = time.perf_counter()
+        try:
+            status = run_assistant_turn(
+                bus=tagged, turn_id=rec.sub_turn,
+                text=_task_text(task, inputs),
+                max_calls=share, wall_seconds=remaining_wall(),
+                sub_turn=SubTurn(
+                    task=rec.id, label=rec.goal, announced=False,
+                    finish=True, title=False,
+                    query_offset=QUERY_STRIDE * index,
+                    payload={"task": {"id": rec.id, "goal": rec.goal,
+                                      "kind": rec.kind,
+                                      "parent": turn_id,
+                                      "depends_on": rec.depends_on}}),
+                **common)
+            rec.status = _STATUS_OF.get(status, "partial")
+            if rec.status == "partial":
+                rec.reason = "ended early; see its own line"
+        except Aborted:
+            rec.status = "stopped"
+            rec.reason = "you stopped me"
+        except ModelUnavailable as e:
+            rec.status = "failed"
+            rec.reason = f"the model was unreachable: {e}"[:200]
+        except Exception as e:                  # noqa: BLE001
+            rec.status = "failed"
+            rec.reason = f"{type(e).__name__}: {e}"[:200]
+        if not rec.elapsed_ms:
+            rec.elapsed_ms = round((time.perf_counter() - t0) * 1000, 1)
+        return rec
+
+    def announce_done(rec: TaskRecord) -> None:
+        rec.done_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        bus.emit("task_done", turn_id=turn_id, task=rec.id,
+                 status=rec.status, reason=rec.reason,
+                 sub_turn=rec.sub_turn, cost=rec.cost(),
+                 artifacts=[dict(a) for a in rec.artifacts],
+                 saved=list(rec.saved), checked=list(rec.checked),
+                 refused=list(rec.refused), say=rec.say.strip()[:300])
+
+    # ── the schedule: whatever is ready runs, the pool bounds how
+    #    many at once, a finished task frees what depended on it; a
+    #    stop starts nothing new and lets the running ones close ──
+    queue = list(tasks)
+    finished: set[str] = set()
+    pending: dict[Any, TaskRecord] = {}
+    pool = ThreadPoolExecutor(max_workers=max(1, int(pool_size)),
+                              thread_name_prefix=f"task-{turn_id}")
+    try:
+        while queue or pending:
+            if not abort.fired():
+                ready = [t for t in queue
+                         if all(d in finished for d in
+                                (t.get("depends_on") or []))]
+                for task in ready:
+                    queue.remove(task)
+                    rec = records[task["id"]]
+                    rec.status = "running"
+                    rec.started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                                   time.gmtime())
+                    bus.emit("task_started", turn_id=turn_id, task=rec.id,
+                             goal=rec.goal, kind=rec.kind,
+                             depends_on=list(rec.depends_on),
+                             sub_turn=rec.sub_turn,
+                             n=tasks.index(task) + 1, of=len(tasks),
+                             max_calls=share)
+                    pending[pool.submit(run_one, task,
+                                        tasks.index(task))] = rec
+            if not pending:
+                break
+            done_set, _ = wait(list(pending), return_when=FIRST_COMPLETED)
+            for fut in done_set:
+                rec = pending.pop(fut)
+                try:
+                    fut.result()
+                except Exception as e:              # noqa: BLE001
+                    rec.status = "failed"
+                    rec.reason = f"{type(e).__name__}: {e}"[:200]
+                finished.add(rec.id)
+                announce_done(rec)
+    finally:
+        pool.shutdown(wait=True)
+    for task in queue:
+        rec = records[task["id"]]
+        rec.status = "stopped" if abort.fired() else "failed"
+        rec.reason = ("you stopped me" if abort.fired()
+                      else "its inputs never finished")
+        announce_done(rec)
+
+    ordered = [records[t["id"]] for t in tasks]
+    total_calls = sum(r.model_calls for r in ordered)
+    total_steps = sum(r.steps for r in ordered)
+    stopped = abort.fired()
+
+    # ── the record: "What was done", a document the person keeps ──
+    markdown = report_markdown(
+        text, plan, ordered, pool=pool_size, total_calls=total_calls,
+        total_steps=total_steps,
+        elapsed_ms=(time.perf_counter() - started) * 1000,
+        stopped=stopped, budget_tick=budget.tick())
+    report_id = ""
+    spec, problems = validate_artifact("document", {"markdown": markdown},
+                                       build_id=build.version)
+    if spec is not None and not problems:
+        row = store.add_artifact(session_id, turn_id=turn_id,
+                                 type="document", title=REPORT_TITLE,
+                                 spec=spec)
+        report_id = row["artifact_id"]
+        bus.emit("artifact", turn_id=turn_id,
+                 artifact_id=row["artifact_id"], version=row["version"],
+                 type=row["type"], title=row["title"], spec=row["spec"])
+    plan_payload = {"tasks": [r.row() for r in ordered],
+                    "synthesis": plan.get("synthesis", ""),
+                    "repairs": list(plan.get("repairs") or []),
+                    "pool": pool_size, "report": report_id,
+                    "stopped": stopped}
+
+    def close_without_model(status: str, closing: str) -> str:
+        bus.emit("say_token", turn_id=turn_id, delta=closing)
+        store.add_message(
+            session_id, "assistant", closing, turn_id=turn_id,
+            payload={"chips": [], "artifacts": [report_id] if report_id
+                     else [], "trace": [], "plan": plan_payload,
+                     "elapsed_ms": round(
+                         (time.perf_counter() - started) * 1000, 1)})
+        state = AssistantState()
+        state.notes = list(session.get("notes") or [])
+        _persist(store, session_id, state, status, closing, [])
+        _finish(bus, budget, turn_id, status, started,
+                model_calls=total_calls, steps=total_steps,
+                thinking_level=thinking_level, tasks=len(ordered),
+                skills_loaded=[])
+        return status
+
+    if stopped:
+        done_ids = [r.id for r in ordered if r.status == "done"]
+        left = [r.id for r in ordered if r.status != "done"]
+        return close_without_model(
+            "stopped",
+            "You stopped me. "
+            + (f"Finished: {', '.join(done_ids)}. " if done_ids else "")
+            + (f"Not finished: {', '.join(left)}. " if left else "")
+            + f"Each task's own line is above, and \"{REPORT_TITLE}\" "
+            "in the panel says what was checked.")
+
+    # ── the synthesis: the answer from the findings, no tools ──
+    synthesis_calls = max(1, min(SYNTHESIS_CALLS,
+                                 max_calls - total_calls))
+    synth = TaskRecord(id="synthesis", goal="the final answer")
+    try:
+        status = run_assistant_turn(
+            bus=_TaggedBus(bus, "", synth), turn_id=turn_id,
+            text=_synthesis_text(text, plan, ordered),
+            max_calls=synthesis_calls, wall_seconds=remaining_wall(),
+            sub_turn=SubTurn(
+                task="", label="", announced=True, finish=False,
+                title=False, tools=frozenset({"suggest_next"}),
+                payload={"plan": plan_payload},
+                artifacts=[report_id] if report_id else []),
+            **common)
+    except ModelUnavailable as e:
+        return close_without_model(
+            "partial",
+            f"I lost the connection to the model before I could put the "
+            f"answer together ({e}). Each task's own findings are above, "
+            f"and \"{REPORT_TITLE}\" in the panel says what was done.")
+    final = "answered" if status in ("answered", "proposed") \
+        else ("stopped" if status == "stopped" else "partial")
+    _finish(bus, budget, turn_id, final, started,
+            model_calls=total_calls + synth.model_calls,
+            steps=total_steps + synth.steps,
+            thinking_level=thinking_level, tasks=len(ordered),
+            skills_loaded=[])
+    return final
 
 
 def run_proposal_turn(*, build: Build, store: AssistantStore,
@@ -1208,4 +1814,6 @@ __all__ = ["ASSISTANT_VERSION", "IDENTITY", "THINKING_LEVELS", "DEPTHS",
            "MODE_MEANS",
            "DEFAULT_THINKING", "MODES", "DEFAULT_MODE", "system_prompt",
            "summarize", "run_assistant_turn", "run_proposal_turn",
-           "chart_rows_turn"]
+           "chart_rows_turn", "run_task_turn", "SubTurn", "TaskRecord",
+           "report_markdown", "TASK_POOL", "SYNTHESIS_CALLS",
+           "MIN_TASK_CALLS", "QUERY_STRIDE", "REPORT_TITLE"]

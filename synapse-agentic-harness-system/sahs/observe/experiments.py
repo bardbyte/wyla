@@ -21,6 +21,7 @@ from sahs.evals.grading import SutAnswer, TrialResult
 from sahs.evals.schema import Task
 
 from .annotations import enqueue_trace, ensure_queue
+from .datasets import DATASET_NAMES, ITEM_SCHEMAS, is_item_file, items_to_tasks
 from .langfuse_emitter import set_trace_attributes
 from .tracer import trace_id_for
 
@@ -38,7 +39,18 @@ def tasks_version(paths: Iterable[Path]) -> str:
 
 
 def dataset_name(path: Path) -> str:
+    """A task file is named by its folder and stem; an item file
+    (precedents, silver, scenarios) by its schema, so the run lands on
+    the dataset ``langfuse_sync.py datasets --build`` pushed."""
     path = Path(path)
+    if path.exists():
+        try:
+            head = path.read_text(encoding="utf-8").split("\n", 1)[0]
+            schema = json.loads(head).get("schema", "") if head.strip() else ""
+        except (ValueError, AttributeError):
+            schema = ""
+        if schema in ITEM_SCHEMAS:
+            return DATASET_NAMES[schema]
     parent = path.parent.name
     return (f"{DATASET_PREFIX}-{parent}" if parent == path.stem
             else f"{DATASET_PREFIX}-{parent}-{path.stem}")
@@ -48,6 +60,10 @@ def task_item(row: dict[str, Any]) -> dict[str, Any]:
     """One dataset item from one task row, whatever its shape: the
     whole row rides in metadata so nothing is lossy; input and
     expected are the best-effort projection the UI shows."""
+    if row.get("schema", "") in ITEM_SCHEMAS:
+        # already an item (sahs/observe/datasets.py): as it is
+        return {k: row.get(k) for k in ("id", "input", "expected_output",
+                                        "metadata")}
     if row.get("schema", "").startswith("meridian.task/"):
         task = Task.model_validate(row)
         return {"id": task.id,
@@ -69,6 +85,15 @@ def read_rows(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in
             Path(path).read_text(encoding="utf-8").splitlines()
             if line.strip()]
+
+
+def read_any_tasks(path: Path) -> list[Task]:
+    """Tasks from a task file, or from an item file (precedents,
+    silver, scenarios) turned into tasks: what run_evals.py loads."""
+    rows = read_rows(path)
+    if is_item_file(rows):
+        return items_to_tasks(rows)
+    return [Task.model_validate(row) for row in rows]
 
 
 def push_datasets(client: Any, paths: Iterable[Path]) -> dict[str, int]:
@@ -130,6 +155,20 @@ class ExperimentRecorder:
             return answer
         return wrapped
 
+    @staticmethod
+    def _expected_skill(item: Any) -> str:
+        expected = getattr(item, "expected_output", None)
+        if isinstance(expected, dict) and expected.get("skill"):
+            return str(expected["skill"])
+        meta = getattr(item, "metadata", None)
+        if isinstance(meta, dict):
+            if meta.get("skill"):
+                return str(meta["skill"])
+            for tag in meta.get("tags") or []:
+                if str(tag).startswith("skill="):
+                    return str(tag)[6:]
+        return ""
+
     def on_trial(self, trial: TrialResult) -> None:
         item = self.items.get(trial.task_id)
         if item is None:
@@ -161,6 +200,16 @@ class ExperimentRecorder:
         root.score_trace(name="pass",
                          value=1.0 if trial.verdict == "pass" else 0.0,
                          data_type="NUMERIC")
+        expected_skill = self._expected_skill(item)
+        if expected_skill and answer is not None:
+            # did the turn load the skill the item names: the routing
+            # half of the precedent eval, scored beside the SQL half
+            root.score_trace(
+                name="skill_hit",
+                value=1.0 if expected_skill in answer.skills else 0.0,
+                data_type="NUMERIC",
+                comment=f"expected {expected_skill}; loaded "
+                        f"{', '.join(answer.skills) or 'nothing'}")
         root.update(level="DEFAULT" if trial.verdict == "pass"
                     else "WARNING").end()
         self.recorded += 1
@@ -196,5 +245,5 @@ def experiment_recorder(client: Any, paths: Iterable[Path], *,
 
 
 __all__ = ["ExperimentRecorder", "dataset_name", "experiment_recorder",
-           "push_datasets", "read_rows", "run_name_for", "task_item",
-           "tasks_version"]
+           "push_datasets", "read_any_tasks", "read_rows", "run_name_for",
+           "task_item", "tasks_version"]

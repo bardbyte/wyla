@@ -107,22 +107,54 @@ def load_dotenv(path: Path | None = None, override: bool = False) -> list[str]:
     caller says ``override=True`` (the enterprise settings loader does,
     so its ``.env`` wins over a stale shell). Search order: explicit
     path → $SAHS_ENV_FILE → <silo root>/.env → ./.env.
-    Returns the variable names that were loaded."""
+    Returns the variable names that were loaded.
+
+    The file is read at most once per process: its parsed pairs are
+    cached by resolved path, size and mtime (``reset_dotenv_cache``
+    forgets them; an edited file is re-read on its own). ``os.environ``
+    is consulted fresh on every call, so a variable the shell (or a
+    test) sets or removes after the first call is honoured."""
     loaded: list[str] = []
     candidate = dotenv_path(path)
     if candidate is None:
         return loaded
-    for line in candidate.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip().removeprefix("export ").strip()
-        value = dotenv_value(value)
+    for key, value in _dotenv_pairs(candidate):
         if key and (override or key not in os.environ):
             os.environ[key] = value
             loaded.append(key)
     return loaded
+
+
+# resolved path → ((size, mtime_ns), the parsed pairs)
+_DOTENV_CACHE: dict[str, tuple[tuple[int, int], list[tuple[str, str]]]] = {}
+
+
+def _dotenv_pairs(candidate: Path) -> list[tuple[str, str]]:
+    """The file's ``key, value`` pairs, parsed once per (path, stamp)."""
+    key = str(candidate)
+    try:
+        stat = candidate.stat()
+        stamp = (stat.st_size, stat.st_mtime_ns)
+    except OSError:
+        return []
+    cached = _DOTENV_CACHE.get(key)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    pairs: list[tuple[str, str]] = []
+    for line in candidate.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        name = name.strip().removeprefix("export ").strip()
+        pairs.append((name, dotenv_value(value)))
+    _DOTENV_CACHE[key] = (stamp, pairs)
+    return pairs
+
+
+def reset_dotenv_cache() -> None:
+    """Forget every parsed ``.env`` (the tests, between files)."""
+    _DOTENV_CACHE.clear()
 
 
 def env_proxies() -> dict[str, str]:

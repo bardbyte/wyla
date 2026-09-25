@@ -62,6 +62,13 @@ With `sqlite` or `spanner`, every `/api/chat/*` call needs the session
 cookie and every chat, message, project, memory and artifact row carries
 the person who made it. What lands where, table by table, and what still
 lives on the filesystem: [`docs/spanner-wiring.md`](../../docs/spanner-wiring.md).
+Which `.env` the server reads is `SAHS_ENV_FILE` (`make run ENV=e1` from
+the repo root sets it and starts uvicorn on 8810); the profiles, the
+readiness checks and the DDL order: [`docs/deploy.md`](../../docs/deploy.md).
+Langfuse, when the team turns it on, is a mirror of those tables — the
+traces, sessions, users, scores, prompt versions and datasets are all
+rebuilt from them:
+[`langfuse-insight.md`](../../synapse-agentic-harness-system/docs/runbooks/langfuse-insight.md).
 
 With a store, the shell boots as the signed-in person (`js/session.js`):
 nobody signed in means every route is the sign-in page, every API call
@@ -181,7 +188,12 @@ where it is used, metric cards open in place with the definition and
 the table, and Skills (in place of Artifacts) showcases the doctrine
 packs with a Use-in-chat door. Skills also lets a person teach one:
 material in, the model's draft in the house format out, saved under
-`graph/skills/users/<owner>/` and loaded for that person alone. The
+`graph/skills/users/<owner>/` and loaded for that person alone. A pack
+within `SAHS_MAX_SKILL_CHARS` enters the chat whole; a larger one (a
+runtime knowledge bundle) loads as a searchable library — its table
+of contents plus the passages that match the ask, with `skill_search`
+and `skill_read` for the rest (see the harness's
+`docs/skill-retrieval.md`). The
 same page lists the knowledge files the graph is built from (the
 folders under the skills root, the staged drops, the reference docs)
 with their authors and last writes; Browse and Add open one pop-up
@@ -196,4 +208,17 @@ the gateway; each model's engine map is `synapse-agentic-harness-system/docs/mod
 remembered per chat (`POST /api/chat/sessions/{id}/model`), and the
 "?" beside the dials explains Chat/Autopilot, Quick/Standard/Deep and
 both models from `GET /api/chat/dials`.
+
+A message that reads like several jobs ("compare churn across the
+regions, then explain which definitions differ, and build a
+dashboard") becomes a task run on both surfaces: the harness splits it
+into at most six tasks, runs the independent ones side by side and the
+dependent ones after their inputs, and answers once with a "What was
+done" document beside the artifacts. The chat shows a task board under
+the message — one row per task with its status and cost, the running
+row open, the rest folded — and replays it when the chat is reopened.
+The events (`plan_made`, `task_started`, `task_done`, and a `task` field
+on every record a task's sub-turn emits) ride the same stream; there is
+no new route. The mental model, the gate, the budget split and the
+report are in `synapse-agentic-harness-system/docs/multi-task-turns.md`.
 

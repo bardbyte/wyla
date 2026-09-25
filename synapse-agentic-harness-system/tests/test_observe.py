@@ -120,16 +120,19 @@ def test_one_turn_is_one_trace_with_generations_tools_and_a_score(tmp_path):
     assert closed["metadata"]["elapsed_ms"] == 4.2
     assert closed["level"] == "DEFAULT"
 
-    (event,) = rec.of("event")
-    assert event["name"] == "artifact:chart"
-    assert event["metadata"]["artifact_id"] == "art1"
+    events = {e["name"]: e for e in rec.of("event")}
+    assert set(events) == {"artifact:chart", "chips"}
+    assert events["artifact:chart"]["metadata"]["artifact_id"] == "art1"
+    assert events["chips"]["metadata"]["suggestions"] == ["more"]
 
     (done,) = rec.of("trace_close")
     assert done["output"] == "Here you go."
     assert done["metadata"]["status"] == "answered"
     assert done["level"] == "DEFAULT"
-    (score,) = rec.of("score")
-    assert score["name"] == "turn_status" and score["value"] == "answered"
+    scores = {s["name"]: s for s in rec.of("score")}
+    assert set(scores) == {"turn_status", "refused"}
+    assert scores["turn_status"]["value"] == "answered"
+    assert scores["refused"]["value"] == 0.0
     assert tracer._turns == {}                    # forgotten on turn_done
 
 
@@ -225,11 +228,15 @@ def sdk_client():
         return httpx.Response(207, json={"successes": [], "errors": []})
     # a fresh public key per client: the SDK keeps one resource set
     # per key, and an earlier test's exporter must not receive ours
+    # the id generator the emitter pins observation ids through, as
+    # setup.langfuse_client() hands it to the real client
+    from sahs.observe.langfuse_emitter import PINNED
     client = Langfuse(public_key=f"pk-test-{uuid.uuid4().hex[:8]}",
                       secret_key="sk-test", base_url="http://127.0.0.1:1",
                       httpx_client=httpx.Client(
                           transport=httpx.MockTransport(handler)),
-                      span_exporter=exporter, flush_interval=0.2)
+                      span_exporter=exporter, flush_interval=0.2,
+                      id_generator=PINNED)
     yield client, exporter, posted
     client.shutdown()
 
@@ -264,7 +271,8 @@ def test_langfuse_emitter_writes_the_trace_the_tracer_asked_for(
     scores = [e["body"] for batch in posted for e in batch.get("batch", [])
               if e.get("type", "").startswith("score")]
     assert [(sc["name"], sc["value"], sc["traceId"]) for sc in scores] == \
-        [("turn_status", "answered", trace_id_for("s1", "t1"))]
+        [("turn_status", "answered", trace_id_for("s1", "t1")),
+         ("refused", 0.0, trace_id_for("s1", "t1"))]
 
 
 # ── datasets and runs ────────────────────────────────────────

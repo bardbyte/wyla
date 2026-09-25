@@ -10,6 +10,7 @@ a call ceiling in the loop, a session token ceiling here.
 from __future__ import annotations
 
 import inspect
+import logging
 import os
 import re
 import threading
@@ -26,9 +27,10 @@ from sahs.util.paths import owner_paths
 
 from .events import ASSISTANT_EVENTS, EventBus
 from .loop import (DEFAULT_MODE, DEFAULT_THINKING, DEPTHS, MAX_CALLS,
-                   MODE_MEANS, MODES,
+                   MODE_MEANS, MODES, TASK_POOL,
                    THINKING_LEVELS, chart_rows_turn, run_assistant_turn,
-                   run_proposal_turn)
+                   run_proposal_turn, run_task_turn)
+from .planner import should_plan
 from .skills_loader import all_skills, load_packs
 from .store import AssistantStore
 
@@ -45,8 +47,12 @@ CHAT_BUDGET = {"session_tokens": 6_000_000, "session_calls": 800,
                "turn_tokens": 2_500_000, "turn_calls": MAX_CALLS + 20}
 
 
+_log = logging.getLogger("sahs.assistant.runtime")
+
+
 class _SessionRuntime:
-    def __init__(self, session_id: str, events_dir: Path | None) -> None:
+    def __init__(self, session_id: str, events_dir: Path | None,
+                 store: Any = None) -> None:
         path = (events_dir / f"{session_id}.jsonl") if events_dir else None
         self.bus = EventBus(session_id, path,
                             events=ASSISTANT_EVENTS)
@@ -54,6 +60,32 @@ class _SessionRuntime:
         self.abort = Abort()
         self.thread: threading.Thread | None = None
         self.current_turn: str = ""
+        # a store that keeps events (SpannerAssistantStore.add_event)
+        # gets every record the bus emits, after the JSONL and before
+        # the observers; the bus resumes after what the store already
+        # holds so a pod that restarted never reuses a seq. A store
+        # write that fails is logged and counted, never raised: the
+        # page still sees the live stream, the turn goes on.
+        self.store = store if callable(getattr(store, "add_event", None)) \
+            else None
+        self.store_errors = 0
+        self.empty_gap: tuple[int, int] | None = None
+        if self.store is not None:
+            try:
+                self.bus.resume(int(self.store.last_event_seq(session_id)))
+            except Exception as exc:                 # noqa: BLE001
+                _log.warning("events for %s: could not read the store's "
+                             "head (%s); numbering from 1", session_id, exc)
+            self.bus.sinks.append(self._keep)
+
+    def _keep(self, record: dict[str, Any]) -> None:
+        try:
+            self.store.add_event(self.bus.session_id, record)
+        except Exception as exc:                     # noqa: BLE001
+            self.store_errors += 1
+            _log.warning("events for %s: seq %s not stored (%s: %s)",
+                         self.bus.session_id, record.get("seq"),
+                         type(exc).__name__, exc)
 
     @property
     def running(self) -> bool:
@@ -238,11 +270,33 @@ class AssistantRuntime:
         return {"ok": True, "plane": self.plane_of(session),
                 "choice": now, "model": self.label_for(now)}
 
+    # ── the content store (SAHS_STORE=spanner|sqlite): the files on a
+    #    chat, the person's own skills, the knowledge files and the
+    #    review board in the identity database; None keeps every one of
+    #    them on the filesystem, as under SAHS_STORE=local ───────────
+    @property
+    def content_store(self) -> Any:
+        return getattr(self, "_content_store", None)
+
+    @content_store.setter
+    def content_store(self, store: Any) -> None:
+        from .skills_loader import bind_own_skills, unbind_own_skills
+        self._content_store = store
+        # the loader reads this owner's own packs from the store's rows
+        # in every reader (the shelf, the loop's index, load_skill)
+        if store is None:
+            unbind_own_skills(self.owner)
+        else:
+            bind_own_skills(self.owner, store.my_skills)
+        self._reviews = None                 # the board follows the store
+
     # ── files on a chat (the composer's Add files) ────────────
     def files(self, session_id: str) -> list[dict[str, Any]]:
         from . import files as files_mod
         if self.store.get_session(session_id) is None:
             raise KeyError(session_id)
+        if self.content_store is not None:
+            return self.content_store.files(session_id)
         return files_mod.manifest(self.workspace(session_id))
 
     def add_file(self, session_id: str, name: str,
@@ -252,6 +306,8 @@ class AssistantRuntime:
         from . import files as files_mod
         if self.store.get_session(session_id) is None:
             raise KeyError(session_id)
+        if self.content_store is not None:
+            return self.content_store.add_file(session_id, name, data)
         return files_mod.store(self.workspace(session_id), name,
                                data).row()
 
@@ -259,7 +315,26 @@ class AssistantRuntime:
         from . import files as files_mod
         if self.store.get_session(session_id) is None:
             raise KeyError(session_id)
+        if self.content_store is not None:
+            return self.content_store.remove_file(session_id, file_id)
         return files_mod.remove(self.workspace(session_id), file_id)
+
+    def _file_parts(self, session_id: str, file_ids: list[str]
+                    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """The parts that ride a message for these files, from the
+        home the files are in (the workspace, or the store's rows)."""
+        from . import files as files_mod
+        if self.content_store is not None:
+            return self.content_store.parts_for(session_id, file_ids)
+        return files_mod.parts_for(self.workspace(session_id), file_ids)
+
+    def _mark_files_sent(self, session_id: str, file_ids: list[str],
+                         turn_id: str) -> None:
+        from . import files as files_mod
+        if self.content_store is not None:
+            self.content_store.mark_sent(session_id, file_ids, turn_id)
+            return
+        files_mod.mark_sent(self.workspace(session_id), file_ids, turn_id)
 
     @staticmethod
     def file_support() -> dict[str, Any]:
@@ -361,11 +436,45 @@ class AssistantRuntime:
         with self._lock:
             rt = self._runtimes.get(session_id)
             if rt is None:
-                rt = _SessionRuntime(session_id, self.events_dir)
+                # the store is read here, not at construction: the app
+                # swaps in the chat-table store after building the runtime
+                rt = _SessionRuntime(session_id, self.events_dir, self.store)
                 if self.observer is not None:
                     rt.bus.sinks.append(self.observer)
                 self._runtimes[session_id] = rt
             return rt
+
+    def events_since(self, session_id: str, after: int) -> list[dict]:
+        """The records after ``after`` for the stream: the bus's, and
+        when the bus has nothing there but the store does (this pod
+        came up after the events were emitted, or the bus trimmed
+        them), the store's. The bus resumes past the store's head, so
+        the two never overlap."""
+        rt = self.runtime(session_id)
+        batch = rt.bus.since(after)
+        if rt.store is None:
+            return batch
+        # the first seq the bus can serve; everything between ``after``
+        # and it was emitted before this bus existed
+        gap_end = batch[0]["seq"] if batch else rt.bus.head() + 1
+        if gap_end <= after + 1:
+            return batch
+        # a gap the store could not fill (a row that never landed) is
+        # remembered, so a stream polling every 50 ms does not ask the
+        # database the same question every time
+        gap = (after, gap_end)
+        if rt.empty_gap == gap:
+            return batch
+        try:
+            stored = rt.store.events(session_id, after)
+        except Exception as exc:                     # noqa: BLE001
+            _log.warning("events for %s: replay from the store failed "
+                         "(%s: %s)", session_id, type(exc).__name__, exc)
+            return batch
+        kept = [e for e in stored if e["seq"] < gap_end]
+        if not kept:
+            rt.empty_gap = gap
+        return kept + batch
 
     def create_session(self, *, actor: str = "admin") -> dict:
         try:
@@ -411,9 +520,12 @@ class AssistantRuntime:
     # Skills page where people READ them, full text included
     @property
     def owner(self) -> str:
-        """Whose own packs load: the configured person today, the
-        signed-in one once identity lands (the same seam)."""
+        """Whose own packs load: the signed-in person's user id when a
+        store binds one (two people with one display name never share a
+        shelf), else the configured name on a laptop."""
         from .skills_loader import owner_slug
+        if self.owner_user_id:
+            return owner_slug(self.owner_user_id)
         return owner_slug(self.user_name) or "anon"
 
     def skills(self) -> list[dict]:
@@ -445,11 +557,13 @@ class AssistantRuntime:
 
     def save_my_skill(self, name: str, text: str) -> dict:
         from . import authoring
-        return authoring.save_skill(self.graph_root, self.owner, name, text)
+        return authoring.save_skill(self.graph_root, self.owner, name, text,
+                                    store=self.content_store)
 
     def delete_my_skill(self, name: str) -> bool:
         from . import authoring
-        gone = authoring.delete_skill(self.graph_root, self.owner, name)
+        gone = authoring.delete_skill(self.graph_root, self.owner, name,
+                                      store=self.content_store)
         # a published submission whose file is gone is withdrawn too
         sub = self.reviews.find("skill", authoring.slug(name), self.owner)
         if sub is not None and sub["status"] == "published":
@@ -460,11 +574,16 @@ class AssistantRuntime:
     #    manager, with the model's read, before the agent sees it ──
     # where approved knowledge files land: a folder, or a callable the
     # app gives so the answer follows its configuration at publish time
+    # (with a content store they land in KnowledgeFiles instead)
     knowledge_dir: Any = None
 
     @property
     def reviews(self) -> Any:
+        """The board: the ledger under runs/reviews/, or — with a
+        content store — the same verbs over the review tables."""
         from .reviews import Reviews
+        if self.content_store is not None:
+            return self.content_store
         if getattr(self, "_reviews", None) is None:
             self._reviews = Reviews(self.graph_root / "runs" / "reviews")
         return self._reviews
@@ -518,12 +637,25 @@ class AssistantRuntime:
         from . import authoring
         if sub["kind"] == "skill":
             # the owner's folder is the submitter's slug (a slug slugs
-            # to itself), so it lists for the person who filed it
+            # to itself), so it lists for the person who filed it; on
+            # the store, the submitter's UserSkills row
             got = authoring.save_skill(self.graph_root,
                                        sub.get("submitter_slug") or self.owner,
-                                       sub["name"], text)
+                                       sub["name"], text,
+                                       store=self.content_store,
+                                       user_id=str(sub.get("submitter_user_id")
+                                                   or ""))
             return {"ok": bool(got.get("ok")), "reason": got.get("reason", ""),
                     "path": got.get("path", "")}
+        if self.content_store is not None:
+            # the row carries the provenance the file's header carried:
+            # who staged it and when; an approved resubmission replaces
+            # the earlier version under the same name
+            got = self.content_store.stage_knowledge(
+                sub["business_unit"], sub["name"], sub.get("ext") or "md", text,
+                str(sub.get("submitter_user_id") or ""), replace=True)
+            return {"ok": bool(got.get("ok")), "reason": got.get("reason", ""),
+                    "path": f"KnowledgeFiles/{got['file']}" if got.get("ok") else ""}
         root = self.knowledge_dir() if callable(self.knowledge_dir) \
             else self.knowledge_dir
         root = Path(root) if root else (
@@ -553,7 +685,7 @@ class AssistantRuntime:
                 "min_band": MIN_BAND, "me": self.user_name, **board}
 
     def set_skills(self, session_id: str, names: list[str]) -> dict:
-        from sahs.loop.skills import LOADED_VAR, SkillTooLarge, max_loaded
+        from sahs.loop.skills import LOADED_VAR, SkillUnreadable, max_loaded
 
         from .skills_loader import load_packs
         session = self.store.get_session(session_id)
@@ -567,8 +699,10 @@ class AssistantRuntime:
         try:
             loaded, missing = load_packs(self.graph_root, list(names),
                                          owner=self.owner)
-        except SkillTooLarge as e:
-            # over the size ceiling: refused by name, never cut
+        except SkillUnreadable as e:
+            # broken input (a file that cannot be read): refused by
+            # name with the reason. Size never refuses — a pack over
+            # the ceiling pins and loads as a library.
             return {"ok": False, "reason": str(e)}
         if missing:
             return {"ok": False,
@@ -643,25 +777,32 @@ class AssistantRuntime:
             project_id=(project or {}).get("id", ""))
         level = self.thinking_level(depth)
         chosen = self.mode_for(mode)
+        common = dict(
+            build=build, store=self.store, bus=rt.bus,
+            budget=rt.budget, abort=rt.abort, model=model,
+            session=session, turn_id=turn_id, text=prompt_text,
+            workspace=self.workspace(session_id),
+            skills=loaded, graph_root=self.graph_root,
+            memories=memories, project=project,
+            snapshot_runner=self.snapshot_runner,
+            runner=self.runner,
+            substrate=self.substrate,
+            thinking_level=level, user_name=self.user_name,
+            mode=chosen, plane=plane, model_label=model_label,
+            model_name=model_name,
+            attachments=attachments or [],
+            file_names=file_names or [],
+            owner=self.owner)
+        # a message that reads like several jobs goes to the planner
+        # (one JSON one-shot, then tasks); anything else is the turn
+        # exactly as before — same call, same events, same prompt
+        body = (self._task_turn(common) if should_plan(prompt_text, chosen,
+                                                       level)
+                else (lambda: run_assistant_turn(**common)))
 
         def worker() -> None:
             try:
-                run_assistant_turn(
-                    build=build, store=self.store, bus=rt.bus,
-                    budget=rt.budget, abort=rt.abort, model=model,
-                    session=session, turn_id=turn_id, text=prompt_text,
-                    workspace=self.workspace(session_id),
-                    skills=loaded, graph_root=self.graph_root,
-                    memories=memories, project=project,
-                    snapshot_runner=self.snapshot_runner,
-                    runner=self.runner,
-                    substrate=self.substrate,
-                    thinking_level=level, user_name=self.user_name,
-                    mode=chosen, plane=plane, model_label=model_label,
-                    model_name=model_name,
-                    attachments=attachments or [],
-                    file_names=file_names or [],
-                    owner=self.owner)
+                body()
             except ModelUnavailable as e:
                 rt.bus.emit("error", turn_id=turn_id,
                             code="model_unavailable",
@@ -694,6 +835,14 @@ class AssistantRuntime:
 
         return worker
 
+    def _task_turn(self, common: dict[str, Any]) -> Callable[[], Any]:
+        """The planned path (docs/multi-task-turns.md): the turn is
+        announced, the planner is asked once, and the tasks run as
+        sub-turns of this session on this bus, budget and abort flag —
+        or, with no plan, the turn runs as one. The same worker guard
+        as any model turn wraps it (_model_turn)."""
+        return lambda: run_task_turn(**common, pool_size=TASK_POOL)
+
     def start_turn(self, session_id: str, text: str,
                    depth: str = "", mode: str = "",
                    model: str = "",
@@ -718,12 +867,10 @@ class AssistantRuntime:
         # the files ride this message: their parts are built before
         # anything is stored, so an over-budget attachment is refused
         # with the reason and the chat stays as it was
-        from . import files as files_mod
         attachments: list[dict] = []
         used: list[dict] = []
         if files:
-            attachments, used = files_mod.parts_for(
-                self.workspace(session_id), list(files))
+            attachments, used = self._file_parts(session_id, list(files))
         turn_id = f"t_{uuid.uuid4().hex[:10]}"
         rt.abort = Abort()
         rt.current_turn = turn_id
@@ -735,8 +882,8 @@ class AssistantRuntime:
                                 "rides": r["rides"]} for r in used]}
             if used else None)
         if used:
-            files_mod.mark_sent(self.workspace(session_id),
-                                [r["id"] for r in used], turn_id)
+            self._mark_files_sent(session_id, [r["id"] for r in used],
+                                  turn_id)
         worker = self._model_turn(session_id, session, rt, build,
                                   turn_id, text, depth=depth, mode=mode,
                                   plane=plane, model_id=model_id,
@@ -904,8 +1051,34 @@ class AssistantRuntime:
         switching chats or tabs never stops or loses a turn."""
         rt = self._runtimes.get(session_id)
         if rt is None or not rt.running:
+            # no thread here: either nothing runs, or this pod came up
+            # after the turn started elsewhere and the store holds the
+            # events. A stored turn that never closed is reported with
+            # where it began (and ``interrupted``: no thread will finish
+            # it), so the page can replay what the person saw.
+            store = getattr(self.store, "last_turn", None)
+            if callable(store) and (rt is None or not rt.bus.since(0)):
+                try:
+                    last = store(session_id)
+                except Exception as exc:             # noqa: BLE001
+                    _log.warning("turn window for %s: the store did not "
+                                 "answer (%s: %s)", session_id,
+                                 type(exc).__name__, exc)
+                    last = None
+                if last and last["turn_id"] and not last["closed"]:
+                    first = last["first_seq"]
+                    return {"running": False, "turn_id": last["turn_id"],
+                            "after": (first - 1) if first else None,
+                            "interrupted": True}
             return {"running": False, "turn_id": "", "after": None}
         first = rt.bus.first_seq(rt.current_turn)
+        if first is None and rt.store is not None:
+            try:
+                last = rt.store.last_turn(session_id)
+                if last["turn_id"] == rt.current_turn:
+                    first = last["first_seq"]
+            except Exception:                        # noqa: BLE001
+                first = None
         return {"running": True, "turn_id": rt.current_turn,
                 "after": (first - 1) if first is not None else None}
 

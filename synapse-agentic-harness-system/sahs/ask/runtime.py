@@ -8,6 +8,7 @@ turn runs is refused with a reason rather than queued invisibly.
 
 from __future__ import annotations
 
+import os
 import threading
 import uuid
 from pathlib import Path
@@ -77,7 +78,7 @@ class AskRuntime:
                  store_path: Path, events_dir: Path | None = None,
                  model_factory: Callable[[Budget], Any] | None = None,
                  snapshot_runner: Any = None, runner: Any = None,
-                 owner_user_id: str = "") -> None:
+                 owner_user_id: str = "", store: Any = None) -> None:
         self.builds_root = Path(builds_root)
         self.graph_root = Path(graph_root)
         # a signed-in person's runtime keeps its own store and event log
@@ -94,7 +95,13 @@ class AskRuntime:
         self.events_dir = Path(events_dir) if events_dir else None
         if self.events_dir:
             self.events_dir.mkdir(parents=True, exist_ok=True)
-        self.store = SessionStore(Path(store_path))
+        # the store: the per-person sqlite file by default; under an
+        # identity store the app hands in SpannerAssistantStore (the
+        # chat tables, bound to the owner), here or by assigning
+        # ``runtime.store`` afterwards. Every verb the lane uses
+        # (sessions, messages, plan versions, feedback) is on both.
+        self.store = store if store is not None \
+            else SessionStore(Path(store_path))
         self._model_factory = model_factory
         self._runtimes: dict[str, _SessionRuntime] = {}
         self._lock = threading.Lock()
@@ -119,6 +126,16 @@ class AskRuntime:
             return self._model_factory(budget)
         from .model import VertexModel          # imported late: env-bound
         return VertexModel.from_env(budget)
+
+    @property
+    def model_name(self) -> str:
+        """The engine this lane runs on, for the skill budgets
+        (``sahs.util.profiles``): the Vertex model the .env names;
+        '' (the conservative unknown-engine row) under a scripted
+        model factory or an unset env."""
+        if self._model_factory is not None:
+            return ""
+        return (os.environ.get("VERTEX_MODEL") or "").strip()
 
     # ── sessions ─────────────────────────────────────────────
     def runtime(self, session_id: str) -> _SessionRuntime:
@@ -156,7 +173,7 @@ class AskRuntime:
         silently 'loaded'."""
         from sahs.loop.skills import (
             LOADED_VAR,
-            SkillTooLarge,
+            SkillUnreadable,
             load_skills,
             max_loaded,
         )
@@ -171,8 +188,10 @@ class AskRuntime:
                               "matters for this session"}
         try:
             loaded, missing = load_skills(self.graph_root, list(names))
-        except SkillTooLarge as e:
-            # over the size ceiling: refused by name, never cut
+        except SkillUnreadable as e:
+            # broken input (a file that cannot be read): refused by
+            # name with the reason. Size never refuses — a skill over
+            # the ceiling pins and the turn holds it as a library.
             return {"ok": False, "reason": str(e)}
         if missing:
             return {"ok": False,
@@ -182,7 +201,10 @@ class AskRuntime:
         return {"ok": True, "skills": [s.name for s in loaded]}
 
     def sessions(self, limit: int = 50) -> list[dict]:
-        rows = self.store.list_sessions(limit)
+        # the chat tables hold the v2 chats too (kind assistant); this
+        # lane's shelf is the two hats
+        rows = [r for r in self.store.list_sessions(limit * 2)
+                if r.get("kind") in ("analyst", "steward")][:limit]
         for row in rows:
             rt = self._runtimes.get(row["id"])
             row["running"] = bool(rt and rt.running)
@@ -204,11 +226,23 @@ class AskRuntime:
         rt.abort = Abort()
         rt.current_turn = turn_id
         # the session's loaded skills ride the session dict into the
-        # turn (Agent Loop v1 §2: Context(..., skills=session.skills))
+        # turn (Agent Loop v1 §2: Context(..., skills=session.skills)):
+        # whole when they fit this engine's whole-load limit, and as
+        # a library when they do not — this lane has no lookup tools,
+        # so the library is STATIC retrieval: the contents plus the
+        # top passages for this ask under the engine's budget, built
+        # here and rendered into the navigator's prompt (never a
+        # refusal, never a cut)
+        from sahs.assistant.skills_loader import skill_context
         from sahs.loop.skills import load_skills
         loaded, _missing = load_skills(self.graph_root,
                                        list(session.get("skills") or []))
-        session["_skills_loaded"] = loaded
+        library = skill_context(self.graph_root, loaded, text,
+                                self.model_name, "medium", tools=False)
+        session["_skills_loaded"] = library.whole
+        session["_skill_library"] = library.block
+        session["_skills_library"] = library.searchable_names
+        session["_skills_record"] = library.event()
         self.store.add_message(session_id, "user", text, turn_id=turn_id,
                                payload={"choice": choice} if choice else None)
         model = LazyModel(lambda: self.model_for(rt.budget))

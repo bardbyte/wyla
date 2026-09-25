@@ -320,3 +320,39 @@ def test_the_composer_switches_models_and_explains_every_dial():
     for piece in ('"/dials"', "SessionModel", "set_session_model",
                   "model=req.model", '"plane": plane'):
         assert piece in BACKEND, piece
+
+
+def test_a_compound_ask_draws_a_task_board():
+    """Multi-task turns (docs/multi-task-turns.md): the plan is a board
+    under the person's message, one row per task with its status and
+    cost, the task's own events grouped under its row (the running one
+    open, the finished ones folded), and the transcript replays the
+    same board from the stored plan. Every new event has an arm and a
+    listener (pinned above with ASSISTANT_EVENTS)."""
+    for piece in ('case "plan_made"', 'case "task_started"',
+                  'case "task_done"', "task-board", "task-row",
+                  "boardFor", "taskTurnFor", "taskStatus", "homeOf",
+                  "Split into", "side by side", "Sorting out the asks",
+                  "Working through", 'task.el.open = status === "running"',
+                  "replayTaskMessage", "payload?.task", "payload?.plan",
+                  "if (turn.task) break;", "event.planning",
+                  'split(".")[0]'):
+        assert piece in CHAT_JS, piece
+    for status in ("running", "done", "partial", "failed", "stopped"):
+        assert f".task-row.{status}" in CSS, status
+    for cls in (".task-board", ".task-board-head", ".task-status",
+                ".task-cost", ".task-body", ".task-note"):
+        assert cls in CSS, cls
+    # the harness side: the planner gate, the runner, the report, the
+    # tag on every sub-turn record, no new route (the stream carries it)
+    runtime_py = (SILO / "sahs" / "assistant" / "runtime.py").read_text(
+        encoding="utf-8")
+    loop_py = (SILO / "sahs" / "assistant" / "loop.py").read_text(
+        encoding="utf-8")
+    assert "should_plan(" in runtime_py and "def _task_turn" in runtime_py
+    for piece in ("def run_task_turn", "class SubTurn", "class TaskRecord",
+                  'REPORT_TITLE = "What was done"', "task=self._task or None",
+                  "ThreadPoolExecutor"):
+        assert piece in loop_py, piece
+    assert (SILO / "sahs" / "assistant" / "planner.py").exists()
+    assert "task" not in BACKEND.split("class NewMessage")[0]

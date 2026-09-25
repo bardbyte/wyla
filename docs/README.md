@@ -15,6 +15,7 @@ specs, eval baselines).
 | Design sweep | [`design_inventory.md`](design_inventory.md) | the sweep of the design files |
 | The enterprise port | [`enterprise-port.md`](enterprise-port.md) | what came across from the enterprise branch, every deviation, and how a change is carried back |
 | Spanner wiring | [`spanner-wiring.md`](spanner-wiring.md) | every path the app persists, the store class behind it, and the Spanner table it lands in under `SAHS_STORE=spanner`, or the gap |
+| Deploying | [`deploy.md`](deploy.md) | the one flag (`SAHS_ENV_FILE`), the four profiles, what each readiness check proves, the DDL order, the tenancy decision, day one on a new environment |
 
 ## Reading order
 

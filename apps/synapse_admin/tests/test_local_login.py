@@ -24,7 +24,7 @@ SILO = REPO_ROOT / "synapse-agentic-harness-system"
 sys.path.insert(0, str(SILO))
 sys.path.insert(0, str(SILO / "tests"))
 
-from apps.synapse_admin.backend import auth, chat, okta  # noqa: E402
+from apps.synapse_admin.backend import ask, auth, chat, okta  # noqa: E402
 from apps.synapse_admin.backend.app import create_app  # noqa: E402
 from fake_spanner import FakeSpannerDatabase  # noqa: E402
 from test_oidc import CLIENT, ISSUER  # noqa: E402
@@ -45,6 +45,8 @@ def _reset() -> None:
     okta.reset_client()
     chat._RUNTIME = None
     chat._RUNTIMES.clear()
+    ask._RUNTIME = None
+    ask._RUNTIMES.clear()
 
 
 @pytest.fixture()
@@ -268,6 +270,139 @@ def test_on_spanner_every_row_lands_in_the_spanner_tables(spanner, laptop):
     assert bo_client.get(f"/api/chat/sessions/{session['id']}").json()["available"] is False
     assert bo_client.get(f"/api/chat/artifacts/{art['artifact_id']}").json()["available"] is False
     assert spanner.count("Users") == 2
+
+
+def _frames(client: TestClient, url: str, **params) -> list[dict]:
+    """The SSE frames of one stream, as (id, event) pairs with the data."""
+    out = []
+    with client.stream("GET", url, params=params) as response:
+        assert response.status_code == 200
+        frame: dict = {}
+        for line in response.iter_lines():
+            line = line.rstrip("\r\n")
+            if not line:
+                if frame:
+                    out.append(frame)
+                frame = {}
+            elif line.startswith("id: "):
+                frame["id"] = int(line[4:])
+            elif line.startswith("event: "):
+                frame["event"] = line[7:]
+            elif line.startswith("data: "):
+                frame["data"] = json.loads(line[6:])
+    return out
+
+
+def test_a_turns_events_land_in_chat_events_and_replay_after_a_restart(spanner, laptop):
+    """Every record the chat's bus emits is also a ChatEvents row; when
+    the pod restarts (no runtime, an empty bus) the stream and the
+    session's turn window are served from the table."""
+    client = _client()
+    assert client.post("/api/auth/signup", json=ANA).status_code == 201
+    ana = client.get("/api/whoami").json()["user"]
+    csrf = _csrf(client)
+    session = client.post("/api/chat/sessions", headers=csrf).json()["session"]
+    runtime = chat._RUNTIMES[ana["user_id"]]
+    rt = runtime.runtime(session["id"])
+    rt.bus.emit("turn_started", turn_id="t1")
+    rt.bus.emit("say_token", turn_id="t1", delta="churn is a rate")
+    rt.bus.emit("turn_done", turn_id="t1", tokens={"in": 3})
+    rows = spanner.rows("ChatEvents", "SessionId = @s", {"s": session["id"]})
+    assert [(r["Seq"], r["Ev"], r["TurnId"]) for r in rows] == [
+        (1, "turn_started", "t1"), (2, "say_token", "t1"), (3, "turn_done", "t1")]
+    assert json.loads(rows[1]["Payload"])["delta"] == "churn is a rate"
+    live = _frames(client, f"/api/chat/sessions/{session['id']}/stream", after=0, once=True)
+    assert [(f["id"], f["event"]) for f in live] == [
+        (1, "turn_started"), (2, "say_token"), (3, "turn_done")]
+
+    # the pod restarts: the runtimes are gone, and with them every bus
+    chat._RUNTIMES.clear()
+    shown = client.get(f"/api/chat/sessions/{session['id']}").json()
+    assert shown["head"] == 3 and shown["running"] is False and shown["turn_id"] == ""
+    replay = _frames(client, f"/api/chat/sessions/{session['id']}/stream", after=0, once=True)
+    assert [(f["id"], f["event"]) for f in replay] == [
+        (1, "turn_started"), (2, "say_token"), (3, "turn_done")]
+    assert replay[1]["data"]["delta"] == "churn is a rate"
+    assert replay[2]["data"]["tokens"] == {"in": 3}
+    resumed = _frames(client, f"/api/chat/sessions/{session['id']}/stream", after=2, once=True)
+    assert [(f["id"], f["event"]) for f in resumed] == [(3, "turn_done")]
+    # a new turn on the rebuilt bus numbers on from the table
+    rt = chat._RUNTIMES[ana["user_id"]].runtime(session["id"])
+    assert rt.bus.emit("turn_started", turn_id="t2")["seq"] == 4
+    assert spanner.count("ChatEvents", "SessionId = @s", {"s": session["id"]}) == 4
+
+    # a restart mid-turn: the session says which turn was cut and where it began
+    chat._RUNTIMES.clear()
+    shown = client.get(f"/api/chat/sessions/{session['id']}").json()
+    assert shown["running"] is False and shown["turn_id"] == "t2" and shown["turn_after"] == 3
+    # another person's stream of this chat replays nothing
+    bo_client = TestClient(client.app)
+    assert bo_client.post("/api/auth/signup", json=BO).status_code == 201
+    assert bo_client.get(f"/api/chat/sessions/{session['id']}").json()["available"] is False
+
+
+def test_the_ask_lane_lands_in_the_chat_tables_with_the_owner(spanner, laptop):
+    """The E18 lane (/api/sessions*) on a store: its runtime's store is
+    the chat-table store bound to the person, sessions are kind
+    analyst or steward, and the message, plan and feedback rows carry
+    the owner."""
+    from sahs.assistant.spanner_store import SpannerAssistantStore
+    client = _client()
+    assert client.post("/api/auth/signup", json=ANA).status_code == 201
+    ana = client.get("/api/whoami").json()["user"]
+    csrf = _csrf(client)
+    made = client.post("/api/sessions", json={"kind": "analyst"}, headers=csrf)
+    assert made.status_code == 201, made.text
+    session = made.json()["session"]
+    assert session["kind"] == "analyst" and session["actor"] == ana["user_id"]
+    runtime = ask._RUNTIMES[ana["user_id"]]
+    assert isinstance(runtime.store, SpannerAssistantStore)
+    assert runtime.store.owner_user_id == ana["user_id"]
+    # the steward hat needs metrics.certify, which an analyst lacks
+    assert client.post("/api/sessions", json={"kind": "steward"}, headers=csrf).status_code == 403
+
+    runtime.store.add_message(session["id"], "user", "what is churn?", turn_id="t1")
+    runtime.store.add_message(session["id"], "assistant", "a rate", turn_id="t1",
+                              payload={"chat": {"kind": "answer"}})
+    runtime.store.add_plan_version(session["id"], {"metric": "churn"}, turn_id="t1",
+                                   summary="churn by month")
+    recorded = client.post(f"/api/sessions/{session['id']}/feedback",
+                           json={"vote": "up", "turn_id": "t1", "note": "good"}, headers=csrf)
+    assert recorded.status_code == 201, recorded.text
+    shown = client.get(f"/api/sessions/{session['id']}").json()
+    assert [m["text"] for m in shown["messages"]] == ["what is churn?", "a rate"]
+    assert shown["messages"][1]["payload"] == {"chat": {"kind": "answer"}}
+    assert shown["plan_versions"][0]["plan"] == {"metric": "churn"}
+    assert shown["session"]["title"] == "" and shown["running"] is False
+    restored = client.post(f"/api/sessions/{session['id']}/plan/restore",
+                           json={"version": 1}, headers=csrf).json()
+    assert restored["restored"] is False                      # v1 is the current plan
+    listed = client.get("/api/sessions").json()["sessions"]
+    assert [s["id"] for s in listed] == [session["id"]] and listed[0]["running"] is False
+    # the chat shelf (kind assistant) does not list the analyst session, nor the reverse
+    assert client.get("/api/chat/sessions").json()["sessions"] == []
+    chat_session = client.post("/api/chat/sessions", headers=csrf).json()["session"]
+    assert [s["id"] for s in client.get("/api/sessions").json()["sessions"]] == [session["id"]]
+    assert [s["id"] for s in client.get("/api/chat/sessions").json()["sessions"]] == [chat_session["id"]]
+
+    owner = {"u": ana["user_id"]}
+    assert spanner.count("ChatSessions", "OwnerUserId = @u AND Kind = 'analyst'", owner) == 1
+    assert spanner.count("ChatMessages", "OwnerUserId = @u", owner) == 2
+    assert spanner.count("ChatPlanVersions", "SessionId = @s", {"s": session["id"]}) == 1
+    feedback = spanner.rows("ChatFeedback", "UserId = @u", owner)
+    assert len(feedback) == 1 and feedback[0]["Vote"] == "up" and feedback[0]["Note"] == "good"
+    # and not in the lane's sqlite file
+    for path in (laptop / "graph" / "runs" / "ask").rglob("sessions.sqlite3"):
+        conn = sqlite3.connect(path)
+        try:
+            assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0, path
+        finally:
+            conn.close()
+    # another person sees nothing of it
+    bo_client = TestClient(client.app)
+    assert bo_client.post("/api/auth/signup", json=BO).status_code == 201
+    assert bo_client.get("/api/sessions").json()["sessions"] == []
+    assert bo_client.get(f"/api/sessions/{session['id']}").json()["available"] is False
 
 
 def test_the_google_consent_state_is_parked_in_the_store(spanner, laptop, monkeypatch):

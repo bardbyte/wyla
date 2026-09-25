@@ -82,6 +82,40 @@ def test_the_chat_store_is_the_sqlite_store_with_a_person():
     assert "IngestedRun" in ddl
 
 
+def test_the_content_tables_hold_the_bytes_and_the_board():
+    """007: a file's bytes in chunks under its ChatFiles row, and the
+    review ledger as a head row, its versions, its events and each
+    person's seen-mark — keyed, interleaved, CHECKed."""
+    ddl = _text("007_content.sql")
+    for table in ("ChatFileChunks", "ReviewSubmissions", "ReviewVersions",
+                  "ReviewEvents", "ReviewSeen"):
+        assert f"CREATE TABLE {table} (" in ddl, table
+    assert "PRIMARY KEY (SessionId, FileId, Seq)" in ddl
+    assert "INTERLEAVE IN PARENT ChatFiles ON DELETE CASCADE" in ddl
+    assert re.search(r"Chunk\s+BYTES\(MAX\)\s+NOT NULL", ddl)
+    assert ddl.count("INTERLEAVE IN PARENT ReviewSubmissions ON DELETE CASCADE") == 2
+    assert "INTERLEAVE IN PARENT Users ON DELETE CASCADE" in ddl      # ReviewSeen
+    assert "CHECK (Kind IN ('skill', 'knowledge'))" in ddl
+    assert "CHECK (Status IN ('pending', 'published', 'rejected', 'withdrawn'))" in ddl
+    assert "CHECK (Ext IN ('md', 'txt', 'csv', 'json', 'yaml', 'yml', 'sql'))" in ddl
+    assert "'submitted', 'resubmitted', 'ai_review', 'approved', 'rejected', 'withdrawn'" in ddl
+    assert "FOREIGN KEY (SubmitterUserId) REFERENCES Users (UserId)" in ddl
+    assert "PRIMARY KEY (SubmissionId, Seq)" in ddl and "Payload       JSON" in ddl
+    # the ledger's by/at are reserved words in GoogleSQL: Actor, OccurredAt
+    assert not re.search(r"^\s+(By|At)\s+", ddl, re.M)
+    # the lists the store writes are the DDL's
+    from sahs.assistant import reviews as rv
+    for status in rv.STATUSES:
+        assert f"'{status}'" in ddl, status
+    for event in rv.EVENTS:
+        assert f"'{event}'" in ddl, event
+    for ext in rv.EXTS:
+        assert f"'{ext}'" in ddl, ext
+    # the chunk ceiling stays under Spanner's 10 MiB cell
+    from sahs.assistant.content_store import CHUNK_BYTES
+    assert CHUNK_BYTES <= 8 * 1024 * 1024
+
+
 def test_the_graph_is_assertions_plus_a_fold_and_a_property_graph():
     from sahs.graph.ids import ID_PATTERNS
     from sahs.graph.quads import RELATIONS, WITNESSES
@@ -103,6 +137,23 @@ def test_the_graph_is_assertions_plus_a_fold_and_a_property_graph():
     for kind in ID_PATTERNS:
         assert f"'{kind}'" in ddl, kind
     assert "CHECK (Status IN ('active', 'superseded', 'retracted'))" in ddl
+
+
+def test_the_bundle_tables_hang_under_builds_and_every_file_is_in_the_readme():
+    """005: what sahs/builds/spanner_store.py writes, keyed as it reads,
+    interleaved so a re-publish's DELETE FROM Builds takes the old
+    bundle and its chunks with it."""
+    ddl = _text("005_build_bundles.sql")
+    assert "CREATE TABLE BuildBundles (" in ddl and "CREATE TABLE BuildBundleChunks (" in ddl
+    assert ddl.count("INTERLEAVE IN PARENT Builds ON DELETE CASCADE") == 1
+    assert ddl.count("INTERLEAVE IN PARENT BuildBundles ON DELETE CASCADE") == 1
+    assert re.search(r"Chunk\s+BYTES\(MAX\)\s+NOT NULL", ddl)
+    assert re.search(r"Complete\s+BOOL\s+NOT NULL DEFAULT \(false\)", ddl)
+    assert "PRIMARY KEY (BuildId, Seq)" in ddl
+    assert "PublishedAt  TIMESTAMP   NOT NULL OPTIONS (allow_commit_timestamp = true)" in ddl
+    readme = (DDL / "README.md").read_text(encoding="utf-8")
+    for path in sorted(DDL.glob("*.sql")):
+        assert f"`{path.name}`" in readme, path.name
 
 
 def test_the_readme_and_the_design_say_how():

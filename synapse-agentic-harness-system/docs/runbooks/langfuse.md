@@ -59,11 +59,19 @@ unless `SAHS_LANGFUSE_FULL_RESULTS=1`. Tag an environment with
 
 ```
 python scripts/langfuse_sync.py backfill graph/runs/chat/events
+python scripts/langfuse_sync.py backfill --from spanner [--since <iso>]
 ```
 
-Same translator, same trace ids (a hash of session and turn), so a
-re-run overwrites rather than duplicates. Timing is import time; the
-record's own timestamps stay in the events file.
+Same translator, same trace ids (a hash of session and turn) and the
+same observation and score ids, so a re-run overwrites rather than
+duplicates. Timing is import time; the record's own timestamps stay in
+the record. With a store on (`SAHS_STORE=spanner|sqlite`) the record is
+the chat tables and `--from spanner` replays `ChatEvents` through the
+store, files each trace under the session's owner and scores the
+thumbs in `ChatFeedback`; mind the table's 90-day row deletion policy.
+The full picture — prompt versions, the silver, precedents and
+scenarios datasets, experiment runs and the coverage check — is
+[`langfuse-insight.md`](langfuse-insight.md).
 
 ## Step three: datasets and the calibration lines
 

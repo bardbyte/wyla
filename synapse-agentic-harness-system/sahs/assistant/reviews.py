@@ -355,9 +355,191 @@ def _title_of(text: str, fallback: str) -> tuple[str, str]:
     return title, description
 
 
+def fold_records(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """The current state of every submission from its events, in the
+    order they happened: one dict per submission, the shape the page
+    reads. The ledger on disk and the ``ReviewEvents`` rows in the
+    store (``sahs/assistant/content_store.py``) both fold through
+    here, so the two boards read alike."""
+    subs: dict[str, dict[str, Any]] = {}
+    for rec in records:
+        ev, sid = rec.get("ev"), rec.get("id")
+        if not sid:
+            continue
+        if ev == "submitted":
+            subs[sid] = {**{k: v for k, v in rec.items() if k != "ev"},
+                         "status": "pending", "version": 1,
+                         "submitted_at": rec["at"], "updated_at": rec["at"],
+                         "decided_at": "", "decided_by": "",
+                         "comments": [], "ai_review": None,
+                         "ai_status": "running", "published_path": ""}
+            continue
+        sub = subs.get(sid)
+        if sub is None:
+            continue
+        sub["updated_at"] = rec.get("at", sub["updated_at"])
+        if ev == "resubmitted":
+            sub.update(version=int(rec.get("version") or sub["version"] + 1),
+                       status="pending", ai_review=None,
+                       ai_status="running", decided_at="", decided_by="")
+            for key in ("description", "purpose", "title"):
+                if rec.get(key):
+                    sub[key] = rec[key]
+            if rec.get("comment"):
+                sub["comments"].append({"at": rec["at"], "by": rec.get("by", ""),
+                                        "event": "resubmitted",
+                                        "text": rec["comment"]})
+        elif ev == "ai_review":
+            if rec.get("version") and rec["version"] != sub["version"]:
+                continue                 # a read of an older version
+            sub["ai_review"] = rec.get("review")
+            sub["ai_status"] = rec.get("status") or (
+                "done" if rec.get("review") else "failed")
+            sub["ai_reason"] = rec.get("reason", "")
+        elif ev in ("approved", "rejected"):
+            sub.update(status="published" if ev == "approved" else "rejected",
+                       decided_at=rec["at"], decided_by=rec.get("by", ""))
+            if ev == "approved":
+                sub["published_path"] = rec.get("published_path", "")
+            sub["comments"].append({"at": rec["at"], "by": rec.get("by", ""),
+                                    "event": ev,
+                                    "text": rec.get("comment", "")})
+        elif ev == "withdrawn":
+            sub["status"] = "withdrawn"
+    return subs
+
+
+def board_row(sub: dict[str, Any], *,
+              text: str | None = None) -> dict[str, Any]:
+    """A folded submission as the board lists it: the status label and
+    the light summary of the model's read; with a text, the full read
+    stays and the text rides along (the one-submission view)."""
+    row = dict(sub)
+    row["status_label"] = STATUS_LABEL.get(row["status"], row["status"])
+    review = row.get("ai_review")
+    row["ai_summary"] = ({"recommendation": review["recommendation"],
+                          "recommendation_label": RECOMMENDATION_LABEL[
+                              review["recommendation"]],
+                          "by": review["by"],
+                          "insights": len(review.get("insights") or [])}
+                         if review else None)
+    if text is None:
+        row.pop("ai_review", None)
+    else:
+        row["text"] = text
+    return row
+
+
+def check_submission(*, kind: str, name: str, text: str, title: str = "",
+                     description: str = "", purpose: str = "",
+                     business_unit: str = "", ext: str = "md",
+                     submitter_slug: str = "",
+                     reserved: set[str] | frozenset[str] = frozenset()
+                     ) -> dict[str, Any]:
+    """What the door checks before a submission is filed, and the
+    fields as they are filed: ``{"ok": False, "reason"}`` or ``ok``
+    with the normalized ``kind, name, title, description, purpose,
+    business_unit, ext, text``."""
+    if kind not in KINDS:
+        return {"ok": False, "reason": "kind is skill or knowledge"}
+    text = (text or "").strip() + "\n"
+    cap = MAX_SKILL_CHARS if kind == "skill" else MAX_KNOWLEDGE_CHARS
+    if len(text.strip()) < 20:
+        return {"ok": False, "reason": "the file is empty"}
+    if len(text) > cap:
+        return {"ok": False, "reason": f"over {cap:,} characters"}
+    parsed_title, parsed_description = _title_of(text, name or "untitled")
+    title = (title or "").strip() or parsed_title
+    name = _slug(name) or _slug(title)
+    if not name:
+        return {"ok": False, "reason": "the file needs a name"}
+    if kind == "skill" and name in reserved:
+        return {"ok": False,
+                "reason": f"{name} is a built-in skill's name: pick another"}
+    if kind == "knowledge":
+        if not _BU.match(business_unit or ""):
+            return {"ok": False, "reason": "a knowledge file names the "
+                                           "business unit it is for"}
+        if ext not in EXTS:
+            return {"ok": False, "reason": "ext is one of " + ", ".join(EXTS)}
+    if not (submitter_slug or "").strip():
+        return {"ok": False, "reason": "no submitter to file this for"}
+    description = (description or "").strip()[:400] or parsed_description
+    purpose = (purpose or "").strip()[:600]
+    return {"ok": True, "kind": kind, "name": name, "title": title,
+            "description": description, "purpose": purpose,
+            "business_unit": business_unit if kind == "knowledge" else "",
+            "ext": ext if kind == "knowledge" else "md", "text": text}
+
+
+def check_decision(sub: dict[str, Any], decision: str,
+                   comment: str = "") -> dict[str, Any]:
+    """Whether this decision may be taken on this submission: it must
+    be pending, the approver on the record must hold the band, a
+    rejection carries its reason. ``{"ok": True, "comment"}`` or the
+    refusal."""
+    if sub["status"] != "pending":
+        return {"ok": False, "reason": f"this submission is "
+                                       f"{STATUS_LABEL[sub['status']].lower()}, "
+                                       "not pending"}
+    approver = Approver(**sub["approver"])
+    if not approver.may_approve:
+        return {"ok": False,
+                "reason": f"the approver must be band {MIN_BAND} or above; "
+                          f"{approver.name} is band {approver.band}"}
+    comment = (comment or "").strip()[:4000]
+    if decision == "reject" and not comment:
+        return {"ok": False, "reason": "a rejection carries the reason "
+                                       "for the submitter"}
+    if decision not in ("approve", "reject"):
+        return {"ok": False, "reason": "decision is approve or reject"}
+    return {"ok": True, "comment": comment}
+
+
+def notice_rows(records: list[dict[str, Any]],
+                subs: dict[str, dict[str, Any]],
+                unread: Callable[[int, dict[str, Any]], bool]
+                ) -> list[dict[str, Any]]:
+    """The notices the PRD lists, read off the events in order: a file
+    submitted (to the submitter and the manager), approved, rejected,
+    resubmitted. ``unread(index, record)`` says whether this person
+    has read that record yet."""
+    out = []
+    for idx, rec in enumerate(records):
+        sub = subs.get(rec.get("id", ""))
+        ev = rec.get("ev")
+        if sub is None or ev not in ("submitted", "resubmitted", "approved",
+                                     "rejected"):
+            continue
+        fresh = unread(idx, rec)
+        title = sub.get("title") or sub.get("name")
+        approver = (sub.get("approver") or {}).get("name", "")
+        if ev in ("submitted", "resubmitted"):
+            verb = "submitted" if ev == "submitted" else "resubmitted"
+            out.append({"at": rec["at"], "id": sub["id"], "event": ev,
+                        "to": "approver", "who": approver, "unread": fresh,
+                        "text": f"{sub.get('submitter', 'someone')} {verb} "
+                                f"'{title}' ({sub['kind']}) for your review"})
+            out.append({"at": rec["at"], "id": sub["id"], "event": ev,
+                        "to": "submitter", "who": sub.get("submitter", ""),
+                        "unread": fresh,
+                        "text": f"'{title}' {verb} to {approver} for approval"})
+        else:
+            out.append({"at": rec["at"], "id": sub["id"], "event": ev,
+                        "to": "submitter", "who": sub.get("submitter", ""),
+                        "unread": fresh,
+                        "text": f"'{title}' was {ev} by {rec.get('by') or approver}"
+                                + (": " + rec["comment"][:120]
+                                   if rec.get("comment") else "")})
+    return out
+
+
 class Reviews:
     """The workflow over one folder. Every mutation appends a record;
-    every read folds the ledger (a few hundred records at most)."""
+    every read folds the ledger (a few hundred records at most). The
+    same board on the store's tables is ``SpannerContentStore``
+    (``sahs/assistant/content_store.py``); both fold and check through
+    the functions above."""
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
@@ -388,52 +570,7 @@ class Reviews:
         return out
 
     def _fold(self) -> dict[str, dict[str, Any]]:
-        subs: dict[str, dict[str, Any]] = {}
-        for rec in self._records():
-            ev, sid = rec.get("ev"), rec.get("id")
-            if not sid:
-                continue
-            if ev == "submitted":
-                subs[sid] = {**{k: v for k, v in rec.items() if k != "ev"},
-                             "status": "pending", "version": 1,
-                             "submitted_at": rec["at"], "updated_at": rec["at"],
-                             "decided_at": "", "decided_by": "",
-                             "comments": [], "ai_review": None,
-                             "ai_status": "running", "published_path": ""}
-                continue
-            sub = subs.get(sid)
-            if sub is None:
-                continue
-            sub["updated_at"] = rec.get("at", sub["updated_at"])
-            if ev == "resubmitted":
-                sub.update(version=int(rec.get("version") or sub["version"] + 1),
-                           status="pending", ai_review=None,
-                           ai_status="running", decided_at="", decided_by="")
-                for key in ("description", "purpose", "title"):
-                    if rec.get(key):
-                        sub[key] = rec[key]
-                if rec.get("comment"):
-                    sub["comments"].append({"at": rec["at"], "by": rec.get("by", ""),
-                                            "event": "resubmitted",
-                                            "text": rec["comment"]})
-            elif ev == "ai_review":
-                if rec.get("version") and rec["version"] != sub["version"]:
-                    continue                 # a read of an older version
-                sub["ai_review"] = rec.get("review")
-                sub["ai_status"] = rec.get("status") or (
-                    "done" if rec.get("review") else "failed")
-                sub["ai_reason"] = rec.get("reason", "")
-            elif ev in ("approved", "rejected"):
-                sub.update(status="published" if ev == "approved" else "rejected",
-                           decided_at=rec["at"], decided_by=rec.get("by", ""))
-                if ev == "approved":
-                    sub["published_path"] = rec.get("published_path", "")
-                sub["comments"].append({"at": rec["at"], "by": rec.get("by", ""),
-                                        "event": ev,
-                                        "text": rec.get("comment", "")})
-            elif ev == "withdrawn":
-                sub["status"] = "withdrawn"
-        return subs
+        return fold_records(self._records())
 
     def _file(self, sid: str, version: int) -> Path:
         return self.files / sid / f"v{version}.md"
@@ -447,22 +584,9 @@ class Reviews:
 
     # ── reads ──
     def list(self, *, with_text: bool = False) -> list[dict[str, Any]]:
-        rows = []
-        for sub in self._fold().values():
-            row = dict(sub)
-            row["status_label"] = STATUS_LABEL.get(row["status"], row["status"])
-            review = row.get("ai_review")
-            row["ai_summary"] = ({"recommendation": review["recommendation"],
-                                  "recommendation_label": RECOMMENDATION_LABEL[
-                                      review["recommendation"]],
-                                  "by": review["by"],
-                                  "insights": len(review.get("insights") or [])}
-                                 if review else None)
-            if not with_text:
-                row.pop("ai_review", None)
-            else:
-                row["text"] = self.text_of(sub["id"])
-            rows.append(row)
+        rows = [board_row(sub, text=self.text_of(sub["id"]) if with_text
+                          else None)
+                for sub in self._fold().values()]
         rows.sort(key=lambda r: r["updated_at"], reverse=True)
         return rows
 
@@ -496,32 +620,17 @@ class Reviews:
         already has under that name (pending, rejected or published):
         the same door either way, status pending, the read started by
         the caller."""
-        if kind not in KINDS:
-            return {"ok": False, "reason": "kind is skill or knowledge"}
-        text = (text or "").strip() + "\n"
-        cap = MAX_SKILL_CHARS if kind == "skill" else MAX_KNOWLEDGE_CHARS
-        if len(text.strip()) < 20:
-            return {"ok": False, "reason": "the file is empty"}
-        if len(text) > cap:
-            return {"ok": False, "reason": f"over {cap:,} characters"}
-        parsed_title, parsed_description = _title_of(text, name or "untitled")
-        title = (title or "").strip() or parsed_title
-        name = _slug(name) or _slug(title)
-        if not name:
-            return {"ok": False, "reason": "the file needs a name"}
-        if kind == "skill" and name in reserved:
-            return {"ok": False,
-                    "reason": f"{name} is a built-in skill's name: pick another"}
-        if kind == "knowledge":
-            if not _BU.match(business_unit or ""):
-                return {"ok": False, "reason": "a knowledge file names the "
-                                               "business unit it is for"}
-            if ext not in EXTS:
-                return {"ok": False, "reason": "ext is one of " + ", ".join(EXTS)}
-        if not (submitter_slug or "").strip():
-            return {"ok": False, "reason": "no submitter to file this for"}
-        description = (description or "").strip()[:400] or parsed_description
-        purpose = (purpose or "").strip()[:600]
+        checked = check_submission(
+            kind=kind, name=name, text=text, title=title,
+            description=description, purpose=purpose,
+            business_unit=business_unit, ext=ext,
+            submitter_slug=submitter_slug, reserved=reserved)
+        if not checked["ok"]:
+            return checked
+        kind, name, text = checked["kind"], checked["name"], checked["text"]
+        title, description = checked["title"], checked["description"]
+        purpose, business_unit = checked["purpose"], checked["business_unit"]
+        ext = checked["ext"]
         existing = self.find(kind, name, submitter_slug)
         if existing is not None:
             return self.resubmit(existing["id"], text=text, description=description,
@@ -531,8 +640,7 @@ class Reviews:
         self._append({"ev": "submitted", "id": sid, "at": now_iso(),
                       "kind": kind, "name": name, "title": title,
                       "description": description, "purpose": purpose,
-                      "business_unit": business_unit if kind == "knowledge" else "",
-                      "ext": ext if kind == "knowledge" else "md",
+                      "business_unit": business_unit, "ext": ext,
                       "submitter": submitter, "submitter_slug": submitter_slug,
                       "approver": asdict(approver), "chars": len(text)})
         return {"ok": True, "submission": self.get(sid), "resubmitted": False}
@@ -625,17 +733,11 @@ class Reviews:
         sub = self._fold().get(sid)
         if sub is None:
             return {"ok": False, "reason": f"no submission {sid}"}
-        if sub["status"] != "pending":
-            return {"ok": False, "reason": f"this submission is "
-                                           f"{STATUS_LABEL[sub['status']].lower()}, "
-                                           "not pending"}
-        approver = Approver(**sub["approver"])
-        if not approver.may_approve:
-            return {"ok": False,
-                    "reason": f"the approver must be band {MIN_BAND} or above; "
-                              f"{approver.name} is band {approver.band}"}
-        comment = (comment or "").strip()[:4000]
-        by = by or approver.name
+        checked = check_decision(sub, decision, comment)
+        if not checked["ok"]:
+            return checked
+        comment = checked["comment"]
+        by = by or sub["approver"]["name"]
         if decision == "approve":
             published_path = ""
             if publish is not None:
@@ -646,14 +748,9 @@ class Reviews:
             self._append({"ev": "approved", "id": sid, "at": now_iso(), "by": by,
                           "comment": comment, "published_path": published_path,
                           "version": sub["version"]})
-        elif decision == "reject":
-            if not comment:
-                return {"ok": False, "reason": "a rejection carries the reason "
-                                               "for the submitter"}
+        else:
             self._append({"ev": "rejected", "id": sid, "at": now_iso(), "by": by,
                           "comment": comment, "version": sub["version"]})
-        else:
-            return {"ok": False, "reason": "decision is approve or reject"}
         return {"ok": True, "submission": self.get(sid)}
 
     def withdraw(self, sid: str, *, by: str = "") -> dict[str, Any]:
@@ -673,33 +770,8 @@ class Reviews:
         # "read through record N": the ledger is append-only, so the
         # count is exact where a clock would tie within a second
         seen = int(self._seen().get(me, 0) or 0)
-        out = []
-        for idx, rec in enumerate(self._records()):
-            sub = subs.get(rec.get("id", ""))
-            ev = rec.get("ev")
-            if sub is None or ev not in ("submitted", "resubmitted", "approved",
-                                         "rejected"):
-                continue
-            unread = idx >= seen
-            title = sub.get("title") or sub.get("name")
-            approver = (sub.get("approver") or {}).get("name", "")
-            if ev in ("submitted", "resubmitted"):
-                verb = "submitted" if ev == "submitted" else "resubmitted"
-                out.append({"at": rec["at"], "id": sub["id"], "event": ev,
-                            "to": "approver", "who": approver, "unread": unread,
-                            "text": f"{sub.get('submitter', 'someone')} {verb} "
-                                    f"'{title}' ({sub['kind']}) for your review"})
-                out.append({"at": rec["at"], "id": sub["id"], "event": ev,
-                            "to": "submitter", "who": sub.get("submitter", ""),
-                            "unread": unread,
-                            "text": f"'{title}' {verb} to {approver} for approval"})
-            else:
-                out.append({"at": rec["at"], "id": sub["id"], "event": ev,
-                            "to": "submitter", "who": sub.get("submitter", ""),
-                            "unread": unread,
-                            "text": f"'{title}' was {ev} by {rec.get('by') or approver}"
-                                    + (": " + rec["comment"][:120]
-                                       if rec.get("comment") else "")})
+        out = notice_rows(self._records(), subs,
+                          lambda idx, rec: idx >= seen)
         out.reverse()                                # newest first
         return {"notices": out[:limit],
                 "unread": sum(1 for n in out if n["unread"]),
@@ -726,4 +798,6 @@ class Reviews:
 __all__ = ["KINDS", "STATUSES", "STATUS_LABEL", "EVENTS", "MIN_BAND",
            "RECOMMENDATIONS", "RECOMMENDATION_LABEL", "CATEGORIES",
            "CATEGORY_LABEL", "CONFIDENCES", "Approver", "approver_for",
-           "REVIEW_SYSTEM", "ai_review", "checks_review", "Reviews"]
+           "REVIEW_SYSTEM", "ai_review", "checks_review", "fold_records",
+           "board_row", "check_submission", "check_decision", "notice_rows",
+           "Reviews"]

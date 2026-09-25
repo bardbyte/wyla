@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -37,11 +37,17 @@ Verdict = Literal["pass", "fail", "ambiguous"]
 class SutAnswer(BaseModel):
     """What a system-under-test returns for one task."""
 
-    kind: Literal["sql", "abstain", "disambiguate", "bindings"]
+    kind: Literal["sql", "abstain", "disambiguate", "bindings", "plan"]
     sql: str | None = None
     options: list[str] = Field(default_factory=list)
     bindings: dict[str, list[str]] = Field(default_factory=dict)
     reason: str | None = None
+    # plan: the task list a planner produced (decompose tasks)
+    tasks: list[dict[str, Any]] = Field(default_factory=list)
+    # the skills the SUT loaded on the way (the assistant loop's
+    # skills_loaded record); scored beside the verdict when a task
+    # names the skill it expects
+    skills: list[str] = Field(default_factory=list)
 
 
 @dataclass
@@ -171,6 +177,43 @@ def grade_resolve_bind(task: Task, answer: SutAnswer) -> TrialResult:
     return TrialResult(task.id, task.kind, "pass", "bindings_match")
 
 
+def _waves(tasks: list[dict[str, Any]]) -> int:
+    depth: dict[str, int] = {}
+    for t in tasks:
+        depth[str(t.get("id"))] = 1 + max(
+            (depth.get(str(d), 0) for d in (t.get("depends_on") or [])),
+            default=0)
+    return max(depth.values(), default=0)
+
+
+def grade_decompose(task: Task, answer: SutAnswer) -> TrialResult:
+    """The plan against the gold task list: the same number of tasks,
+    the same kinds (as a multiset) and the same depth of dependency
+    waves pass; the same count with different kinds or depth is
+    AMBIGUOUS (a person decides whether the split is as good); a
+    different count, or no plan at all, fails. Goals are prose and are
+    never string-compared."""
+    if answer.kind != "plan":
+        return TrialResult(task.id, task.kind, "fail", "no_plan")
+    want = list(task.gold.expected_tasks)
+    got = list(answer.tasks)
+    if not want:
+        return TrialResult(task.id, task.kind, "pass" if not got else "fail",
+                           "single_job" if not got else "split_single_job")
+    if len(got) != len(want):
+        return TrialResult(task.id, task.kind, "fail",
+                           f"task_count {len(got)}≠{len(want)}")
+    kinds_want = sorted(str(t.get("kind", "answer")) for t in want)
+    kinds_got = sorted(str(t.get("kind", "answer")) for t in got)
+    if kinds_got != kinds_want:
+        return TrialResult(task.id, task.kind, "ambiguous",
+                           f"kinds {kinds_got}≠{kinds_want}")
+    if _waves(got) != _waves(want):
+        return TrialResult(task.id, task.kind, "ambiguous",
+                           f"waves {_waves(got)}≠{_waves(want)}")
+    return TrialResult(task.id, task.kind, "pass", "plan_shape_match")
+
+
 def grade(task: Task, answer: SutAnswer,
           substrate: ExecutionSubstrate | None) -> TrialResult:
     if task.kind == "nl2sql":
@@ -179,6 +222,8 @@ def grade(task: Task, answer: SutAnswer,
         return grade_abstain(task, answer)
     if task.kind == "disambiguate":
         return grade_disambiguate(task, answer)
+    if task.kind == "decompose":
+        return grade_decompose(task, answer)
     return grade_resolve_bind(task, answer)
 
 
