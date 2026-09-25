@@ -26,7 +26,6 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
-import urllib.error
 from pathlib import Path
 from typing import Any, Protocol, Mapping
 
@@ -129,6 +128,7 @@ class BQJobRunner:
         return self.connection.token()
 
     def run(self, sql: str, limit: int) -> dict[str, Any]:
+        import urllib.error
         import urllib.request
         url = (f"{self.connection.endpoint}/bigquery/v2/projects/"
                f"{self.connection.project}/queries")
@@ -275,23 +275,15 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
                                 "machine: not your SQL; dry_run and "
                                 "snapshot still work", "source": "gate"})
 
-    if mode == "live" and runner is None:
-        return _finish(
-            "denied",
-            error="google_oauth_required: live BigQuery execution requires "
-                  "a stored Google OAuth connection",
-            taught={
-                "kind": "access", "yours_to_fix": False,
-                "hint": "this workspace requires a connected Google account "
-                        "for live BigQuery. Open Account, connect Google "
-                        "BigQuery, and retry.", "source": "oauth"})
-
     # 4. only now may an execution object exist. When the live runner is
-    # user-scoped, the required dry run uses the same user token too.
+    # user-scoped, the required dry run uses the same user token too;
+    # the evals inject their own substrate class, so the keyword rides
+    # only when there is a token to ride
     if substrate is None:
         from sahs.evals.substrate import BQDryRun
         token_provider = getattr(runner, "token_provider", None)
-        substrate = BQDryRun(token_provider=token_provider)
+        substrate = (BQDryRun(token_provider=token_provider)
+                     if token_provider is not None else BQDryRun())
 
     # the project that HOSTS the tables may not be the one that runs
     # the query: qualify every table the build knows before the trip
@@ -369,6 +361,24 @@ def execute_sandboxed(build: Build, sql: str, mode: str = "snapshot",
                       "bounds normal queries; narrow the scan or "
                       "justify the outlier to a steward.")
     if runner is None:
+        # BigQuery as the person (SAHS_BQ_AUTH_MODE=user): live needs the
+        # person's connected Google account, and the gates above have
+        # already had their say; as the service account, the default runner
+        from sahs.util.auth import AuthError, resolve_bq_auth_mode
+        try:
+            user_scoped = resolve_bq_auth_mode() == "user"
+        except AuthError:
+            user_scoped = False
+        if user_scoped:
+            return _finish(
+                "denied",
+                error="google_oauth_required: live BigQuery execution requires "
+                      "a stored Google OAuth connection",
+                taught={
+                    "kind": "access", "yours_to_fix": False,
+                    "hint": "this workspace requires a connected Google account "
+                            "for live BigQuery. Open Account, connect Google "
+                            "BigQuery, and retry.", "source": "oauth"})
         runner = BQJobRunner()
     capped = _cap_limit(sent, limit)
     try:

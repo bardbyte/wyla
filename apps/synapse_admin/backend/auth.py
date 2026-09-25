@@ -113,7 +113,14 @@ def _google_runner(user_id: str):
     from sahs.tools.sandbox import BQJobRunner
     from sahs.util.google_auth.oauth import GoogleOAuthCredentialProvider
     if not _requires_google_user_oauth():
-        return BQJobRunner()
+        from sahs.util.auth import AuthError
+        try:
+            return BQJobRunner()
+        except AuthError as exc:
+            # no BigQuery configured on this machine (a laptop, a test):
+            # live execution stays denied by the sandbox; nothing else breaks
+            logger.info("no service-account BigQuery runner: %s", exc)
+            return None
     try:
         settings = _google_oauth_settings()
     except HTTPException as exc:
