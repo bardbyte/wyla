@@ -194,11 +194,13 @@ def test_runtime_attaches_its_observer_to_every_new_session(tmp_path):
                                graph_root=tmp_path / "graph",
                                store_path=tmp_path / "chat.sqlite3",
                                model_factory=lambda budget: None)
-    assert runtime.runtime("before").bus.sinks == []
+    # every bus carries the usage settler (the turn's cost onto the chat
+    # row); the observer joins it only once it is set
+    assert len(runtime.runtime("before").bus.sinks) == 1
     seen = []
     runtime.observer = seen.append
     rt = runtime.runtime("after")
-    assert rt.bus.sinks == [seen.append]
+    assert len(rt.bus.sinks) == 2 and rt.bus.sinks[-1] == seen.append
     rt.bus.emit("turn_started", turn_id="t1", text="x")
     assert seen and seen[0]["ev"] == "turn_started"
 

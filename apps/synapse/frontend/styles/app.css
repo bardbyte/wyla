@@ -1560,3 +1560,69 @@ table.result tr:last-child td { border-bottom: none; }
 .model-text b { font-weight: 600; font-size: var(--fs-13, 0.8125rem); }
 .model-text small { color: var(--ink-3, #5b6b8f); font-size: var(--fs-11, 0.6875rem); }
 .knob-note { margin: 6px 10px; color: var(--ink-3, #5b6b8f); }
+
+/* ── the chat pane is the scroll surface: the thread scrolls under the
+   masthead and past the chips, the composer stays docked, and the wheel
+   works in the gutters beside the column — the outlet loses its width
+   cap and padding on this page so the pane is the whole main column;
+   the reading width lives on the thread and the chip row ── */
+.outlet.chatv2page {
+  max-width: none; width: 100%; height: 100vh; padding: 0; gap: 0;
+  overflow: hidden;
+}
+.chatv2 { height: 100%; min-height: 0; }
+.chat-main { height: 100%; overflow: hidden; }
+.chat-scroll {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column;
+}
+.chat-scroll .chat-masthead {
+  position: sticky; top: 0; z-index: 5; background: var(--bg, #faf8f3);
+}
+.chat-scroll .chat-thread {
+  flex: 1 0 auto; overflow: visible; width: 100%; max-width: 1240px;
+  margin: 0 auto; padding: 14px 28px;
+}
+.chat-scroll .chat-chiprow {
+  width: 100%; max-width: 1240px; margin: 0 auto; padding: 4px 28px 8px;
+}
+.chat-scroll .chat-composer {
+  position: sticky; bottom: 0; z-index: 5; background: var(--bg, #faf8f3);
+}
+.chatv2.empty .chat-scroll { justify-content: center; }
+.chatv2.empty .chat-scroll .chat-composer { position: static; }
+@media (max-width: 860px) {
+  .outlet.chatv2page { height: calc(100vh - 52px); }
+  .chat-scroll .chat-thread, .chat-scroll .chat-chiprow {
+    padding-left: 16px; padding-right: 16px;
+  }
+}
+
+/* ── the thinking block, closed by default: one compact line while the
+   model works (the orb turns, the words shimmer — see .think-orb and
+   .think-text, still under reduced motion), the tokens so far beside
+   it, "Thought for 12s" once the answer lands; the footer under the
+   answer says what the turn cost ── */
+.tool-activity summary { flex-wrap: wrap; row-gap: 2px; }
+.tool-activity summary:focus-visible { outline: 2px solid var(--accent, #2f6feb);
+  outline-offset: 2px; border-radius: 4px; }
+.think-usage {
+  font-size: 11.5px; color: var(--ink-3, #8a857a); white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.turn-usage {
+  font-size: 11.5px; color: var(--ink-3, #8a857a); margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* the shelf and the search rows: what a chat cost, on a second small
+   line ("8.2K tokens · 3 turns"), only once a turn has run */
+.chat-row { flex-wrap: wrap; row-gap: 1px; }
+.chat-row .chat-title { flex: 1 1 auto; min-width: 0; }
+.chat-row .chat-usage {
+  flex-basis: 100%; font-size: 10.5px; color: var(--ink-3, #8a857a);
+  line-height: 1.2; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; font-variant-numeric: tabular-nums;
+}
+.chat-row.on .chat-usage { color: inherit; opacity: 0.8; }
+.search-hit .search-usage { font-variant-numeric: tabular-nums; }

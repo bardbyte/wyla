@@ -571,3 +571,13 @@
 @media (prefers-reduced-motion: reduce) {
   .task-row.running .task-mark { animation: none; }
 }
+
+/* ── the wordmark on this surface reads "Systematic Intelligence", the
+   tagline "by Lumi" under it: two words, so the mark is set smaller
+   and tracked wider than the console's one-word SYNAPSE, on one line
+   in the 264px sidebar (SYNAPSE_LOGO still replaces both with the
+   image, js/main.js brandLogo) ── */
+.brand .wordmark {
+  font-size: var(--fs-13); letter-spacing: 0.09em; line-height: 1.25;
+  white-space: nowrap;
+}

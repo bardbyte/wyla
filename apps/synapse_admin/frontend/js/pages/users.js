@@ -50,9 +50,30 @@ const userRow = (u, me) => {
           <div class="muted">${esc(u.email)}</div></td>
       <td><span class="chip status-${esc(status)}">${esc(status)}</span></td>
       <td class="roles">${roles} ${grant}</td>
+      <td class="tokens" title="${esc(usageTitle(u.usage))}">${esc(tokensCell(u.usage))}</td>
       <td class="muted">${esc(when(u.last_login_at))}</td>
       <td class="actions">${toggle} ${remove}</td>
     </tr>`;
+};
+
+/* what a person's chats cost, across every chat of theirs (GET
+ * /api/admin/users carries the aggregate): the compact total in the
+ * cell, the breakdown on hover */
+const fmtN = (n) => new Intl.NumberFormat().format(Number(n) || 0);
+const tokensCell = (usage) => {
+  const u = usage || {};
+  const tokens = Number(u.tokens) || 0;
+  if (!tokens && !(Number(u.turns) || 0)) return "—";
+  return new Intl.NumberFormat(undefined, { notation: "compact",
+    maximumFractionDigits: 1 }).format(tokens);
+};
+const usageTitle = (usage) => {
+  const u = usage || {};
+  if (!(Number(u.tokens) || 0) && !(Number(u.turns) || 0)) return "no chat turn yet";
+  return `${fmtN(u.tokens_in)} in · ${fmtN(u.tokens_out)} out · ${
+    fmtN(u.model_calls)} model calls · ${fmtN(u.turns)} turns across ${
+    fmtN(u.chats)} chat${Number(u.chats) === 1 ? "" : "s"} · ${
+    ((Number(u.elapsed_ms) || 0) / 1000).toFixed(1)}s`;
 };
 
 /* one person from /api/admin/access: their sign-in count and the
@@ -103,7 +124,8 @@ export async function renderUsers(outlet) {
     people.innerHTML = card(`PEOPLE · ${got.users.length}`, `
       <div class="tablewrap">
         <table class="result users">
-          <thead><tr><th>who</th><th>status</th><th>roles</th><th>last sign-in</th><th></th></tr></thead>
+          <thead><tr><th>who</th><th>status</th><th>roles</th><th
+            title="What their chats cost: tokens in and out, model calls, turns — hover a number">tokens</th><th>last sign-in</th><th></th></tr></thead>
           <tbody>${got.users.map((u) => userRow(u, me)).join("")}</tbody>
         </table>
       </div>

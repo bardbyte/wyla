@@ -23,6 +23,7 @@ export async function renderChat(outlet, wanted = "") {
   outlet.innerHTML = `
     <div class="chatv2 empty" id="chatv2">
       <div class="chat-main">
+        <div class="chat-scroll" id="chat-scroll">
         <div class="chat-masthead">
           <button class="chat-title-btn" id="chat-title"
             title="Rename this chat">
@@ -42,8 +43,6 @@ export async function renderChat(outlet, wanted = "") {
           <h1 class="chat-greet" id="chat-greet"></h1>
         </div>
         <div class="chat-thread" id="chat-thread"></div>
-        <button class="chat-jump" id="chat-jump" type="button" hidden
-          title="Jump to the latest">↓ Latest</button>
         <div class="chat-chiprow" id="chat-chiprow"></div>
         <div class="chat-composer">
           <div class="chat-box">
@@ -98,6 +97,9 @@ export async function renderChat(outlet, wanted = "") {
           <div class="chat-foot">Radix is AI and can make mistakes.
             Check the receipts before you act on a number.</div>
         </div>
+        </div>
+        <button class="chat-jump" id="chat-jump" type="button" hidden
+          title="Jump to the latest">↓ Latest</button>
       </div>
       <aside class="chat-panel" id="chat-panel" hidden>
         <div class="chat-panel-head">
@@ -119,31 +121,36 @@ export async function renderChat(outlet, wanted = "") {
                   running: false, seq: 0, artifacts: new Map(),
                   panelId: "" };
 
-  // ── the thread follows new content only while the reader is at the
-  //    bottom. Scrolling up to reread unsticks it, so a thinking delta,
-  //    an answer token or the one-second heartbeat never yanks the
-  //    view back down; sending a message re-sticks it; while new
-  //    content lands out of view a "Latest" pill offers the way back ──
+  // ── the whole main pane is the scroll surface (#chat-scroll): the
+  //    thread scrolls under the masthead and past the chips, the
+  //    composer stays docked at the bottom of the pane, and the wheel
+  //    works in the gutters beside the column too — nothing between
+  //    the masthead and the composer traps it. The thread follows new
+  //    content only while the reader is at the bottom. Scrolling up to
+  //    reread unsticks it, so a thinking delta, an answer token or the
+  //    one-second heartbeat never yanks the view back down; sending a
+  //    message re-sticks it; while new content lands out of view a
+  //    "Latest" pill offers the way back ──
   const NEAR_BOTTOM = 48;
+  const scroller = el("chat-scroll");
+  const composer = outlet.querySelector(".chat-composer");
   const jump = el("chat-jump");
-  const atBottom = () => thread.scrollHeight - thread.scrollTop
-    - thread.clientHeight <= NEAR_BOTTOM;
+  const atBottom = () => scroller.scrollHeight - scroller.scrollTop
+    - scroller.clientHeight <= NEAR_BOTTOM;
   let stuck = true;
   const scroll = (force = false) => {
     if (force) stuck = true;
     if (stuck) {
-      thread.scrollTop = thread.scrollHeight;
+      scroller.scrollTop = scroller.scrollHeight;
       jump.hidden = true;
       return;
     }
-    // the pill sits just above the thread's bottom edge, whatever the
-    // composer's height is at the moment
-    const main = thread.parentElement;
-    jump.style.bottom = `${Math.max(0, main.clientHeight - thread.offsetTop
-      - thread.offsetHeight) + 12}px`;
+    // the pill sits just above the docked composer, whatever its
+    // height is at the moment
+    jump.style.bottom = `${composer.offsetHeight + 12}px`;
     jump.hidden = false;
   };
-  thread.addEventListener("scroll", () => {
+  scroller.addEventListener("scroll", () => {
     stuck = atBottom();
     if (stuck) jump.hidden = true;
   }, { passive: true });
@@ -1150,35 +1157,114 @@ export async function renderChat(outlet, wanted = "") {
     if (turn) return turn;
     const div = document.createElement("div");
     div.className = "chat-turn";
-    div.innerHTML = `
-      <details class="tool-activity" hidden open>
-        <summary>
-          <span class="tri">▸</span>
-          <span class="thinking-line">
-            <span class="think-orb">✳</span>
-            <span class="think-text">Thinking…</span></span>
-          <span class="tool-title" hidden></span>
-        </summary>
-        <div class="tool-steps"></div>
-      </details>
+    div.innerHTML = `${activityHTML()}
       <div class="chat-prose md"></div>
       <div class="chat-extras"></div>`;
     thread.appendChild(div);
-    turn = { el: div,
-             activity: div.querySelector(".tool-activity"),
-             toolTitle: div.querySelector(".tool-title"),
-             toolSteps: div.querySelector(".tool-steps"),
-             thinking: div.querySelector(".thinking-line"),
-             thinkText: div.querySelector(".think-text"),
-             prose: div.querySelector(".chat-prose"),
-             extras: div.querySelector(".chat-extras"),
-             buffer: "", steps: 0, rows: new Map(), verbs: [],
-             thoughts: "", done: false, tick: null, tickLabel: "",
-             tickStart: 0, seg: null, segText: "", thought: false,
-             settled: false, startedAt: 0 };
+    turn = { el: div, ...activityParts(div) };
+    rememberThinking(turn.activity);
     state.turns.set(turnId, turn);
     scroll();
     return turn;
+  }
+
+  // ── the thinking block, the way a chat assistant shows it: closed
+  //    by default — one compact line ("Radix is thinking… 12s") while
+  //    the model works; a click on it, or Enter on the summary, opens
+  //    the streamed thoughts and the steps; that choice is kept per
+  //    browser, so the next turn (and the next chat) opens the way the
+  //    person left it; the answer folds it to "Thought for 12s" unless
+  //    they had it open ──
+  const THINK_KEY = "synapse-thinking-open";
+  const thinkOpen = () => {
+    try { return localStorage.getItem(THINK_KEY) === "1"; } catch { return false; }
+  };
+  function rememberThinking(details) {
+    // the click lands before the toggle, so the state after it is the
+    // opposite of the one now; Enter and Space on the summary click too
+    details.querySelector("summary").addEventListener("click", () => {
+      try { localStorage.setItem(THINK_KEY, details.open ? "0" : "1"); } catch {}
+    });
+  }
+  // the block's markup, the same on a turn and on a task row: the
+  // compact line, the folded title, the tokens so far beside them
+  const activityHTML = () => `
+      <details class="tool-activity" hidden>
+        <summary title="">
+          <span class="tri">▸</span>
+          <span class="thinking-line">
+            <span class="think-orb">✳</span>
+            <span class="think-text">Radix is thinking…</span></span>
+          <span class="tool-title" hidden></span>
+          <span class="think-usage" hidden></span>
+        </summary>
+        <div class="tool-steps"></div>
+      </details>`;
+  const activityParts = (root) => ({
+    activity: root.querySelector(".tool-activity"),
+    toolTitle: root.querySelector(".tool-title"),
+    toolSteps: root.querySelector(".tool-steps"),
+    thinking: root.querySelector(".thinking-line"),
+    thinkText: root.querySelector(".think-text"),
+    liveUsage: root.querySelector(".think-usage"),
+    prose: root.querySelector(".chat-prose"),
+    extras: root.querySelector(".chat-extras"),
+    buffer: "", steps: 0, rows: new Map(), verbs: [],
+    thoughts: "", done: false, tick: null, tickLabel: "",
+    tickStart: 0, seg: null, segText: "", thought: false,
+    settled: false, startedAt: 0 });
+
+  // ── usage: what a turn spent, live beside the thinking line (from
+  //    budget_tick: the turn's tokens in and out so far) and as a
+  //    footer under the answer (from turn_done, replayed from the
+  //    stored message's payload); a cost only when a rate is set ──
+  const fmtInt = (n) => new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 0 }).format(Math.max(0, Number(n) || 0));
+  const usageOf = (event) => {
+    // a stream record (the turn's own split, turn_*) or a stored
+    // message's usage (the same numbers, plain names)
+    const num = (...keys) => {
+      for (const k of keys) {
+        const v = Number(event[k]);
+        if (event[k] !== null && event[k] !== undefined && Number.isFinite(v)) return v;
+      }
+      return 0;
+    };
+    const cost = event.turn_cost_usd ?? event.cost_usd;
+    return { tokensIn: num("turn_tokens_in", "tokens_in"),
+             tokensOut: num("turn_tokens_out", "tokens_out"),
+             tokens: num("turn_tokens", "tokens"),
+             calls: num("model_calls", "calls", "turn_calls"),
+             secs: num("elapsed_ms") / 1000,
+             cost: typeof cost === "number" && Number.isFinite(cost) ? cost : null };
+  };
+  const tokensText = (u) => `${fmtInt(u.tokens)} tokens (${fmtInt(u.tokensIn)} in · ${
+    fmtInt(u.tokensOut)} out)`;
+  const costText = (u) => u.cost === null ? ""
+    : ` · $${u.cost.toFixed(u.cost < 0.01 ? 4 : 2)}`;
+  const secsText = (s) => `${s >= 10 ? s.toFixed(0) : s.toFixed(1)}s`;
+  function liveUsage(turn, event) {
+    const u = usageOf(event);
+    if (!turn.liveUsage || turn.done) return;
+    turn.liveUsage.textContent = `· ${tokensText(u)}${costText(u)}`;
+    turn.liveUsage.hidden = false;
+  }
+  // the footer: "12.4s · 8,210 tokens (7,900 in · 310 out) · 2 model calls"
+  function usageFooter(container, u) {
+    if (!u) return;
+    let foot = container.querySelector(":scope > .turn-usage");
+    if (!foot) {
+      foot = document.createElement("div");
+      foot.className = "turn-usage";
+      container.appendChild(foot);
+    }
+    const calls = `${fmtInt(u.calls)} model call${u.calls === 1 ? "" : "s"}`;
+    foot.textContent = u.tokens > 0 || u.calls > 0
+      ? `${secsText(u.secs)} · ${tokensText(u)} · ${calls}${costText(u)}`
+      : `${secsText(u.secs)} · no model call`;
+    foot.title = "What this turn cost: wall time, tokens in and out, model calls"
+      + (u.cost === null ? " (no rate configured: SYNAPSE_COST_IN and SYNAPSE_COST_OUT)"
+                         : ", and the estimate at the configured rate");
   }
 
   // what Radix is doing, in the user's words: the model's own
@@ -1307,30 +1393,37 @@ export async function renderChat(outlet, wanted = "") {
     if (turn.tick) { clearInterval(turn.tick); turn.tick = null; }
   }
 
+  // the live line's words: the assistant by name while it thinks, the
+  // plain verb while a tool runs, "Stopping…" on the stop; the seconds
+  // count from the first one, and past twenty the line says "still"
+  const wording = (label) => label === "Thinking…" ? "Radix is thinking…" : label;
+  const still = (base) => base.startsWith("Radix is ")
+    ? `Radix is still ${base.slice(9)}`
+    : `Still ${base.charAt(0).toLowerCase()}${base.slice(1)}`;
   function pulse(turn, label, sinceIso = "") {
     stopPulse(turn);
-    turn.tickLabel = label;
+    turn.tickLabel = wording(label);
     // the clock starts when the event happened, not when it was
     // seen — a replayed turn shows its true seconds
     const since = Date.parse(sinceIso || "");
     turn.tickStart = Number.isFinite(since)
       ? Math.min(since, Date.now()) : Date.now();
-    showThinking(turn, label);
+    showThinking(turn, turn.tickLabel);
     turn.tick = setInterval(() => {
       if (turn.done) { stopPulse(turn); return; }
       const secs = Math.round((Date.now() - turn.tickStart) / 1000);
-      if (secs < 4) return;
+      if (secs < 1) return;
       const base = turn.tickLabel.replace(/…$/, "");
       showThinking(turn, secs >= 20
-        ? `Still ${base.charAt(0).toLowerCase()}${base.slice(1)} · ${secs}s`
+        ? `${still(base)} · ${secs}s`
         : `${base}… ${secs}s`);
     }, 1000);
   }
 
-  // ── the thinking block, the way a chat assistant shows it: the model's own
-  // thought summaries in the order they happen, interleaved with the
-  // steps — open while it works, "Thought for 34s" when the answer
-  // lands, yours to expand; new work reopens it
+  // ── the block's contents: the model's own thought summaries in the
+  // order they happen, interleaved with the steps — folded behind the
+  // compact line while it works, "Thought for 34s" when the answer
+  // lands, yours to expand; new work brings the live line back
   function doneLabel(thought, elapsedMs, verbs) {
     const secs = Math.max(0, (elapsedMs || 0) / 1000);
     const head = `${thought ? "Thought" : "Worked"} for ${
@@ -1340,7 +1433,7 @@ export async function renderChat(outlet, wanted = "") {
 
   function openBlock(turn) {
     turn.activity.hidden = false;
-    turn.activity.open = true;
+    turn.activity.open = thinkOpen();       // closed unless they keep it open
     turn.settled = false;
     turn.toolTitle.hidden = true;
     turn.thinking.hidden = false;
@@ -1370,13 +1463,15 @@ export async function renderChat(outlet, wanted = "") {
       elapsedMs ?? (turn.startedAt ? Date.now() - turn.startedAt : 0),
       [...new Set(turn.verbs)]);
     turn.toolTitle.hidden = false;
-    turn.activity.open = false;
+    // the answer folds the block — unless the person keeps it open
+    turn.activity.open = thinkOpen();
     turn.settled = true;
   }
 
   function doneThinking(turn, elapsedMs) {
     turn.done = true;
     settleBlock(turn, elapsedMs);
+    if (turn.liveUsage) turn.liveUsage.hidden = true;   // the footer takes over
   }
 
   // one row per call: announced when the call starts, settled when
@@ -1466,6 +1561,7 @@ export async function renderChat(outlet, wanted = "") {
         <b>${esc(c.label)}</b>
         ${c.hint ? `<span class="muted">${prose(c.hint)}</span>` : ""}
       </button>`).join("");
+    scroll();        // the chips sit in the scroll flow, under the answer
     for (const b of box.querySelectorAll(".chip-choice")) {
       b.addEventListener("click", async () => {
         const item = items[Number(b.dataset.i)];
@@ -1653,16 +1749,7 @@ export async function renderChat(outlet, wanted = "") {
         <span class="task-cost"></span>
       </summary>
       <div class="task-body">
-        <details class="tool-activity" hidden open>
-          <summary>
-            <span class="tri">▸</span>
-            <span class="thinking-line">
-              <span class="think-orb">✳</span>
-              <span class="think-text">Thinking…</span></span>
-            <span class="tool-title" hidden></span>
-          </summary>
-          <div class="tool-steps"></div>
-        </details>
+        ${activityHTML()}
         <div class="chat-prose md"></div>
         <div class="chat-extras"></div>
         <div class="task-note muted" hidden></div>
@@ -1677,17 +1764,8 @@ export async function renderChat(outlet, wanted = "") {
              statusEl: row.querySelector(".task-status"),
              costEl: row.querySelector(".task-cost"),
              noteEl: row.querySelector(".task-note"),
-             activity: row.querySelector(".tool-activity"),
-             toolTitle: row.querySelector(".tool-title"),
-             toolSteps: row.querySelector(".tool-steps"),
-             thinking: row.querySelector(".thinking-line"),
-             thinkText: row.querySelector(".think-text"),
-             prose: row.querySelector(".chat-prose"),
-             extras: row.querySelector(".chat-extras"),
-             buffer: "", steps: 0, rows: new Map(), verbs: [],
-             thoughts: "", done: false, tick: null, tickLabel: "",
-             tickStart: 0, seg: null, segText: "", thought: false,
-             settled: false, startedAt: 0 };
+             ...activityParts(row) };
+    rememberThinking(task.activity);
     board.tasks.set(id, task);
     scroll();
     return task;
@@ -1793,8 +1871,10 @@ export async function renderChat(outlet, wanted = "") {
         const seg = thoughtSegment(turn);
         turn.segText += event.delta || "";
         seg.innerHTML = renderMarkdown(turn.segText, "md");
+        // the latest line of the thought rides the compact line's
+        // hover; the line itself stays "Radix is thinking… 12s"
         const line = lastLine(turn.segText);
-        if (line) { turn.tickLabel = line; showThinking(turn, line); }
+        if (line) turn.activity.querySelector("summary").title = line;
         scroll();
         break;
       }
@@ -1842,6 +1922,9 @@ export async function renderChat(outlet, wanted = "") {
       case "budget_tick":
         el("chat-meter").textContent =
           `${event.tokens ?? 0} tokens · ${event.calls ?? 0} calls`;
+        // the turn's tokens so far, on the line of the turn that
+        // spends them: a task's tick counts on the parent's line
+        liveUsage(turn.task ? turn.parent : turn, event);
         break;
       case "turn_done":
         if (turn.task) {              // a task's own end: its row settles
@@ -1850,6 +1933,7 @@ export async function renderChat(outlet, wanted = "") {
         }
         setRunning(false);
         doneThinking(turn, event.elapsed_ms);
+        usageFooter(turn.el, usageOf(event));      // what the turn cost
         if (!state.session.title) refreshTitle();
         if (event.status === "partial"
             || event.status === "stopped") {
@@ -1905,6 +1989,7 @@ export async function renderChat(outlet, wanted = "") {
     details.innerHTML = `<summary><span class="tri">▸</span>
       <span class="tool-title">${esc(doneLabel(thought, elapsedMs, verbs))
       }</span></summary><div class="tool-steps"></div>`;
+    rememberThinking(details);          // folded; a click is a choice too
     const steps = details.querySelector(".tool-steps");
     for (const t of entries) {
       const el = document.createElement("div");
@@ -1977,6 +2062,7 @@ export async function renderChat(outlet, wanted = "") {
       if (row) artifactCard(turn.extras, row, false);
     }
     if (p.chips?.length && last) chipRow(p.chips);
+    if (p.usage) usageFooter(turn.el, usageOf(p.usage));
   }
 
   // ── history replay from the store ────────────────────────
@@ -2017,6 +2103,10 @@ export async function renderChat(outlet, wanted = "") {
       if (chips?.length
           && message === boot.messages[boot.messages.length - 1]) {
         chipRow(chips);
+      }
+      // the footer the stream drew, from the stored usage
+      if (message.payload?.usage) {
+        usageFooter(div, usageOf(message.payload.usage));
       }
     }
   }

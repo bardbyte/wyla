@@ -439,10 +439,39 @@ class AssistantRuntime:
                 # the store is read here, not at construction: the app
                 # swaps in the chat-table store after building the runtime
                 rt = _SessionRuntime(session_id, self.events_dir, self.store)
+                # the turn's usage onto the chat's row and its final
+                # message when the turn ends, whatever store this
+                # runtime holds by then
+                rt.bus.sinks.append(
+                    lambda record, sid=session_id: self._settle_usage(sid, record))
                 if self.observer is not None:
                     rt.bus.sinks.append(self.observer)
                 self._runtimes[session_id] = rt
             return rt
+
+    def _settle_usage(self, session_id: str, record: dict[str, Any]) -> None:
+        """A bus sink: the parent turn's ``turn_done`` (never a task's —
+        a multi-task turn's sub-turns count once, through the parent's
+        totals) adds the turn's usage to the chat's row
+        (``add_usage``) and writes it onto the payload of the turn's
+        final assistant message, so the transcript replays the footer.
+        A store that fails here is logged, never a failed turn."""
+        if record.get("ev") != "turn_done" or record.get("task"):
+            return
+        from .store import usage_of
+        usage = usage_of(record)
+        store = self.store
+        try:
+            store.add_usage(session_id, tokens_in=usage["tokens_in"],
+                            tokens_out=usage["tokens_out"],
+                            calls=usage["calls"],
+                            elapsed_ms=usage["elapsed_ms"])
+            turn_id = str(record.get("turn_id") or "")
+            if turn_id:
+                store.set_message_usage(session_id, turn_id, usage)
+        except Exception as exc:                     # noqa: BLE001
+            _log.warning("usage for %s: not stored (%s: %s)", session_id,
+                         type(exc).__name__, exc)
 
     def events_since(self, session_id: str, after: int) -> list[dict]:
         """The records after ``after`` for the stream: the bus's, and

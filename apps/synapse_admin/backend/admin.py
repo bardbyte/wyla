@@ -25,10 +25,50 @@ class RoleChange(BaseModel):
     role: str = Field(pattern="^(analyst|steward|admin)$")
 
 
+# a person with no chat yet: every counter at zero, the shape the page
+# reads (tokens_in, tokens_out, tokens, model_calls, elapsed_ms, turns,
+# chats), never a missing key
+EMPTY_USAGE = {"tokens_in": 0, "tokens_out": 0, "tokens": 0, "model_calls": 0,
+               "elapsed_ms": 0, "turns": 0, "chats": 0}
+
+
+def _usage_by_person(store) -> tuple[dict[str, dict], str]:
+    """Every person's chat usage from the chat tables, one SUM grouped by
+    owner (009_usage.sql); a database from before that migration still
+    lists its people, with the reason beside the empty column."""
+    from sahs.assistant.spanner_store import usage_by_owner
+    try:
+        return usage_by_owner(store.db), ""
+    except Exception as exc:                          # noqa: BLE001
+        import logging
+        logging.getLogger("synapse_admin.admin").warning(
+            "usage totals unavailable (%s: %s)", type(exc).__name__, exc)
+        return {}, f"usage unavailable: {type(exc).__name__}: {exc}"
+
+
 @router.get("/users")
-def users(limit: int = 100) -> dict:
-    """List account metadata and roles, excluding credentials and tokens."""
+def users(limit: int = 100, admin: dict = Depends(require_users_manage)) -> dict:
+    """List account metadata and roles, excluding credentials and tokens,
+    each with what their chats cost (tokens in and out, model calls,
+    turns, wall time, across every chat of theirs)."""
     limit = min(max(limit, 1), 500)
+    from sahs.spanner import spanner_is_enabled
+    if not spanner_is_enabled():
+        # SAHS_STORE=local: one person, the local developer, whose chats
+        # live in the local sqlite store — their totals from it
+        from apps.synapse_admin.backend.chat import _chat
+        runtime, _ = _chat()
+        usage = dict(EMPTY_USAGE)
+        totals = getattr(runtime.store, "usage_totals", None)
+        if callable(totals):
+            usage.update(totals())
+        return {"available": True, "users": [{
+            "user_id": str(admin.get("user_id") or "local"), "email": "",
+            "username": "local", "first_name": "", "last_name": "",
+            "name": str(admin.get("name") or "Local developer"),
+            "status": "active", "roles": list(admin.get("roles") or ["admin"]),
+            "last_login_at": "", "usage": usage}],
+            "note": "SAHS_STORE=local: the one person on this machine"}
     try:
         store = _identity()
         # the store's own listing: the same shape every route returns for a
@@ -36,13 +76,15 @@ def users(limit: int = 100) -> dict:
         users = store.list_users(limit)
     except _google_api_error() as exc:
         raise _identity_unavailable(exc) from exc
+    by_person, usage_note = _usage_by_person(store)
     return {"available": True, "users": [{
         "user_id": user["user_id"], "email": user["email"],
         "username": user["username"], "first_name": user["first_name"],
         "last_name": user["last_name"], "name": user["name"],
         "status": user["status"], "roles": list(user["roles"]),
-        "last_login_at": user.get("last_login_at", "")}
-        for user in users]}
+        "last_login_at": user.get("last_login_at", ""),
+        "usage": {**EMPTY_USAGE, **by_person.get(user["user_id"], {})}}
+        for user in users], **({"usage_note": usage_note} if usage_note else {})}
 
 
 @router.patch("/users/{user_id}")

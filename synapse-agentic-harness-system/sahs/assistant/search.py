@@ -124,6 +124,11 @@ def search_sessions(sessions: list[dict[str, Any]],
             "running": bool(session.get("running")),
             "messages": len(texts),
             "preview": snippet(first_ask, [], 120),
+            # what the chat cost, from the session row (009_usage.sql):
+            # the results page's "8.2K tokens · 3 turns"
+            **{key: int(session.get(key) or 0) for key in
+               ("tokens", "tokens_in", "tokens_out", "model_calls",
+                "elapsed_ms", "turns")},
         }
         if not query:
             out.append({**base, "score": 0.0, "title_hits": [],

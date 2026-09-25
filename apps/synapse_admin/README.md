@@ -226,13 +226,14 @@ python scripts/skills_check.py --skills-dir /path/to/skills --model gemini-3.7-f
 python -m pytest apps/synapse_admin/tests/ -q
 ```
 
-## Synapse by Lumi, the second surface (apps/synapse)
+## Systematic Intelligence by Lumi, the second surface (apps/synapse)
 
 The same server also serves a second frontend at
 `http://localhost:8400/synapse/` from `apps/synapse/frontend`: a copy
 of this one, stripped for the people who ask questions rather than
-steward the graph. The left header reads Synapse Semantic
-Intelligence; New chat and Search chats sit at the top, the recent
+steward the graph. The left header reads Systematic Intelligence, by
+Lumi (the console keeps Synapse by Lumi; the assistant is Radix on
+both); New chat and Search chats sit at the top, the recent
 chats under them, and Data Products, Metrics Explorer and Artifacts in
 their own section at the bottom above the account. Home, Skills,
 Cosmos and Operate are not there. Search chats is a page of its own
@@ -274,6 +275,23 @@ the gateway; each model's engine map is `synapse-agentic-harness-system/docs/mod
 remembered per chat (`POST /api/chat/sessions/{id}/model`), and the
 "?" beside the dials explains Chat/Autopilot, Quick/Standard/Deep and
 both models from `GET /api/chat/dials`.
+
+What a turn costs is shown and kept, on both surfaces. While a turn
+runs the thinking line (closed by default: one compact "Radix is
+thinking… 12s" line, a click opens the streamed thoughts, the choice
+kept per browser) carries the tokens so far from `budget_tick`; when
+it ends the answer carries a footer — "12.4s · 8,210 tokens (7,900 in
+· 310 out) · 2 model calls", a cost only when `SYNAPSE_COST_IN` and
+`SYNAPSE_COST_OUT` are set — from `turn_done`, replayed from the
+message's stored `usage`. Each chat's totals (tokens in and out, model
+calls, turns, wall time) live on its session row (`db/spanner/009_usage.sql`
+on Spanner, the same columns in the sqlite stores), ride
+`GET /api/chat/sessions` and `/api/chat/search`, and show on the shelf
+and the search rows as "8.2K tokens · 3 turns". The People page's
+Tokens column is each person's sum across their chats, with the
+breakdown on hover, from `GET /api/admin/users` (one aggregate query
+per store; under `SAHS_STORE=local`, the one developer's totals from
+the local store).
 
 A message that reads like several jobs ("compare churn across the
 regions, then explain which definitions differ, and build a

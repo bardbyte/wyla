@@ -155,7 +155,10 @@ def test_without_a_store_that_keeps_events_nothing_changes(tmp_path):
                                events_dir=tmp_path / "events")
     sid = runtime.store.create_session("assistant")["id"]
     rt = runtime.runtime(sid)
-    assert rt.store is None and rt.bus.sinks == []
+    # no event-keeping sink; the one sink left is the usage settler,
+    # which every runtime carries (the local store takes add_usage too)
+    assert rt.store is None and len(rt.bus.sinks) == 1
+    assert rt._keep not in rt.bus.sinks
     rt.bus.emit("turn_started", turn_id="t1")
     assert runtime.events_since(sid, 0)[0]["seq"] == 1 and runtime.events_since(sid, 1) == []
     assert runtime.turn_window(sid) == {"running": False, "turn_id": "", "after": None}
