@@ -34,41 +34,57 @@ from typing import Any, Callable, Iterator
 
 from sahs.util.auth import (_first_env, describe_route, env_proxies,
                             plane_opener, redact_url)
+from sahs.util.profiles import DEFAULT_CAP, LEVEL_RANK, profile_for
+
+# the checks a plain run makes; "levels" (one call per candidate
+# thinkingLevel) is asked for with --levels or --only levels
+DEFAULT_CHECKS = frozenset({"token", "generate", "stream", "tools", "thinking",
+                            "system", "cache", "probe"})
 
 # the two enterprise hosts are configuration, never source: the token
 # service that mints the bearer (IDP_TOKEN_URL) and the gateway's Gemini
 # root (GATEWAY_BASE_URL, …/genai/google/v1). Empty here; the .env names them
 IDP_TOKEN_URL = ""
 GATEWAY_BASE_URL = ""
-DEFAULT_MODEL = "gemini-2.5-pro"
+# the everyday engine: Gemini 3.7 Flash. 2.5 Pro, the plane's first
+# model, is retiring and is no longer listed by default; an .env that
+# still names it gets the budget dialect (sahs.util.profiles)
+DEFAULT_MODEL = "gemini-3.7-flash"
 EMBEDDING_SCOPES = [
     "/genai/google/v1/models/bge-large-en/embeddings/**::post",
     "/genai/google/v1/models/bge-large-en/**::post",
 ]
-DEFAULT_SCOPES = [
-    "/genai/google/v1/models/gemini-2.5-pro/**::post",
-    "/genai/google/v1/models/gemini-2.5-flash/**::post",
-    *EMBEDDING_SCOPES,
-]
+
+
+def model_scope(model: str) -> str:
+    """The gateway's path-pattern scope for one model."""
+    return f"/genai/google/v1/models/{model}/**::post"
+
+
+DEFAULT_SCOPES = [model_scope(DEFAULT_MODEL), *EMBEDDING_SCOPES]
 
 
 # ── the models the gateway serves ──────────────────────────────
 # One plane, several models. GATEWAY_MODELS lists them (comma or space
 # separated); unset, the plane serves GATEWAY_MODEL alone, as before.
-# Each model has a thinking style and an output cap:
-#   budget  2.5: thinkingConfig.thinkingBudget, counted against the cap
-#   level   3.x: thinkingConfig.thinkingLevel (low | medium | high)
+# Each model has an engine map (sahs.util.profiles): a thinking style,
+# the levels it accepts, an output cap:
+#   level   3.x: thinkingConfig.thinkingLevel, from the levels the
+#           model accepts (3.7 Flash: low | medium | high; 3.5 Flash:
+#           medium | high; 3.1 Flash Lite: minimal … high)
+#   budget  2.5 (retiring): thinkingConfig.thinkingBudget under the cap
 #   none    no thinkingConfig at all
 # GATEWAY_MODEL_THINKING=gemini-3.1-flash-lite:none,… overrides the
-# family default; GATEWAY_MODEL_CAPS=gemini-3.5-flash:32768,… the caps.
+# style; GATEWAY_MODEL_LEVELS=gemini-3.5-flash:medium|high,… the levels
+# (what the --levels probe found); GATEWAY_MODEL_CAPS=…:32768 the caps.
 
 THINKING_KINDS = ("budget", "level", "none")
-DEFAULT_OUTPUT_CAP = 65536
-# the dial's five levels as a level model spells them: the ends fold
-# onto the nearest level every 3.x model accepts (Flash knows minimal;
-# Pro knows low and high; GATEWAY_THINKING_LEVELS says so per deployment)
+DEFAULT_OUTPUT_CAP = DEFAULT_CAP
+# the dial's five stops as a level model spells them when no model is
+# named: the common three levels, the ends folded in. With a model
+# named, thinking_levels() folds onto the levels THAT model accepts.
 DEFAULT_THINKING_LEVELS = {"minimal": "low", "low": "low", "medium": "medium",
-                           "high": "high", "max": "high"}
+                           "high": "high", "max": "high", "json": "low"}
 
 
 def _split_list(raw: str) -> list[str]:
@@ -83,11 +99,6 @@ def _pairs(raw: str) -> dict[str, str]:
         if sep and key.strip() and value.strip():
             out[key.strip()] = value.strip()
     return out
-
-
-def model_scope(model: str) -> str:
-    """The gateway's path-pattern scope for one model."""
-    return f"/genai/google/v1/models/{model}/**::post"
 
 
 def default_gateway_model(env: dict[str, str] | None = None) -> str:
@@ -109,39 +120,33 @@ def gateway_models(env: dict[str, str] | None = None) -> list[str]:
 
 
 def scopes_for(env: dict[str, str] | None = None) -> list[str]:
-    """The scopes the token asks for: GATEWAY_SCOPES as given; else, when
-    GATEWAY_MODELS names the models, one path pattern per model plus the
-    embedding scopes; else the guide's four."""
+    """The scopes the token asks for: GATEWAY_SCOPES as given; else one
+    path pattern per model the gateway serves (GATEWAY_MODELS, or the
+    one GATEWAY_MODEL) plus the embedding scopes."""
     env = dict(os.environ if env is None else env)
     given = [s.strip() for s in (env.get("GATEWAY_SCOPES") or "").split(",") if s.strip()]
     if given:
         return given
-    if (env.get("GATEWAY_MODELS") or "").strip():
-        return [model_scope(m) for m in gateway_models(env)] + list(EMBEDDING_SCOPES)
-    return list(DEFAULT_SCOPES)
+    return [model_scope(m) for m in gateway_models(env)] + list(EMBEDDING_SCOPES)
 
 
 def thinking_kind(model: str, env: dict[str, str] | None = None) -> str:
-    """How this model takes its depth: by family, unless
-    GATEWAY_MODEL_THINKING says otherwise for it."""
-    env = dict(os.environ if env is None else env)
-    given = _pairs(env.get("GATEWAY_MODEL_THINKING") or "").get(model, "").lower()
-    if given in THINKING_KINDS:
-        return given
-    name = (model or "").lower()
-    if name.startswith("gemini-2.5"):
-        return "budget"
-    if name.startswith("gemini-3"):
-        return "level"
-    return "budget"
+    """How this model takes its depth: its engine map's word (the
+    table, else the family), unless GATEWAY_MODEL_THINKING says
+    otherwise for it."""
+    return profile_for(model, env).thinking
 
 
-def thinking_levels(env: dict[str, str] | None = None) -> dict[str, str]:
-    """The depth dial's levels as the API spells them for a level model:
-    GATEWAY_THINKING_LEVELS=minimal:low,low:low,medium:medium,high:high,max:high
-    (the default)."""
+def thinking_levels(env: dict[str, str] | None = None,
+                    model: str = "") -> dict[str, str]:
+    """The depth dial's stops (and "json") as the API spells them for a
+    level model. With a model named, each stop folds onto the levels
+    that model accepts (its profile, or GATEWAY_MODEL_LEVELS); without
+    one, the common three. GATEWAY_THINKING_LEVELS=minimal:low,… is
+    the deployment's last word, for every model."""
     env = dict(os.environ if env is None else env)
-    out = dict(DEFAULT_THINKING_LEVELS)
+    out = (dict(profile_for(model, env).depth_levels) if model
+           else dict(DEFAULT_THINKING_LEVELS))
     for key, value in _pairs(env.get("GATEWAY_THINKING_LEVELS") or "").items():
         if key in out:
             out[key] = value
@@ -149,9 +154,7 @@ def thinking_levels(env: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def output_cap(model: str, env: dict[str, str] | None = None) -> int:
-    env = dict(os.environ if env is None else env)
-    raw = _pairs(env.get("GATEWAY_MODEL_CAPS") or "").get(model, "")
-    return int(raw) if raw.isdigit() else DEFAULT_OUTPUT_CAP
+    return profile_for(model, env).cap
 # the identity service answers {"authorization_token": "…"} (the laptop, 2026-09-05);
 # the other names are the usual suspects, tried after it
 TOKEN_FIELDS = ("authorization_token", "authorizationToken", "access_token",
@@ -525,9 +528,9 @@ class Config:
     thinking_budget: int = 1056
     show_thoughts: bool = True
     prompt: str = "In two sentences, what is a cash rewards credit card?"
-    # the gateway addresses a method with a slash (…/gemini-2.5-pro/generateContent,
+    # the gateway addresses a method with a slash (…/gemini-3.7-flash/generateContent,
     # the guide's form, matching its path-pattern scopes); Google's own
-    # REST uses a colon (…/gemini-2.5-pro:generateContent). auto tries
+    # REST uses a colon (…/gemini-3.7-flash:generateContent). auto tries
     # the slash first and falls back on a 401/404
     path_form: str = "auto"
 
@@ -620,19 +623,24 @@ def _error_text(status: int, body: bytes,
 
 
 def _generation_config(cfg: Config, thinking_key: str,
-                       max_tokens: int = 1024) -> dict[str, Any]:
+                       max_tokens: int = 1024, level: str = "") -> dict[str, Any]:
     """The check's generationConfig in the model's own thinking dialect:
-    a budget for 2.5, a level for 3.x, nothing for a model that does not
-    think (thinking_kind decides, GATEWAY_MODEL_THINKING overrides)."""
-    out: dict[str, Any] = {"temperature": 0.3, "topP": 0.9, "topK": 40,
-                           "maxOutputTokens": max_tokens}
+    a level for 3.x (the model's "medium", or the one named), a budget
+    for 2.5 with the guide's sampling, nothing for a model that does not
+    think (thinking_kind decides, GATEWAY_MODEL_THINKING overrides). A
+    Gemini 3 call leaves the temperature at the model's default, as
+    Google asks."""
+    out: dict[str, Any] = {"maxOutputTokens": max_tokens}
     kind = thinking_kind(cfg.model)
-    if kind == "budget" and cfg.thinking_budget:
-        out["thinkingConfig"] = {thinking_key: cfg.show_thoughts,
-                                 "thinkingBudget": cfg.thinking_budget}
+    if kind == "budget":
+        out.update({"temperature": 0.3, "topP": 0.9, "topK": 40})
+        if cfg.thinking_budget:
+            out["thinkingConfig"] = {thinking_key: cfg.show_thoughts,
+                                     "thinkingBudget": cfg.thinking_budget}
     elif kind == "level":
-        out["thinkingConfig"] = {thinking_key: cfg.show_thoughts,
-                                 "thinkingLevel": thinking_levels().get("medium", "medium")}
+        out["thinkingConfig"] = {
+            thinking_key: cfg.show_thoughts,
+            "thinkingLevel": level or thinking_levels(model=cfg.model)["medium"]}
     return out
 
 
@@ -651,8 +659,7 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
     """Every check, in the order a client would need them, each
     recorded whether it passed or not; nothing stops early except a
     missing token, without which nothing else can be tried."""
-    want = only or {"token", "generate", "stream", "tools", "thinking",
-                    "system", "cache", "probe"}
+    want = only or set(DEFAULT_CHECKS)
     report: dict[str, Any] = {"config": cfg.display(), "checks": []}
 
     def record(name: str, ok: bool | None, detail: str, **data: Any) -> None:
@@ -982,6 +989,42 @@ def run_checks(cfg: Config, http: Http, stream: Stream, *,
                   "the gateway plane must spell it the guide's way"),
                **accepted)
 
+    # ── the levels this model accepts (3.x): one tiny call per candidate ──
+    if "levels" in want and thinking_kind(cfg.model) == "level":
+        profile = profile_for(cfg.model)
+        found: dict[str, Any] = {}
+        for level in LEVEL_RANK:
+            body = {"contents": [{"role": "user",
+                                  "parts": [{"text": "Say OK."}]}],
+                    "generationConfig": {
+                        "maxOutputTokens": 64,
+                        "thinkingConfig": {thinking_key: False,
+                                           "thinkingLevel": level}}}
+            try:
+                status, payload, raw, seconds = generate(body)
+            except GatewayError as e:
+                found[level] = {"ok": False, "note": str(e)[:120], "seconds": 0.0}
+                continue
+            got = (summarize_answer(payload)
+                   if status == 200 and isinstance(payload, dict) else None)
+            found[level] = {"ok": status == 200, "seconds": seconds,
+                            "thought_tokens": (got["usage"].get("thoughts") or 0)
+                            if got else 0,
+                            "note": "" if got else gateway_reason(status, raw)[:120]}
+        accepted = [lvl for lvl in LEVEL_RANK if found[lvl]["ok"]]
+        refused = [lvl for lvl in LEVEL_RANK if not found[lvl]["ok"]]
+        expected = list(profile.accepts)
+        agree = accepted == expected
+        paste = f"GATEWAY_MODEL_LEVELS={cfg.model}:{'|'.join(accepted)}"
+        record("levels", bool(accepted),
+               "accepts " + (", ".join(accepted) or "nothing")
+               + (" · refuses " + ", ".join(refused) if refused else "")
+               + (f" · as the profile says ({profile.source})" if agree else
+                  f" · the profile expected {', '.join(expected) or 'nothing'}"
+                  f" — paste {paste} into the .env"),
+               accepted=accepted, refused=refused, expected=expected,
+               agree=agree, paste=paste, tried=found)
+
     # ── a system instruction ──
     if "system" in want:
         # on 2.5 the thinking tokens count against maxOutputTokens: a
@@ -1137,6 +1180,11 @@ def render_report(report: dict[str, Any]) -> str:
     if cache:
         verdict.append("prompt cache works through the gateway" if cache["ok"]
                        else "no prompt cache seen")
+    levels = report.get("levels")
+    if levels:
+        verdict.append("levels " + (", ".join(levels.get("accepted") or [])
+                                    or "none accepted")
+                       + ("" if levels.get("agree") else " (not what the profile says)"))
     token = report.get("token", {})
     if token.get("ttl_s"):
         verdict.append(f"token lives {token['ttl_s']} s by its JWT")
@@ -1209,11 +1257,12 @@ def plane_note(env: dict[str, str] | None = None) -> str:
     return f"{PLANE_VAR} unset: no Vertex key and no gateway credentials"
 
 
-# ── thinking as a budget (2.5) ─────────────────────────────────
+# ── thinking as a budget (2.5, retiring) ───────────────────────
 
-# the depth dial's three levels as token budgets; 2.5 Pro counts the
-# thinking against maxOutputTokens, so the client raises the cap by
-# the budget. Override with GATEWAY_THINKING_BUDGETS=low:512,medium:2048,…
+# the depth dial's stops as token budgets, for an .env that still
+# names a 2.5 model: 2.5 counts the thinking against maxOutputTokens,
+# so the client raises the cap by the budget. Override with
+# GATEWAY_THINKING_BUDGETS=low:512,medium:2048,…
 THINKING_BUDGETS = {"minimal": 256, "low": 1024, "medium": 4096, "high": 16384,
                     "max": 32768, "json": 512}
 

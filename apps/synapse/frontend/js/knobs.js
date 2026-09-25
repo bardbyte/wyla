@@ -130,7 +130,9 @@ export function mountDepthKnob({ button, pop, select, depths = [], below = null,
 }
 
 /** The model knob. `models` rows are the dials catalog's:
- * {id, plane, plane_name, label, means, available, reason, default}. */
+ * {id, plane, plane_name, label, means, fit, feel, available, reason,
+ * default}; the small line under a name is its fit (where the engine
+ * belongs in the harness), else the plane's feel. */
 export function mountModelPicker({ button, pop, select, models = [], below = null, onPick = null }) {
   listen();
   register(pop, button);
@@ -162,7 +164,7 @@ export function mountModelPicker({ button, pop, select, models = [], below = nul
             title="${esc(m.available ? m.means : m.reason)}">
             <span class="model-mark" aria-hidden="true">${m.id === select.value ? "●" : "○"}</span>
             <span class="model-text"><b>${esc(m.label)}</b>
-              <small>${esc(m.available ? (m.default ? "where a new chat starts" : m.feel || "")
+              <small>${esc(m.available ? (m.default ? "where a new chat starts" : m.fit || m.feel || "")
                                        : `not configured here`)}</small></span>
           </button>`).join("")}
       </div>`).join("");
